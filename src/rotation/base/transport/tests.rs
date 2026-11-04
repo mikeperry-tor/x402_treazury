@@ -225,7 +225,7 @@ async fn untrusted_tls_is_reported_without_retry_or_verification_bypass() {
     .unwrap();
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("https://{}/secret-url", listener.local_addr().unwrap())
+    let url: reqwest::Url = format!("https://{}/secret-url", listener.local_addr().unwrap())
         .parse()
         .unwrap();
     let connections = Arc::new(AtomicUsize::new(0));
@@ -237,9 +237,21 @@ async fn untrusted_tls_is_reported_without_retry_or_verification_bypass() {
             assert!(acceptor.accept(socket).await.is_err());
         }
     });
-    let error = rpc(&client(), &url, "eth_chainId", json!([]))
-        .await
-        .unwrap_err();
+    let context = crate::network::NetworkContext::new(Default::default()).unwrap();
+    let http = context
+        .http_participating(
+            &crate::network::IsolationId::discovery(url.as_str()).unwrap(),
+            url.as_str(),
+            Some(Duration::from_secs(2)),
+            false,
+            crate::network::HttpPolicy::COMPATIBLE,
+        )
+        .unwrap();
+    let error = super::rpc(&context, http, &url, "eth_chainId", json!([]), |value| {
+        Ok((value, true))
+    })
+    .await
+    .unwrap_err();
     assert!(error.to_string().contains("TLS"), "{error}");
     assert!(!error.to_string().contains("secret"));
     assert_eq!(connections.load(Ordering::SeqCst), 1);

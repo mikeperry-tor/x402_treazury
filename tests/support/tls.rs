@@ -10,6 +10,19 @@ use tokio_rustls::{
     },
 };
 pub const CA: &[u8] = include_bytes!("../fixtures/tls/ca.pem");
+/// Independent caller-supplied client for low-level payment APIs.
+pub fn client(url: &str) -> reqwest::Client {
+    crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .with_trusted_roots([CA])
+        .unwrap()
+        .http(
+            &crate::network::IsolationId::discovery(url).unwrap(),
+            url,
+            None,
+        )
+        .unwrap()
+}
 /// Explicit immutable private-PKI trust; certificate and hostname checks stay on.
 pub fn install_trust() {
     crate::network::install_context(

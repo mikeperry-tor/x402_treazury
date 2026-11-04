@@ -33,7 +33,7 @@ use tokio_rustls::{
 
 // Public fixture certificate, self-signed with the repository's public TLS fixture
 // key. It is intentionally absent from the immutable test trust roots.
-const UNTRUSTED: &str = "MIIDEzCCAfugAwIBAgIUSLbZ/H0OOLZiVs06zv8QOqmJSJEwDQYJKoZIhvcNAQELBQAwGjEYMBYGA1UEAwwPYXBpLmV4YW1wbGUuY29tMB4XDTI2MTAyMDA2MjIyNFoXDTQ2MTAxNTA2MjIyNFowGjEYMBYGA1UEAwwPYXBpLmV4YW1wbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoLKu6cRlH+Ds87H9YqAZAjXcelrR+Ui1BdlKldnoiIFyB0CCMhCeaC3gKGK6a8BTjjQ7rO/hn/jduGTsWdHyQH1BIy77vx77css5PaClcKRufVeruLGu8kDkwV7mjmKK+sn13oIE2W9oRMDa4g3krtG9gZFHIjPHQ1emLe1NQSHvcrYA8Us/vbL5f70WLHIiplu9P9TeZClPlYkQewHKGZdFysXbL4h9yzKOOTe3ogzHUfpwSNgjlSXtm81u7nt09W/T0mZeneinpavLyPbgkMMGN/i5zf+l/Vk+KUbft66RM+6dYF3KHsNpSiMVwxo1dOLIYilcGsEItTIG0ZNh3QIDAQABo1EwTzAaBgNVHREEEzARgg9hcGkuZXhhbXBsZS5jb20wDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDQYJKoZIhvcNAQELBQADggEBAIy2kfaYsTXwW2EDfCixkW+msbCkYdWJUBTsGtuJvF5gofYsfvZQDY/IVPc6osSFnlqZXNRYK5I4su4RvXUcJUmUYE2Xiucb2rgwnlxP+F4KP6bpt6+5QbD1sa0UD/K3J231nMaoP6X/sr02QgGgkaqqwvb8ml+6LKk1ZZdTPCA5p1+J3Pz5X0/Ck9tkYGH0IYesBfMOi52lYZq/Hlf3UN+UWrVr6IQEDnRmyvlN4S2fIVJPwPLSb/5CrvnIJsW027dV2+gSAuRDeq4cCbBjQjRbKH+9YcztafrxF7qNXtERdCnzCSzna0Cdj7ZNQmMgct7TK6G+GRrVuofyHyIp6Z0=";
+const UNTRUSTED: &[u8] = include_bytes!("../../tests/fixtures/tls/untrusted.der");
 struct Listener {
     tcp: TcpListener,
     good: TlsAcceptor,
@@ -341,7 +341,7 @@ async fn serve(
             include_bytes!("../../tests/fixtures/tls/server.der").to_vec(),
             http1,
         ),
-        bad: acceptor(STANDARD.decode(UNTRUSTED).unwrap(), http1),
+        bad: acceptor(UNTRUSTED.to_vec(), http1),
         remaining,
         connections,
         body,

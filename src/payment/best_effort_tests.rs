@@ -1380,7 +1380,13 @@ async fn tor_unsigned_retry_child() {
                 for (i, (peer, m, uri, body, signed)) in obs.iter().enumerate() {
                     assert_eq!(body, &obs[0].3, "exact repeated wire bytes");
                     assert_eq!(m.as_str(), method);
-                    assert_eq!(uri, "/pay?q=exact+%26+value");
+                    let uri: axum::http::Uri = uri.parse().unwrap();
+                    assert_eq!(
+                        uri.path_and_query().unwrap().as_str(),
+                        "/pay?q=exact+%26+value"
+                    );
+                    assert_eq!(uri.scheme_str(), Some("https"));
+                    assert_eq!(uri.authority().unwrap().as_str(), "api-a.example.com");
                     if method == "POST" {
                         assert_eq!(
                             serde_json::from_slice::<Value>(body).unwrap(),

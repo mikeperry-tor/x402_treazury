@@ -45,6 +45,12 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
         ),
     ))
     .await;
+    let expected_authority = vendor
+        .parse::<axum::http::Uri>()
+        .unwrap()
+        .authority()
+        .unwrap()
+        .clone();
     let m = manager(None).await;
     let tools = crate::catalog::build_tools(&crate::catalog::Config::default(), &json!({"paths":{"/items/{id}":{"post":{
         "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}},
@@ -115,8 +121,11 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
         let captures = captured.lock().unwrap();
         assert_eq!(captures.len(), 4);
         for (uri, headers, body) in captures.iter() {
-            assert_eq!(uri.split('?').next().unwrap(), "/items/a%2Fb%3F%E9%9B%AA");
-            let parsed = reqwest::Url::parse(&format!("http://localhost{uri}")).unwrap();
+            let wire: axum::http::Uri = uri.parse().unwrap();
+            assert_eq!(wire.path(), "/items/a%2Fb%3F%E9%9B%AA");
+            assert_eq!(wire.scheme_str(), Some("https"));
+            assert_eq!(wire.authority(), Some(&expected_authority));
+            let parsed = reqwest::Url::parse(uri).unwrap();
             let pairs: Vec<_> = parsed
                 .query_pairs()
                 .map(|(k, v)| (k.into_owned(), v.into_owned()))
