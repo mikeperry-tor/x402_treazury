@@ -117,7 +117,7 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         prerequisites: vec![
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
-            "reviewed startup inventory required; treasury-only bootstrap waits for active and configured reserves, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
+            "reviewed startup inventory required; treasury-only bootstrap waits for enabled reserve claims, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
             "funding permits must cover source fees, the full configured nominal range up to each enabled slot maximum, and the floating swap minimum at quote/preparation time; offline targets are not quotes and no offline preflight proves the range fits",
             "all declared pools must be preserved; unused pools receive no new allocation authority",
         ],
@@ -182,9 +182,11 @@ fn expand_phases(
     let mut used = BTreeSet::new();
     let mut expanded = Vec::new();
     let mut jobs = if m.start.mode == StartMode::TreasuryOnly {
-        u32::try_from(m.start.pools.len())?
-            .checked_mul(2)
-            .context("bootstrap slots overflow")?
+        m.start.pools.iter().try_fold(0u32, |jobs, pool| {
+            let large = !config["resolved_wallets"][pool]["reserves"]["large"].is_null();
+            jobs.checked_add(1 + u32::from(large))
+                .context("bootstrap slots overflow")
+        })?
     } else {
         0
     };

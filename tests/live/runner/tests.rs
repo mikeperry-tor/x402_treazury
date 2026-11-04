@@ -122,15 +122,15 @@ fn explicit_concurrency_and_bootstrap_refill_slots() {
         rounds: vec![round("call", "second"), round("third", "fourth")],
     };
     m.start.mode = StartMode::TreasuryOnly;
-    m.limits.new_funding_jobs = 3;
+    m.limits.new_funding_jobs = 2;
     m.limits.source_exposure_zec = "0.1".into();
     assert!(planner::build(&m, &config()).is_err());
-    m.limits.new_funding_jobs = 4;
+    m.limits.new_funding_jobs = 3;
     assert_eq!(
         planner::build(&m, &config())
             .unwrap()
             .planned_new_funding_jobs,
-        4
+        3
     );
 }
 #[test]

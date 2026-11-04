@@ -21,7 +21,7 @@ mod tests {
             ("standard", 4, 800_000, 0, 2),
             ("rotation", 14, 2_800_000, 1, 2),
             ("extended", 28, 5_600_000, 2, 2),
-            ("treasury-only", 28, 5_600_000, 6, 2),
+            ("treasury-only", 28, 5_600_000, 4, 2),
             ("catalog", 3, 0, 0, 0),
             ("reliability", 2, 400_000, 0, 1),
         ] {

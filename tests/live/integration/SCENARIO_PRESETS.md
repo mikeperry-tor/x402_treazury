@@ -57,7 +57,7 @@ make an assertion pass.
 The extended preset rotates `test_pool` twice and requests one graceful restart
 at the first queued-refill checkpoint while retaining Tor. Both rounds include
 service from `independent_pool`. The treasury-only variant has the same calls but
-starts with no EVM allocations: four bootstrap jobs (initial plus enabled small reserve for each
+starts with no EVM allocations: two bootstrap jobs (one enabled small reserve for each
 of two pools) and two replacement jobs. Existing-wallet presets assume funded
 managed pools; they do not substitute an unrelated EVM private key.
 

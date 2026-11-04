@@ -130,7 +130,7 @@ fn planner_expected(
         "prerequisites":[
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
-            "reviewed startup inventory required; treasury-only bootstrap waits for active and configured reserves, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
+            "reviewed startup inventory required; treasury-only bootstrap waits for enabled reserve claims, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
             "funding permits must cover source fees, the full configured nominal range up to each enabled slot maximum, and the floating swap minimum at quote/preparation time; offline targets are not quotes and no offline preflight proves the range fits",
             "all declared pools must be preserved; unused pools receive no new allocation authority"],
         "case_bindings":bindings,"expanded_phases":phases,"declared_managed_pools":if unsigned {json!([])}else{json!(["pool","unused"])},
@@ -161,7 +161,7 @@ fn planner_complete_scenario_and_start_mode_contracts() {
                 );
                 continue;
             }
-            let jobs = refills + if treasury_only { 2 } else { 0 };
+            let jobs = refills + if treasury_only { 1 } else { 0 };
             let allowance = if jobs > 0 { jobs + 1 } else { 0 };
             m.limits.new_funding_jobs = allowance;
             if allowance > 0 {
@@ -427,14 +427,17 @@ fn planner_allocation_final_guards_and_sum_overflow_remain_distinct() {
     );
     m.start.mode = StartMode::TreasuryOnly;
     assert_eq!(
-        planner_error(&m, &cfg),
+        serde_json::to_value(planner::build(&m, &cfg).unwrap()).unwrap(),
+        planner_expected(&m, &cfg, 20000, 40000, 1, 1)
+    );
+    let mut large = cfg.clone();
+    large["resolved_wallets"]["pool"]["reserves"]["large"] = json!({});
+    assert_eq!(
+        planner_error(&m, &large),
         "insufficient funding slots for bootstrap/refills"
     );
     m.limits.new_funding_jobs = 2;
-    assert_eq!(
-        serde_json::to_value(planner::build(&m, &cfg).unwrap()).unwrap(),
-        planner_expected(&m, &cfg, 20000, 40000, 2, 2)
-    );
+    assert_eq!(planner::build(&m, &large).unwrap().planned_new_funding_jobs, 2);
 }
 
 #[test]
