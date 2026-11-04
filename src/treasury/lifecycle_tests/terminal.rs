@@ -122,6 +122,17 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
         // Exercise the existing canonical-proof/Store boundary with the retained
         // authenticated original. Ordinary reconciliation remains pending-only;
         // scans must not reopen completed historical source journals.
+        let original_operation = job.operation_id.clone();
+        let (original_inputs, original_snapshot) = owner
+            .store
+            .call(move |s| {
+                Ok((
+                    s.prepared_inputs(&original_operation)?,
+                    s.prepared_snapshot(&original_operation)?.to_vec(),
+                ))
+            })
+            .await
+            .unwrap();
         assert!(
             owner
                 .confirm_sdk_transaction(&prepared)
@@ -136,67 +147,71 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
             .await
             .unwrap();
         let identity = owner.status().await.unwrap().treasury_id;
-        owner.close().await.unwrap();
-        let mut owner = Treasury::open_with_network(
-            dir.path().join("state"),
-            dir.path().join("key"),
-            identity,
-            TreasuryNetwork::Synthetic,
-        )
-        .await
-        .unwrap();
         use crate::treasury::recovery::RecoveryOutcome;
-        for (allowed, expected) in [
-            (false, RecoveryOutcome::Waiting("funding_disabled")),
-            (
-                true,
-                RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached"),
-            ),
-            (
-                true,
-                RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached"),
-            ),
-        ] {
-            assert_eq!(
-                owner
-                    .recover_funding_job(job.id.clone(), 0, allowed, &mut NoDisclosure, &stop)
-                    .await
-                    .unwrap(),
-                expected
-            );
-        }
-        assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), 1, true, &mut NoDisclosure, &stop)
+        for restart in [false, true] {
+            if restart {
+                owner.close().await.unwrap();
+                owner = Treasury::open_with_network(
+                    dir.path().join("state"),
+                    dir.path().join("key"),
+                    identity.clone(),
+                    TreasuryNetwork::Synthetic,
+                )
                 .await
-                .unwrap(),
-            RecoveryOutcome::Recovered
-        );
-        let raw = prepared.bytes().to_vec();
-        owner
-            .store
-            .call(move |s| {
-                assert_ne!(
-                    s.funding_job(&job.id)?.unwrap().operation_id,
-                    job.operation_id
-                );
+                .unwrap();
+            }
+            // Canonical confirmation supersedes active expiry as replacement
+            // authority. Its archived proof/count remains immutable history.
+            for (allowed, maximum) in [(false, 0), (true, 0), (false, 1), (true, 1)] {
                 assert_eq!(
-                    s.funding_recovery_count(&job.id)?,
-                    1,
-                    "reconfirmation does not consume the original twice"
+                    owner
+                        .recover_funding_job(
+                            job.id.clone(),
+                            maximum,
+                            allowed,
+                            &mut NoDisclosure,
+                            &stop
+                        )
+                        .await
+                        .unwrap(),
+                    RecoveryOutcome::Waiting("swap_outcome_pending")
                 );
-                assert_eq!(s.operation(&job.operation_id)?.submission, "CONFIRMED");
-                assert_eq!(
-                    s.operation(&job.operation_id)?.attempts,
-                    0,
-                    "recovery must not broadcast"
-                );
-                assert_eq!(s.prepared_bytes(&job.operation_id)?.as_slice(), raw);
-                assert!(!s.operation_pending(&job.operation_id)?);
-                Ok(())
-            })
-            .await
-            .unwrap();
+            }
+            let original = job.clone();
+            let raw = prepared.bytes().to_vec();
+            let inputs = original_inputs.clone();
+            let snapshot = original_snapshot.clone();
+            owner
+                .store
+                .call(move |s| {
+                    assert_eq!(
+                        s.funding_job(&original.id)?.unwrap().operation_id,
+                        original.operation_id
+                    );
+                    assert_eq!(
+                        s.funding_recovery_count(&original.id)?,
+                        1,
+                        "historical expiry remains counted without granting another attempt"
+                    );
+                    assert!(s.source_previously_closed(&original.operation_id)?);
+                    assert_eq!(s.operation(&original.operation_id)?.submission, "CONFIRMED");
+                    assert_eq!(
+                        s.operation(&original.operation_id)?.attempts,
+                        0,
+                        "recovery must not broadcast"
+                    );
+                    assert_eq!(s.prepared_bytes(&original.operation_id)?.as_slice(), raw);
+                    assert_eq!(s.prepared_inputs(&original.operation_id)?, inputs);
+                    assert_eq!(
+                        s.prepared_snapshot(&original.operation_id)?.as_slice(),
+                        snapshot
+                    );
+                    assert!(!s.operation_pending(&original.operation_id)?);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
         owner.close().await.unwrap();
     }
 }

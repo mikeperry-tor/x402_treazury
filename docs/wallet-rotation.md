@@ -603,7 +603,11 @@ not remove that liability. Replacement requires independently established source
 non-disclosure or the existing authenticated finite-expiry proof; the current
 unconsumed claim, enabled funding policy and recovery allowance still apply.
 Verified finite expiry can permit a fresh attempt under current unconsumed claim,
-funding, fee and recovery authority and actual SDK spendable funds. The old NEAR
+funding, fee and recovery authority and actual SDK spendable funds. If later
+canonical confirmation establishes that the original source transaction was
+included, that confirmation supersedes active expiry as the basis for a new
+replacement. The prior expiry proof, pinned snapshot and recovery count remain
+audit history; they do not authorize another deposit after confirmation. The old NEAR
 request remains independently observable until its own terminal outcome.
 
 Status observations retain each accepted request's exact operation and saved quote,
