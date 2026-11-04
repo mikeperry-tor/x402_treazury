@@ -167,6 +167,14 @@ Existing local files stay untouched. Preserve the owning
    isolation and absent wallet/stdout assertions; observe actual origin requests
    for inspection, warming and serving rather than accept a SOCKS attempt alone.
 
+The later constructor audit also exposed standalone listener DNS resolution in
+`main.rs`. **NV1 — Listener resolution boundary** moves that existing resolution
+and all-address loopback validation into `network.rs`, preserving its ordering,
+ephemeral ports and exact validated bind vector. This is a separate reviewed
+production boundary correction, not an audit exception or provider-routing change.
+Verify localhost/literal controls, CLI/Host behavior and the constructor inventory;
+update the network guide and include its full call chain/complexity at this gate.
+
 Independently review each exact FX commit and any fixup before dependent work;
 use `--fixup` for findings and preserve unsquashed history. At the combined fixture
 gate after FX4, review all FX commits/fixups and complete consumers alongside the

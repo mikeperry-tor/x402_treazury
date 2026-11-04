@@ -11,6 +11,8 @@ mod http_queue_tests;
 #[path = "network/http_timeout_tests.rs"]
 mod http_timeout_tests;
 #[cfg(test)]
+mod listener_tests;
+#[cfg(test)]
 mod retry_policy_tests;
 mod scope_observation;
 #[cfg(test)]
@@ -1186,6 +1188,20 @@ mod public_destination_tests {
 #[cfg(test)]
 #[path = "network_http_tests.rs"]
 mod http_tests;
+
+/// Resolve an operator's local listener host once and validate every bind address.
+/// This local DNS lookup is separate from provider transport and Tor remote DNS.
+pub async fn loopback_listener_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
+    let addresses: Vec<_> = tokio::net::lookup_host((host, port)).await?.collect();
+    ensure!(
+        !addresses.is_empty(),
+        "HTTP listen host resolved to no addresses"
+    );
+    for address in &addresses {
+        crate::server::host::require_loopback(address.ip())?;
+    }
+    Ok(addresses)
+}
 
 /// Dedicated supervisor boundary: literal loopback Tor control, never provider egress.
 /// The application does not use this to bypass its installed network policy.
