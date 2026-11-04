@@ -13,14 +13,14 @@ Reconfirm the actual integration baseline before each implementation milestone.
 O0 and the selected replacement-authority milestone started from
 `d220eb95f766f98afe95dd8c2551778d993f5e6b`. Their replacement-authority implementation
 and scoped child gates
-are complete; the reopened publisher consumer, other lanes and whole-branch GR/GI
-gates remain unfinished.
+are complete, including the publisher-consumer correction accepted below. Catalog
+expansion G1 is complete; remaining child work and whole-branch GR/GI are unfinished.
 The completed child plan has yielded the maintained
 [funding/source contract](../wallet-rotation.md#funding-and-source-safety) and
 [lifecycle coverage](../../tests/LIFECYCLE.md). The fixture validation foundation
 below is complete through focused continuations.
-The inherited publisher-completion finding reopens its affected financial consumer
-and GF; it does not change the settled replacement-authority decisions.
+The inherited publisher-completion finding is corrected without changing settled
+replacement authority. Wider GF remains required after financial F2 and F3.
 
 The child plans own implementation commits, tests and permanent documentation;
 this document owns ordering, shared ownership and integration. It introduces no
@@ -67,12 +67,12 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | Milestone / lane | Child commits and default order | Integration acceptance |
 | --- | --- | --- |
 | O0 / coordination | Complete for the selected replacement scope: tracked baseline, preserved local changes, shared-worktree ownership, serialized builds and independent design review recorded in private evidence. | Material design findings resolved before implementation. O0 is preparation, not another application feature commit. |
-| F1 / financial | Replacement-authority scope complete; publisher consumer reopened below. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`. Contracts now live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 accepted the combined authority, archive/reconfirmation and race chains with scoped offline evidence. Confirmed deposit plus FAILED/REFUNDED grants no replacement; fixed/ranged redraw and late SUCCESS/credit races retain original liabilities. The validation foundation now passes; the publisher consumer below reopens GF. |
-| C1 / catalog | [Expansion/schema safety](catalog_safety_and_schema.md), C1 then C2; can start alongside financial F1. | All ingestion/direct-Value paths protected; generated schemas and outbound serialization remain faithful; child gates pass. |
+| F1 / financial | Replacement authority and publisher-consumer correction complete. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`; publisher fixups `e9d3dcb4`, `9fd610ce`, `2ef9dcc0`. Contracts live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 and the scoped publisher-consumer gate accepted exact authority, archive/reconfirmation and actual publication/actor/funding/close chains. Confirmed deposit plus FAILED/REFUNDED grants no replacement; late fulfillment retains original liabilities. Wider GF after F2/F3 remains required. |
+| C1 / catalog | [Expansion/schema safety](catalog_safety_and_schema.md): C1 and its G1 accepted through `a50d4f7a`; C2 remains next in this child. | All ingestion/direct-Value paths protected. C2 must preserve faithful generated schemas/outbound serialization and reopen affected expansion concerns at combined G2. |
 | F2 / financial | [Indexer regression/recovery](indexer_regression_recovery.md), I1 through I3, integrated after financial F1. | Stale tip cannot destructively reset valid state; genuine deep-reorg recovery and accepted randomized work survive. Complete GF below. |
 | C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, integrated after catalog C1 settles construction contracts. | Correct invalidation, atomic durable publication and progressing readers; no caching around expansion safety. Child gates pass. |
 | F3 / financial | [Proving execution](proving_execution.md), T1 then T2, integrated after financial F2. | Accepted principal/fee authority, proposal exclusion and owned calculation completion survive cancellation/restart; complete GF again for execution changes. |
-| P1 / portability | [Portability](portability_fixes.md), P1 plus storage/lifecycle design and inventory may start independently. | Compilation/probe evidence accurately scoped; no claim of native support from compilation alone. |
+| P1 / portability | [Portability](portability_fixes.md): `4fff946f` plus `574e0b38`/`5251194e` implement portable classification and native control wiring; shared-storage/lifecycle design proceeds independently. | macOS six probe controls and compiler gates pass. Exact Windows/Linux execution remains pending; standalone native namespace probe `42e394c0` provides a reviewed CI experiment, not storage acceptance. |
 | P2 / portability | Child P2 shared storage, then P3/P4 lifecycle/native workflows. Schedule shared-storage edits after financial F3 and catalog C2 by default. | Child native storage/recovery and ordinary-platform gates pass; complete GS below. Coordinate earlier integration only after affected owners settle their contracts. |
 | R0 / R9 follow-up | [Focused R9 plan](hot_path_efficiency.md) prepared in this separate R0 documentation boundary before implementation. Scoping proceeds independently. | Fresh consumer/query audit separates qualification budget/status work from ordinary regex/client-cache work; ordered commits, authority-preserving tests and review gates agreed. Do not presume a cached monetary ledger or measured speedup. |
 | R1 / R9 implementation | Execute [R9 child commits](hot_path_efficiency.md); normally integrate code after financial F2 and catalog C1 correctness gates, coordinating overlapping catalog/network/Store owners. | Child gates pass; exact budget arithmetic, concurrent admission, rollback/restart and uncertain charges preserved. Ordinary optimizations retain transport isolation and live-I/O ownership. Assess remaining history-dependent work before claiming it solved. |
@@ -109,7 +109,7 @@ consumers and resume unfinished stages rather than repeat all passed checks.
 No baseline result substitutes for checks invalidated by integration. Use temporary
 state/public unfunded keys; offline results establish no live or Tor qualification.
 
-### Validation foundation and reopened publisher consumer
+### Validation foundation and publisher correction
 
 The fixture prerequisite is complete through `1ca4f524`, with maintained contracts
 in [verified TLS fixtures](../testing.md#verified-tls-fixtures),
@@ -126,17 +126,28 @@ compact-unwind diagnostic remains recorded. Later changes reopen affected checks
 No live-funded, consensus or live Tor qualification ran. Windows CI is an execution
 route pending native results; Linux preparation is not native test acceptance.
 
-The proving audit exposed an inherited publication consumer defect introduced by
-`560b31796`: `prepare_with_facts` can durably retain a late-fulfilled calculation as
-RESOLVED, while the publisher mistakes failure to load its pending-only disclosure
-view for failure to publish. Its completed-result retry can then prevent actor or
-close progress. Resolve this in a separately reviewed fixup before dependent
-execution work. Separate durable acknowledgment from current disclosure authority;
-retain exact bytes, snapshots, inputs and existing fulfillment proofs, distinguish
-positive credit alone, and add actual publisher/funding/close consumer regressions.
-The former Store-only race evidence does not close this concern. GF is reopened
-for it; T2 must not build on the unresolved boundary. No new closure, spending,
-replay, input-release or replacement authority is granted by this correction.
+The inherited `560b31796` publisher defect is corrected by `e9d3dcb4`, with
+independently reviewed fixups `9fd610ce` and `2ef9dcc0`. Durable acknowledgment is
+separate from the current pending-disclosure view: a late-fulfilled calculation
+can remain RESOLVED without a false publication retry. Exact raw bytes, snapshots,
+inputs and existing fulfillment proofs remain; positive credit alone is distinct.
+Actual publisher, actor, funding and close regressions cover the full boundary.
+The correction grants no closure, spending, replay, input-release or replacement
+authority. Its scoped consumer gate is accepted; T2 design may use this boundary,
+while T2 integration still follows financial F2.
+
+Through frozen `a50d4f7a`, independent combined C1 G1/publisher review accepts
+assembled coverage of all 58 default/compatibility targets: 1,801 passes and
+41 ignored cases. Proving passes four, lifecycle 36 and codec one. Production/full
+all-target compiler/Clippy and format pass; source-matched complexity covers
+444 files with no exclusions. The new expansion/sanitizer advisory scores have
+explicit simplification and full-chain review. Scoped unchanged results carry
+with provenance; stopped runs stay failed, focused repeats are counted once, and
+this is not a single successful `make check`. The macOS test-link compact-unwind
+warning remains. Native P1 and Windows storage/lifecycle gates remain open; the
+reviewed standalone namespace CI probe is an experiment, not support evidence.
+No live-funded, consensus or live Tor qualification ran. Later child changes
+reopen affected checks and combined concerns.
 
 ## Independent review gates and completion
 

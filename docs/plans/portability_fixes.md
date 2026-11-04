@@ -42,6 +42,15 @@ read-only access; a storage migration cannot upgrade old financial authority.
 
 ## Known gaps and removal options
 
+P1 source correction is committed as `4fff946f`, with independently reviewed
+fixture/CI fixups `574e0b38` and `5251194e`. Portable `ErrorKind` replaces the
+Unix-only probe classification, and cfg-specific builder bindings remove the two
+reported Windows warnings. All six controls and production/all-target warning
+gates pass on macOS through `a50d4f7a`; Windows/Linux execution remains pending.
+The standalone `42e394c0` namespace probe is a source-reviewed native CI experiment,
+not P2 privacy/durability acceptance. The table's probe finding records the
+assessment baseline; storage, parent control and native workflow gates remain open.
+
 | Gap and evidence | Impact | Options and required preservation |
 | --- | --- | --- |
 | `qualification_probe` in [src/network.rs](../../src/network.rs) unconditionally references `libc::EPERM/EACCES`, while [Cargo.toml](../../Cargo.toml) declares `libc` only under `cfg(unix)`. Introduced in `185d968`. | Source-level non-Unix compilation blocker, even though the caller is a qualification tool. | Prefer portable `io::ErrorKind::PermissionDenied` if native tests establish the required denial classification. Otherwise isolate OS error mapping with Unix and Windows implementations. Simply making libc unconditional does not implement Windows error semantics. Preserve positive and denied probe controls; refusal, timeout and successful connection must remain distinct. |

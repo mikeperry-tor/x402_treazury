@@ -23,6 +23,14 @@ registries remain read-only under the version-2 authority contract.
 
 ## Current gaps and proposed behavior
 
+C1 and its independent G1 are accepted through `a50d4f7a`: shared structural and
+actual expansion accounting now protects authored, import, cache/304, relay and
+direct-Value construction, with iterative traversal. Maintained contracts live in
+the architecture/configuration/source guides and both resource inventories.
+C2 below is still unfinished; its schema projection changes must reopen affected
+C1 call chains at combined G2. The following gap description records the starting
+behavior, not a claim that C1 remains unimplemented.
+
 Dynamic import recursively inspects references with existing depth/node/expanded-byte
 guards. Static local/remote/cached and relay catalog construction lacks a shared
 pre-expansion guard; `resolve` recursively clones referenced values. Public
