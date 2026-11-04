@@ -837,7 +837,7 @@
 +                    .create_mock_wallet();
 +                let activation = zcash_protocol::consensus::Parameters::activation_height(
 +                    &LOCAL_NETWORK,
-+                    consensus::NetworkUpgrade::Sapling,
++                    zcash_protocol::consensus::NetworkUpgrade::Sapling,
 +                )
 +                .unwrap();
 +                assert_eq!(
@@ -912,7 +912,15 @@
                  }
              }
              #[tokio::test]
-@@ -4772,7 +5023,6 @@
+@@ -4748,6 +4999,7 @@
+         }
+         mod no_last_known_chain_height {
+             use super::*;
++            use crate::wallet::traits::SyncWallet as _;
+             // If there are know scan_ranges in the SyncState
+             #[tokio::test]
+             async fn get_bday_error() {
+@@ -4772,7 +5024,6 @@
                      )) if s == test_error
                  ));
              }
@@ -920,7 +928,7 @@
              #[tokio::test]
              async fn raw_bday_above_chain_height() {
                  let builder = crate::mocks::MockWalletBuilder::new();
-@@ -4784,17 +5034,15 @@
+@@ -4784,17 +5035,15 @@
                      BlockHeight::from_u32(1),
                      &LOCAL_NETWORK,
                  );
