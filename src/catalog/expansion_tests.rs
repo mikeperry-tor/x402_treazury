@@ -88,9 +88,9 @@ async fn local_and_cache_admission_reject_expansion_and_304_cannot_refresh_it() 
             file.to_str().unwrap(),
             &crate::test_tls::client("https://api.example.com"),
         )
-            .await
-            .unwrap_err()
-            .is::<expansion::ComplexityLimit>()
+        .await
+        .unwrap_err()
+        .is::<expansion::ComplexityLimit>()
     );
     let cfg = Config {
         http_cache_directory: Some(directory.path().join("cache")),
