@@ -28,7 +28,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
 discovery, retained financial obligations and the choice between root recovery and
 discarding retired keys.
-The code-review follow-up plans cover
+The [code-review orchestration plan](plans/review_orchestration.md) coordinates
+implementation lanes, integration order and shared review gates. Its child plans cover
 [replacement funding authority](plans/funding_replacement_authority.md),
 [indexer regression and chain recovery](plans/indexer_regression_recovery.md),
 [catalog expansion and schema correctness](plans/catalog_safety_and_schema.md),
