@@ -37,6 +37,7 @@ The remaining child plans cover
 [indexer regression and chain recovery](plans/indexer_regression_recovery.md),
 [catalog expansion and schema correctness](plans/catalog_safety_and_schema.md),
 [registry efficiency](plans/registry_efficiency.md),
+[hot-path and qualification history](plans/hot_path_efficiency.md),
 [proving execution](plans/proving_execution.md) and
 [portability/private storage](plans/portability_fixes.md).
 The maintained
