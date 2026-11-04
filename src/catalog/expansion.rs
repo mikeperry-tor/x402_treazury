@@ -15,7 +15,6 @@ pub(crate) struct Budget {
 
 #[derive(Clone, Copy)]
 enum Mode {
-    Expand,
     Clone,
     Import,
 }
@@ -74,16 +73,8 @@ impl Budget {
         Ok(())
     }
 
-    /// Mirror resolve exactly: a successfully followed reference replaces the
-    /// whole object; unresolved, external or active-cycle references clone the
-    /// original object without resolving its children. Invalid non-string $ref
-    /// fields remain ordinary object members. Siblings are not extra expansions.
-    pub(crate) fn expansion(&mut self, root: &Value, node: &Value) -> Result<()> {
-        self.inspect(root, node, Mode::Expand)
-    }
-
     pub(crate) fn copying(&mut self, node: &Value) -> Result<()> {
-        self.inspect(node, node, Mode::Clone)
+        self.inspect(node, node, Mode::Clone, 0)
     }
 
     /// Charge an iterative reference-only consumer before it compares or
@@ -94,13 +85,35 @@ impl Budget {
         self.bytes(reference.len(), depth)
     }
 
-    fn inspect<'a>(&mut self, root: &'a Value, node: &'a Value, mode: Mode) -> Result<()> {
-        let mut frames = vec![Frame::Visit(node, 0, mode)];
+    /// Charge the actual schema-provenance walk without expanding its target
+    /// before a known unsupported sibling can reject that operation.
+    pub(crate) fn schema_node(&mut self, node: &Value, depth: usize) -> Result<()> {
+        self.node(depth)?;
+        if let Value::Object(fields) = node {
+            for key in fields.keys() {
+                self.bytes(key.len(), depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn copying_at(&mut self, node: &Value, depth: usize) -> Result<()> {
+        self.inspect(node, node, Mode::Clone, depth)
+    }
+
+    fn inspect<'a>(
+        &mut self,
+        root: &'a Value,
+        node: &'a Value,
+        mode: Mode,
+        initial_depth: usize,
+    ) -> Result<()> {
+        let mut frames = vec![Frame::Visit(node, initial_depth, mode)];
         let mut active = BTreeSet::new();
         while let Some(frame) = frames.pop() {
             // Cursor advancement schedules one child at a time. Actual value
             // work is outside this match, so all policies use one flat path.
-            let (node, depth, mut mode) = match frame {
+            let (node, depth, mode) = match frame {
                 Frame::Visit(node, depth, mode) => (node, depth, mode),
                 Frame::LeaveReference(reference) => {
                     active.remove(reference);
@@ -163,22 +176,6 @@ impl Budget {
                 frames.push(Frame::Visit(target, depth + 1, mode));
                 continue;
             }
-            if matches!(mode, Mode::Expand)
-                && let Some(reference) = map.get("$ref").and_then(Value::as_str)
-            {
-                if reference.starts_with("#/") {
-                    self.bytes(reference.len(), depth)?;
-                }
-                if reference.starts_with("#/") && active.insert(reference) {
-                    if let Some(target) = root.pointer(&reference[1..]) {
-                        frames.push(Frame::LeaveReference(reference));
-                        frames.push(Frame::Visit(target, depth + 1, Mode::Expand));
-                        continue;
-                    }
-                    active.remove(reference);
-                }
-                mode = Mode::Clone;
-            }
             frames.push(Frame::Object(map.iter(), depth, mode));
         }
         Ok(())
@@ -192,7 +189,7 @@ fn reference_rejected(code: &'static str, message: &'static str) -> anyhow::Erro
 /// Dynamic imports retain their stricter reference-admission contract. The
 /// traversal and resource accounting are shared with authored catalog handling.
 pub(crate) fn import(root: &Value) -> Result<()> {
-    Budget::default().inspect(root, root, Mode::Import)
+    Budget::default().inspect(root, root, Mode::Import, 0)
 }
 
 /// Raw Value APIs must validate physical depth before any Value::clone, schema
@@ -208,68 +205,68 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn reference_fallback_does_not_expand_ignored_siblings_or_cycle_leaves() {
-        let root = json!({
-            "a": {"type":"string"},
-            "loop": {"$ref":"#/loop", "unused":{"$ref":"#/missing"}}
-        });
-        let mut direct = Budget::default();
-        direct
-            .expansion(&root, &json!({"$ref":"#/a", "ignored": {"type":"number"}}))
-            .unwrap();
-        assert_eq!(direct.nodes, 3); // wrapper, target object, target string
-        assert_eq!(direct.bytes, "#/a".len() + "type".len() + "string".len());
-        let mut cycle = Budget::default();
-        cycle.expansion(&root, &root["loop"]).unwrap();
-        // The repeated reference clones its remaining subtree without following
-        // the nested missing ref; preserving the authored resolver contract.
-        assert!(cycle.nodes > 1);
+    fn schema_resource_context_is_checked_only_after_pointer_work_is_charged() {
+        let root = json!({"Container":{"$id":"https://example.com/base","X":{"$ref":"#/Y"}},"Y":{"type":"string"}});
+        let schema = json!({"$ref":"#/Container/X"});
+        let mut budget = Budget {
+            nodes: 0,
+            bytes: BYTES - "$ref".len() - "#/Container/X".len() + 1,
+        };
+        let error = super::super::contracts::schema(&root, &schema, &mut budget).unwrap_err();
+        assert!(error.is::<ComplexityLimit>());
+        assert_eq!(
+            budget.nodes, 2,
+            "pointer work must fail before target traversal/context lookup"
+        );
+        let error =
+            super::super::contracts::schema(&root, &schema, &mut Budget::default()).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<super::super::Unsupported>(),
+            Some(&super::super::Unsupported::InputReference)
+        );
     }
-
     #[test]
-    fn repeated_long_pointer_traversal_is_charged_before_target_lookup() {
+    fn real_schema_projection_charges_repeated_long_pointers_before_lookup() {
         let key = "long-key".repeat(16);
         let pointer = format!("#/{key}");
         let mut fields = serde_json::Map::new();
-        fields.insert(key, Value::Null);
+        fields.insert(key, Value::Bool(true));
         fields.insert("alias".into(), json!({"$ref":pointer.clone()}));
         let root = Value::Object(fields);
-        let node = json!([{"$ref":"#/alias"},{"$ref":"#/alias"}]);
-        // Simulate earlier work at the real byte boundary without allocating a
-        // giant fixture. One long target lookup fits; the second must fail
-        // before visiting its tiny null target, not only when copying strings.
+        let schema = json!({"allOf":[{"$ref":"#/alias"},{"$ref":"#/alias"}]});
+        // Covers both preflight/projection pointer parses. Only three long
+        // pointer traversals fit, so the second target cannot be visited.
         let mut budget = Budget {
             nodes: 0,
-            bytes: BYTES - (2 * "#/alias".len() + pointer.len()),
+            bytes: BYTES
+                - ("allOf".len() + 4 * "$ref".len() + 4 * "#/alias".len() + 3 * pointer.len()),
         };
-        assert!(budget.expansion(&root, &node).is_err());
-        assert_eq!(budget.nodes, 6);
+        let error = super::super::contracts::schema(&root, &schema, &mut budget).unwrap_err();
+        assert!(error.is::<ComplexityLimit>());
+        assert_eq!(budget.nodes, 15);
     }
-
     #[test]
-    fn repeated_targets_are_charged_each_time_and_arithmetic_fails_visibly() {
+    fn real_schema_projection_accounts_each_repeated_target() {
         let root = json!({"s":{"type":"string"}});
-        let node = json!([{"$ref":"#/s"},{"$ref":"#/s"}]);
-        let mut budget = Budget::default();
-        budget.expansion(&root, &node).unwrap();
-        assert_eq!(budget.nodes, 7);
+        let schema = json!({"allOf":[{"$ref":"#/s"},{"$ref":"#/s"}]});
+        let projected =
+            super::super::contracts::schema(&root, &schema, &mut Budget::default()).unwrap();
         assert_eq!(
-            budget.bytes,
-            2 * ("#/s".len() + "type".len() + "string".len())
+            projected,
+            json!({"allOf":[{"type":"string"},{"type":"string"}]})
         );
-        let mut overflow = Budget {
-            nodes: usize::MAX,
+        let mut budget = Budget {
+            nodes: NODES - 3,
             bytes: 0,
         };
-        assert!(overflow.copying(&Value::Null).is_err());
-        let mut overflow = Budget {
-            nodes: 0,
-            bytes: usize::MAX,
-        };
-        assert!(overflow.copying(&json!("x")).is_err());
+        assert!(
+            super::super::contracts::schema(&root, &schema, &mut budget)
+                .unwrap_err()
+                .is::<ComplexityLimit>()
+        );
     }
     #[test]
-    fn exact_existing_boundaries_use_small_inputs() {
+    fn exact_existing_boundaries_and_overflow_use_small_inputs() {
         let mut budget = Budget {
             nodes: NODES - 1,
             bytes: BYTES - 1,
@@ -287,11 +284,17 @@ mod tests {
         }
         shape(&nested).unwrap();
         assert!(shape(&Value::Array(vec![nested])).is_err());
-        let mut budget = Budget {
-            nodes: 0,
-            bytes: BYTES - 2,
+        let mut overflow = Budget {
+            nodes: usize::MAX,
+            bytes: 0,
         };
-        budget.reference("#/", DEPTH).unwrap();
-        assert!(budget.reference("#/", DEPTH + 1).is_err());
+        assert!(overflow.copying(&Value::Null).is_err());
+        let mut overflow = Budget {
+            nodes: 0,
+            bytes: usize::MAX,
+        };
+        assert!(overflow.copying(&json!("x")).is_err());
+        let mut depth = Budget::default();
+        assert!(depth.copying_at(&json!([null]), DEPTH).is_err());
     }
 }

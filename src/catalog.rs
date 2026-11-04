@@ -1,4 +1,13 @@
+#[cfg(test)]
+mod contract_tests;
+mod contracts;
 mod credit_pricing;
+mod input;
+pub(crate) mod media;
+pub use contracts::{
+    CatalogBuild, IncompleteCatalog, OperationIssue, Unsupported, append_omissions,
+};
+pub use input::BodyArgument;
 pub(crate) mod diagnostics;
 pub(crate) mod expansion;
 #[cfg(test)]
@@ -296,8 +305,14 @@ pub struct ToolSpec {
     pub has_body: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub help_url: Option<String>,
-    #[serde(skip)]
-    pub body_names: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub wire_names: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole_body: Option<BodyArgument>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub body_closed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_media_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -308,6 +323,8 @@ pub struct RoutedRequest {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
     pub body: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_media_type: Option<String>,
 }
 
 impl ToolSpec {
@@ -333,43 +350,79 @@ impl ToolSpec {
         let mut path = self.request_url.as_ref().unwrap_or(&self.path).clone();
         let mut query = BTreeMap::new();
         let mut body = Map::new();
+        let mut whole_body = None;
+        let mut assigned = BTreeSet::new();
         let headers = headers::route(&self.header_params, args)?;
         for (key, value) in args {
+            if self
+                .whole_body
+                .as_ref()
+                .is_some_and(|body| body.name == *key)
+            {
+                whole_body = Some(value.clone());
+                continue;
+            }
+            if (self.whole_body.is_some() || self.body_closed)
+                && !self.param_routes.contains_key(key)
+                && !self.header_params.contains_key(key)
+            {
+                bail!("unknown argument outside the declared JSON body and parameters");
+            }
             if self.header_params.contains_key(key) {
                 continue;
             }
-            match self
+            let wire = self.wire_names.get(key).unwrap_or(key);
+            let location = self
                 .param_routes
                 .get(key)
                 .map(String::as_str)
-                .unwrap_or(if self.has_body { "body" } else { "query" })
-            {
+                .unwrap_or(if self.has_body { "body" } else { "query" });
+            ensure!(
+                matches!(location, "path" | "query" | "body"),
+                "unsupported routed parameter location"
+            );
+            ensure!(
+                location != "body" || self.has_body,
+                "body route has no request body"
+            );
+            ensure!(
+                assigned.insert((location, wire)),
+                "duplicate routed parameter identity"
+            );
+            match location {
                 "path" => {
                     if value.is_null() {
                         continue;
                     }
+                    ensure!(
+                        value.is_string() || value.is_number() || value.is_boolean(),
+                        "path parameter values must be scalars"
+                    );
                     let value = arg_text(value);
                     // URL parsing removes dot segments, including percent-encoded
                     // dots. Reject them before they can escape the selected route.
                     ensure!(value != "." && value != "..", "dot path parameter rejected");
                     path = path.replace(
-                        &format!("{{{key}}}"),
+                        &format!("{{{wire}}}"),
                         &utf8_percent_encode(&value, PATH_SEGMENT).to_string(),
                     )
                 }
                 "query" => {
                     if !value.is_null() {
-                        query.insert(key.clone(), value.clone());
+                        query.insert(wire.clone(), value.clone());
                     }
                 }
                 _ => {
-                    body.insert(
-                        self.body_names.get(key).unwrap_or(key).clone(),
-                        value.clone(),
-                    );
+                    body.insert(wire.clone(), value.clone());
                 }
             }
         }
+        ensure!(
+            self.whole_body
+                .as_ref()
+                .is_none_or(|body| !body.required || whole_body.is_some()),
+            "required JSON body argument is missing"
+        );
         ensure!(
             !path.contains('{'),
             "missing path parameter for {}",
@@ -408,7 +461,12 @@ impl ToolSpec {
             method: self.method.clone(),
             url,
             query,
-            body: self.has_body.then_some(Value::Object(body)),
+            body: if self.whole_body.is_some() {
+                whole_body
+            } else {
+                self.has_body.then_some(Value::Object(body))
+            },
+            json_media_type: self.json_media_type.clone(),
         })
     }
 }
@@ -809,7 +867,7 @@ async fn fetch_catalog_origin(
                     .contains_key(reqwest::header::CONTENT_RANGE)
                 {
                     return Err(Failure::validation(
-                        anyhow::Error::new(IncompleteCatalog).context(LoadStage::Body),
+                        anyhow::Error::new(IncompleteRelayCatalog).context(LoadStage::Body),
                     ));
                 }
                 revalidate_cached_catalog(response.headers(), conditional, slot)
@@ -834,7 +892,7 @@ async fn fetch_catalog_origin(
             let (status, headers, bytes) = read_catalog_body(response, cfg.max_spec_bytes)
                 .await
                 .map_err(|error| {
-                    let mut failure = if error.is::<IncompleteCatalog>() {
+                    let mut failure = if error.is::<IncompleteRelayCatalog>() {
                         Failure::validation(error)
                     } else {
                         Failure::body(error)
@@ -866,13 +924,13 @@ fn catalog_request(
 }
 
 #[derive(Debug)]
-struct IncompleteCatalog;
-impl std::fmt::Display for IncompleteCatalog {
+struct IncompleteRelayCatalog;
+impl std::fmt::Display for IncompleteRelayCatalog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("catalog partial_response")
     }
 }
-impl std::error::Error for IncompleteCatalog {}
+impl std::error::Error for IncompleteRelayCatalog {}
 
 async fn read_catalog_body(
     response: reqwest::Response,
@@ -883,7 +941,7 @@ async fn read_catalog_body(
     if status == reqwest::StatusCode::PARTIAL_CONTENT
         || headers.contains_key(reqwest::header::CONTENT_RANGE)
     {
-        return Err(IncompleteCatalog.into());
+        return Err(IncompleteRelayCatalog.into());
     }
     let body_started = std::time::Instant::now();
     let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes").await?;
@@ -1005,79 +1063,8 @@ pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value> {
     Ok(document)
 }
 
-fn resolve(root: &Value, node: &Value, budget: &mut expansion::Budget) -> Result<Value> {
-    budget.expansion(root, node)?;
-    Ok(resolve_checked(root, node, &mut BTreeSet::new()))
-}
-
-fn resolve_checked(root: &Value, node: &Value, seen: &mut BTreeSet<String>) -> Value {
-    match node {
-        Value::Object(map) => {
-            if let Some(reference) = node.get("$ref").and_then(Value::as_str) {
-                if reference.starts_with("#/") && seen.insert(reference.to_owned()) {
-                    let result = root
-                        .pointer(&reference[1..])
-                        .map(|v| resolve_checked(root, v, seen));
-                    seen.remove(reference);
-                    if let Some(value) = result {
-                        return value;
-                    }
-                }
-                return node.clone();
-            }
-            Value::Object(
-                map.iter()
-                    .map(|(k, v)| (k.clone(), resolve_checked(root, v, seen)))
-                    .collect(),
-            )
-        }
-        Value::Array(a) => Value::Array(a.iter().map(|v| resolve_checked(root, v, seen)).collect()),
-        _ => node.clone(),
-    }
-}
-
 pub fn sanitize(node: &Value) -> Value {
     sanitize::sanitize(node)
-}
-
-fn schema(node: &Value) -> Value {
-    let Some(map) = node.as_object() else {
-        return node.clone();
-    };
-    let mut out = Map::new();
-    for (key, value) in map {
-        match key.as_str() {
-            "type" | "format" | "enum" | "const" | "minimum" | "maximum" | "exclusiveMinimum"
-            | "exclusiveMaximum" | "minLength" | "maxLength" | "minItems" | "maxItems"
-            | "pattern" | "default" | "nullable" | "description" | "title" | "required" => {
-                out.insert(key.clone(), value.clone());
-            }
-            "properties" => {
-                out.insert(
-                    key.clone(),
-                    Value::Object(
-                        value
-                            .as_object()
-                            .into_iter()
-                            .flatten()
-                            .map(|(k, v)| (k.clone(), schema(v)))
-                            .collect(),
-                    ),
-                );
-            }
-            "items" | "additionalProperties" => {
-                out.insert(key.clone(), schema(value));
-            }
-            "anyOf" | "oneOf" | "allOf" => {
-                out.insert(
-                    key.clone(),
-                    Value::Array(value.as_array().into_iter().flatten().map(schema).collect()),
-                );
-            }
-            _ => {}
-        }
-    }
-    sanitize(&Value::Object(out))
 }
 
 pub fn operations(root: &Value, pricing_key: Option<&str>) -> Result<Vec<Value>> {
@@ -1092,7 +1079,7 @@ pub(crate) fn operations_with_credits(
     expansion::shape(root)?;
     let mut budget = expansion::Budget::default();
     if root.get("paths").is_none() {
-        return digest_operations(root, credit_key);
+        return digest_operations(root, credit_key, &mut budget);
     }
     let mut ops = Vec::new();
     for (path, item) in root["paths"]
@@ -1117,20 +1104,133 @@ pub(crate) fn operations_with_credits(
     Ok(ops)
 }
 
-fn digest_operations(root: &Value, credit_key: Option<&str>) -> Result<Vec<Value>> {
-    let mut ops = root
-        .get("operations")
-        .and_then(Value::as_array)
-        .cloned()
-        .context("expected OpenAPI paths or operations digest")?;
-    if let Some(key) = credit_key {
-        for op in &mut ops {
-            if let Some(metadata) = op.get(key).cloned() {
-                op["credit_pricing"] = metadata;
+// Copy opaque digest metadata once, excluding schemas that are projected below.
+fn digest_fields(
+    source: &Value,
+    excluded: &[&str],
+    budget: &mut expansion::Budget,
+) -> Result<Map<String, Value>> {
+    budget.schema_node(source, 0)?;
+    let mut output = Map::new();
+    for (key, value) in source.as_object().context("digest object required")? {
+        if excluded.contains(&key.as_str()) {
+            continue;
+        }
+        budget.copying(value)?;
+        output.insert(key.clone(), value.clone());
+    }
+    Ok(output)
+}
+fn digest_parameter(root: &Value, source: &Value, budget: &mut expansion::Budget) -> Result<Value> {
+    let source = match contracts::reference(root, source, budget) {
+        Ok(source) => source,
+        Err(error) => {
+            let Some(reason) = error.downcast_ref::<Unsupported>() else {
+                return Err(error);
+            };
+            return Ok(json!({"name":source["name"],"in":source["in"],"issue":reason}));
+        }
+    };
+    if !source.is_object() {
+        return Ok(json!({"issue":Unsupported::InputSchema}));
+    }
+    let mut parameter = digest_fields(source, &["schema", "issue"], budget)?;
+    parameter.entry("in").or_insert(json!("query"));
+    if parameter.get("in") == Some(&Value::Null) {
+        parameter.insert("in".into(), json!("query"));
+    }
+    if parameter["in"] == "cookie" {
+        parameter.insert("issue".into(), json!(Unsupported::CookieParameter));
+    } else if let Some(source) = source.get("schema") {
+        match contracts::schema(root, source, budget) {
+            Ok(schema) => {
+                parameter.insert("schema".into(), schema);
+            }
+            Err(error) => {
+                let Some(reason) = error.downcast_ref::<Unsupported>() else {
+                    return Err(error);
+                };
+                parameter.insert("issue".into(), json!(reason));
             }
         }
     }
-    Ok(ops)
+    Ok(Value::Object(parameter))
+}
+fn digest_body(root: &Value, source: &Value, budget: &mut expansion::Budget) -> Result<Value> {
+    if !source.is_object() {
+        return Ok(json!({"issue":Unsupported::InputSchema}));
+    }
+    let mut body = digest_fields(source, &["schema", "issue"], budget)?;
+    let media = source
+        .get("media_type")
+        .and_then(Value::as_str)
+        .unwrap_or("application/json");
+    if media::json_type(media).is_err() {
+        body.insert("issue".into(), json!(Unsupported::RequestMedia));
+    } else {
+        match contracts::schema(root, source.get("schema").unwrap_or(&json!({})), budget) {
+            Ok(schema) => {
+                body.insert("schema".into(), schema);
+                body.insert("media_type".into(), json!(media));
+            }
+            Err(error) => {
+                let Some(reason) = error.downcast_ref::<Unsupported>() else {
+                    return Err(error);
+                };
+                body.insert("issue".into(), json!(reason));
+            }
+        }
+    }
+    Ok(Value::Object(body))
+}
+fn digest_operations(
+    root: &Value,
+    credit_key: Option<&str>,
+    budget: &mut expansion::Budget,
+) -> Result<Vec<Value>> {
+    let source = root
+        .get("operations")
+        .and_then(Value::as_array)
+        .context("expected OpenAPI paths or operations digest")?;
+    let mut operations = Vec::new();
+    for source in source {
+        if !source.is_object() {
+            budget.copying(source)?;
+            operations.push(source.clone());
+            continue;
+        };
+        let mut operation = digest_fields(source, &["params", "body"], budget)?;
+        if let Some(params) = source.get("params") {
+            let value = if let Some(params) = params.as_array() {
+                Value::Array(
+                    params
+                        .iter()
+                        .map(|p| digest_parameter(root, p, budget))
+                        .collect::<Result<_>>()?,
+                )
+            } else {
+                budget.copying(params)?;
+                params.clone()
+            };
+            operation.insert("params".into(), value);
+        }
+        if let Some(body) = source.get("body") {
+            operation.insert(
+                "body".into(),
+                if body.is_null() {
+                    Value::Null
+                } else {
+                    digest_body(root, body, budget)?
+                },
+            );
+        }
+        if let Some(value) = credit_key.and_then(|key| source.get(key)) {
+            budget.copying(value)?;
+            operation.insert("credit_pricing".into(), value.clone());
+        }
+        operations.push(Value::Object(operation));
+    }
+    Ok(operations)
 }
 
 fn openapi_operation(
@@ -1170,16 +1270,16 @@ fn openapi_operation(
             params.push(parameter);
         }
     }
-    let body = op.get("requestBody").filter(|v| !v.is_null()).map(|rb| -> Result<Value> {
-        let rb = resolve(root, rb, budget)?;
-        Ok(json!({"required": rb["required"].as_bool().unwrap_or(false),
-            "schema": schema(rb.pointer("/content/application~1json/schema").unwrap_or(&json!({}))) }))
-    }).transpose()?;
-    Ok(
-        json!({"path":path, "method":method, "summary":op["summary"],
-        "description":op["description"], "tags":op.get("tags").cloned().unwrap_or(json!([])),
-        "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body}),
-    )
+    let body = op
+        .get("requestBody")
+        .filter(|value| !value.is_null())
+        .map(|source| media::body(root, source, budget))
+        .transpose()?;
+    let mut operation = json!({"path":path,"method":method,"summary":op["summary"],"description":op["description"],
+        "tags":op.get("tags").unwrap_or(&json!([])),"pricing":pricing_key.and_then(|key|op.get(key)),"credit_pricing":credit_key.and_then(|key|op.get(key))});
+    operation["params"] = Value::Array(params);
+    operation["body"] = body.unwrap_or(Value::Null);
+    Ok(operation)
 }
 
 fn openapi_parameter(
@@ -1187,19 +1287,71 @@ fn openapi_parameter(
     parameter_source: &Value,
     budget: &mut expansion::Budget,
 ) -> Result<Option<Value>> {
-    let p = resolve(root, parameter_source, budget)?;
+    let raw = match contracts::reference(root, parameter_source, budget) {
+        Ok(raw) => raw,
+        Err(error) => {
+            let Some(reason) = error.downcast_ref::<Unsupported>() else {
+                return Err(error);
+            };
+            return Ok(Some(
+                json!({"name":parameter_source["name"],"in":parameter_source["in"],"issue":reason}),
+            ));
+        }
+    };
+    if raw["in"] == "cookie" {
+        return Ok(Some(
+            json!({"name":raw["name"],"in":raw["in"],"issue":Unsupported::CookieParameter}),
+        ));
+    }
+    let p = raw;
     if !p["name"].is_string() {
         return Ok(None);
     }
-    let original_schema = resolve(root, p.get("schema").unwrap_or(&json!({})), budget)?;
-    let s = schema(&original_schema);
+    let ignored = p["in"] == "header"
+        && p["name"].as_str().is_some_and(|name| {
+            headers::ignored(&name.to_ascii_lowercase())
+                || headers::payment(&name.to_ascii_lowercase())
+        });
+    let s = match if ignored {
+        let schema = p.get("schema").unwrap_or(&Value::Null);
+        budget.copying(schema).map(|_| schema.clone())
+    } else {
+        contracts::schema(
+            root,
+            p.get("schema").unwrap_or(&json!({"type":"string"})),
+            budget,
+        )
+    } {
+        Ok(schema) => schema,
+        Err(error) => {
+            let Some(reason) = error.downcast_ref::<Unsupported>() else {
+                return Err(error);
+            };
+            return Ok(Some(json!({"name":p["name"],"in":p["in"],"issue":reason})));
+        }
+    };
+    // Copy only used parameter metadata; schema annotations were projected above.
+    for key in [
+        "name",
+        "in",
+        "description",
+        "style",
+        "explode",
+        "content",
+        "allowReserved",
+    ] {
+        if let Some(value) = p.get(key) {
+            budget.copying(value)?;
+        }
+    }
     let mut parameter = json!({"name": p["name"], "in": p["in"],
-        "required": p["required"].as_bool().unwrap_or(false),
-        "description": p.get("description").filter(|v| !v.is_null()).unwrap_or(&s["description"]),
-        "schema": s});
-    // Header serialization belongs to the original parameter contract.
-    if p["in"] == "header" {
-        for key in ["style", "explode", "content"] {
+    "required": p["required"].as_bool().unwrap_or(false),
+    "description": p.get("description").filter(|v| !v.is_null()).unwrap_or(&s["description"]),
+    });
+    parameter["schema"] = s;
+    // Serialization belongs to the original parameter contract.
+    {
+        for key in ["style", "explode", "content", "allowReserved"] {
             if let Some(value) = p.get(key) {
                 parameter[key] = value.clone();
             }
@@ -1329,23 +1481,46 @@ fn price(op: &Value) -> String {
 }
 
 pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolSpec>> {
+    build_catalog(cfg, root, prefix)?.complete()
+}
+
+pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
             error,
             reason: "Provider credit-pricing settings are invalid",
         })?;
     }
-    let selected = selected_operations(cfg, root, prefix)?;
+    let (selected, issues) = selected_operations(cfg, root, prefix)?;
+    // A help document cannot disguise the absence of every selected API contract.
+    // Active tool-name selectors still require an actual compatible inventory.
+    if selected.is_empty() && !issues.is_empty() {
+        if !cfg.include_tools.is_empty()
+            || !cfg.exclude_tools.is_empty()
+            || cfg.use_recommended_tools
+        {
+            filter_tool_names(cfg, &mut Vec::new(), true).map_err(|error| ToolConfigurationError {
+                error: error.context(IncompleteCatalog(issues.clone())),
+                reason: "Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections",
+            })?;
+        }
+        return Ok(CatalogBuild {
+            tools: Vec::new(),
+            issues,
+        });
+    }
     let mut credit_diagnostics = credit_pricing::Diagnostics::default();
     let mut tools = selected
         .into_iter()
-        .map(|(op, name)| operation_tool(cfg, root, &op, name, &mut credit_diagnostics))
+        .map(|(op, name, input)| {
+            operation_tool(cfg, root, &op, name, input, &mut credit_diagnostics)
+        })
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
         tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
             method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
-            param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
+            param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), wire_names:BTreeMap::new(),whole_body:None,body_closed:false,json_media_type:None });
     }
     // Authored overrides also apply to help and always follow generated text/schema.
     for tool in &mut tools {
@@ -1358,17 +1533,17 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
-    filter_tool_names(cfg, &mut tools).map_err(|error| ToolConfigurationError {
-        error,
-        reason: "Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings",
+    filter_tool_names(cfg, &mut tools, !issues.is_empty()).map_err(|error| ToolConfigurationError {
+        error: if issues.is_empty() {error} else {error.context(IncompleteCatalog(issues.clone()))},
+        reason: if issues.is_empty() {"Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings"} else {"Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections"},
     })?;
     if let Some(credits) = &cfg.credit_pricing {
         credit_diagnostics.report(prefix, credits, &tools);
     }
-    Ok(tools)
+    Ok(CatalogBuild { tools, issues })
 }
 
-fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
+fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>, partial: bool) -> Result<()> {
     // Every selector sees the same compatible named inventory, including help.
     let compile = |selectors: &[String], advisory: bool| -> Result<Vec<regex::Regex>> {
         selectors.iter().map(|selector| {
@@ -1377,6 +1552,7 @@ fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
                 if advisory || selector.contains(['*', '?']) {
                     tracing::warn!(selector, advisory, "Provider tool selector matches nothing");
                 } else {
+                    if partial {bail!("provider tool selector {selector} matches no compatible tools; inspect omitted operations and operation selections");}
                     bail!("unknown provider tool selector {selector}; check path, operation and tag filters");
                 }
             }
@@ -1407,16 +1583,17 @@ fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
 }
 
 /// Names after operation selection and collision naming, before tool-name filters.
-/// Diagnostics use this without regenerating schemas, pricing or tool descriptions.
+/// Uses the same compatible inventory; no pricing/tool-description generation.
 pub(crate) fn tool_names_before_filtering(
     cfg: &Config,
     root: &Value,
     prefix: &str,
 ) -> Result<Vec<String>> {
-    let mut names: Vec<_> = selected_operations(cfg, root, prefix)?
-        .into_iter()
-        .map(|(_, name)| name)
-        .collect();
+    let (selected, issues) = selected_operations(cfg, root, prefix)?;
+    if !issues.is_empty() {
+        return Err(IncompleteCatalog(issues).into());
+    }
+    let mut names: Vec<_> = selected.into_iter().map(|(_, name, _)| name).collect();
     if cfg.help_url.is_some() {
         names.push(format!("{prefix}_help"));
     }
@@ -1424,7 +1601,14 @@ pub(crate) fn tool_names_before_filtering(
 }
 
 // Selection and collision naming depend on the entire sorted inventory.
-fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(Value, String)>> {
+fn selected_operations(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+) -> Result<(
+    Vec<(Value, String, input::OperationInput)>,
+    Vec<OperationIssue>,
+)> {
     let mut ops = operations_with_credits(
         root,
         cfg.pricing_key.as_deref(),
@@ -1463,23 +1647,41 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
             error
         });
     }
+    let mut issues = Vec::new();
+    let mut compatible = Vec::new();
+    for (op, base) in selected {
+        match input::prepare(&op) {
+            Ok(input) => compatible.push((op, base, input)),
+            Err(error) => {
+                let Some(reason) = error.downcast_ref::<Unsupported>() else {
+                    return Err(error);
+                };
+                issues.push(OperationIssue {
+                    method: op["method"].as_str().unwrap().to_ascii_uppercase(),
+                    path: op["path"].as_str().unwrap().into(),
+                    reason: *reason,
+                });
+            }
+        }
+    }
+    let mut selected = compatible;
     // Exact wire paths define twins; later name filters cannot resurrect GET.
     if cfg.prefer_post {
         let post_paths: BTreeSet<_> = selected
             .iter()
-            .filter(|(op, _)| op["method"].as_str().unwrap().eq_ignore_ascii_case("POST"))
-            .map(|(op, _)| op["path"].as_str().unwrap().to_owned())
+            .filter(|(op, _, _)| op["method"].as_str().unwrap().eq_ignore_ascii_case("POST"))
+            .map(|(op, _, _)| op["path"].as_str().unwrap().to_owned())
             .collect();
-        selected.retain(|(op, _)| {
+        selected.retain(|(op, _, _)| {
             !op["method"].as_str().unwrap().eq_ignore_ascii_case("GET")
                 || !post_paths.contains(op["path"].as_str().unwrap())
         });
     }
     let mut counts = BTreeMap::<String, usize>::new();
-    for (_, base) in &selected {
+    for (_, base, _) in &selected {
         *counts.entry(base.clone()).or_default() += 1;
     }
-    Ok(name_selected_operations(selected, &counts))
+    Ok((name_selected_operations(selected, &counts), issues))
 }
 
 // Filters precede collision counting and retain the most specific include anchor.
@@ -1522,12 +1724,12 @@ fn selected_operation_base(cfg: &Config, op: &Value, prefix: &str) -> Option<Str
 }
 
 fn name_selected_operations(
-    selected: Vec<(Value, String)>,
+    selected: Vec<(Value, String, input::OperationInput)>,
     counts: &BTreeMap<String, usize>,
-) -> Vec<(Value, String)> {
+) -> Vec<(Value, String, input::OperationInput)> {
     let mut seen = BTreeMap::<String, usize>::new();
     let mut named = Vec::new();
-    for (op, base) in selected {
+    for (op, base, input) in selected {
         let method = op["method"].as_str().unwrap();
         let name = if counts[&base] > 1 {
             format!("{base}_{}", method.to_lowercase())
@@ -1541,152 +1743,9 @@ fn name_selected_operations(
         } else {
             name
         };
-        named.push((op, name));
+        named.push((op, name, input));
     }
     named
-}
-
-struct OperationInput {
-    schema: Value,
-    routes: BTreeMap<String, String>,
-    body_names: BTreeMap<String, String>,
-    header_params: BTreeMap<String, HeaderParameter>,
-    has_body: bool,
-}
-
-fn operation_input(op: &Value) -> Result<OperationInput> {
-    let mut props = Map::new();
-    let mut routes = BTreeMap::new();
-    let mut required = BTreeSet::new();
-    let mut body_names = BTreeMap::new();
-    collect_input_parameters(&op["params"], &mut props, &mut routes, &mut required);
-    let has_body = !op["body"].is_null();
-    let body = &op["body"]["schema"];
-    merge_body_properties(
-        body,
-        &mut props,
-        &mut routes,
-        &mut required,
-        &mut body_names,
-    )?;
-    let header_params = headers::collect(&op["params"], &mut props, &mut required)?;
-    let mut input_schema = json!({"type":"object", "properties":props});
-    if !required.is_empty() {
-        input_schema["required"] = json!(required);
-    }
-    preserve_body_required_alternatives(body, &body_names, &mut input_schema);
-    Ok(OperationInput {
-        schema: sanitize(&input_schema),
-        routes,
-        body_names,
-        header_params,
-        has_body,
-    })
-}
-
-fn collect_input_parameters(
-    params: &Value,
-    props: &mut Map<String, Value>,
-    routes: &mut BTreeMap<String, String>,
-    required: &mut BTreeSet<String>,
-) {
-    for p in params.as_array().into_iter().flatten() {
-        if p["in"] == "header" {
-            continue;
-        }
-        let Some(key) = p["name"].as_str() else {
-            continue;
-        };
-        let mut prop = p["schema"].as_object().cloned().unwrap_or_default();
-        prop.entry("type").or_insert(json!("string"));
-        if p["description"].as_str().is_some_and(|s| !s.is_empty()) {
-            prop.entry("description")
-                .or_insert(p["description"].clone());
-        }
-        props.insert(key.to_string(), Value::Object(prop));
-        routes.insert(
-            key.to_string(),
-            if p["in"] == "path" { "path" } else { "query" }.into(),
-        );
-        if p["required"] == true {
-            required.insert(key.to_string());
-        }
-    }
-}
-
-fn merge_body_properties(
-    body: &Value,
-    props: &mut Map<String, Value>,
-    routes: &mut BTreeMap<String, String>,
-    required: &mut BTreeSet<String>,
-    body_names: &mut BTreeMap<String, String>,
-) -> Result<()> {
-    for (key, value) in body["properties"].as_object().into_iter().flatten() {
-        let name = if props.contains_key(key) {
-            format!("{key}_body")
-        } else {
-            key.clone()
-        };
-        ensure!(
-            !props.contains_key(&name),
-            "unresolvable body/query collision: {key}"
-        );
-        props.insert(
-            name.clone(),
-            if value.is_object() {
-                value.clone()
-            } else {
-                json!({"type":"string"})
-            },
-        );
-        body_names.insert(name.clone(), key.clone());
-        routes.insert(name.clone(), "body".into());
-        if body["required"]
-            .as_array()
-            .is_some_and(|r| r.contains(&json!(key)))
-        {
-            required.insert(name);
-        }
-    }
-    Ok(())
-}
-
-// Presence-only alternatives remain meaningful when a body is flattened together
-// with query/path arguments. Rename body keys after collisions, so a query value
-// cannot satisfy a body requirement (for example Exa's ids-or-urls constraint).
-fn preserve_body_required_alternatives(
-    body: &Value,
-    body_names: &BTreeMap<String, String>,
-    input: &mut Value,
-) {
-    let names: BTreeMap<_, _> = body_names
-        .iter()
-        .map(|(arg, wire)| (wire.as_str(), arg.as_str()))
-        .collect();
-    for keyword in ["oneOf", "anyOf", "allOf"] {
-        let Some(branches) = body[keyword].as_array() else {
-            continue;
-        };
-        let translated: Option<Vec<Value>> = branches
-            .iter()
-            .map(|branch| {
-                let object = branch.as_object()?;
-                if object.len() != 1 {
-                    return None;
-                }
-                let required: Option<Vec<_>> = object
-                    .get("required")?
-                    .as_array()?
-                    .iter()
-                    .map(|key| names.get(key.as_str()?).copied())
-                    .collect();
-                Some(json!({"required": required?}))
-            })
-            .collect();
-        if let Some(branches) = translated {
-            input[keyword] = json!(branches);
-        }
-    }
 }
 
 fn operation_description(
@@ -1751,9 +1810,9 @@ fn operation_tool(
     root: &Value,
     op: &Value,
     name: String,
+    input: input::OperationInput,
     credit_diagnostics: &mut credit_pricing::Diagnostics,
 ) -> Result<ToolSpec> {
-    let input = operation_input(op)?;
     let method = op["method"].as_str().unwrap();
     let credit_estimate = cfg.credit_pricing.as_ref().map(|credits| {
         let (description, reason) = credits.describe(&op["credit_pricing"]);
@@ -1782,7 +1841,10 @@ fn operation_tool(
         header_params: input.header_params,
         has_body: input.has_body,
         help_url: None,
-        body_names: input.body_names,
+        wire_names: input.wire_names,
+        whole_body: input.whole_body,
+        body_closed: input.body_closed,
+        json_media_type: input.json_media_type,
     })
 }
 
@@ -1816,7 +1878,7 @@ mod selection_tests;
 
 fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) -> Result<()> {
     if let Some(ap) = cfg.additional_properties {
-        tool.input_schema["additionalProperties"] = json!(ap);
+        tool.input_schema["additionalProperties"] = json!(ap && tool.whole_body.is_none());
     }
     if let Some(patch) = cfg.overrides.get(&tool.name) {
         let pricing = patch
@@ -1841,8 +1903,34 @@ fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) -> Result<()> {
             });
         }
         for (key, value) in patch["params"].as_object().into_iter().flatten() {
-            if value.is_string() && tool.input_schema["properties"][key].is_object() {
+            if !value.is_string() {
+                continue;
+            }
+            if tool.input_schema["properties"][key].is_object() {
                 tool.input_schema["properties"][key]["description"] = value.clone();
+                continue;
+            }
+            let Some(body) = &tool.whole_body else {
+                continue;
+            };
+            let Some(properties) = tool.input_schema["properties"][&body.name]
+                .get("properties")
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            let wire = if properties.contains_key(key) {
+                Some(key.as_str())
+            } else {
+                key.strip_suffix("_body")
+                    .filter(|wire| properties.contains_key(*wire))
+            }
+            .map(str::to_owned);
+            if let Some(wire) = wire
+                && properties[&wire].is_object()
+            {
+                tool.input_schema["properties"][&body.name]["properties"][&wire]["description"] =
+                    value.clone();
             }
         }
     }

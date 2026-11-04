@@ -105,6 +105,7 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
     let saved = import::saved_tools(&candidate, document().to_string().as_bytes()).unwrap();
     assert_eq!(
         saved
+            .tools
             .iter()
             .find(|tool| tool.name == read.name)
             .unwrap()
@@ -112,11 +113,11 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
         rendered
     );
     assert_eq!(
-        read.input_schema["properties"]["symbol"]["description"],
+        read.input_schema["properties"]["body"]["properties"]["symbol"]["description"],
         "original_read"
     );
     assert_eq!(
-        read.input_schema["properties"]["symbol"]["default"],
+        read.input_schema["properties"]["body"]["properties"]["symbol"]["default"],
         "https://docs.example.com/original_read"
     );
     let guidance = built.instructions.unwrap();
@@ -127,6 +128,7 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
     assert_eq!(
         import::saved_tools(&candidate, document().to_string().as_bytes())
             .unwrap()
+            .tools
             .iter()
             .map(|tool| &tool.name)
             .collect::<Vec<_>>(),
@@ -270,7 +272,7 @@ fn listener_projection_preserves_selection_and_validates_hidden_operations() {
             .is_err()
     );
     assert_eq!(
-        import::saved_tools(&candidate, &bytes).unwrap().len(),
+        import::saved_tools(&candidate, &bytes).unwrap().tools.len(),
         4,
         "saved inspection stays unfiltered"
     );
@@ -554,6 +556,7 @@ async fn curated_cli_refresh_atomically_adopts_current_local_bundle_and_preserve
         import::saved_tools(&refreshed.candidate, refreshed.document.as_bytes()).unwrap();
     assert_eq!(
         inventory
+            .tools
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
@@ -573,6 +576,7 @@ async fn curated_cli_refresh_atomically_adopts_current_local_bundle_and_preserve
             .map(|bound| bound.tool.name.as_str())
             .collect::<Vec<_>>(),
         inventory
+            .tools
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>()

@@ -787,3 +787,151 @@ fn routing_precedes_same_prefix_collision_detection() {
     assert!(serving.tools.is_empty());
     assert_eq!(serving.conflicts.len(), 3);
 }
+
+#[tokio::test]
+async fn partial_source_omissions_survive_overrides_and_strict_inspection_refuses_partial() {
+    let directory = tempfile::tempdir().unwrap();
+    let spec = directory.path().join("spec.json");
+    let path = directory.path().join("deployment.toml");
+    let document = json!({"openapi":"3.1.0","paths":{"/healthy":{"get":{}},"/unsupported":{"post":{"parameters":[{"name":"session","in":"cookie"}]}}}});
+    std::fs::write(&spec, document.to_string()).unwrap();
+    std::fs::write(
+        &path,
+        r#"version=1
+[wallets.payer]
+mode='static'
+private_key_env='KEY'
+[sources.alias]
+spec='spec.json'
+base_url='https://example.com'
+prefix='vendor'
+[servers.one]
+listen='127.0.0.1:0'
+bearer_token_env='TOKEN'
+wallet='payer'
+sources=['alias']
+instructions_text='Operator guidance'
+[servers.two]
+listen='127.0.0.1:0'
+bearer_token_env='TOKEN'
+wallet='payer'
+sources=['alias']
+instructions_text=''
+"#,
+    )
+    .unwrap();
+    assert!(
+        Deployment::load_for_inspection(&path, false)
+            .await
+            .err()
+            .unwrap()
+            .is::<catalog::IncompleteCatalog>()
+    );
+    let mut deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+    let wallets = BTreeMap::from([("payer".into(), PaidClient::unsigned())]);
+    assert!(
+        deployment
+            .inventory()
+            .iter()
+            .all(|inventory| inventory.omitted_operations["alias"].len() == 1)
+    );
+    let servers = deployment.build_servers(&wallets);
+    for name in ["one", "two"] {
+        let text = servers[name].instructions.as_deref().unwrap();
+        assert!(text.contains("1 API operations are omitted"));
+        assert!(text.contains("Cookie parameters"));
+        assert_eq!(servers[name].catalog.read().views["default"].len(), 1);
+    }
+    assert!(
+        servers["one"]
+            .instructions
+            .as_ref()
+            .unwrap()
+            .starts_with("Operator guidance")
+    );
+    drop(servers);
+    let mut repaired = document;
+    repaired["paths"]
+        .as_object_mut()
+        .unwrap()
+        .remove("/unsupported");
+    let old = deployment.sources.remove("alias").unwrap();
+    deployment.sources.insert(
+        "alias".into(),
+        Source::from_document("alias", old.config, std::sync::Arc::new(repaired)).unwrap(),
+    );
+    deployment.refresh_selection(true).unwrap();
+    assert!(deployment.build_servers(&wallets).values().all(|server| {
+        !server
+            .instructions
+            .as_deref()
+            .unwrap_or("")
+            .contains("omitted")
+    }));
+}
+
+#[tokio::test]
+async fn all_unsupported_initial_source_only_fails_dependent_waiting_endpoints() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("deployment.toml");
+    std::fs::write(
+        directory.path().join("bad.json"),
+        json!({"paths":{"/bad":{"get":{"parameters":[{"name":"cookie","in":"cookie"}]}}}})
+            .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("good.json"),
+        json!({"paths":{"/good":{"get":{}}}}).to_string(),
+    )
+    .unwrap();
+    let mut config = String::from(
+        "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='KEY'\n[sources.bad]\nspec='bad.json'\nbase_url='https://example.com'\nhelp_url='https://example.com/help'\n[sources.good]\nspec='good.json'\nbase_url='https://example.com'\n",
+    );
+    for (name, sources, wait) in [
+        ("waiting", "['bad']", true),
+        ("nonwaiting", "['bad','good']", false),
+        ("healthy", "['good']", true),
+    ] {
+        config.push_str(&format!("[servers.{name}]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='payer'\nsources={sources}\nwait_for_catalogs={wait}\ninstructions_text=''\n"));
+    }
+    std::fs::write(&path, config).unwrap();
+    assert!(
+        Deployment::load_for_inspection(&path, false)
+            .await
+            .err()
+            .unwrap()
+            .is::<catalog::IncompleteCatalog>()
+    );
+    let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+    assert!(deployment.sources["bad"].compatibility_unavailable());
+    assert!(deployment.unavailable_sources.contains_key("bad"));
+    assert!(!deployment.unavailable_sources.contains_key("good"));
+    let mut readiness = deployment.resolved_catalog_readiness();
+    assert!(readiness.remove("waiting").unwrap().await.unwrap().is_err());
+    assert!(readiness.remove("healthy").unwrap().await.unwrap().is_ok());
+    assert!(!readiness.contains_key("nonwaiting"));
+    let servers =
+        deployment.build_servers(&BTreeMap::from([("payer".into(), PaidClient::unsigned())]));
+    assert!(servers["waiting"].catalog.read().views["default"].is_empty());
+    assert_eq!(
+        servers["nonwaiting"].catalog.read().views["default"].len(),
+        1
+    );
+    for name in ["waiting", "nonwaiting"] {
+        assert!(
+            servers[name]
+                .instructions
+                .as_deref()
+                .unwrap()
+                .contains("1 API operations are omitted")
+        );
+    }
+    assert!(
+        !servers["healthy"]
+            .instructions
+            .as_deref()
+            .unwrap_or("")
+            .contains("omitted")
+    );
+}

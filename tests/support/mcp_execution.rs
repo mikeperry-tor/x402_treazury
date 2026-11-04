@@ -65,6 +65,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
         vendor,
     )]);
     m.catalog.publish(CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([("writer".into(), bound)]),
@@ -85,7 +86,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
         let s = s.clone();
         let (base, task) = listen(crate::server::http_app(s, "test-token".into())).await;
         for fallback in [false, true] {
-            let args = json!({"id":"a/b?雪","q":["x y","雪"],"flag":true,"q_body":"body🙂"});
+            let args = json!({"id":"a/b?雪","q":["x y","雪"],"flag":true,"body":{"q":"body🙂"}});
             let result = if fallback {
                 call(
                     &base,

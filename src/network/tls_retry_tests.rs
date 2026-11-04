@@ -509,6 +509,7 @@ async fn fixture() {
                     }
                     "api" => crate::payment::PaidClient::new(payer)
                         .execute_response(crate::catalog::RoutedRequest {
+                            json_media_type: None,
                             headers: Default::default(),
                             method: "GET".into(),
                             url: endpoint.clone(),
@@ -576,6 +577,7 @@ async fn fixture() {
         let client = crate::payment::PaidClient::new(payer).with_transport(HttpPolicy::COMPATIBLE);
         let error = client
             .execute_response(crate::catalog::RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: "GET".into(),
                 url: endpoint.into(),
@@ -643,6 +645,7 @@ async fn write_cases(state: &StateData, connections: &AtomicUsize, tor: bool, di
                 direct_port
             };
             let route = crate::catalog::RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: method.into(),
                 url: format!("https://spec.example.com:{port}/write"),
@@ -806,6 +809,7 @@ async fn body_cases(
             _ => crate::payment::PaidClient::new(payer)
                 .with_transport(HttpPolicy::COMPATIBLE)
                 .execute_response(crate::catalog::RoutedRequest {
+                    json_media_type: None,
                     headers: Default::default(),
                     method: "GET".into(),
                     url: endpoint.clone(),

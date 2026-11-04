@@ -2,6 +2,21 @@
 use serde_json::Value;
 use std::path::Path;
 
+// Named regressions below inspect the original body constraints independently
+// of whether those constraints live at the MCP root or an explicit body argument.
+fn body_schema(tool: &x402_treazury::catalog::ToolSpec) -> &Value {
+    match &tool.whole_body {
+        None => &tool.input_schema,
+        Some(body) => {
+            assert!(tool.has_body, "whole-body metadata requires an HTTP body");
+            tool.input_schema
+                .get("properties")
+                .and_then(|properties| properties.get(&body.name))
+                .expect("whole-body metadata must point to the advertised input property")
+        }
+    }
+}
+
 fn assert_observed_tariff(
     tool: &x402_treazury::catalog::ToolSpec,
     tariff: &str,
@@ -141,15 +156,15 @@ async fn banking_compliance_projects_typed_post_bodies_and_excludes_unmodeled_ca
         assert!(tool.description.contains(&format!("${price}/call [spec]")));
     }
     let check = &tools.iter().find(|t| t.path == "/api/check").unwrap();
-    assert_eq!(check.input_schema["required"], json!(["text"]));
-    assert_eq!(check.input_schema["properties"]["text"]["minLength"], 1);
+    assert_eq!(body_schema(check)["required"], json!(["text"]));
+    assert_eq!(body_schema(check)["properties"]["text"]["minLength"], 1);
     assert_eq!(
-        check.input_schema["properties"]["include_warnings"]["type"],
+        body_schema(check)["properties"]["include_warnings"]["type"],
         "boolean"
     );
     assert!(check.description.contains("misidentified subsections"));
     let lookup = &tools.iter().find(|t| t.path == "/api/lookup").unwrap();
-    assert_eq!(lookup.input_schema["required"], json!(["query"]));
+    assert_eq!(body_schema(lookup)["required"], json!(["query"]));
     assert!(
         lookup
             .description
@@ -157,24 +172,24 @@ async fn banking_compliance_projects_typed_post_bodies_and_excludes_unmodeled_ca
     );
     let generate = &tools.iter().find(|t| t.path == "/api/generate").unwrap();
     assert_eq!(
-        generate.input_schema["required"],
+        body_schema(generate)["required"],
         json!(["institution_name", "product_details", "product_type"])
     );
     assert_eq!(
-        generate.input_schema["properties"]["product_details"]["properties"]["fdic_insured"]["type"],
+        body_schema(generate)["properties"]["product_details"]["properties"]["fdic_insured"]["type"],
         "boolean"
     );
     assert!(generate.description.contains("fdic_insured=false"));
     // MCP discovery documents options/ranges in prose, without structural enums or bounds.
     for (tool, field) in [(lookup, "limit"), (generate, "quantity")] {
-        let schema = &tool.input_schema["properties"][field];
+        let schema = &body_schema(tool)["properties"][field];
         assert_eq!(schema["type"], "number");
         assert!(schema.get("minimum").is_none());
         assert!(schema.get("maximum").is_none());
         assert!(schema.get("default").is_none());
     }
     for tool in &tools {
-        let schema = &tool.input_schema["properties"]["product_type"];
+        let schema = &body_schema(tool)["properties"]["product_type"];
         assert_eq!(schema["type"], "string");
         assert!(schema.get("enum").is_none());
     }
@@ -267,11 +282,11 @@ async fn blockchainmoneymap_keeps_namespace_names_public_fallback_and_usdc_price
             .contains("separately supplied authorization proof")
     );
     assert_eq!(
-        revocation.input_schema["required"],
+        body_schema(revocation)["required"],
         json!(["authorizationProof", "policy", "revocation", "targets"])
     );
     assert_eq!(
-        revocation.input_schema["properties"]["targets"]["maxItems"],
+        body_schema(revocation)["properties"]["targets"]["maxItems"],
         25
     );
 }
@@ -303,7 +318,7 @@ async fn strale_polish_lookup_describes_only_the_supported_krs_input() {
     );
     assert!(tool.description.contains("$0.054/call [spec]"));
     assert!(
-        tool.input_schema["properties"]["krs_number"]["description"]
+        body_schema(tool)["properties"]["krs_number"]["description"]
             .as_str()
             .unwrap()
             .contains("company names are unsupported")
@@ -357,7 +372,7 @@ async fn daedalus_materializes_identity_security_without_putting_identity_in_the
         } else {
             json!({"code":"let answer = 42;", "focus":"injection"})
         };
-        let mut arguments = payload.as_object().unwrap().clone();
+        let mut arguments = json!({"body":payload}).as_object().unwrap().clone();
         arguments.insert("X-Agent-Id".into(), json!("fixture-agent"));
         let route = tool
             .route(cfg.base_url.as_ref().unwrap(), &arguments)
@@ -521,7 +536,7 @@ async fn stabletravel_repairs_literal_path_slots_without_changing_vendor_operati
     let route = intent
         .route(
             cfg.base_url.as_ref().unwrap(),
-            json!({"ident":"UAL123", "ident_body":"UAL123", "intent":"departed"})
+            json!({"ident":"UAL123", "body":{"ident":"UAL123", "intent":"departed"}})
                 .as_object()
                 .unwrap(),
         )
@@ -540,7 +555,7 @@ async fn stabletravel_repairs_literal_path_slots_without_changing_vendor_operati
         .find(|t| t.name == "stabletravel_google_flights_search")
         .unwrap();
     assert!(
-        search.input_schema["properties"]["return_date"]["description"]
+        body_schema(search)["properties"]["return_date"]["description"]
             .as_str()
             .unwrap()
             .contains("default")
@@ -595,7 +610,7 @@ async fn coinmarketcap_projects_keyless_paths_without_losing_dex_request_contrac
         .iter()
         .find(|t| t.name == "coinmarketcap_v4_dex_pairs_quotes_latest")
         .unwrap();
-    assert!(dex.input_schema["properties"].get("pair_address").is_none());
+    assert!(body_schema(dex)["properties"].get("pair_address").is_none());
     let args =
         json!({"contract_address":"0x0000000000000000000000000000000000000001", "network_id":"1"});
     let route = dex
@@ -662,18 +677,19 @@ async fn ax1_projects_external_request_and_preserves_free_receipt_routing() {
     assert!(buy.description.contains("new purchase"));
     assert!(!buy.description.contains("Console mode"));
     assert!(!buy.description.contains("Paid execution still requires"));
-    assert_eq!(buy.input_schema["required"], json!(["tokenAddress"]));
+    assert_eq!(body_schema(buy)["required"], json!(["tokenAddress"]));
     assert!(
-        buy.input_schema["properties"]
+        body_schema(buy)["properties"]
             .get("PAYMENT-SIGNATURE")
             .is_none()
     );
     assert_eq!(
-        buy.input_schema["properties"]["chain"]["enum"],
+        body_schema(buy)["properties"]["chain"]["enum"],
         json!(["base", "solana"])
     );
-    let args =
+    let payload =
         json!({"tokenAddress":"So11111111111111111111111111111111111111112", "chain":"solana"});
+    let args = json!({"body":payload});
     let route = buy
         .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
         .unwrap();
@@ -681,7 +697,7 @@ async fn ax1_projects_external_request_and_preserves_free_receipt_routing() {
         route.url,
         "https://www.ax1.vc/api/dashboard/q-verdict/resource"
     );
-    assert_eq!(route.body.unwrap(), args);
+    assert_eq!(route.body.unwrap(), payload);
     let poll = tools
         .iter()
         .find(|t| t.name == "ax1_operations_operationid")
@@ -750,7 +766,7 @@ async fn nansen_keeps_keyless_analytics_without_api_key_or_sse_lifecycles() {
         .find(|t| t.path == "/api/v1/tgm/holders")
         .unwrap();
     assert!(
-        holders.input_schema["properties"]["premium_labels"]["description"]
+        body_schema(holders)["properties"]["premium_labels"]["description"]
             .as_str()
             .unwrap()
             .contains("paid plan")
@@ -796,7 +812,7 @@ async fn blockrun_adds_completed_model_gateways_without_transaction_broadcasts()
     ] {
         let tool = tools.iter().find(|t| t.name == name).unwrap();
         assert!(
-            tool.input_schema["properties"]["stream"]["description"]
+            body_schema(tool)["properties"]["stream"]["description"]
                 .as_str()
                 .unwrap()
                 .contains("false")
@@ -842,13 +858,13 @@ async fn new_intelligence_providers_preserve_paid_and_public_workflows() {
                 for name in ["agdata_screenshot", "agdata_mpp_screenshot"] {
                     let tool = by_name(name);
                     assert!(
-                        tool.input_schema["properties"]["format"]["enum"]
+                        body_schema(tool)["properties"]["format"]["enum"]
                             .as_array()
                             .unwrap()
                             .contains(&json!("pdf"))
                     );
                     assert!(
-                        tool.input_schema["properties"]["format"]["description"]
+                        body_schema(tool)["properties"]["format"]["description"]
                             .as_str()
                             .unwrap()
                             .contains("imageBase64")
@@ -1114,11 +1130,40 @@ async fn directory_defaults_include_public_operations_and_exclude_ownership() {
         serde_json::json!({"get":{"description":"new route"}});
     let tools = catalog::build_tools(&cfg, &doc, "x402_list").unwrap();
     assert!(tools.iter().any(|t| t.path == "/services/new-public-read"));
-    for path in ["/assess", "/suggestions"] {
+    for path in ["/assess", "/suggestions", "/submit"] {
         assert!(tools.iter().any(|t| t.path == path && t.method == "POST"));
     }
+    let submit = tools.iter().find(|tool| tool.path == "/submit").unwrap();
+    assert!(submit.whole_body.as_ref().unwrap().required);
+    assert_eq!(
+        body_schema(submit)["oneOf"],
+        serde_json::json!([
+            doc["components"]["schemas"]["ServiceSubmissionRequest"],
+            doc["components"]["schemas"]["FacilitatorSubmissionRequest"]
+        ])
+    );
+    for payload in [
+        serde_json::json!({"url":"https://api.example.com","email":"operator@example.com","service_name":"Example","description":"Public API","website_url":"https://example.com","category":"AI","endpoints":["/read"]}),
+        serde_json::json!({"type":"facilitator","email":"operator@example.com","facilitator_name":"Example","website_url":"https://example.com","settler_addresses":["0x1111111111111111111111111111111111111111"],"networks":["base"]}),
+    ] {
+        let request = submit
+            .route(
+                cfg.base_url.as_deref().unwrap(),
+                serde_json::json!({"body":payload}).as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(request.url, "https://x402-list.com/api/v1/submit");
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.body, Some(payload));
+        assert!(request.query.is_empty() && request.headers.is_empty());
+    }
+    assert!(submit.description.contains("nonrefundable $1"));
+    assert!(
+        !cfg.recommended_tools
+            .iter()
+            .any(|name| name == "x402_list_submit")
+    );
     for path in [
-        "/submit",
         "/services/{slug}/verify-ownership",
         "/services/{slug}/request-update",
         "/services/{slug}/reissue-token",
@@ -1183,10 +1228,10 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
     }
     let contents = &tools[0];
     assert_eq!(
-        contents.input_schema["oneOf"],
+        body_schema(contents)["oneOf"],
         json!([{"required":["ids"]},{"required":["urls"]}])
     );
-    assert_eq!(contents.input_schema["properties"]["urls"]["minItems"], 1);
+    assert_eq!(body_schema(contents)["properties"]["urls"]["minItems"], 1);
     assert!(contents.description.contains("exactly one"));
     let args = json!({"urls":["https://example.com/a?b=1"],"highlights":{"query":"context"},"maxAgeHours":0});
     let routed = contents
@@ -1197,9 +1242,9 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
     assert_eq!(routed.body, Some(args));
     assert!(routed.query.is_empty());
     let search = &tools[1];
-    assert_eq!(search.input_schema["required"], json!(["query"]));
+    assert_eq!(body_schema(search)["required"], json!(["query"]));
     assert!(
-        search.input_schema["properties"]["stream"]["description"]
+        body_schema(search)["properties"]["stream"]["description"]
             .as_str()
             .unwrap()
             .contains("false")
@@ -1224,7 +1269,7 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
 }
 
 #[test]
-fn body_presence_alternatives_follow_collision_renaming() {
+fn optional_body_presence_alternatives_stay_body_local_beside_query_inputs() {
     use serde_json::json;
     use x402_treazury::catalog::{self, Config};
     for keyword in ["oneOf", "anyOf", "allOf"] {
@@ -1237,10 +1282,10 @@ fn body_presence_alternatives_follow_collision_renaming() {
         let tools = catalog::build_tools(&Config::default(), &doc, "test").unwrap();
         let tool = &tools[0];
         assert_eq!(
-            tool.input_schema[keyword],
-            json!([{"required":["ids_body"]},{"required":["urls"]}])
+            body_schema(tool)[keyword],
+            json!([{"required":["ids"]},{"required":["urls"]}])
         );
-        let args = json!({"ids":"query value","ids_body":["document"]});
+        let args = json!({"ids":"query value","body":{"ids":["document"]}});
         let route = tool
             .route("https://example.com", args.as_object().unwrap())
             .unwrap();
@@ -1299,26 +1344,28 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
         assert!(!tools.iter().any(|t| t.path == path));
     }
     let search = tools.iter().find(|t| t.name == "oneshot_search").unwrap();
-    assert_eq!(search.input_schema["required"], json!(["query"]));
-    assert_eq!(search.input_schema["properties"]["query"]["minLength"], 1);
-    assert_eq!(search.input_schema["properties"]["query"]["maxLength"], 500);
+    assert_eq!(body_schema(search)["required"], json!(["query"]));
+    assert_eq!(body_schema(search)["properties"]["query"]["minLength"], 1);
+    assert_eq!(body_schema(search)["properties"]["query"]["maxLength"], 500);
     assert_eq!(
-        search.input_schema["properties"]["max_results"]["maximum"],
+        body_schema(search)["properties"]["max_results"]["maximum"],
         20
     );
     assert_eq!(
-        search.input_schema["properties"]["max_results"]["default"],
+        body_schema(search)["properties"]["max_results"]["default"],
         5
     );
-    assert_eq!(search.param_routes.len(), 2);
-    assert!(search.param_routes.values().all(|v| v == "body"));
-    let args = json!({"query":"Rust MCP integration","max_results":3});
+    assert!(search.param_routes.is_empty());
+    assert_eq!(search.whole_body.as_ref().unwrap().name, "body");
+    assert!(!search.whole_body.as_ref().unwrap().required);
+    let body = json!({"query":"Rust MCP integration","max_results":3});
+    let args = json!({"body":body});
     let routed = search
         .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
         .unwrap();
     assert_eq!(routed.url, "https://win.oneshotagent.com/v1/tools/search");
     assert_eq!(routed.method, "POST");
-    assert_eq!(routed.body, Some(args));
+    assert_eq!(routed.body, Some(body));
     assert!(routed.query.is_empty());
     assert!(search.description.contains("$0.001"));
     assert!(!search.description.contains("securitySchemes"));
@@ -1418,7 +1465,7 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
         .find(|t| t.name == "stableenrich_exa_search")
         .unwrap();
     assert!(
-        exa.input_schema["properties"]["stream"]["description"]
+        body_schema(exa)["properties"]["stream"]["description"]
             .as_str()
             .unwrap()
             .contains("false")
@@ -1503,7 +1550,7 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
     ] {
         let tool = tools.iter().find(|t| t.path == path).unwrap();
         assert!(
-            tool.input_schema["properties"]["format"]["description"]
+            body_schema(tool)["properties"]["format"]["description"]
                 .as_str()
                 .unwrap()
                 .contains("Choose png or jpeg")
@@ -1511,7 +1558,7 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
     }
     let messages = tools.iter().find(|t| t.path == "/v1/messages").unwrap();
     assert!(
-        messages.input_schema["properties"]["stream"]["description"]
+        body_schema(messages)["properties"]["stream"]["description"]
             .as_str()
             .unwrap()
             .contains("false")
@@ -1530,12 +1577,13 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
         .iter()
         .find(|t| t.name == "agent402_chat_completions")
         .unwrap();
-    let args = json!({"messages":[{"role":"user","content":"Hello"}],"max_tokens":32});
+    let payload = json!({"messages":[{"role":"user","content":"Hello"}],"max_tokens":32});
+    let args = json!({"body":payload});
     assert_eq!(
         chat.route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
             .unwrap()
             .body,
-        Some(args)
+        Some(payload)
     );
     for path in [
         "/api/image-crop",
@@ -1614,7 +1662,7 @@ async fn agentutility_preserves_aliases_json_modes_and_explicit_recommendations(
         assert_eq!(route.body, Some(args));
         assert!(route.query.is_empty());
         assert_eq!(
-            tool.input_schema["required"],
+            body_schema(tool)["required"],
             doc["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]["required"]
         );
         assert!(tool.description.contains("$0.006"));
@@ -1634,7 +1682,7 @@ async fn agentutility_preserves_aliases_json_modes_and_explicit_recommendations(
     cfg.use_recommended_tools = false;
     let keywords = all.iter().find(|t| t.path == "/keyword-suggest").unwrap();
     assert_eq!(
-        keywords.input_schema["anyOf"],
+        body_schema(keywords)["anyOf"],
         serde_json::json!([{"required":["query"]},{"required":["keyword"]}])
     );
     cfg.tags = vec!["synthforge".into()];
@@ -1695,7 +1743,7 @@ async fn added_help_tools_build_offline_without_changing_api_routes() {
         let help = &tools[1];
         assert_eq!(help.help_url, cfg.help_url);
         assert!(
-            help.input_schema["properties"]
+            body_schema(help)["properties"]
                 .as_object()
                 .unwrap()
                 .is_empty()
@@ -1751,7 +1799,7 @@ async fn blockrun_fixed_targets_and_hosted_audio_preserve_boundaries() {
         .find(|t| t.name == "blockrun_chat_completions")
         .unwrap();
     assert!(
-        chat.input_schema["properties"]["stream"]["description"]
+        body_schema(chat)["properties"]["stream"]["description"]
             .as_str()
             .unwrap()
             .contains("false")
@@ -1816,7 +1864,7 @@ async fn blockrun_fixed_targets_and_hosted_audio_preserve_boundaries() {
             .unwrap();
         assert_eq!(route.url, format!("https://blockrun.ai{path}"));
         assert!(
-            !literal.input_schema["properties"]
+            !body_schema(literal)["properties"]
                 .as_object()
                 .unwrap()
                 .contains_key("symbol")
@@ -1995,10 +2043,10 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
     assert_eq!(phone_tools.len(), 1);
     let phone = &phone_tools[0];
     assert_eq!(phone.name, "relayshield_phone_reputation");
-    assert_eq!(phone.input_schema["required"], serde_json::json!(["phone"]));
-    assert_eq!(phone.input_schema["properties"]["phone"]["type"], "string");
-    // The generic converter rebuilds root tool schemas; closure belongs to the
-    // authored request schema rather than the generated MCP schema.
+    assert_eq!(body_schema(phone)["required"], serde_json::json!(["phone"]));
+    assert_eq!(body_schema(phone)["properties"]["phone"]["type"], "string");
+    // The authored closed body remains closed in the advertised caller schema.
+    assert_eq!(body_schema(phone)["additionalProperties"], false);
     assert_eq!(
         phone_doc["paths"]["/v1/payg/phone-reputation"]["post"]["requestBody"]["content"]["application/json"]
             ["schema"]["additionalProperties"],
@@ -2040,9 +2088,9 @@ async fn ipintel_preserves_paid_post_contracts_and_arbitrary_json() {
     let tools = catalog::build_tools(&cfg, &doc, "ipintel").unwrap();
     let find = |name: &str| tools.iter().find(|t| t.name == name).unwrap();
     let dns = find("ipintel_dns_lookup");
-    assert_eq!(dns.input_schema["required"], json!(["domain"]));
+    assert_eq!(body_schema(dns)["required"], json!(["domain"]));
     assert_eq!(
-        dns.input_schema["properties"]["types"]["items"]["enum"],
+        body_schema(dns)["properties"]["types"]["items"]["enum"],
         json!(["A", "AAAA", "MX", "NS", "TXT", "CAA", "SOA"])
     );
     let args = json!({"domain":"example.com","types":["MX","TXT"]});
@@ -2054,17 +2102,17 @@ async fn ipintel_preserves_paid_post_contracts_and_arbitrary_json() {
     assert!(route.query.is_empty());
     let satellite = find("ipintel_satellite");
     assert_eq!(
-        satellite.input_schema["properties"]["date"]["type"],
+        body_schema(satellite)["properties"]["date"]["type"],
         json!(["string", "null"])
     );
     assert_eq!(
-        satellite.input_schema["properties"]["fallback"]["default"],
+        body_schema(satellite)["properties"]["fallback"]["default"],
         true
     );
     assert!(satellite.response_mapping.is_none());
     let validator = find("ipintel_json_schema_validator");
     assert!(
-        validator.input_schema["properties"]["data"]
+        body_schema(validator)["properties"]["data"]
             .get("type")
             .is_none()
     );
@@ -2183,7 +2231,7 @@ async fn newsgurus_uses_catalog_templates_and_preserves_parameter_contracts() {
         .find(|t| t.name == "newsgurus_fantasy_lineup")
         .unwrap();
     assert_eq!(
-        fantasy.input_schema["required"],
+        body_schema(fantasy)["required"],
         json!(["game_date", "roster_player_ids", "scoring_system", "sport"])
     );
     assert_eq!(
@@ -2273,7 +2321,7 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
         .find(|t| t.name == "vaaya_edgar_fulltext")
         .unwrap();
     assert_eq!(
-        fulltext.input_schema["properties"]["startdt"]["pattern"],
+        body_schema(fulltext)["properties"]["startdt"]["pattern"],
         r"^\d{4}-\d{2}-\d{2}$"
     );
     let funding = tools
@@ -2281,7 +2329,7 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
         .find(|t| t.name == "vaaya_signalbase_funding")
         .unwrap();
     assert!(
-        funding.input_schema["properties"]["date_preset"]["enum"]
+        body_schema(funding)["properties"]["date_preset"]["enum"]
             .as_array()
             .unwrap()
             .contains(&json!("last_30d"))
@@ -2290,7 +2338,7 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
         .iter()
         .find(|t| t.name == "vaaya_firecrawl_scrape")
         .unwrap();
-    assert_eq!(scrape.input_schema["properties"]["waitFor"]["minimum"], 0);
+    assert_eq!(body_schema(scrape)["properties"]["waitFor"]["minimum"], 0);
     let fundable = tools
         .iter()
         .find(|t| t.name == "vaaya_fundable_company")
@@ -2364,18 +2412,18 @@ async fn vaaya_tako_and_recallradar_keep_research_bodies_and_structured_prices()
         .find(|t| t.name == "vaaya_recallradar_search")
         .unwrap();
     assert!(
-        recall.input_schema["properties"]
+        body_schema(recall)["properties"]
             .as_object()
             .unwrap()
             .is_empty()
     );
-    assert_ne!(recall.input_schema["additionalProperties"], false);
+    assert_ne!(body_schema(recall)["additionalProperties"], false);
     let search = tools
         .iter()
         .find(|t| t.name == "vaaya_tako_search")
         .unwrap();
-    assert_eq!(search.input_schema["required"], json!(["query"]));
-    assert_eq!(search.input_schema["properties"]["effort"]["const"], "fast");
+    assert_eq!(body_schema(search)["required"], json!(["query"]));
+    assert_eq!(body_schema(search)["properties"]["effort"]["const"], "fast");
     assert!(tools.iter().any(|t| t.path == "/api/run/tako/visualize"));
     assert!(
         tools
@@ -2582,7 +2630,7 @@ async fn regimeshift_diagnostics_and_unsigned_intents_preserve_provisioning_boun
 }
 
 #[tokio::test]
-async fn agentutility_excludes_demonstrated_full_branch_conversion_loss() {
+async fn agentutility_preserves_full_repo_files_audit_branches_and_wire_bodies() {
     use x402_treazury::{catalog, config};
     let cfg = config::load(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agentutility/provider.toml"),
@@ -2604,16 +2652,30 @@ async fn agentutility_excludes_demonstrated_full_branch_conversion_loss() {
         let original = &doc["paths"][path];
         let body = &original["post"]["requestBody"]["content"]["application/json"]["schema"];
         assert!(body["oneOf"][0]["properties"]["repo"].is_object());
-        // Independently exercise each actual input without provider filters. The
-        // build succeeds but loses all branch inputs and required alternatives.
+        // Independently verify the captured alternatives and actual authored selection.
         let isolated = serde_json::json!({"paths":{path:original}});
         let converted =
             catalog::build_tools(&catalog::Config::default(), &isolated, "probe").unwrap();
-        assert_eq!(
-            converted[0].input_schema,
-            serde_json::json!({"type":"object","properties":{}})
-        );
-        assert!(!supported.iter().any(|t| t.path == path), "{path}");
+        assert_eq!(body_schema(&converted[0]), body);
+        let tool = supported.iter().find(|tool| tool.path == path).unwrap();
+        assert_eq!(body_schema(tool), body);
+        assert!(tool.whole_body.as_ref().unwrap().required);
+        assert_eq!(tool.input_schema["required"], serde_json::json!(["body"]));
+        for payload in [
+            serde_json::json!({"repo":"public/example","branch":"main"}),
+            serde_json::json!({"files":[{"path":"src/main.rs","content":"fn main() {}"}]}),
+        ] {
+            let route = tool
+                .route(
+                    cfg.base_url.as_deref().unwrap(),
+                    serde_json::json!({"body":payload}).as_object().unwrap(),
+                )
+                .unwrap();
+            assert_eq!(route.method, "POST");
+            assert_eq!(route.url, format!("https://x402.agentutility.ai{path}"));
+            assert_eq!(route.body, Some(payload));
+            assert!(route.query.is_empty() && route.headers.is_empty());
+        }
         assert!(
             !doc["paths"]
                 .as_object()
@@ -2768,7 +2830,7 @@ async fn locus_discovery_and_gateway_preserve_complete_source_contracts() {
         .find(|t| t.path == "/api/locus-place-report")
         .unwrap();
     assert_eq!(
-        paid.input_schema["anyOf"],
+        body_schema(paid)["anyOf"],
         json!([{"required":["address"]},{"required":["zip"]}])
     );
     let args = json!({"address":"1 Main St","radiusMeters":800});
@@ -2872,11 +2934,11 @@ async fn straits_public_formats_preserve_routes_tiers_and_historical_meaning() {
     assert_eq!(paid.name, "straits_vessels_get");
     assert_eq!(free.name, "straits_vessels_get_2");
     assert_eq!(
-        free.input_schema["properties"]["flagged"]["type"],
+        body_schema(free)["properties"]["flagged"]["type"],
         "boolean"
     );
     assert_eq!(
-        free.input_schema["properties"]["region"]["enum"],
+        body_schema(free)["properties"]["region"]["enum"],
         json!(["hormuz", "cape"])
     );
     let route = free

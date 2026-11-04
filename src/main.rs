@@ -256,7 +256,18 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
     x402_treazury::config::validate(&cfg)?;
-    let tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    let built = catalog::build_catalog(&cfg, &root, &prefix)?;
+    let issues = built.issues.clone();
+    let tools = if args.list_tools
+        || args.check
+        || args.route_tool.is_some()
+        || built.tools.is_empty() && !built.issues.is_empty()
+    {
+        built.complete()?
+    } else {
+        built.tools
+    };
+    catalog::append_omissions(&mut cfg.instructions_text, "standalone", &issues);
     tracing::info!(target: "x402_treazury::startup", tools = tools.len(), "Catalog ready");
     if inspect_standalone(&args, &cfg, &base, &tools).await? {
         return Ok(());

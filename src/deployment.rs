@@ -136,11 +136,14 @@ struct Source {
     config: Config,
     document: std::sync::Arc<serde_json::Value>,
     tools: Vec<ToolSpec>,
+    issues: Vec<catalog::OperationIssue>,
     base_url: String,
     instructions: Option<String>,
 }
 #[derive(Serialize)]
 pub struct Inventory {
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub omitted_operations: BTreeMap<String, Vec<catalog::OperationIssue>>,
     pub discover_on_demand: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unavailable_sources: Vec<String>,
@@ -464,7 +467,7 @@ impl Deployment {
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, false, None, false, None).await
+        Self::load_with_purpose(path, startup::CatalogPurpose::Inspection, None, false, None).await
     }
     /// Strict operator inspection; bypassing advice retains all ordinary filters.
     pub async fn load_for_inspection(path: &Path, all_tools: bool) -> Result<Self> {
@@ -475,12 +478,19 @@ impl Deployment {
         all_tools: bool,
         network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
-        Self::load_with_warnings(path, false, None, all_tools, network_override).await
+        Self::load_with_purpose(
+            path,
+            startup::CatalogPurpose::Inspection,
+            None,
+            all_tools,
+            network_override,
+        )
+        .await
     }
     /// Warn for listener-bound sources before catalog I/O, including failed fetches.
     /// Keyless serving keeps provider warnings but cannot bootstrap or pay a relay.
     pub async fn load_for_unsigned_serving(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, true, None, false, None).await
+        Self::load_with_purpose(path, startup::CatalogPurpose::Serving, None, false, None).await
     }
     pub async fn load_for_serving(path: &Path) -> Result<Self> {
         Self::load_for_serving_with_relay(path, &std::env::vars().collect(), Default::default())
@@ -499,9 +509,9 @@ impl Deployment {
         restriction: crate::rotation::restriction::FundingRestriction,
         network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
-        Self::load_with_warnings(
+        Self::load_with_purpose(
             path,
-            true,
+            startup::CatalogPurpose::Serving,
             Some((env, restriction)),
             false,
             network_override,
@@ -592,9 +602,9 @@ impl Deployment {
         )
     }
 
-    async fn load_with_warnings(
+    async fn load_with_purpose(
         path: &Path,
-        warn: bool,
+        purpose: startup::CatalogPurpose,
         relay_env: Option<(
             &BTreeMap<String, String>,
             crate::rotation::restriction::FundingRestriction,
@@ -602,6 +612,7 @@ impl Deployment {
         all_tools: bool,
         network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
+        let purpose = purpose.for_current_operation();
         let mut config = MetaConfig::parse_with_network(
             &tokio::fs::read_to_string(path).await.with_context(|| {
                 format!("failed to read deployment config file '{}'", path.display())
@@ -673,7 +684,7 @@ impl Deployment {
                 config,
                 &wallet_resolution.source_bindings,
                 path,
-                warn,
+                purpose,
                 relay,
                 deployment.defer_discovery,
                 all_tools,
@@ -682,7 +693,7 @@ impl Deployment {
             deployment.unavailable_sources = unavailable_sources;
             deployment.pending_sources = pending_sources;
             deployment.sources = sources;
-            deployment.refresh_selection(deployment.defer_discovery)?;
+            deployment.refresh_selection(purpose == startup::CatalogPurpose::Serving)?;
             selection_diagnostics::report_completed(
                 &deployment.listeners,
                 &deployment.sources,
@@ -730,6 +741,16 @@ impl Deployment {
         self.listeners
             .iter()
             .map(|(name, s)| Inventory {
+                omitted_operations: s
+                    .sources
+                    .iter()
+                    .filter_map(|id| {
+                        self.sources
+                            .get(id)
+                            .filter(|source| !source.issues.is_empty())
+                            .map(|source| (id.clone(), source.issues.clone()))
+                    })
+                    .collect(),
                 discover_on_demand: s.discover_on_demand,
                 unavailable_sources: s
                     .sources
@@ -1226,6 +1247,13 @@ impl Deployment {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             let mut instructions = cfg.instructions_text.clone().unwrap_or(source_instructions);
+            let mut text = Some(instructions);
+            for id in &cfg.sources {
+                if let Some(source) = self.sources.get(id) {
+                    catalog::append_omissions(&mut text, id, &source.issues);
+                }
+            }
+            instructions = text.unwrap_or_default();
             if let Some(reason) = self.selection_errors.get(name) {
                 instructions.push_str(&format!("\n\nUNAVAILABLE endpoint tool selection: {reason}. Correct the endpoint/source selections and restart."));
             }
@@ -1239,6 +1267,12 @@ impl Deployment {
                         instructions.push_str(&format!("\n\nSource {id}: OPERATOR_REQUIRED (new relay payer creation is unavailable). Observation continues; its tools will appear if discovery becomes possible."));
                     } else if self.pending_sources.contains_key(id) {
                         instructions.push_str(&format!("\n\nSource {id}: PENDING (catalog discovery is waiting). Its tools will appear when discovery succeeds."));
+                    } else if self
+                        .sources
+                        .get(id)
+                        .is_some_and(Source::compatibility_unavailable)
+                    {
+                        instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (all selected API operations have unsupported input contracts). Inspect omitted operations and correct the source configuration."));
                     } else {
                         instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (catalog discovery failed). Its tools are unavailable, not intentionally empty. Restart to retry."));
                     }
@@ -1529,13 +1563,14 @@ impl Deployment {
         let can_allocate = runtime.funding_available()
             && self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
             && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
+        let initial_readiness = (!self.defer_discovery).then(|| self.resolved_catalog_readiness());
         let mut deferred = self.defer_discovery.then(|| {
             deferred::Runtime::new(self, deferred_wallets, catalog, manager, can_allocate)
         });
-        let catalog_readiness = deferred
-            .as_mut()
-            .map(deferred::Runtime::catalog_readiness)
-            .unwrap_or_default();
+        let catalog_readiness = match deferred.as_mut() {
+            Some(runtime) => runtime.catalog_readiness(),
+            None => initial_readiness.expect("nondeferred catalog results"),
+        };
         let startup_catalogs = match deferred.as_mut() {
             Some(runtime) => runtime.startup_readiness(),
             None => {
@@ -1579,6 +1614,9 @@ struct ListenerInventory {
 }
 
 impl Source {
+    fn compatibility_unavailable(&self) -> bool {
+        self.tools.is_empty() && !self.issues.is_empty()
+    }
     // One transient assignment/tag view feeds publication and selector diagnostics.
     fn listener_tools(&self, name: &str, listener: &ListenerConfig) -> Result<Vec<&ToolSpec>> {
         let operations = catalog::operations(&self.document, None)?;

@@ -104,7 +104,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Straits | `straits/provider.toml` | Authored free/premium JSON, CSV, RSS and HTML contracts |
 | Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |
 | VoIPStore | `voipstore.toml` | Virtual-number catalog, quotes, purchases and SMS status; prepaid top-ups excluded |
-| x402-list | `x402-list.toml` | Public directory reads, assessments and suggestions |
+| x402-list | `x402-list.toml` | Public directory reads, assessments, suggestions and listing submissions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
 
 Curl, AGProxy and Horizon Pulse pin complete vendor OpenAPI documents as runtime
@@ -126,11 +126,12 @@ and Glassnode metadata-to-metric workflow each have concrete consumers.
 Tests need no Python or live vendor access. See [provider caveats](CAVEATS.md)
 for route exclusions, pricing semantics and vendor-specific workflows.
 
-The x402-list provider exposes public directory reads, assessments and suggestions.
+The x402-list provider exposes public directory reads, assessments, suggestions and listing submissions.
 Directory reads can become paid after a shared-IP free quota; the ordinary wallet cap
 still applies. Listings do not guarantee compatible payment or supply executable API
-schemas. Owner-token workflows and an unrepresentable submit
-schema are excluded. Embedded source management deliberately keeps three reads.
+schemas. Service/facilitator submissions retain their complete body alternatives
+and return a review-queue acknowledgment; acceptance is separate. Owner-token
+workflows remain excluded. Embedded source management deliberately keeps three reads.
 
 Optional advertised provider help may explain prices and request contracts before
 a paid call. Unknown prices mean missing pricing information, not free calls.

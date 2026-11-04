@@ -13,11 +13,11 @@ pub(crate) fn capacity_error(_: reqwest::header::MaxSizeReached) -> anyhow::Erro
     ))
 }
 
-fn ignored(name: &str) -> bool {
+pub(super) fn ignored(name: &str) -> bool {
     matches!(name, "accept" | "content-type" | "authorization")
 }
 
-fn payment(name: &str) -> bool {
+pub(super) fn payment(name: &str) -> bool {
     matches!(
         name,
         "payment-signature"
@@ -123,6 +123,7 @@ pub(super) fn collect(
     params: &Value,
     props: &mut Map<String, Value>,
     required: &mut BTreeSet<String>,
+    names: &mut super::input::Names,
 ) -> Result<BTreeMap<String, HeaderParameter>> {
     let mut headers = BTreeMap::new();
     let mut seen = BTreeSet::new();
@@ -160,27 +161,16 @@ pub(super) fn collect(
                 "The catalog's Idempotency-Key schema does not allow an automatically generated UUID",
             ))?;
         }
-        let argument = if props.contains_key(name) {
-            format!("{name}_header")
-        } else {
-            name.into()
-        };
+        let argument = names.argument(name, "header");
         ensure!(
             !props.contains_key(&argument) && !headers.contains_key(&argument),
             Problem("The catalog's HTTP header argument conflicts with another input argument")
         );
         let is_required = parameter["required"] == true;
         if !managed {
-            let mut schema = parameter["schema"].as_object().cloned().unwrap_or_default();
-            schema
-                .entry("type")
-                .or_insert(Value::String("string".into()));
-            if let Some(description) = parameter["description"].as_str() {
-                schema
-                    .entry("description")
-                    .or_insert(Value::String(description.into()));
-            }
-            props.insert(argument.clone(), Value::Object(schema));
+            let schema =
+                super::input::parameter_schema(parameter, "Use a scalar or a flat array/object.");
+            props.insert(argument.clone(), schema);
             if is_required {
                 required.insert(argument.clone());
             }

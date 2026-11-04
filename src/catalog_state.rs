@@ -253,6 +253,7 @@ impl BoundTool {
 }
 #[derive(Clone, Default)]
 pub struct CatalogSnapshot {
+    pub registration_issues: BTreeMap<String, Vec<crate::catalog::OperationIssue>>,
     pub generation: u64,
     pub instructions: BTreeMap<String, Option<String>>,
     pub views: BTreeMap<String, Vec<BoundTool>>,

@@ -378,12 +378,16 @@ impl Manager {
             "hardcoded_registry_document_bytes",
         )?;
         let mut result = base.clone();
+        result.registration_issues.clear();
         result.generation = generation;
         let previous = self.catalog.read();
         for record in live.into_iter().filter(|r| r.disabled.is_none()) {
             let target = &record.owner;
             let cfg = self.listeners.get(target).context("target_missing")?;
             let built = import::build_visible(&record.candidate, record.document.as_bytes(), cfg)?;
+            result
+                .registration_issues
+                .insert(record.id.clone(), built.issues.clone());
             let wallet = cfg
                 .wallet
                 .as_deref()
@@ -464,6 +468,11 @@ impl Manager {
                 }
                 text.push_str(&format!("[{}]\n{instructions}", record.candidate.name));
             }
+            crate::catalog::append_omissions(
+                result.instructions.entry(target.clone()).or_default(),
+                &record.candidate.name,
+                &built.issues,
+            );
         }
         Ok(result)
     }
@@ -489,6 +498,13 @@ impl Manager {
             "status": if r.disabled.is_some() { "disabled" } else { "available" },
             "next": next
         });
+        if let Some(issues) = snapshot
+            .registration_issues
+            .get(&r.id)
+            .filter(|issues| !issues.is_empty())
+        {
+            result["omitted_operations"] = json!(issues);
+        }
         if let Some(provider) = &r.candidate.provider {
             result["provider_id"] = json!(provider.id);
             result["schema"] = json!({"kind": if r.candidate.remote_spec().is_some() { "remote" } else { "bundled" }, "reference": provider.settings.spec});

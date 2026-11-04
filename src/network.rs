@@ -1133,6 +1133,7 @@ mod public_destination_tests {
         assert_eq!(context.http_cache_len(), 0);
         let error = crate::payment::PaidClient::unsigned()
             .execute_response(crate::catalog::RoutedRequest {
+                json_media_type: None,
                 method: "GET".into(),
                 url: "http://127.0.0.1:1/read".into(),
                 headers: Default::default(),

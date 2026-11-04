@@ -424,6 +424,7 @@ async fn paid_import_fixture() {
     );
     let configured = listeners(false);
     let snapshot = CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: configured.keys().map(|key| (key.clone(), vec![])).collect(),

@@ -27,7 +27,7 @@ pub fn listener_definitions(
     let mut definitions = Vec::new();
     if policy.local {
         definitions.push((super::local::NAME, "Find locally bundled provider definitions, reviewed, filtered and repaired for compatible API use. Listing is offline. Use a provider_id to add one.".to_owned(), super::local::list_schema()));
-        definitions.push(("x402_treazury_providers_add_local", "Add a locally bundled provider using its reviewed, filtered and repaired API definition. Find its callable tools with tools_search.".into(), object(json!({
+        definitions.push(("x402_treazury_providers_add_local", "Add a locally bundled provider using its reviewed, filtered and repaired API definition. Reports unsupported omitted operations; find its callable tools with tools_search.".into(), object(json!({
             "provider_id":{"type":"string","minLength":1,"description":"Exact local definition ID returned by providers_list_local."},
             "name":registration_name()
         }), &["provider_id"])));
@@ -49,7 +49,7 @@ pub fn listener_definitions(
         ));
     }
     if policy.remote {
-        definitions.push(("x402_treazury_providers_add_remote", "Add a provider from a public HTTPS OpenAPI 3 JSON specification URL. Pass the URL directly for server-side import, then find callable tools with tools_search. Repeated registrations reuse the accepted provider.".into(), object(json!({
+        definitions.push(("x402_treazury_providers_add_remote", "Add a provider from a public HTTPS OpenAPI 3 JSON specification URL. Pass the URL directly for server-side import, then inspect omitted operations and find callable tools with tools_search. Repeated registrations reuse the accepted provider.".into(), object(json!({
             "spec_url":{"type":"string","format":"uri","description":"Published public HTTPS OpenAPI 3 JSON URL; an API base or usage document is insufficient."},
             "name":registration_name()
         }), &["spec_url"])));

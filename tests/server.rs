@@ -462,9 +462,13 @@ fn schemas_filters_and_routes_handle_boundaries_collisions_and_refs() {
     let tools = build_tools(&cfg, &root, "t").unwrap();
     assert_eq!(tools.len(), 1);
     let tool = &tools[0];
-    assert_eq!(tool.input_schema["required"], json!(["id", "q_body"]));
+    assert_eq!(tool.input_schema["required"], json!(["id"]));
     assert_eq!(
-        tool.input_schema["properties"]["q_body"]["exclusiveMinimum"],
+        tool.input_schema["properties"]["body"]["required"],
+        json!(["q"])
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["body"]["properties"]["q"]["exclusiveMinimum"],
         0
     );
     assert!(
@@ -475,7 +479,7 @@ fn schemas_filters_and_routes_handle_boundaries_collisions_and_refs() {
     let route = tool
         .route(
             "https://example.test/gateway",
-            json!({"id":"a/b?x","q":"query","q_body":2})
+            json!({"id":"a/b?x","q":"query","body":{"q":2}})
                 .as_object()
                 .unwrap(),
         )
@@ -531,6 +535,7 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
     tool.path = "/new".into();
     let tools = catalog_state::bind(vec![(tool.clone(), client, url)]);
     server.catalog.publish(CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([("default".into(), tools.clone()), ("other".into(), tools)]),
@@ -684,6 +689,7 @@ async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_cont
     let mut tool = tools.iter().find(|t| t.help_url.is_some()).unwrap().clone();
     tool.help_url = Some(format!("{url}/new-help"));
     server.catalog.publish(CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([(
@@ -726,18 +732,37 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
             .collect::<Vec<_>>(),
         vec!["/a-b", "/a_b"]
     );
-    for doc in [
-        json!({"paths":{"/a-b":{"get":{}},"/a_b":{"get":{}},"/a_b_get_2":{"get":{}}}}),
-        json!({"paths":{"/x":{"post":collision}}}),
-    ] {
-        assert!(build_tools(&Config::default(), &doc, "t").is_err());
-    }
+    assert!(
+        build_tools(
+            &Config::default(),
+            &json!({"paths":{"/a-b":{"get":{}},"/a_b":{"get":{}},"/a_b_get_2":{"get":{}}}}),
+            "t"
+        )
+        .is_err()
+    );
+    let collision_tools = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/x":{"post":collision}}}),
+        "t",
+    )
+    .unwrap();
+    let routed = collision_tools[0]
+        .route(
+            "https://example.com",
+            json!({"q":"query","q_body":"second query","body":{"q":"body"}})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(routed.query["q"], "query");
+    assert_eq!(routed.query["q_body"], "second query");
+    assert_eq!(routed.body, Some(json!({"q":"body"})));
     let nested = json!({"type":"object","properties":{"boolean_bound":{"type":"number","minimum":3,"exclusiveMinimum":true},"numeric_bound":{"type":"number","exclusiveMaximum":9}}});
     let body = json!({"type":"object","properties":{"items":{"type":"array","items":nested}}});
     let operation = json!({"description":"雪🙂 vendor instructions kept whole", "parameters":[{"name":"Authorization","in":"header","schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":body}}}});
     let doc = json!({"paths":{"/x":{"post":operation}}});
     let tools = build_tools(&Config::default(), &doc, "t").unwrap();
-    let props = &tools[0].input_schema["properties"];
+    let props = &tools[0].input_schema["properties"]["body"]["properties"];
     assert!(props.get("Authorization").is_none());
     assert_eq!(
         props["items"]["items"]["properties"]["boolean_bound"]["exclusiveMinimum"],
@@ -761,7 +786,7 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
     let route = tools[0]
         .route(
             "https://example.com",
-            json!({"items":[{"boolean_bound":4,"numeric_bound":8}]})
+            json!({"body":{"items":[{"boolean_bound":4,"numeric_bound":8}]}})
                 .as_object()
                 .unwrap(),
         )

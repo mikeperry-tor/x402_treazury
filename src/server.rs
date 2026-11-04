@@ -58,6 +58,7 @@ impl Server {
             discovery_search_tool_instructions_text: None,
             providers_search_remote_tool_instructions_text: None,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
+                registration_issues: Default::default(),
                 instructions: Default::default(),
                 generation: 0,
                 views: BTreeMap::from([("default".into(), catalog_state::bind(tools))]),

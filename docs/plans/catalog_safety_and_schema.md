@@ -67,7 +67,8 @@ and make any rejected/omitted operation visible to the affected consumer.
    collision-safe tool names with explicit original-name routing; retain header
    casing/idempotency and inherited overrides. Reject unsupported cookies explicitly.
    Verify allOf/oneOf/anyOf bodies and required alternatives before fixing actual
-   gaps: merge only compatible allOf fields and preserve exclusive alternatives
+   gaps: preserve property-bearing compositions as whole bodies, and retain
+   only ordinary object roots with pure required-only alternatives as flat inputs
    or explicitly reject unsupported shapes. Select supported content types truthfully; reject unsupported bodies with
    useful diagnostics. Test serialized outbound path/query/body/header bytes and
    negative cases with zero paid disclosure, including suffix collisions, inherited

@@ -47,6 +47,7 @@ fn request(args: &Map<String, Value>) -> Result<(RoutedRequest, ManualRawHeaders
     let headers = ManualRawHeaders::parse(args.contains_key("headers").then_some(&input.headers))?;
     Ok((
         RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: method.to_string(),
             url: url.into(),

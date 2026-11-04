@@ -61,7 +61,7 @@ fn header_aliases_survive_tool_serialization_without_overwriting_query_or_body()
         .remove(0);
     let restored: ToolSpec = serde_json::from_value(serde_json::to_value(&tool).unwrap()).unwrap();
     for tool in [tool, restored] {
-        let args = json!({"shared":"query","shared_header":"header","body-key":"body","body-key_header":"another header"});
+        let args = json!({"shared":"query","shared_header":"header","body":{"body-key":"body"},"body-key":"another header"});
         let route = tool
             .route("https://example.com", args.as_object().unwrap())
             .unwrap();
@@ -287,4 +287,55 @@ fn documented_payment_headers_are_ignored_but_cannot_be_injected_into_routes() {
             );
         }
     }
+}
+
+#[test]
+fn actual_boolean_and_untyped_header_schemas_are_preserved_without_string_injection() {
+    let tool = tool(json!([
+        {"name":"X-Never","in":"header","schema":false},
+        {"name":"X-Any","in":"header","schema":true},
+        {"name":"X-Empty","in":"header","schema":{}},
+        {"name":"X-Choice","in":"header","schema":{"enum":[1,2],"x-annotation":{"$ref":"opaque annotation"}}},
+        {"name":"X-Legacy","in":"header"}
+    ]));
+    let properties = &tool.input_schema["properties"];
+    assert_eq!(properties["X-Never"], false);
+    assert_eq!(properties["X-Any"], true);
+    assert!(properties["X-Empty"].get("type").is_none());
+    assert!(properties["X-Choice"].get("type").is_none());
+    assert_eq!(properties["X-Choice"]["enum"], json!([1, 2]));
+    assert_eq!(
+        properties["X-Choice"]["x-annotation"]["$ref"],
+        "opaque annotation"
+    );
+    assert!(
+        properties["X-Empty"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("flat array/object")
+    );
+    assert_eq!(properties["X-Legacy"]["type"], "string");
+    // The false schema is optional and stays absent. The actual simple codec
+    // handles each otherwise permitted scalar/flat value without a new validator.
+    let route = tool
+        .route(
+            "https://example.com",
+            json!({"X-Any":{"a":1,"b":true},"X-Empty":["a",2],"X-Choice":2,"X-Legacy":"original"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.headers["x-any"], "a,1,b,true");
+    assert_eq!(route.headers["x-empty"], "a,2");
+    assert_eq!(route.headers["x-choice"], "2");
+    assert_eq!(route.headers["x-legacy"], "original");
+    assert!(!route.headers.contains_key("x-never"));
+    assert!(route.body.is_none() && route.query.is_empty());
+    assert!(
+        tool.route(
+            "https://example.com",
+            json!({"X-Any":{"nested":{"a":1}}}).as_object().unwrap()
+        )
+        .is_err()
+    );
 }

@@ -140,9 +140,29 @@ type DownloadResult = std::result::Result<Download, SharedFailure>;
 
 /// One deployment load, one immutable network policy/runtime. Retain parsed remote
 /// documents only for this load; aliases still generate/filter/bind independently.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum CatalogPurpose {
+    #[default]
+    Inspection,
+    Serving,
+    Qualification,
+}
+impl CatalogPurpose {
+    pub(super) fn for_current_operation(self) -> Self {
+        if crate::qualification::active() {
+            Self::Qualification
+        } else if catalog_evidence::collecting() {
+            Self::Inspection
+        } else {
+            self
+        }
+    }
+}
+
 #[derive(Default)]
 struct Downloads {
     defer: bool,
+    purpose: CatalogPurpose,
     all_tools: bool,
     relay: crate::discovery_relay::Relays,
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
@@ -261,7 +281,7 @@ pub(super) async fn load(
     config: &MetaConfig,
     bindings: &EffectiveBindings,
     path: &Path,
-    warn: bool,
+    purpose: CatalogPurpose,
     relay: crate::discovery_relay::Relays,
     defer: bool,
     all_tools: bool,
@@ -276,6 +296,7 @@ pub(super) async fn load(
     let limit = config.startup.catalog_concurrency;
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, defer_relay = defer, "Loading initial catalogs");
     let downloads = Downloads {
+        purpose,
         defer,
         all_tools,
         relay,
@@ -299,7 +320,14 @@ pub(super) async fn load(
         loads.push(async move {
             (
                 id,
-                load_one(id, source, path, warn && used, downloads).await,
+                load_one(
+                    id,
+                    source,
+                    path,
+                    purpose != CatalogPurpose::Inspection && used,
+                    downloads,
+                )
+                .await,
             )
         });
     }
@@ -324,7 +352,7 @@ pub(super) async fn load(
                             tracing::debug!(source=source_id, state="pending", "Catalog load retained for serving");
                             continue;
                         }
-                        Err(error) if warn && !crate::qualification::active() && !catalog_evidence::collecting()
+                        Err(error) if purpose == CatalogPurpose::Serving
                             && config.sources[source_id].optional_startup && error.is::<RemoteCatalogUnavailable>() => {
                             failures += 1;
                             unavailable.insert(source_id.clone(), error.downcast_ref::<RemoteCatalogUnavailable>().expect("typed remote failure").prefix.clone());
@@ -339,9 +367,14 @@ pub(super) async fn load(
                         }
                         Err(error) => return Err(error),
                     };
+                    if source.compatibility_unavailable() {
+                        unavailable.insert(source_id.clone(), source.config.prefix.clone().expect("resolved prefix"));
+                        tracing::debug!(source = source_id, omitted = source.issues.len(), "Catalog has no supported API operations; dependent waiting endpoints remain unavailable");
+                    } else {
+                        tracing::info!(target: "x402_treazury::startup", source = source_id, completed = sources.len() + 1, total,
+                            elapsed_ms = started.elapsed().as_millis() as u64, "Catalog ready");
+                    }
                     sources.insert(source_id.clone(), source);
-                    tracing::info!(target: "x402_treazury::startup", source = source_id, completed = sources.len(), total,
-                        elapsed_ms = started.elapsed().as_millis() as u64, "Catalog ready");
                 }
                 None => break,
             },
@@ -355,7 +388,7 @@ pub(super) async fn load(
             completed = sources.len(), "Catalog inspection finished with failures; no partial inventory published");
         return Err(error.context(format!("catalog inspection failed for {failures} of {total} sources; independent catalog results retained")));
     }
-    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64,
+    tracing::info!(target: "x402_treazury::startup", total, ready = sources.values().filter(|source| !source.compatibility_unavailable()).count(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64,
     "{}", if deferred.is_empty() {
         "Initial catalog loading finished"
     } else {
@@ -378,7 +411,17 @@ async fn load_one(
         finished: false,
     };
     tracing::debug!(target: "x402_treazury::startup", source = id, "Catalog load started");
-    let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
+    let result = Source::load(id, source, path, warn, &mut progress, downloads)
+        .await
+        .and_then(|loaded| {
+            if downloads.purpose != CatalogPurpose::Serving
+                && let SourceLoad::Ready(source) = &loaded
+                && !source.issues.is_empty()
+            {
+                return Err(catalog::IncompleteCatalog(source.issues.clone()).into());
+            }
+            Ok(loaded)
+        });
     progress.finished = true;
     if let Err(error) = &result {
         let failure = catalog_failure(error, progress.phase);
@@ -505,7 +548,7 @@ impl Source {
             .context(catalog::LoadStage::Configuration)?;
         cfg.resolve_cover(&base_url, crate::network::global().policy.cover_enabled())
             .context(catalog::LoadStage::Configuration)?;
-        let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
+        let built = catalog::build_catalog(&cfg, &document, cfg.prefix.as_deref().unwrap())
             .map_err(|e| {
                 if (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
                     && !e.is::<catalog::ToolConfigurationError>()
@@ -519,11 +562,14 @@ impl Source {
             })
             .context(catalog::LoadStage::Generation)
             .with_context(|| format!("source {id}: catalog generation"))?;
-        tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(),
+        let tools = built.tools;
+        let issues = built.issues;
+        tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(), omitted_operations=issues.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");
         Ok(Self {
             send_tools: None,
             tools,
+            issues,
             base_url,
             instructions: cfg.instructions_text.clone(),
             config: cfg,
@@ -564,6 +610,7 @@ pub(super) async fn warm(
     relay: crate::discovery_relay::Relays,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
+        purpose: CatalogPurpose::Inspection,
         defer: false,
         all_tools: false,
         relay,

@@ -205,8 +205,9 @@ fn inspect_source(record: &Record) -> serde_json::Value {
         super::import::saved_tools(&record.candidate, record.document.as_bytes())
     })();
     match tools {
-        Ok(tools) => {
-            source["tools"] = tools.into_iter().map(|tool| serde_json::json!({"name":tool.name,"method":tool.method,"path":tool.path})).collect();
+        Ok(built) => {
+            source["omitted_operations"] = serde_json::json!(built.issues);
+            source["tools"] = built.tools.into_iter().map(|tool| serde_json::json!({"name":tool.name,"method":tool.method,"path":tool.path})).collect();
         }
         Err(_) => {
             // Do not turn an unreadable inventory into a successful empty list

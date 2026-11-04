@@ -201,6 +201,17 @@ challenges are terminal. Earlier target signatures suppress generic fallback.
 Local input, origin, identity and download-limit failures authorize no relay spending.
 See [relay configuration](configuration.md#relay-fallback) for settings and trust.
 
+Accepted sources can expose supported operations while omitting incompatible
+siblings. Registration details include `omitted_operations` with method, path and
+fixed reason; endpoint instructions retain a concise notice even with configured
+instruction overrides. Omitted POST operations cannot hide usable same-path GETs.
+Source operation/path/method/tag filters can intentionally exclude an unsupported
+operation; later tool-name/listener filters apply only to compatible tool names
+and do not erase source-level notices. Complete operator/qualification inspection
+remains strict. Read each current input schema: optional/complex JSON bodies use
+one body argument, with ordinary path/query/header arguments outside it. See
+[input contracts](configuration.md#openapi-inputs-and-request-bodies).
+
 ## Tool documentation
 
 Agent-facing tool descriptions should briefly explain what the tool does, when
@@ -258,7 +269,7 @@ Each `[servers.NAME]` can customize three instruction surfaces:
 
 | Setting | Placement and semantics |
 | --- | --- |
-| `instructions_text` | Replaces the composed source guidance in `initialize.result.instructions` and current catalog metadata. Omit to retain source composition; `""` suppresses inherited source guidance. Generated pricing, discovery and availability/conflict notices remain. |
+| `instructions_text` | Replaces the composed source guidance in `initialize.result.instructions` and current catalog metadata. Omit to retain source composition; `""` suppresses inherited source guidance. Generated pricing, discovery, omitted-operation and availability/conflict notices remain. |
 | `discovery_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_tools_search`, exposed by `discover_on_demand` or either provider-management capability. |
 | `providers_search_remote_tool_instructions_text` | Appends to `x402_treazury_providers_search_remote`, exposed by remote management with a nonempty directory list. |
 

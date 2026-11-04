@@ -94,12 +94,16 @@ async fn nullable_body_fields_preserve_presence_and_wire_names() {
     }}}});
     let tools = build_tools(&Config::default(), &root, "route").unwrap();
     let tool = &tools[0];
-    assert_eq!(tool.input_schema["required"], json!(["nickname_body"]));
+    assert!(tool.input_schema.get("required").is_none());
     assert_eq!(
-        tool.input_schema["properties"]["nickname_body"]["type"],
+        tool.input_schema["properties"]["body"]["required"],
+        json!(["nickname"])
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["body"]["properties"]["nickname"]["type"],
         json!(["string", "null"])
     );
-    let args = json!({"nickname":null,"nickname_body":null,"nested":{"value":null,"items":[null]},"extra":null});
+    let args = json!({"nickname":null,"body":{"nickname":null,"nested":{"value":null,"items":[null]},"extra":null}});
     let routed = tool
         .route("https://example.com", args.as_object().unwrap())
         .unwrap();
@@ -110,7 +114,7 @@ async fn nullable_body_fields_preserve_presence_and_wire_names() {
         tool.route("https://example.com", &Default::default())
             .unwrap()
             .body,
-        Some(json!({}))
+        None
     );
     assert!(
         path_tools()[0]
@@ -184,5 +188,105 @@ async fn dot_arguments_are_rejected_before_provider_io() {
         assert_eq!(result, format!("/gateway/users/{encoded}/settings"));
     }
     assert_eq!(requests.load(Ordering::SeqCst), 6);
+    task.abort();
+}
+
+#[tokio::test]
+async fn whole_json_media_aliases_have_exact_wire_bytes_and_route_failures_have_no_io() {
+    use axum::body::to_bytes;
+    use std::sync::Mutex;
+    tls::install_trust();
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let seen = captured.clone();
+    let (address, task) = tls::serve(Router::new().fallback(move |request: Request| {
+        let seen = seen.clone();
+        async move {
+            let method = request.method().to_string();
+            let uri = request.uri().to_string();
+            let media = request.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let header = request.headers()["x-mode"].to_str().unwrap().to_owned();
+            let bytes = to_bytes(request.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec();
+            seen.lock()
+                .unwrap()
+                .push((method, uri, media, header, bytes));
+            "ok"
+        }
+    }))
+    .await;
+    let document = json!({"openapi":"3.1.0","paths":{
+        "/items/{id}":{"patch":{"parameters":[
+            {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+            {"name":"id","in":"query","schema":{"type":"integer"}},
+            {"name":"X-Mode","in":"header","schema":{"type":"string"}}
+        ],"requestBody":{"required":true,"content":{"application/json-patch+json; profile=\"https://example.com/profile\"":{"schema":{"type":"array","items":{"type":"object"}}}}}}},
+        "/unsupported":{"post":{"parameters":[{"name":"session","in":"cookie"}]}}
+    }});
+    let built =
+        x402_treazury::catalog::build_catalog(&Config::default(), &document, "wire").unwrap();
+    assert_eq!(built.issues.len(), 1);
+    assert_eq!(built.tools.len(), 1);
+    let tools = serde_json::from_value(serde_json::to_value(built.tools).unwrap()).unwrap();
+    let server = Server::new(
+        tools,
+        PaidClient::unsigned(),
+        format!("https://{address}"),
+        None,
+    );
+    let name = server.catalog.read().views["default"][0].tool.name.clone();
+    for args in [
+        json!({"id":"a/b","X-Mode":"fast"}),
+        json!({"id":"a/b","X-Mode":"fast","body":[],"extra":"forbidden"}),
+        json!({"id":"a/b","id_query":{"nested":1},"X-Mode":"fast","body":[]}),
+        json!({"id":{"nested":1},"X-Mode":"fast","body":[]}),
+        json!({"id":["a","b"],"X-Mode":"fast","body":[]}),
+        json!({"id":"a/b","id_query":[[1]],"X-Mode":"fast","body":[]}),
+    ] {
+        assert!(
+            server
+                .invoke(&name, args.as_object().unwrap())
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        server
+            .invoke("wire_unsupported", &Default::default())
+            .await
+            .is_err()
+    );
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "route/unsupported failures must precede all unsigned or paid I/O"
+    );
+    let body = json!([{"op":"remove","path":"/old"}]);
+    let result = server
+        .invoke(
+            &name,
+            json!({"id":"a/b","id_query":7,"X-Mode":"fast","body":body})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "ok");
+    let records = captured.lock().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0],
+        (
+            "PATCH".into(),
+            "/items/a%2Fb?id=7".into(),
+            "application/json-patch+json; profile=\"https://example.com/profile\"".into(),
+            "fast".into(),
+            serde_json::to_vec(&body).unwrap()
+        )
+    );
+    drop(records);
     task.abort();
 }

@@ -160,7 +160,7 @@ async fn fixture() {
     assert_eq!(image.tool.path, "/v1/image");
     let output = image
         .invoke_output(
-            json!({"prompt":"a map","format":"png"})
+            json!({"body":{"prompt":"a map"},"format":"png"})
                 .as_object()
                 .unwrap(),
         )
@@ -230,7 +230,7 @@ async fn fixture() {
     assert!(
         private_api
             .invoke_output(
-                json!({"prompt":"a map","format":"png"})
+                json!({"body":{"prompt":"a map"},"format":"png"})
                     .as_object()
                     .unwrap()
             )
@@ -276,7 +276,7 @@ async fn fixture() {
     oversized_api.tool.request_url = None;
     let error = oversized_api
         .invoke_output(
-            json!({"prompt":"a map","format":"png"})
+            json!({"body":{"prompt":"a map"},"format":"png"})
                 .as_object()
                 .unwrap(),
         )

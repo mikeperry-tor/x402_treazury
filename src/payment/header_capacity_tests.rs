@@ -25,6 +25,7 @@ fn full_headers() -> BTreeMap<String, String> {
 
 fn route(headers: BTreeMap<String, String>) -> RoutedRequest {
     RoutedRequest {
+        json_media_type: None,
         method: "POST".into(),
         url: "https://api.example.com/orders".into(),
         headers,

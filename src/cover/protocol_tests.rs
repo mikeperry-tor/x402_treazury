@@ -115,6 +115,7 @@ async fn run() {
         },
     );
     let route = |path: &str| crate::catalog::RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "GET".into(),
         url: format!("https://api.example.com{path}"),

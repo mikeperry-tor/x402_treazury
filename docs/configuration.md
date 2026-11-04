@@ -1013,13 +1013,93 @@ to a different operation URL origin emits a warning and continues without cover;
 see [cover configuration](cover-traffic.md#enable-and-inspect). Disable cover for
 sources whose operations span origins, as the bundled Lonestar provider does.
 
+## OpenAPI inputs and request bodies
+
+Path, query, JSON-body and business-header inputs retain distinct identities.
+Inherited parameters override only the same location/name (header names compare
+case-insensitively). Unique argument names keep their spelling. A cross-location
+collision adds `_query`, `_body` or `_header`, with numeric suffixes when an authored
+or generated name already occupies that spelling. Original wire names persist in
+routing metadata; a query `id_query` alias still sends the declared query key `id`.
+
+Required simple object bodies remain flat when that preserves the contract.
+Property-bearing allOf, exclusive/closed alternatives and unfamiliar root
+constraints retain their complete schema under one `body` argument. Ordinary
+explicit object roots can remain flat with pure required-only oneOf/anyOf/allOf
+alternatives; child property declarations are never merged into the parent. Optional HTTP
+bodies always use that argument so callers can omit the body, provide `{}`, or
+provide JSON null distinctly. Inner `required` fields apply only when the optional
+body exists. A required body with no required fields still sends `{}` in flat
+mode; a required whole-body argument must be supplied. If another argument is
+named `body`, the JSON argument receives a collision-safe name such as `body_body`.
+For a path `ident` plus a whole JSON body, pass `ident="flight"` and
+`body={"ident":"flight","intent":"scheduled"}`.
+
+Unknown outer arguments in whole-body mode fail before HTTP; arbitrary body keys
+belong inside its body value. `additional_properties` controls the flat outer
+schema; the whole-body outer schema remains closed because extra outer arguments
+have no wire destination. Its body schema retains authored additionalProperties
+and other constraints. Parameter-description overrides target existing outer
+arguments first, then an unambiguous existing whole-body property; legacy `_body`
+metadata aliases may target that existing nested property. They never fabricate
+new caller arguments or rewrite the body schema into a flat shape.
+
+The JSON encoder chooses a representable offered application/json first, then a
+concrete +json alternative ([structured JSON suffix](https://www.rfc-editor.org/rfc/rfc6839.html#section-3.1)). Each candidate uses its most-specific applicable
+OpenAPI content declaration and its own schema. An unsupported preferred offer
+does not remove another usable JSON offer. Exact selected Content-Type parameters
+are retained; UTF-8 is the supported encoding, and a declared non-UTF8 charset is
+not sent with UTF-8 bytes. Form, multipart, XML and binary-only bodies need another
+encoding and are omitted explicitly rather than advertised as empty JSON inputs.
+
+Path inputs serialize scalars; query inputs serialize scalars or repeated scalar
+arrays. Authored boolean schemas and no-type constraints remain intact; only an
+absent schema uses the legacy string default. Composed parameter schemas need an
+explicit representable root wire type; the builder does not evaluate alternatives
+to infer one. Untyped inputs still use these scalar wire contracts, and object or
+nested-array arguments fail before outbound I/O or payment.
+
+Unsupported cookies, parameter/header serialization, input references and request
+representations omit only affected selected operations. The current resolver cannot
+preserve used OpenAPI3.1 (or unspecified-version) input-schema `$ref` siblings;
+these receive `schema_reference_siblings` instead of losing validator constraints.
+A used schema reference under a string-valued schema `$id` receives
+`input_reference`: the builder does not guess URI/resource resolution. A local
+pointer selecting a target below an ID carries that lexical context; only further
+used refs that depend on it are unsupported. An exact no-ref target remains
+supported because it needs no additional base-dependent lookup.
+No-reference schema IDs remain unchanged; IDs inside opaque example/default data
+and schema entries merely named `$id` do not establish that resource context.
+Catalog-root metadata IDs do not change ordinary OpenAPI-root local references.
+General authored Reference Object semantics and stricter dynamic-import reference
+policy are unchanged. Unknown schema annotations, including readOnly/discriminator,
+are retained and do not by themselves make an operation unsupported.
+
+Serving and registration retain usable siblings and append concise source omission
+notices after instruction overrides, including an empty override. Registration and
+operator details identify each omitted method/path with a fixed reason. Strict
+CLI/configuration/qualification inspection and the public Vec builder reject partial
+catalogs. To intentionally remove an unsupported operation from that issue domain,
+use operation/path/method/tag selection such as `exclude_operations`. Tool-name
+filters run after compatibility and POST preference; they match compatible names,
+never hypothetical names for omitted operations, and do not erase source notices.
+A serving source with no supported selected API operations retains its issue metadata
+and is unavailable to dependent `wait_for_catalogs = true` endpoints; other endpoints
+follow their own readiness and serving settings. A help document does not convert
+that source into a successful API catalog. Intentionally empty selections remain
+configuration errors, and explicit help-only selection remains valid when supported
+API operations existed before name filtering. Dynamic registration may reject an
+all-unsupported candidate without changing existing registrations. Strict inspection
+and qualification still reject any omission.
+An explicit unmatched active selector remains an error rather than widening access.
+
 ## OpenAPI header parameters and idempotency
 
 OpenAPI `in: header` business parameters become ordinary tool arguments. Header
 names are case-insensitive on the wire and for operation overrides of inherited
 parameters. Argument names preserve the declared spelling; a collision with a
-query/body argument adds `_header`, retaining the original wire name. An
-unresolvable alias collision is an explicit catalog error. Required headers must
+query/body argument adds `_header` and a numeric suffix where needed, retaining
+the original wire name. Required headers must
 be supplied before dispatch; absent/null optional values are omitted.
 
 Header serialization supports OpenAPI `simple` style: scalar values become text,

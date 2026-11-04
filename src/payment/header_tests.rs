@@ -177,6 +177,7 @@ fn direct_routed_requests_cannot_override_reserved_headers_or_inject_values() {
         "X-Payment-Response",
     ] {
         let request = RoutedRequest {
+            json_media_type: None,
             method: "POST".into(),
             url: "https://api.example.com/orders".into(),
             headers: std::collections::BTreeMap::from([(name.into(), "fixture".into())]),

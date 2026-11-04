@@ -885,6 +885,7 @@ mod tests {
         });
         let error = claim
             .invoke(client.execute_response(crate::catalog::RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: "GET".into(),
                 url,
@@ -1041,6 +1042,7 @@ mod tests {
         )
         .with_document_relay(Some(relay));
         let route = || crate::catalog::RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: "https://api.example.com/read".into(),

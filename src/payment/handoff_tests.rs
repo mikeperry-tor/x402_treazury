@@ -293,6 +293,7 @@ async fn run_case_private(
         .unwrap();
     let client = PaidClient::managed(manager.clone());
     let request = RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: method.into(),
         url: format!("{origin}/protected"),

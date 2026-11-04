@@ -54,6 +54,7 @@ pub struct Built {
     pub tools: Vec<ToolSpec>,
     pub base: String,
     pub instructions: Option<String>,
+    pub issues: Vec<catalog::OperationIssue>,
 }
 fn rejected(reason: &'static str) -> anyhow::Error {
     tracing::warn!(reason, "source import validation rejected");
@@ -203,17 +204,27 @@ pub fn build(c: &Candidate, bytes: &[u8]) -> Result<Built> {
     )?;
     let (base, base_url) = resolve_base(c, spec.as_ref(), &root)?;
     validate_paths(paths)?;
-    let (tools, instructions) = selected_tools(c, &root)?;
+    let (catalog, instructions) = selected_tools(c, &root)?;
+    let tools = catalog.tools;
+    let issues = catalog.issues;
     validate_tools(
         &tools,
         &base,
         &base_url,
         &help_origins(c.provider.as_ref())?,
-    )?;
+    )
+    .map_err(|error| {
+        if issues.is_empty() {
+            error
+        } else {
+            error.context(catalog::IncompleteCatalog(issues.clone()))
+        }
+    })?;
     Ok(Built {
         tools,
         base,
         instructions,
+        issues,
     })
 }
 
@@ -339,8 +350,8 @@ fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
 
 /// Rebuild the saved registration's inventory without current admission policy,
 /// listener filtering, transports or payment credentials.
-pub(super) fn saved_tools(c: &Candidate, bytes: &[u8]) -> Result<Vec<ToolSpec>> {
-    selected_tools(c, &parse_document(bytes)?).map(|(tools, _)| tools)
+pub(super) fn saved_tools(c: &Candidate, bytes: &[u8]) -> Result<catalog::CatalogBuild> {
+    selected_tools(c, &parse_document(bytes)?).map(|(built, _)| built)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -370,7 +381,7 @@ impl Candidate {
     }
 }
 
-fn selected_tools(c: &Candidate, root: &Value) -> Result<(Vec<ToolSpec>, Option<String>)> {
+fn selected_tools(c: &Candidate, root: &Value) -> Result<(catalog::CatalogBuild, Option<String>)> {
     if let Some(provider) = &c.provider {
         return super::curated::build(provider, &c.name, root);
     }
@@ -385,7 +396,9 @@ fn selected_tools(c: &Candidate, root: &Value) -> Result<(Vec<ToolSpec>, Option<
     };
     validate_source_name(&c.name)?;
     let prefix = format!("dyn_{}_", c.name);
-    let tools = catalog::build_tools(&cfg, root, &prefix)?
+    let mut built = catalog::build_catalog(&cfg, root, &prefix)?;
+    built.tools = built
+        .tools
         .into_iter()
         .filter_map(|t| {
             match matches(
@@ -399,7 +412,7 @@ fn selected_tools(c: &Candidate, root: &Value) -> Result<(Vec<ToolSpec>, Option<
             }
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok((tools, None))
+    Ok((built, None))
 }
 
 fn validate_tools(

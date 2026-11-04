@@ -328,6 +328,7 @@ async fn relay(
 
 fn route(method: &str, kind: &str) -> RoutedRequest {
     RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: method.into(),
         url: format!("https://api.example.com/target/{method}-{kind}?literal=%2F%20"),

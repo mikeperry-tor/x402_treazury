@@ -48,7 +48,7 @@ fn openapi_conversion_preserves_complete_parameter_metadata_and_operation_scope(
             "pricing":{"amount":"2"},"credit_pricing":{"credits":3},"body":null,
                 "params":[
                     {"name":"path_level","in":"query","required":false,"description":null,"schema":{}},
-                {"name":"count","in":"query","required":true,"description":"Schema prose","schema":{"type":"integer","minimum":0,"exclusiveMinimum":0,"description":"Schema prose"}},
+                {"name":"count","in":"query","required":true,"description":"Schema prose","schema":{"type":"integer","minimum":0,"exclusiveMinimum":0,"description":"Schema prose","example":4}},
                 {"name":"empty","in":"query","required":false,"description":"","schema":{"description":"Not used","type":"string"}},
                 {"name":"fallback","in":null,"required":false,"description":"Fallback","schema":{"description":"Fallback"}},
                 {"name":"bare","in":null,"required":false,"description":null,"schema":{}}
@@ -70,23 +70,23 @@ fn request_body_conversion_retains_reference_and_json_media_type_semantics() {
         "post":{"requestBody":{"content":{"application/json":{"schema":{"$ref":"https://example.invalid/schema"}}}}},
         "put":{"requestBody":{"content":{"application/json":{"schema":{"type":"string"}}}}}
     }}});
-    // An unresolved body-level ref leaves its nested schema unresolved. Unlike
-    // parameters, the body path does not perform a second schema resolution.
-    let bodies = [
-        ("delete", json!({"required":true,"schema":{}})),
-        (
-            "get",
-            json!({"required":true,"schema":{"type":"object","properties":{"value":{"type":"number","maximum":9,"exclusiveMaximum":9}}}}),
-        ),
-        ("patch", json!({"required":false,"schema":{}})),
-        ("post", json!({"required":false,"schema":{}})),
-        ("put", json!({"required":false,"schema":{"type":"string"}})),
-    ];
-    let expected: Vec<_> = bodies.into_iter().map(|(method,body)| json!({"path":"/body","method":method,"summary":null,"description":null,"tags":[],"pricing":null,"credit_pricing":null,"params":[],"body":body})).collect();
+    let operations = operations_with_credits(&document, None, None).unwrap();
+    let bodies: BTreeMap<_, _> = operations
+        .iter()
+        .map(|op| (op["method"].as_str().unwrap(), &op["body"]))
+        .collect();
+    assert_eq!(bodies["get"]["required"], true);
     assert_eq!(
-        operations_with_credits(&document, None, None).unwrap(),
-        expected
+        bodies["get"]["schema"]["properties"]["value"]["exclusiveMaximum"],
+        9
     );
+    assert_eq!(bodies["get"]["media_type"], "application/json");
+    for method in ["delete", "post"] {
+        assert_eq!(bodies[method]["issue"], json!(Unsupported::InputReference));
+    }
+    assert_eq!(bodies["patch"]["issue"], json!(Unsupported::RequestMedia));
+    assert_eq!(bodies["put"]["schema"], json!({"type":"string"}));
+    assert_eq!(bodies["put"]["required"], false);
 }
 
 #[test]

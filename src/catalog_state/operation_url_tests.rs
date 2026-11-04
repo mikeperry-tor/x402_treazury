@@ -240,7 +240,7 @@ async fn paid_operation_urls() {
         .collect();
     assert_ne!(keys[0], keys[1]);
     assert!(keys.iter().all(|key| process_hints().get(*key).is_none()));
-    let args = json!({"q":"original","X-Region":"north","item":"map"});
+    let args = json!({"q":"original","X-Region":"north","body":{"item":"map"}});
     let (first, second) = tokio::join!(
         tools[0].invoke_output(args.as_object().unwrap()),
         tools[1].invoke_output(args.as_object().unwrap())

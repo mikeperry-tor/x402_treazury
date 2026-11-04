@@ -44,6 +44,7 @@ fn payer() -> PaidClient {
 
 async fn manager_with(listeners: BTreeMap<String, ListenerConfig>) -> Arc<Manager> {
     let snapshot = CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: listeners.keys().map(|k| (k.clone(), vec![])).collect(),
@@ -184,15 +185,15 @@ fn imported_and_saved_catalogs_share_post_preference_and_body_routing() {
     let saved = import::saved_tools(&c, &bytes).unwrap();
     assert_eq!(
         serde_json::to_value(&built.tools).unwrap(),
-        serde_json::to_value(saved).unwrap()
+        serde_json::to_value(saved.tools).unwrap()
     );
     let read = built.tools.iter().find(|t| t.path == "/read").unwrap();
     assert_eq!(read.name, "dyn_demo__read");
     assert_eq!(read.method, "POST");
     assert_eq!(built.tools.iter().filter(|t| t.path == "/read").count(), 1);
-    let args = json!({"q":"research"});
+    let args = json!({"body":{"q":"research"}});
     let request = read.route(&built.base, args.as_object().unwrap()).unwrap();
-    assert_eq!(request.body, Some(args));
+    assert_eq!(request.body, Some(args["body"].clone()));
     assert!(request.query.is_empty());
 }
 
@@ -558,6 +559,7 @@ async fn public_transport_child() {
     );
     let payer = payer().public_destinations();
     let request = crate::catalog::RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "GET".into(),
         url: "https://api.example.com/read".into(),
@@ -992,6 +994,7 @@ async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
     let shared = payer();
     let other = payer();
     let snapshot = CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
@@ -1147,6 +1150,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     )
     .await;
     let snapshot = CatalogSnapshot {
+        registration_issues: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
@@ -1187,6 +1191,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         ls.clone(),
         BTreeMap::from([("shared".into(), managed)]),
         Arc::new(CatalogState::new(CatalogSnapshot {
+            registration_issues: Default::default(),
             instructions: Default::default(),
             generation: 0,
             views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
@@ -3760,3 +3765,72 @@ mod directory_relay_tests;
 mod raw_privacy_tests;
 
 use axum::serve::Listener as _;
+
+#[tokio::test]
+async fn partial_registration_publishes_visible_issues_with_tools_and_restores_them() {
+    use rmcp::ServerHandler;
+    let directory = tempfile::tempdir().unwrap();
+    let mut configured = with_registry(
+        listeners(true),
+        Some(directory.path().join("registry.sqlite")),
+    );
+    configured.get_mut("writer").unwrap().instructions_text = Some(String::new());
+    let m = manager_with(configured.clone()).await;
+    let mut document = spec();
+    document["paths"]["/unsupported"] =
+        json!({"post":{"parameters":[{"name":"session","in":"cookie"}]}});
+    let document = document.to_string();
+    let candidate: Candidate =
+        serde_json::from_value(candidate("partial", "persistent", "server")).unwrap();
+    let id = Uuid::new_v4().to_string();
+    let response = m
+        .commit(
+            "writer".into(),
+            false,
+            Record {
+                id: id.clone(),
+                owner: "writer".into(),
+                candidate,
+                targets: vec![],
+                revision: 1,
+                hash: hash(document.as_bytes()),
+                document,
+                format: FORMAT,
+                accepted_at: epoch(),
+                updated_at: epoch(),
+                removed: false,
+                disabled: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(response["tool_count"], 2);
+    assert_eq!(response["omitted_operations"][0]["path"], "/unsupported");
+    assert_eq!(
+        response["omitted_operations"][0]["reason"],
+        "cookie_parameter"
+    );
+    let text = server(&m, "writer").get_info().instructions.unwrap();
+    assert!(text.contains("API operations are omitted"));
+    assert!(text.contains("Cookie parameters"));
+    assert!(m.catalog.read().registration_issues.contains_key(&id));
+    assert!(
+        !server(&m, "reader")
+            .get_info()
+            .instructions
+            .unwrap()
+            .contains("Cookie parameters")
+    );
+    drop(m);
+    let reopened = manager_with(configured).await;
+    let snapshot = reopened.catalog.read();
+    assert_eq!(snapshot.registration_issues[&id][0].path, "/unsupported");
+    assert_eq!(snapshot.views["writer"].len(), 2);
+    assert!(
+        server(&reopened, "writer")
+            .get_info()
+            .instructions
+            .unwrap()
+            .contains("Cookie parameters")
+    );
+}

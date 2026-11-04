@@ -43,7 +43,7 @@ against `tests/fixtures/`. Operation validation and stable sorting precede path,
 method and tag selection. Exact original `exclude_operations` identities override
 operation inclusions without hiding child paths or depending on generated names;
 absent exclusions remain valid under independent source filters. Exact same-path
-GET/POST pairs then retain POST by default (`prefer_post` can
+GET/POST pairs retain POST only after unsupported input contracts have been removed; supported POST wins by default (`prefer_post` can
 disable this). Only surviving operations contribute to name collisions.
 Tool-name filters apply after collision resolution. Recommendation metadata is
 advisory until provider/source `use_recommended_tools` opts in. Include, exclude
@@ -59,16 +59,29 @@ an iterative shared guard bounds physical depth and actual reference expansion t
 depth 64, 500,000 nodes and 64 MiB of string/key traversal and copy work. Repeated
 references and local pointer lookup bytes count each time; unused definitions are
 not hypothetically expanded. Raw-Value operations, naming and tool-building APIs
-use the same guard as local, origin, cached and relay catalog acceptance. Invalid
-candidates cannot enter or refresh caches. Authored unresolved, external and cyclic
-references keep the existing resolver fallback; dynamic imports separately retain
-their stricter reference policy. Sanitization is iterative even for direct callers.
+use the same guard as local, origin, cached and relay catalog acceptance.
+Structurally unsafe candidates cannot enter or refresh caches. Input schemas use
+schema-position-aware preflight/projection: only used schema refs expand. Used
+refs requiring resolution in an active string-valued `$id` resource receive an
+explicit unsupported-operation issue; no URI base is guessed. Target ancestry
+carries context for further refs, while exact no-ref targets remain supported.
+No-reference IDs and opaque ID data remain unchanged. Example,
+default and unknown annotation payloads remain opaque and unchanged. Parameter and
+RequestBody Reference Objects retain target replacement; unresolved input contracts
+become operation issues. Dynamic imports retain separate stricter whole-document
+reference admission. The direct public sanitizer remains iterative.
 Conversion retains operation-level
-parameters and the existing reference-resolution rules. Input construction collects
-parameters before merging body properties; renamed body arguments retain their
-original wire keys, and presence-only alternatives follow those renamed arguments.
-Final sanitization applies to the assembled schema. Path filters respect segment
-boundaries; OpenAPI boolean exclusive bounds normalize to numeric bounds.
+parameters and the existing reference-resolution rules. Input construction reserves original argument spellings and assigns collision-safe
+names across path, query, body and header locations; serialized wire aliases retain
+original keys. Required simple object bodies may remain flat; optional bodies and
+compositions that cannot be flattened faithfully use one JSON body argument.
+Inner schema requirements and HTTP body presence remain separate. Complete body
+constraints/annotations stay body-local. Property-bearing allOf and
+closed/exclusive alternatives retain their whole body schema; only pure
+required-only alternatives on ordinary object roots stay flat. Presence-only alternatives follow
+renamed body arguments.
+Boolean exclusive bounds normalize only at actual schema positions; tool assembly
+does not reinterpret annotations as schemas. Path filters respect segment boundaries.
 Declared business header parameters retain their original names and simple-style
 serialization in serializable tool routing metadata. Collisions with flattened
 query/body arguments use a `_header` argument suffix. OpenAPI's ignored Accept,
@@ -80,8 +93,32 @@ headers through persisted or directly constructed routing metadata.
 A declared Idempotency-Key is generated once per routed invocation and retained
 in the request cloned by existing unsigned and signed attempts. It is not a caller
 argument and grants no retry authority. See [header contracts](configuration.md#openapi-header-parameters-and-idempotency).
-Schema conversion is not a general-purpose OpenAPI implementation;
-for example, file uploads and asynchronous job orchestration are unsupported.
+Catalog construction returns tools plus fixed method/path/reason issues to ordinary
+serving and registration. Selected unsupported operations do not hide usable
+siblings or suppress same-path GETs. Endpoint omission notices follow configured
+instruction overrides; detailed registration/operator inspection retains identities.
+Public Vec builders and strict CLI/qualification inspection refuse partial results.
+Operation/path/method/tag exclusions precede compatibility; later tool-name filters
+see compatible names only and do not erase source-level omissions.
+A serving source with no supported selected API operations retains its issue metadata
+and is unavailable to dependent `wait_for_catalogs = true` endpoints; other endpoints
+follow their own readiness and serving settings. A help document does not convert
+that source into a successful API catalog. Intentionally empty selections remain
+configuration errors, and explicit help-only selection remains valid when supported
+API operations existed before name filtering. Dynamic registration may reject an
+all-unsupported candidate without changing existing registrations. Strict inspection
+and qualification still reject any omission.
+
+The existing JSON encoder carries the selected declared application/json or +json
+Content-Type and parameters through routing; non-UTF8 or non-JSON-only bodies are
+unsupported rather than advertised as JSON. Schema conversion is not a general
+OpenAPI evaluator: cookies and unrepresentable parameter serialization are explicit
+operation issues. The existing resolver cannot preserve OpenAPI3.1/unspecified-
+version input-schema reference siblings, so those used inputs receive the fixed
+schema_reference_siblings reason. Inspection follows only actual schema positions
+and used reference targets before lossy resolution, not unused definitions or
+annotations. General Reference Object and stricter importer policies remain separate.
+See [input contracts](configuration.md#openapi-inputs-and-request-bodies).
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
 source overrides, listener defaults and optional automatic assignment. Source
