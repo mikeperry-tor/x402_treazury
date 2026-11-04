@@ -43,6 +43,14 @@ async fn reorg_before_declared_birthday_keeps_earlier_coverage_through_failure_a
             ),
         );
     }
+    // No old block overlaps tip50, so a true shorter fork is still ambiguous.
+    // Preserve history until the endpoint can demonstrate a divergent block100.
+    assert!(owner.sync_once(&CancellationToken::new()).await.is_err());
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
+    }
+    net.chain.write().await.mine_empty_blocks(50);
     assert!(owner.sync_once(&CancellationToken::new()).await.is_err());
     let wallet = owner.client.as_ref().unwrap().wallet().read().await;
     assert_eq!(
@@ -82,7 +90,10 @@ async fn reorg_before_declared_birthday_keeps_earlier_coverage_through_failure_a
         .await
         .mine_empty_blocks(pepper_sync::sync::MAX_REORG_ALLOWANCE + 1);
     owner.sync_once(&CancellationToken::new()).await.unwrap();
+    let old_tip = net.chain.read().await.tip();
     net.chain.write().await.reorg_to(50);
+    assert!(owner.sync_once(&CancellationToken::new()).await.is_err());
+    net.chain.write().await.mine_empty_blocks(old_tip - 50);
     owner.sync_once(&CancellationToken::new()).await.unwrap();
     let wallet = owner.client.as_ref().unwrap().wallet().read().await;
     assert_eq!(u32::from(wallet.birthday()), 100);

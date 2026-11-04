@@ -176,7 +176,11 @@ async fn pruned_checkpoint_leaf_rebuilds_canonical_sdk_state() {
         ));
         wallet.shard_trees.orchard = tree;
     }
-    net.chain.write().await.reorg_to(22);
+    {
+        let mut chain = net.chain.write().await;
+        chain.reorg_to(21);
+        chain.mine_empty_blocks(1);
+    }
     let stop = CancellationToken::new();
     assert!(owner.sync_once(&stop).await.is_err());
     {

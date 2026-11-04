@@ -797,6 +797,13 @@ identities and the remaining upstream timeout boundaries.
 
 Financial state supports recovery of accepted work and current spending authority.
 SDK/blockchain state owns actual funds, spent inputs and chain corrections.
+A shorter indexer height alone cannot replace retained SDK observations. Without
+a correctly bound divergent retained block, a scan preserves those observations
+and waits recoverably; it does not publish a new Ready observation. A prior
+unsigned scan target does not impose a new monetary or readiness watermark:
+only its unscanned tail can be shortened while actual observations remain intact.
+A rescan after demonstrated divergence or damaged local rollback boundaries
+preserves original liabilities and grants no deposit, release or replay authority.
 NEAR owns settlement of the exact accepted cross-chain swap; source reorgs do not
 reopen its validated successful outcome. Use
 authoritative observations to repair derived estimates, outcomes and workflow

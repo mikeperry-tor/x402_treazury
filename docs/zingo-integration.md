@@ -124,9 +124,25 @@ make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_confli
 See [workspace verification](development.md#combined-workspace-verification).
 Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes.
 The upstream 100-block rolling horizon is a cache-retention policy, not consensus
-finality. A node's larger rollback window does not require matching local retention. A rollback outside the
-retained horizon clears derived SDK chain state and resumes from the effective
-scan floor. Missing older shard checkpoints use upstream's existing
+finality. A node's larger rollback window does not require matching local retention. A demonstrated divergent chain outside the retained horizon clears derived SDK
+chain state and resumes from the effective scan floor. A shorter height alone
+cannot establish divergence. The SDK protects retained block metadata,
+scanned-priority ranges (including outstanding nullifier retrieval) and confirmed
+transactions; an old unsigned scan target is not a protected observation. If
+protected facts do not exceed the endpoint tip, only the unscanned scheduled tail
+is shortened and normal scanning resumes without lowering the floor. If protected
+facts exceed the tip, the SDK compares a retained block at a height served by the
+endpoint. The response must bind that exact height to a complete block identity using the
+SDK's existing projection: a valid full header owns its computed hash; otherwise
+the compact hash must contain exactly 32 bytes. A missing or conflicting compact
+hash projection cannot override a valid header.
+Mismatch permits existing recovery; matching or absent overlap preserves wallet
+observations and reports a recoverable sync failure. Failed or malformed reads
+also preserve them. These endpoint-history checks are not consensus validation.
+The wait is inherently ambiguous: birthday100/tip50 has no overlap; an anchor100
+can match a tip150 fork beginning120. A later healthy endpoint or a retained
+comparison that actually differs enables progress, without a timer, quorum,
+watermark ledger or expanded retention horizon. Missing older shard checkpoints use upstream's existing
 clear-and-rescan fallback; older snapshots need not contain additional checkpoints.
 The same fallback handles a pruned checkpoint or required wallet-block boundary
 that rollback can no longer reconstruct locally. Startup also repairs persisted
@@ -135,8 +151,9 @@ New-chain metadata is not attached to an unverified old scanned prefix.
 A full clear without a proven common ancestor starts at supported Sapling
 activation, even when the replacement tip is above the declared birthday. Clamping
 to the replacement tip or old birthday could miss replacement credits already
-mined below both. An initial birthday hint beyond the observed tip uses the same
-conservative rescan. Existing persisted scan ranges retain the earlier effective
+mined below both. A fresh birthday hint beyond the observed tip uses the same conservative rescan
+only when no retained block, scanned range or confirmed transaction would be
+destroyed. An interrupted scheduled target alone does not establish history. Existing persisted scan ranges retain the earlier effective
 floor through clearing, interruption and reopen; the declared birthday, keys and
 original operation journals remain unchanged. A chain below supported activation
 still reports a diagnostic rather than inventing usable history. This uses the
@@ -297,20 +314,3 @@ archive falls back to the crate version; with Git installed, the failed dirty
 check can add `_dirty`. Shared-cache, same-host comparison does not qualify
 reproducibility across independently populated caches. Parameter staging, integrity
 checks and OS network denial remain separate release requirements.
-
-## Proposed shorter-tip distinction
-
-Current startup normalization can clear retained observations from a shorter height
-alone, including a saved unsigned target beyond the actually scanned prefix. The
-indexer-regression lifecycle characterization reproduces both cases without
-changing runtime behavior. Proposed recovery first distinguishes actual retained
-blocks, scanned-priority ranges and confirmed transactions from unsigned queued
-scan targets. A target-only tail can be shortened without clearing observations.
-When protected observations exceed the endpoint tip, a correctly bound divergent
-retained block would permit existing recovery; matching or absent overlap would
-preserve observations and wait recoverably. This cannot immediately distinguish
-every genuine shorter fork: birthday100/tip50 has no retained overlap, and an
-anchor100 may match a tip150 fork beginning120. Fresh unscanned future-birthday
-wallets retain conservative activation scanning. This is proposed until the owning
-implementation and application recovery tests pass; no consensus or live evidence
-is claimed.

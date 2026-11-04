@@ -1084,7 +1084,11 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
         {
             let mut chain = net.chain.write().await;
             let tip = chain.tip();
-            chain.reorg_to(23);
+            // Re-mine the served rollback boundary so this is demonstrated
+            // divergence, not a matching shorter prefix. Funding21 survives and
+            // the older-checkpoint case still exercises its missing bound23.
+            chain.reorg_to(22);
+            chain.mine_empty_blocks(1);
             if same_height_fork {
                 chain.mine_empty_blocks(tip - 23);
             }
