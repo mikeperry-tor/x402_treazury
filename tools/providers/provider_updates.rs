@@ -11,6 +11,8 @@ use std::{
 use x402_treazury::{catalog::Config, network};
 
 include!("../../src/providers/assets.rs");
+#[path = "update_compare.rs"]
+mod compare;
 
 #[derive(Parser)]
 #[command(about = "Capture complete public provider evidence or replay a frozen sweep offline")]
@@ -32,6 +34,8 @@ enum Action {
     },
     Replay {
         run: PathBuf,
+        #[arg(long)]
+        prior: Option<PathBuf>,
     },
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -349,16 +353,6 @@ fn replay(run: &Path) -> Result<Run> {
     let report: Run = serde_json::from_slice(&std::fs::read(run.join("capture.json"))?)?;
     ensure!(report.format == 1, "unsupported capture version");
     bytes(run, &report.metadata)?;
-    for provider in &report.providers {
-        for read in provider
-            .inputs
-            .iter()
-            .chain(provider.asset.iter())
-            .filter(|r| r.hash.is_some())
-        {
-            bytes(run, read)?;
-        }
-    }
     Ok(report)
 }
 #[tokio::main]
@@ -375,11 +369,12 @@ async fn main() -> Result<()> {
             let run = capture(provider, offline).await?;
             println!("{}", serde_json::json!({"run":serde_json::to_value(&run)?}));
         }
-        Action::Replay { run } => {
+        Action::Replay { run, prior } => {
+            compare::review(&run, prior.as_deref())?;
             let report = replay(&run)?;
             println!(
-                "{} frozen provider outcomes verified",
-                report.providers.len()
+                "{}",
+                serde_json::json!({"run":serde_json::to_value(&run)?,"report":serde_json::to_value(run.join("review.json"))?,"providers":report.providers.len()})
             );
         }
     }
