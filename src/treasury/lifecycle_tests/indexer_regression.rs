@@ -319,13 +319,13 @@ async fn confirmed_partial_merge_above_published_scan_bounds_prevents_tail_only_
 }
 
 #[tokio::test]
-async fn future_cached_shards_are_inert_for_current_witness_after_unsigned_tail_shrinks() {
+async fn future_cached_roots_preserve_current_spendability_across_tail_shrink_and_reopen() {
     use incrementalmerkletree::{Address, Hashable, Level};
     use orchard::tree::MerkleHashOrchard;
     use pepper_sync::{sync::ScanPriority, wallet::NoteInterface as _};
     use shardtree::{LocatedPrunableTree, RetentionFlags, store::ShardStore as _};
     use std::sync::Arc;
-    let (_dir, net, mut owner, _endpoint) = funded_fixture(1).await;
+    let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
     let (position, expected_root, expected_path) = {
         let wallet = owner.client.as_ref().unwrap().wallet().read().await;
         let position = wallet
@@ -370,14 +370,24 @@ async fn future_cached_shards_are_inert_for_current_witness_after_unsigned_tail_
             1250,
         );
     }
-    owner.sync_once(&CancellationToken::new()).await.unwrap();
+    // Fail after safe tail normalization but before subtree-root ingestion. Local
+    // note selection must already see coherent metadata even in this failed scan.
+    net.chain.write().await.faults.inject(
+        Rpc::Block,
+        Fault::Fail(
+            tonic::Code::InvalidArgument,
+            "stop before root update".into(),
+        ),
+    );
+    let failure = owner
+        .sync_once(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(format!("{failure:#}").contains("indexer_request_failed grpc_code=3"));
     let wallet = owner.client.as_ref().unwrap().wallet().read().await;
     assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
     assert_eq!(wallet.sync_state.last_known_chain_height(), Some(23.into()));
-    assert_eq!(
-        wallet.sync_state.ironwood_shard_ranges(),
-        &[1.into()..1001.into(), 1000.into()..1251.into()]
-    );
+    assert!(wallet.sync_state.ironwood_shard_ranges().is_empty());
     let tree = &wallet.shard_trees.ironwood;
     assert_eq!(
         tree.root_at_checkpoint_id(&23.into()).unwrap(),
@@ -398,9 +408,65 @@ async fn future_cached_shards_are_inert_for_current_witness_after_unsigned_tail_
     );
     drop(wallet);
     let sync = owner.status().await.unwrap().sync.unwrap();
-    assert_eq!(sync.phase, SyncPhase::Ready);
+    assert_eq!(sync.phase, SyncPhase::Failed);
     assert_eq!(sync.confirmed_shielded_zatoshis, 1_000_000);
     assert_eq!(sync.spendable_shielded_zatoshis, 1_000_000);
+    owner.sync_once(&CancellationToken::new()).await.unwrap();
+
+    // A previous binary can have saved the shortened target with stale future
+    // metadata. Reopening at the SAME tip must repair it before fallible I/O too.
+    owner
+        .client
+        .as_ref()
+        .unwrap()
+        .wallet()
+        .write()
+        .await
+        .sync_state = interrupted_state(
+        &[(1, 24, ScanPriority::Scanned)],
+        &[(1, 1001), (1000, 1251)],
+        23,
+    );
+    let identity = owner.status().await.unwrap().treasury_id;
+    owner.close().await.unwrap();
+    owner = Treasury::open_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        identity,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    owner.configure_sync(SyncSettings::new(endpoint, 1).unwrap());
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(wallet.sync_state.last_known_chain_height(), Some(23.into()));
+        assert_eq!(wallet.sync_state.ironwood_shard_ranges().len(), 2);
+        assert_eq!(
+            wallet
+                .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+                .unwrap()
+                .into_u64(),
+            0,
+            "the persisted future completion metadata really blocks SDK selection"
+        );
+    }
+    net.chain.write().await.faults.inject(
+        Rpc::Block,
+        Fault::Fail(
+            tonic::Code::InvalidArgument,
+            "stop before root update".into(),
+        ),
+    );
+    let failure = owner
+        .sync_once(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(format!("{failure:#}").contains("indexer_request_failed grpc_code=3"));
+    let sync = owner.status().await.unwrap().sync.unwrap();
+    assert_eq!(sync.phase, SyncPhase::Failed);
+    assert_eq!(sync.spendable_shielded_zatoshis, 1_000_000);
+    owner.sync_once(&CancellationToken::new()).await.unwrap();
     let address = owner
         .client
         .as_ref()

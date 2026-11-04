@@ -129,8 +129,13 @@ chain state and resumes from the effective scan floor. A shorter height alone
 cannot establish divergence. The SDK protects retained block metadata,
 scanned-priority ranges (including outstanding nullifier retrieval) and confirmed
 transactions; an old unsigned scan target is not a protected observation. If
-protected facts do not exceed the endpoint tip, only the unscanned scheduled tail
-is shortened and normal scanning resumes without lowering the floor. If protected
+protected facts do not exceed the endpoint tip, the unscanned scheduled tail
+is shortened without lowering the floor, and cached shard-completion ranges beyond
+that tip are removed. Those scheduling projections cannot require a current note to
+wait for future blocks. Actual tree leaves, cached roots and checkpoint witnesses
+remain intact. The same normalization follows root ingestion, whose response can
+advance beyond the cycle's observed tip; it also repairs saved equal-tip state
+before later network failures can leave local SDK selection blocked. If protected
 facts exceed the tip, the SDK compares a retained block at a height served by the
 endpoint. The response must bind that exact height to a complete block identity using the
 SDK's existing projection: a valid full header owns its computed hash; otherwise

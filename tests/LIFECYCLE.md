@@ -290,5 +290,7 @@ nullifier-retrieval ranges preserve their observations; a confirmed transaction
 merged above published scan bounds also prevents an unsigned-tail reset. A funded
 SDK fixture preserves the current Ironwood checkpoint root, owned-note witness and
 spendability with future cached shard annotations/bare roots after a lower target,
-then resumes healthy progress without adding root-pruning authority.
+including failure before root ingestion and equal-tip stale metadata after reopen.
+Future completion ranges are repaired without pruning actual roots or witnesses;
+later owned commitments and both original/new witnesses remain spendable.
 These local fixtures establish no consensus, live bridge settlement or Tor claim.

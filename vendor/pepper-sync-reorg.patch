@@ -67,6 +67,109 @@
                          );
                          dropped_targets.insert(scan_target);
                          continue;
+--- a/pepper-sync/src/sync/state.rs
++++ b/pepper-sync/src/sync/state.rs
+@@ -83,9 +83,9 @@
+         let reachable = scan_target.origin() == ScanTargetOrigin::Internal
+             || (birthday..=chain_height).contains(&scan_target.block_height());
+         if !reachable {
+-            tracing::warn!(
+-                "scan target at block {} dropped: outside the wallet's chain range {birthday}..={chain_height}",
+-                scan_target.block_height()
++            tracing::debug!(
++                block_height = u32::from(scan_target.block_height()),
++                "Prior wallet scan target is outside the current chain; continuing canonical scanning"
+             );
+         }
+         reachable
+@@ -192,11 +192,28 @@
+ }
+ 
+ /// Splits the range containing [`truncate_height` + 1] and removes all ranges containing block heights above
+-/// `truncate_height`.
++/// `truncate_height`. Drops shard-completion metadata above that height without changing the shard trees.
+ /// If `truncate_height` is zero, the sync state will be cleared completely.
+-pub(super) fn truncate_scan_ranges(truncate_height: BlockHeight, sync_state: &mut SyncState) {
++/// Returns whether any range metadata changed.
++pub(super) fn truncate_scan_ranges(
++    truncate_height: BlockHeight,
++    sync_state: &mut SyncState,
++) -> bool {
+     if truncate_height == zcash_protocol::consensus::H0 {
+         *sync_state = SyncState::new();
++        return true;
++    }
++    let mut changed = false;
++    for ranges in [
++        &mut sync_state.sapling_shard_ranges,
++        &mut sync_state.orchard_shard_ranges,
++        &mut sync_state.ironwood_shard_ranges,
++    ] {
++        let previous_len = ranges.len();
++        // A cached future root does not make its shard complete on this chain tip.
++        // Keep the actual tree; do not invent a completing block by clipping a range.
++        ranges.retain(|range| range.end - 1 <= truncate_height);
++        changed |= ranges.len() != previous_len;
+     }
+     let Some((index, range_to_split)) = sync_state
+         .scan_ranges()
+@@ -205,7 +222,7 @@
+         .enumerate()
+         .find(|(_index, range)| range.block_range().contains(&(truncate_height + 1)))
+     else {
+-        return;
++        return changed;
+     };
+ 
+     if let Some((first_segment, second_segment)) = range_to_split.split_at(truncate_height + 1) {
+@@ -218,6 +235,7 @@
+         .partition_point(|range| range.block_range().start <= truncate_height)]
+         .to_vec();
+     sync_state.scan_ranges = truncated_scan_ranges;
++    true
+ }
+ 
+ /// Resets scan ranges to recover from previous sync interruptions.
+@@ -2044,6 +2062,39 @@
+         assert_eq!(sync_state.transparent_scan_floor, Some(90.into()));
+     }
+ 
++    #[test]
++    fn truncate_completion_metadata_without_a_straddling_scan_range() {
++        let mut state = SyncState::new();
++        state.scan_ranges = vec![ScanRange::from_parts(
++            1.into()..24.into(),
++            ScanPriority::Scanned,
++        )];
++        for ranges in [
++            &mut state.sapling_shard_ranges,
++            &mut state.orchard_shard_ranges,
++            &mut state.ironwood_shard_ranges,
++        ] {
++            *ranges = vec![
++                1.into()..24.into(),
++                23.into()..101.into(),
++                100.into()..201.into(),
++            ];
++        }
++        assert!(super::truncate_scan_ranges(23.into(), &mut state));
++        for ranges in [
++            state.sapling_shard_ranges(),
++            state.orchard_shard_ranges(),
++            state.ironwood_shard_ranges(),
++        ] {
++            assert_eq!(ranges, &[1.into()..24.into()]);
++        }
++        assert_eq!(state.scan_ranges()[0].block_range(), &(1.into()..24.into()));
++        assert!(!super::truncate_scan_ranges(23.into(), &mut state));
++        assert!(super::truncate_scan_ranges(0.into(), &mut state));
++        assert!(state.scan_ranges().is_empty());
++        assert!(state.ironwood_shard_ranges().is_empty());
++    }
++
+     /// Reopening splits the range straddling the height and returns every
+     /// scanned range above it to `Historic`. History below is left scanned,
+     /// since a pool's record below its own first commitment is not in
 --- a/pepper-sync/src/sync.rs
 +++ b/pepper-sync/src/sync.rs
 @@ -59,14 +59,8 @@
@@ -136,7 +239,15 @@
                      )?;
                      // the re-orged block at the chain height is truncated, so its tree sizes are fetched. the wallet
                      // lock is released for the request as it is above.
-@@ -954,7 +949,7 @@
+@@ -740,6 +735,7 @@
+                 consensus_parameters,
+                 &mut *wallet.write().await,
+                 subtree_roots,
++                chain_height,
+             )?;
+ 
+             if !first_verification_complete {
+@@ -954,7 +950,7 @@
      shutdown_mempool.store(true, atomic::Ordering::Release);
      match mempool_handle.await.expect("task panicked") {
          Ok(()) => (),
@@ -145,7 +256,7 @@
          Err(e) => return Err(e.into()),
      }
      // the fetcher is aborted rather than joined: the only request it can still be serving is one that a shutdown
-@@ -988,6 +983,138 @@
+@@ -988,6 +984,140 @@
      })
  }
  
@@ -198,12 +309,14 @@
 +        let state = wallet
 +            .get_sync_state_mut()
 +            .map_err(SyncError::WalletError)?;
-+        if state
++        let shortened = state
 +            .last_known_chain_height()
-+            .is_some_and(|height| height > chain_height)
-+        {
-+            state::truncate_scan_ranges(chain_height, state);
++            .is_some_and(|height| height > chain_height);
++        let changed = state::truncate_scan_ranges(chain_height, state);
++        if shortened {
 +            state::lower_transparent_scan_floor(state, chain_height);
++        }
++        if shortened || changed {
 +            wallet.set_save_flag().map_err(SyncError::WalletError)?;
 +        }
 +        return Ok(chain_height);
@@ -284,7 +397,7 @@
  /// This ensures that the wallet height used to calculate the lower bound for scan range creation is valid.
  /// The comparison takes two input heights and uses several constants to select the correct height.
  ///
-@@ -1000,7 +1127,7 @@
+@@ -1000,7 +1130,7 @@
  ///
  /// The constants are:
  ///   (1) MAX_REORG_ALLOWANCE:
@@ -293,7 +406,7 @@
  ///   (2) Sapling Activation Height:
  ///       * the lower bound on the wallet birthday
  fn checked_wallet_height<W, P>(
-@@ -1012,58 +1139,59 @@
+@@ -1012,58 +1142,59 @@
      W: SyncBlocks + SyncTransactions + SyncNullifiers + SyncOutPoints + SyncShardTrees,
      P: zcash_protocol::consensus::Parameters,
  {
@@ -400,7 +513,7 @@
  }
  
  /// Creates a [`self::SyncStatus`] from the wallet's current [`crate::wallet::SyncState`].
-@@ -1399,7 +1527,7 @@
+@@ -1399,7 +1530,7 @@
                  .is_some_and(|transaction| transaction.status().is_confirmed())
          });
      for confirmed_txid in confirmed_txids {
@@ -409,7 +522,7 @@
              "refusing to fail transaction {confirmed_txid} with `Confirmed` status! \
               a mined transaction can only be invalidated by truncation."
          );
-@@ -1804,11 +1932,13 @@
+@@ -1804,11 +1935,13 @@
              })
          }
          Err(ScanError::ContinuityError(ContinuityError::HashDiscontinuity { height, .. })) => {
@@ -425,7 +538,7 @@
                  let sync_state = wallet
                      .get_sync_state_mut()
                      .map_err(SyncError::WalletError)?;
-@@ -1833,13 +1963,13 @@
+@@ -1833,13 +1966,13 @@
                      - current_reorg_detection_start_height
                      > MAX_REORG_ALLOWANCE
                  {
@@ -441,7 +554,7 @@
                  let sync_state = wallet
                      .get_sync_state_mut()
                      .map_err(SyncError::WalletError)?;
-@@ -1864,7 +1994,9 @@
+@@ -1864,7 +1997,9 @@
                  .await?;
                  state::set_initial_state(wallet, last_known_chain_height, tree_bounds)?;
  
@@ -452,7 +565,7 @@
              } else if height == scan_range.block_range().start {
                  // the first block of the scan range does not follow the block below it, which is held by the wallet
                  // or was kept by the loader from an earlier scan. a re-org has replaced that block since.
-@@ -1898,7 +2030,7 @@
+@@ -1898,7 +2033,7 @@
              block_metadata_size,
              calculated_size,
          }) => {
@@ -461,7 +574,7 @@
                  "RESCAN TRIGGERED: at height {height}, {pool:?} history recorded a commitment \
                   tree of {calculated_size} where the chain reports {block_metadata_size}; the \
                   wallet's {pool:?} records are being cleared back to the pool activation height \
-@@ -1941,7 +2073,7 @@
+@@ -1941,7 +2076,7 @@
  where
      W: SyncWallet + SyncBlocks + SyncTransactions + SyncNullifiers + SyncOutPoints + SyncShardTrees,
  {
@@ -470,7 +583,7 @@
      let Some(activation) = PoolActivation::of(consensus_parameters, target_pool) else {
          // A pool the chain never activates cannot have been served, so it
          // cannot be the one that disagreed.
-@@ -2157,7 +2289,7 @@
+@@ -2157,7 +2292,7 @@
              }
          }?;
          if rolled_back {
@@ -479,7 +592,7 @@
                  "{pool:?} shard tree held state above the highest scanned height \
                   {highest_scanned_height} and was rolled back to its checkpoint at this height."
              );
-@@ -2193,7 +2325,7 @@
+@@ -2193,7 +2328,7 @@
          Err(shardtree::error::ShardTreeError::Query(
              shardtree::error::QueryError::CheckpointPruned,
          )) => {
@@ -488,7 +601,7 @@
                  "shard tree holds state above the highest scanned height {highest_scanned_height} \
                   and cannot roll back to its checkpoint at this height."
              );
-@@ -2281,6 +2413,7 @@
+@@ -2281,6 +2416,7 @@
  fn truncate_wallet_data<W>(
      wallet: &mut W,
      truncate_height: BlockHeight,
@@ -496,7 +609,7 @@
  ) -> Result<(), SyncError<W::Error>>
  where
      W: SyncWallet + SyncBlocks + SyncTransactions + SyncNullifiers + SyncOutPoints + SyncShardTrees,
-@@ -2299,15 +2432,28 @@
+@@ -2299,15 +2435,28 @@
      match truncate::plan_truncation(wallet_state, truncate_height) {
          truncate::TruncationPlan::NoOp => Ok(()),
          truncate::TruncationPlan::ClearAll => {
@@ -528,7 +641,7 @@
  
                      Err(SyncError::TruncationError(height, pooltype))
                  }
-@@ -2353,10 +2499,18 @@
+@@ -2353,10 +2502,18 @@
      Ok(())
  }
  
@@ -548,7 +661,7 @@
      let scan_targets = wallet
          .get_wallet_transactions()
          .map_err(SyncError::WalletError)?
-@@ -2368,7 +2522,10 @@
+@@ -2368,7 +2525,10 @@
                  .map(|height| ScanTarget::new(height, Some(transaction.txid())))
          })
          .collect::<Vec<_>>();
@@ -560,7 +673,7 @@
      state::truncate_scan_ranges(
          consensus::H0,
          wallet
-@@ -2382,6 +2539,10 @@
+@@ -2382,6 +2542,10 @@
      let sync_state = wallet
          .get_sync_state_mut()
          .map_err(SyncError::WalletError)?;
@@ -571,7 +684,26 @@
      add_scan_targets(sync_state, &scan_targets);
      wallet.set_save_flag().map_err(SyncError::WalletError)?;
  
-@@ -2875,7 +3036,7 @@
+@@ -2752,6 +2916,7 @@
+     consensus_parameters: &impl consensus::Parameters,
+     wallet: &mut W,
+     subtree_roots: FetchedSubtreeRoots,
++    chain_height: BlockHeight,
+ ) -> Result<(), SyncError<W::Error>>
+ where
+     W: SyncWallet + SyncShardTrees,
+@@ -2797,6 +2962,10 @@
+         );
+     }
+ 
++    // Requests can observe roots completed after this cycle's tip. Retain their
++    // tree cache, but only current completion ranges may govern note selection.
++    state::truncate_scan_ranges(chain_height, sync_state);
++
+     let shard_trees = wallet
+         .get_shard_trees_mut()
+         .map_err(SyncError::WalletError)?;
+@@ -2875,7 +3044,7 @@
  where
      W: SyncWallet + SyncShardTrees,
  {
@@ -580,7 +712,7 @@
      if birthday
          == consensus_parameters
              .activation_height(consensus::NetworkUpgrade::Sapling)
-@@ -3011,7 +3172,7 @@
+@@ -3011,7 +3180,7 @@
                                          }
                                  }
                                  Err(e) => {
@@ -589,7 +721,7 @@
                                      continue 'main;
                                  }
                              }
-@@ -3028,7 +3189,7 @@
+@@ -3028,7 +3197,7 @@
              }
              Err(e @ MempoolError::ShutdownWithoutStream) => return Err(e),
              Err(MempoolError::ServerError(_)) => {
@@ -598,7 +730,7 @@
                  tokio::time::sleep(Duration::from_secs(3)).await;
              }
          }
-@@ -3088,6 +3249,37 @@
+@@ -3088,6 +3257,37 @@
  mod test {
      use zcash_protocol::consensus::BlockHeight;
      use zcash_protocol::local_consensus::LocalNetwork;
@@ -636,7 +768,7 @@
  
      /// A local network with every upgrade active from `height`.
      const fn activated_at(height: u32) -> LocalNetwork {
-@@ -3305,7 +3497,8 @@
+@@ -3305,7 +3505,8 @@
              }
  
              // A routine two-block reorg rolls the wallet back to height 8.
@@ -646,7 +778,7 @@
  
              assert!(
                  result.is_ok(),
-@@ -3358,7 +3551,8 @@
+@@ -3358,7 +3559,8 @@
              }
              let mut wallet = synced_wallet(shard_trees);
  
@@ -656,7 +788,7 @@
  
              assert!(matches!(
                  result,
-@@ -3395,7 +3589,12 @@
+@@ -3395,7 +3597,12 @@
              }
              let mut wallet = synced_wallet(shard_trees);
  
@@ -670,7 +802,7 @@
  
              assert!(wallet.get_wallet_block(BlockHeight::from_u32(6)).is_err());
              assert_every_tree_holds_a_checkpoint(&mut wallet);
-@@ -3413,7 +3612,8 @@
+@@ -3413,7 +3620,8 @@
              }
              let mut wallet = synced_wallet(shard_trees);
  
@@ -680,7 +812,7 @@
  
              assert!(matches!(
                  result,
-@@ -4609,32 +4809,75 @@
+@@ -4609,32 +4817,75 @@
  
              use super::*;
              #[tokio::test]
@@ -780,7 +912,7 @@
                  }
              }
              #[tokio::test]
-@@ -4772,7 +5015,6 @@
+@@ -4772,7 +5023,6 @@
                      )) if s == test_error
                  ));
              }
@@ -788,7 +920,7 @@
              #[tokio::test]
              async fn raw_bday_above_chain_height() {
                  let builder = crate::mocks::MockWalletBuilder::new();
-@@ -4784,17 +5026,15 @@
+@@ -4784,17 +5034,15 @@
                      BlockHeight::from_u32(1),
                      &LOCAL_NETWORK,
                  );
@@ -815,21 +947,6 @@
              }
              mod sapling_height {
                  use super::*;
---- a/pepper-sync/src/sync/state.rs
-+++ b/pepper-sync/src/sync/state.rs
-@@ -83,9 +83,9 @@
-         let reachable = scan_target.origin() == ScanTargetOrigin::Internal
-             || (birthday..=chain_height).contains(&scan_target.block_height());
-         if !reachable {
--            tracing::warn!(
--                "scan target at block {} dropped: outside the wallet's chain range {birthday}..={chain_height}",
--                scan_target.block_height()
-+            tracing::debug!(
-+                block_height = u32::from(scan_target.block_height()),
-+                "Prior wallet scan target is outside the current chain; continuing canonical scanning"
-             );
-         }
-         reachable
 --- a/pepper-sync/src/wallet/traits.rs
 +++ b/pepper-sync/src/wallet/traits.rs
 @@ -530,15 +530,24 @@

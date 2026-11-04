@@ -735,6 +735,7 @@ where
                 consensus_parameters,
                 &mut *wallet.write().await,
                 subtree_roots,
+                chain_height,
             )?;
 
             if !first_verification_complete {
@@ -1032,12 +1033,14 @@ where
         let state = wallet
             .get_sync_state_mut()
             .map_err(SyncError::WalletError)?;
-        if state
+        let shortened = state
             .last_known_chain_height()
-            .is_some_and(|height| height > chain_height)
-        {
-            state::truncate_scan_ranges(chain_height, state);
+            .is_some_and(|height| height > chain_height);
+        let changed = state::truncate_scan_ranges(chain_height, state);
+        if shortened {
             state::lower_transparent_scan_floor(state, chain_height);
+        }
+        if shortened || changed {
             wallet.set_save_flag().map_err(SyncError::WalletError)?;
         }
         return Ok(chain_height);
@@ -2913,6 +2916,7 @@ fn add_fetched_subtree_roots<W>(
     consensus_parameters: &impl consensus::Parameters,
     wallet: &mut W,
     subtree_roots: FetchedSubtreeRoots,
+    chain_height: BlockHeight,
 ) -> Result<(), SyncError<W::Error>>
 where
     W: SyncWallet + SyncShardTrees,
@@ -2957,6 +2961,10 @@ where
             subtree_roots,
         );
     }
+
+    // Requests can observe roots completed after this cycle's tip. Retain their
+    // tree cache, but only current completion ranges may govern note selection.
+    state::truncate_scan_ranges(chain_height, sync_state);
 
     let shard_trees = wallet
         .get_shard_trees_mut()
