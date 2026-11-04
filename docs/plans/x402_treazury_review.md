@@ -135,7 +135,10 @@ Failed runs remain failed and are replaced only by actual affected-case passes;
 this is not a single successful `make check`. Production/all-target warnings,
 format, exact-source complexity and unchanged high-risk chains are reviewed.
 Proving execution must reopen financial GF. Windows release build/CLI smokes pass
-at `7126f716`; native Checks and storage acceptance remain open. No live-funded,
+at `7126f716`. Vendor preflight and both namespace API candidates pass at
+`5218fef0`; native application/test and full storage acceptance remain open.
+The namespace result proves restricted-token API compatibility, collision and
+identity/byte preservation, not complete privacy, recovery or power-loss durability. No live-funded,
 consensus or live Tor qualification was run.
 
 ---

@@ -47,14 +47,20 @@ fixture/CI fixups `574e0b38` and `5251194e`. Portable `ErrorKind` replaces the
 Unix-only probe classification, and cfg-specific builder bindings remove the two
 reported Windows warnings. All six controls and production/all-target warning
 gates pass on macOS. Windows release build and CLI smoke tests passed at `7126f716`;
-Checks stopped at vendor verification before native probe controls. The binary
-stdin/working-directory correction and earlier cheap CI preflight in `68a93c0b`
-need a native rerun. Linux execution remains pending.
-The standalone `42e394c0` namespace experiment verified ordinary restricted-token
-controls on local NTFS, but both candidates failed at the shared rename before
-directory flush. Buffer-only control `098a2397` needs native execution; error 87's
-cause remains unproven. No P2 privacy/durability acceptance follows. The table records the
-assessment baseline; storage, parent control and native workflow gates remain open.
+Earlier Checks stopped at vendor verification before native probe controls.
+The binary stdin/working-directory correction `68a93c0b` and binary-output fixup
+`cec39403` pass native vendor preflight at `5218fef0`; the application build and
+later native test gates remain pending. Linux execution remains pending.
+The standalone namespace experiment and buffer-only control `098a2397` failed
+at rename before directory flush. Absolute-path/NULL-root control `3e97d27b`
+passes both candidates at `5218fef0`: restricted-owner positive/admin-denial
+controls, local NTFS, no-replace rename, preserved collision identities/bytes,
+and child/root/anchor directory flushes. This is API compatibility evidence,
+not complete P2 privacy, recovery or power-loss acceptance. The hosted image
+also changed between runs, so the result alone does not isolate error 87's cause.
+The simpler Win32 candidate is available for P2 design; full migrated-caller and
+native security gates remain required. The table records the assessment baseline;
+storage, parent control and native workflow gates remain open.
 
 | Gap and evidence | Impact | Options and required preservation |
 | --- | --- | --- |
