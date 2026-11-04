@@ -177,8 +177,8 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
                 &tls::client(&vendor),
                 8,
             )
-                .await
-                .unwrap_err()
+            .await
+            .unwrap_err()
         )
         .contains("max_spec_bytes=8 bytes")
     );
