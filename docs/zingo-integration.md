@@ -234,6 +234,18 @@ therefore retains the fence for actual unfinished signed originals until closure
 The synthetic `sdk_reorg_rescan_preserves_original_signed_work` regression covers
 this gap without requiring lifetime tracking of completed source transactions.
 
+The synthetic `indexer_recovery` owner tests separately keep an actually disclosed
+original through stale-prefix failure, a pre-canceled scan request and reopen, then
+finish it only after healthy canonical confirmation without another submission.
+A proven deep replacement reconstructs a new owned credit below declared birthday
+while the orphaned original input, accepted snapshot and signed bytes remain in
+the pending Store journal. Recovered SDK capital is not permission to release
+that liability or create another deposit; an unburied original still waits even
+when the recovery allowance is zero. These local fixtures establish no consensus
+or live bridge qualification. Existing in-flight sync cancellation tests cover
+the sync-session owner; the pre-canceled request alone does not prove active-I/O
+drain.
+
 The application does not mirror SDK reorg history into completed swap workflows.
 NEAR owns the outcome of a bound swap; a validated SUCCESS closes source work
 without requiring a local CONFIRMED label. Current SDK state independently owns
