@@ -14,7 +14,7 @@ def verify(manifest_name="transport-sources.json"):
     for name, entry in manifest.items():
         source = root / name
         expected = entry["original_files"]
-        actual = {str(p.relative_to(source)) for p in source.rglob("*") if p.is_file()}
+        actual = {p.relative_to(source).as_posix() for p in source.rglob("*") if p.is_file()}
         if actual != set(expected):
             raise SystemExit(f"{name}: unexpected/missing vendor files: {actual ^ set(expected)}")
         patch = root / entry.get("patch", f"{name}-transport.patch")

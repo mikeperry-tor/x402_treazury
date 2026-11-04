@@ -1,13 +1,15 @@
 """Ensure patched snapshot hashes cannot hide undeclared upstream changes."""
 import difflib
 import hashlib
+import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 VERIFIER = Path(__file__).resolve().parents[2] / "vendor" / "verify_pepper.py"
@@ -101,3 +103,48 @@ class PepperVerificationTests(unittest.TestCase):
         result = self.verify()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("vendor verification failed", result.stderr)
+
+
+class TransportVerificationTests(unittest.TestCase):
+    def test_windows_inventory_keys_preserve_exact_reconstruction_and_membership(self):
+        verifier = VERIFIER.with_name("verify_transport.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copied = root / "verify_transport.py"
+            shutil.copyfile(verifier, copied)
+            original = b"pub fn value() -> u8 { 1 }\n"
+            patched = b"pub fn value() -> u8 { 2 }\n"
+            source = root / "sample" / "src" / "lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(patched)
+            patch = "".join(difflib.unified_diff(
+                original.decode().splitlines(keepends=True),
+                patched.decode().splitlines(keepends=True),
+                fromfile="a/src/lib.rs", tofile="b/src/lib.rs",
+            )).encode()
+            root.joinpath("sample.patch").write_bytes(patch)
+            root.joinpath("transport-sources.json").write_text(json.dumps({
+                "sample": {"version": "test", "patch": "sample.patch",
+                           "patch_sha256": hashlib.sha256(patch).hexdigest(),
+                           "original_files": {"src/lib.rs": hashlib.sha256(original).hexdigest()}}
+            }))
+            spec = importlib.util.spec_from_file_location("transport_inventory_fixture", copied)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            # Model a native Windows relative path while keeping the real files,
+            # actual reverse-patch command and original-byte hash checks intact.
+            entry = mock.Mock()
+            entry.is_file.return_value = True
+            entry.relative_to.return_value = PureWindowsPath("src/lib.rs")
+            with mock.patch.object(Path, "rglob", return_value=[entry]):
+                module.verify()
+                extra = mock.Mock()
+                extra.is_file.return_value = True
+                extra.relative_to.return_value = PureWindowsPath("src/undeclared.rs")
+                with mock.patch.object(Path, "rglob", return_value=[entry, extra]):
+                    with self.assertRaisesRegex(SystemExit, "unexpected/missing vendor files"):
+                        module.verify()
+                # A changed snapshot still cannot defeat the original source hash.
+                source.write_bytes(patched + b"// undeclared content\n")
+                with self.assertRaisesRegex(SystemExit, "differs from published source"):
+                    module.verify()
