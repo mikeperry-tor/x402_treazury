@@ -74,7 +74,8 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
     )
     .unwrap();
     let reserve = ReserveConfig {
-        funding_amount_usdc: "0.000001".into(),
+        funding_amount_usdc: Some("0.000001".into()),
+        min_funding_amount_usdc: None,
         max_funding_amount_usdc: None,
     };
     let config = ReservesConfig {

@@ -10,7 +10,6 @@ template="small"
 [wallet_templates.small]
 mode="zcash_rotation"
 max_api_payment_usdc="1.00"
-max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallet_templates.small.reserves.small]
 funding_amount_usdc="5.000001"
@@ -119,11 +118,9 @@ async fn scopes_resolve_exact_sharing_counts_and_capital_without_side_effects() 
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8(output.stdout)
-            .unwrap()
-            .contains("4 managed pools (4 automatic); initial inventory target: 20.000004 USDC")
-    );
+    assert!(String::from_utf8(output.stdout).unwrap().contains(
+        "4 managed pools (4 automatic); initial inventory range: 20.000004 to 20.000004 USDC"
+    ));
     assert!(!dir.path().join("state").exists());
 }
 #[tokio::test]
@@ -142,14 +139,12 @@ private_key_env='SERVER_KEY'
 [wallets.unused_managed]
 mode='zcash_rotation'
 max_api_payment_usdc='1'
-max_funding_spend_zec='0.01'
 max_conversion_overhead_percent=1
 [wallets.unused_managed.reserves.small]
 funding_amount_usdc='3'
 [wallet_templates.unused]
 mode='zcash_rotation'
 max_api_payment_usdc='1'
-max_funding_spend_zec='0.1'
 max_conversion_overhead_percent=1
 [wallet_templates.unused.reserves.small]
 funding_amount_usdc='100'
@@ -227,10 +222,6 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
         config("unknown"),
         config("source").replace("template=\"small\"", "template='missing'"),
         config("source").replace("scope=\"source\"", "scope='source'\nunknown=true"),
-        config("source").replace(
-            "max_funding_spend_zec=\"0.02\"",
-            "max_funding_spend_zec='-1'",
-        ),
         config("source").replace(
             "mode=\"zcash_rotation\"",
             "mode='static'\nprivate_key_env='KEY'",

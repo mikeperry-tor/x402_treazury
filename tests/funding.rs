@@ -132,9 +132,8 @@ impl FundingBackend for Fake {
         let id = job.id.clone();
         let operation = job.operation_id.clone();
         let target = job.target.clone();
-        let ceiling = self.minimum.clone().unwrap_or_else(|| job.target.clone());
         self.store
-            .call(move |s| s.select_quote_terms(&id, &operation, &target, &ceiling))
+            .call(move |s| s.select_quote_terms(&id, &operation, &target, &target))
             .await?;
         Ok((
             Quote {

@@ -16,7 +16,6 @@ max_refund_shielding_fee_zec = "0.001"
 base_rpc_url_env = "BASE_RPC"
 [wallets.research]
 mode = "zcash_rotation"
-max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 max_api_payment_usdc = "1.00"
 [wallets.research.reserves.small]
@@ -67,12 +66,8 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
             "max_conversion_overhead_percent = 101",
         ),
         (
-            "max_funding_spend_zec = \"0.02\"",
-            "max_funding_spend_zec = \"0.000000001\"",
-        ),
-        (
-            "max_funding_spend_zec = \"0.02\"",
-            "max_funding_spend_zec = \"0\"",
+            "max_conversion_overhead_percent = 5",
+            "max_conversion_overhead_percent = 5\nmax_funding_spend_zec = \"0.02\"",
         ),
         (
             "mode = \"zcash_rotation\"",
@@ -303,7 +298,6 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
             shown["wallets"][name]["reserves"]["small"]["max_funding_amount_usdc"],
             "3.00"
         );
-        assert_eq!(shown["wallets"][name]["max_funding_spend_zec"], "0.006");
         assert_eq!(
             shown["wallets"][name]["max_retirement_remainder_usdc"],
             "0.001"
@@ -317,43 +311,81 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
 }
 
 #[test]
-fn reserve_shape_has_required_small_optional_large_and_explicit_output_ceilings() {
+fn reserve_shape_resolves_fixed_ranges_and_slot_defaults() {
     use x402_treazury::rotation::config::ReservesConfig;
-    for (text, expected) in [
-        ("[small]\nfunding_amount_usdc='2'", "2000000"),
+    for (text, minimum, maximum) in [
+        ("[small]\nfunding_amount_usdc='2'", "2000000", "2000000"),
         (
             "[small]\nfunding_amount_usdc='2'\n[large]\nfunding_amount_usdc='10'",
+            "12000000",
             "12000000",
         ),
         (
             "[small]\nfunding_amount_usdc='2'\n[large]\nfunding_amount_usdc='2'",
             "4000000",
+            "4000000",
         ),
+        (
+            "[small]\nfunding_amount_usdc='5'\n[large]\nfunding_amount_usdc='2'",
+            "7000000",
+            "7000000",
+        ),
+        (
+            "[small]\nmin_funding_amount_usdc='2'\nmax_funding_amount_usdc='5'",
+            "2000000",
+            "5000000",
+        ),
+        (
+            "[small]\nfunding_amount_usdc='2'\nmax_funding_amount_usdc='3'",
+            "2000000",
+            "3000000",
+        ),
+        (
+            "[small]\nmin_funding_amount_usdc='2'\nmax_funding_amount_usdc='2'",
+            "2000000",
+            "2000000",
+        ),
+        ("[large]\nfunding_amount_usdc='10'", "12000000", "15000000"),
+        ("[small]", "2000000", "5000000"),
+        ("[large]", "12000000", "30000000"),
     ] {
         let reserves: ReservesConfig = toml::from_str(text).unwrap();
         reserves.validate().unwrap();
         assert_eq!(
             reserves
-                .initial_inventory_target_atomic()
+                .initial_inventory_minimum_atomic()
                 .unwrap()
                 .to_string(),
-            expected
+            minimum,
+            "{text}"
         );
-        assert_eq!(reserves.small.maximum_atomic().unwrap(), 2_000_000);
+        assert_eq!(
+            reserves
+                .initial_inventory_maximum_atomic()
+                .unwrap()
+                .to_string(),
+            maximum,
+            "{text}"
+        );
     }
     for text in [
-        "",
-        "[large]\nfunding_amount_usdc='10'",
+        "[small]\nmin_funding_amount_usdc='2'",
         "[small]\nmax_funding_amount_usdc='2'",
+        "[small]\nfunding_amount_usdc='2'\nmin_funding_amount_usdc='1'\nmax_funding_amount_usdc='3'",
         "[small]\nfunding_amount_usdc='2'\nmax_api_payment_usdc='1'",
         "[small]\nfunding_amount_usdc='2'\n[medium]\nfunding_amount_usdc='5'",
     ] {
-        assert!(toml::from_str::<ReservesConfig>(text).is_err(), "{text}");
+        let parsed = toml::from_str::<ReservesConfig>(text);
+        assert!(
+            parsed.is_err() || parsed.unwrap().validate().is_err(),
+            "{text}"
+        );
     }
     for text in [
         "[small]\nfunding_amount_usdc='0'",
         "[small]\nfunding_amount_usdc='2'\nmax_funding_amount_usdc='1.99'",
-        "[small]\nfunding_amount_usdc='2'\n[large]\nfunding_amount_usdc='1.99'",
+        "[small]\nmin_funding_amount_usdc='3'\nmax_funding_amount_usdc='2'",
+        "[small]\nmin_funding_amount_usdc='0'\nmax_funding_amount_usdc='3'",
         "[small]\nfunding_amount_usdc='0.0000001'",
         "[small]\nfunding_amount_usdc='9223372036854.775808'",
     ] {

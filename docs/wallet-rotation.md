@@ -39,8 +39,10 @@ wallet saves or SDK quick-send helpers to bypass this owner and journal path.
 
 ## Funding limits and fees
 
-Reserve targets describe USDC requested for new allocations; payment caps and
-spendable treasury capacity supply separate authority. The complete syntax and
+Reserve bounds describe nominal USDC sizing for new allocations; payment caps and
+spendable treasury capacity supply separate authority. The treasury's actual
+spendable ZEC balance is the ZEC capital limit supplied by the operator. Reserve
+ranges do not create or mirror a per-transfer ZEC cap. The complete syntax and
 migration rules are in [managed configuration](configuration.md).
 
 ```toml
@@ -52,22 +54,22 @@ slippage_bps = 500
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
 max_retirement_remainder_usdc = "0.001"
-max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 
 [wallets.research.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00"
+# Default randomized nominal funding: $2-5.
 
-[wallets.research.reserves.large]
-funding_amount_usdc = "10.00"
+# Explicitly enabling a large slot opts into its $10-25 default range:
+# [wallets.research.reserves.large]
 ```
 
 | Setting | Meaning |
 | --- | --- |
-| `reserves.small.funding_amount_usdc` | Required positive target for the small reserve. |
-| `reserves.large.funding_amount_usdc` | Optional large target, at least as large as small. |
-| Slot `max_funding_amount_usdc` | Maximum nominal sizing target after a bridge-minimum increase; omission permits no increase above that slot's target. Beneficial extra execution output is not capped. |
+| `reserves.small` | Omitted or empty defaults to a randomized $2-5 nominal range. |
+| `reserves.large` | Absent stays disabled; an explicit empty table opts into the $10-25 randomized default. |
+| Slot `funding_amount_usdc` | Fixed positive nominal target; optional `max_funding_amount_usdc` adds bridge-minimum headroom. |
+| Slot `min_funding_amount_usdc` + `max_funding_amount_usdc` | Uniform randomized nominal amount within the inclusive range; equal endpoints are valid. |
+| Slot `max_funding_amount_usdc` | Nominal sizing ceiling; for a fixed target it adds bridge-minimum headroom, and in range mode it is the configured upper bound. It is never a guaranteed credited balance or received maximum. |
 | `max_api_payment_usdc` | Required explicit cap for each payment by every group wallet, independently of reserve sizes. |
 | `max_retirement_remainder_usdc` | Nonnegative automatic-retirement tolerance, default $0.001 per group; it never authorizes transfers or replacement allocation. |
 | `max_conversion_overhead_percent` | Integer percentage (0–100) by which quoted USD input valuation may exceed output; the Zcash transaction fee has its own safeguard. |
@@ -76,16 +78,19 @@ Enabled automatic funding uses actual spendable treasury funds after confirmatio
 reservations, liabilities and transaction fees. Displayed total balance is not
 spendable capacity. There are no daily/cumulative USDC allocation or daily ZEC
 spending ceilings, and UTC rollover changes no funding authority. Adding spendable
-funds supplies capacity without another budget-setting step. Removed aggregate
-fields are rejected; historical charges and exact reservations remain intact.
+funds supplies capacity without another budget-setting step. `max_funding_spend_zec`
+was removed; delete it from existing configurations because unknown managed-profile
+fields are rejected. Historical charges and exact reservations remain intact.
 
-A group cap may exceed its reserve targets, and targets may exceed the cap.
+A group cap may exceed its reserve bounds, and bounds may exceed the cap.
 Neither case promises that initial funding can serve every allowed price. The
-fresh initial-inventory target is `S + L`, or `S` without large: $2/$10 requests
-$12 before accepted minimum increases and fees. Report actual credits, output
-ceilings, retained holdings and costs separately. Smaller reserve sizes offer more
-cheap-call rotation opportunities; larger sizes support expensive calls but can
-keep more traffic on an address. See [sizing and selection limits](configuration.md).
+fresh initial-inventory range is the sum of slot minima through the sum of slot
+maxima, including bridge-minimum headroom and excluding fees. The default small range alone
+is $2-5; with an explicitly enabled large slot it is $12-30. Report actual
+credits, output ceilings, retained holdings and costs separately. Smaller reserve
+sizes offer more cheap-call rotation opportunities; larger sizes support expensive
+calls but can keep more traffic on an address. See
+[sizing and selection limits](configuration.md).
 
 `auto_fund=false` pauses new funding, while independently permitted retirement and
 reconciliation continue. Financial completion and current payment usability are
@@ -95,7 +100,12 @@ Already accepted work retains its bytes, reservations and original identities
 across disablement. A valid successful operation may receive excess input later;
 SDK-observed returns become ordinary owned capital without reopening funding.
 
-Per-operation safeguards remain:
+Per-operation safeguards remain and are applied once to new work. If current
+conversion-overhead or claim policy no longer accepts an unprepared quote,
+preparation refreshes it under current policy instead of submitting stale
+authority. Once preparation begins, the operation carries its fixed principal and
+transaction fee/input caps; a lowered `max_funding_transaction_fee_zec` remains a
+genuine safeguard against the actual proposal fee.
 
 ```toml
 [treasury]
@@ -103,7 +113,6 @@ max_funding_transaction_fee_zec = "0.0003"
 max_refund_shielding_fee_zec = "0.0003"
 
 # Within an existing managed profile:
-# max_funding_spend_zec = "0.006" # One transfer including its network fee.
 ```
 
 Immutable transaction facts report confirmed principal and actual fees. Shielding
@@ -122,7 +131,7 @@ When maintenance closes the last pending source obligation, independent shieldin
 can proceed in that same pass under the existing pending-work, input and fee checks.
 
 Zingolib selects inputs and calculates standard network fees. The application
-checks the actual proposal against configured per-operation fee/spend safeguards,
+checks the actual proposal against the configured network-fee cap,
 then persists the exact input owner before calculation. Backend calculation
 borrows that same public proposal and retains ordinary consensus expiry, including
 the SDK's NU7 delta, rather than the offline high-level API's epoch-end expiry.
@@ -138,12 +147,15 @@ unstarted without consuming transaction recovery attempts. The
 SDK owns current balances, confirmations, witnesses, spent outputs and chain
 corrections. No full historical source/refund traversal gates publication.
 
-The bridge's USD valuation is not an independent exchange-rate oracle. Reserve output
-and conversion-overhead ceilings do not replace a per-operation ZEC safeguard when
-one is required. All financial limits still apply alongside qualification permits;
-no configuration value authorizes replay or bypasses a zero-new-funding restriction.
-Positive funded qualification still requires an explicit `max_funding_spend_zec`
-to bound its native-asset permits.
+The bridge's USD valuation is not an independent exchange-rate oracle. Actual
+spendable treasury funds, outstanding liabilities, the conversion-overhead limit
+and the accepted operation's network-fee cap govern a swap; there is no separate
+per-operation ZEC spending budget. Qualification runs additionally enforce per-job
+and cumulative source exposure derived from the reviewed manifest. The per-job
+permit is `source_exposure_zec / new_funding_jobs`; a job whose actual source need
+exceeds that average is denied even when the cumulative run exposure would cover
+it, so review the manifest against the largest enabled slot draw. No configuration
+value authorizes replay or bypasses a zero-new-funding restriction.
 
 Treasury command and sync drivers retain their cleanup owner when callers disconnect.
 After an unhealthy SDK mutation, they discard that SDK and reconstruct it from the
@@ -239,28 +251,41 @@ owned even when their outcome is unknown.
 
 A group has one default `ACTIVE` identity, `RETAINED` wallets with spendable
 remainders, and one `READY` wallet for each fulfilled enabled reserve claim.
-Initial and small-reserve allocations use the explicit small target; an optional
-large reserve has its own target. Each allocation commits independently. A failed
-large fill cannot roll back successful small funding. Destination credit makes a
+Small-slot allocations use the small slot's nominal bounds; an optional large
+reserve has its own independent bounds and enabled slots fund small-first. Each allocation commits
+independently. A failed large fill cannot roll back successful small funding. Destination credit makes a
 wallet usable independently of source accounting and provider completion.
 
-For each operation, the funding adapter obtains a dry `EXACT_OUTPUT` sizing
-preview with zero slippage for the USDC target. Its existing structured route-minimum
-retry may increase the nominal target only within that slot's explicit
-`max_funding_amount_usdc`. The preview's NEAR-priced ZEC principal then becomes
-the fixed input of the executable `EXACT_INPUT` quote. Configured slippage
+For each operation, the funding adapter chooses a nominal USDC amount at the
+serialized unsigned quote boundary: the fixed target, or one unbiased inclusive
+draw from the slot range. It obtains a dry `EXACT_OUTPUT` sizing preview with zero
+slippage. A recognized bridge-minimum rejection raises the operation-local floor
+to `max(configured minimum, suggested USDC minimum)` and draws again uniformly
+within the remaining authorized range; the replacement choice is persisted before
+the next request. A fixed target keeps its deterministic adjustment. Reuse is by
+current numeric bounds, not by the historical mode that produced the saved value,
+so a still-in-bounds saved choice survives a range or fixed configuration change.
+Each acquisition round allows at most three unsigned dry sizing attempts; each
+rejection must raise the provider floor, otherwise that round stops without a
+deposit. This bounds the provider-driven retry loop within one round and is not a
+transaction recovery charge; a later scheduler retry starts a new bounded round.
+The preview's NEAR-priced ZEC principal becomes the fixed input of the executable
+`EXACT_INPUT` quote. Acceptance fixes the operation's principal; an unprepared
+quote that no longer satisfies current overhead or claim policy is refreshed
+before preparation, and prepared work retains its fixed transaction fee/input
+caps. Configured slippage
 (`funding.slippage_bps`, default 500 basis points, range 0–1000) applies once to
 that live quote's expected output.
 `minAmountOut` is its execution floor, not the route's minimum supported swap
 size. There is no fixed ZEC conversion or external rate oracle, and this mode
 does not promise smaller swaps, faster execution or absence of refunds. Original
-allocation targets remain immutable, accepted quote terms remain bound to their
+allocation floors remain immutable, accepted quote terms remain bound to their
 operation, and configuration changes govern new work. Actual spendable treasury
-funds, outstanding liabilities, per-operation safeguards and explicit qualification
-permits govern funding. Reserve targets do not cap individual API payments.
+funds, outstanding liabilities, the accepted operation's fee cap and explicit
+qualification permits govern funding. Reserve bounds do not cap individual API payments.
 
 Each wallet has one initial funding claim. Its first positive observed Base USDC
-balance consumes that claim, even below the target; later zero or insufficient
+balance consumes that claim, even below its nominal minimum; later zero or insufficient
 balances never reopen it or authorize a top-up. The saved scalar is an advisory
 estimate, without historical block certificates. Existing claim generation and
 operation bindings publish the wallet role atomically with the first credit.
@@ -617,7 +642,9 @@ detail is inferred from an unparsed response. These diagnostics add no state,
 polling or financial authority. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
 polls log at debug level, clear stale error status and use the normal polling interval.
-They do not release reservations or authorize another deposit. Retained retryable
+They do not release reservations or authorize another deposit. A proposal rejected
+by its actual fee/input cap remains unstarted and logs at DEBUG while ordinary
+funding retries remain available. Retained retryable
 observation attempts (including sync, RPC and storage failures) and retained-owner
 reacquisition attempts log at DEBUG with existing retry behavior. Meaningful transitions into delayed or degraded funding
 belong at INFO; operator-required outcomes belong at WARN and explain the required
@@ -752,9 +779,9 @@ Stale phases, provider amount differences, fee deductions and missing optional
 attribution are reporting or reconciliation matters. They must not create
 financial-repair blockers, pause otherwise authorized payments or funding, or
 reopen proven completed work. For these derived observations, use the actual amount
-without requiring equality to a quote, target, provider report or locally calculated
-refund total. This does not relax quote acceptance or signing authority.
-The first positive USDC credit consumes its initial funding claim even below target.
+without requiring equality to a quote, selected amount, provider report or locally
+calculated refund total. This does not relax quote acceptance or signing authority.
+The first positive USDC credit consumes its initial funding claim even below its nominal minimum.
 An empty refund address after shielding, or later spending of recovered funds,
 does not invalidate historical recovery. Refund receipt and shielding must not
 become additional prerequisites for an independently established terminal outcome.
@@ -1189,7 +1216,8 @@ attempts, retains every receipt/proof, and checks current run authority before
 starting another unsigned attempt. A later success does not erase earlier unknowns.
 
 The first positive initial credit permanently consumes that funding claim, even
-below target. No later debit, partial return, disablement or restart grants a top-up.
+below its nominal minimum. No later debit, partial return, disablement or restart
+grants a top-up.
 Source observation continues independently using exact original ownership.
 
 Late initial funding or external transfers may update an estimate when observed,

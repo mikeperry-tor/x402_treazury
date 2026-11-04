@@ -2004,7 +2004,7 @@ async fn sync_cli_reports_independent_assets_without_provider_or_near_credential
                     .unwrap()
                     .replacen("servers={}\n", "", 1);
             text.push_str(
-                "[wallet_templates.unused]\nmode='zcash_rotation'\nmax_api_payment_usdc='invalid'\nmax_funding_spend_zec='invalid'\nmax_conversion_overhead_percent=5\n[wallet_templates.unused.reserves.small]\nfunding_amount_usdc='invalid'\n[servers.unrelated]\nlisten='127.0.0.1:8080'\nsources=['unused','missing']\nwallet='missing-wallet'\n",
+                "[wallet_templates.unused]\nmode='zcash_rotation'\nmax_api_payment_usdc='invalid'\nmax_conversion_overhead_percent=5\n[wallet_templates.unused.reserves.small]\nfunding_amount_usdc='invalid'\n[servers.unrelated]\nlisten='127.0.0.1:8080'\nsources=['unused','missing']\nwallet='missing-wallet'\n",
             );
             std::fs::write(&config, text).unwrap();
         }

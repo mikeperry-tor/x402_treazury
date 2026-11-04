@@ -951,7 +951,8 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
         "minimum",
         x402_treazury::rotation::config::ReservesConfig {
             small: x402_treazury::rotation::config::ReserveConfig {
-                funding_amount_usdc: "2".into(),
+                funding_amount_usdc: Some("2".into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: Some("2.5".into())
             },
             large: None
@@ -972,7 +973,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
         })
         .unwrap()
     };
-    s.select_quote_terms(&job.id, &job.operation_id, "2000000", "2500000")
+    s.select_quote_terms(&job.id, &job.operation_id, "2000000", "2000000")
         .unwrap();
     assert!(
         s.save_funding_quote_with_target(&job.id, &quote("1000000"), "1000000")

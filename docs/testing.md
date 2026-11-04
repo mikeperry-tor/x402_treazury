@@ -442,8 +442,11 @@ failed publication, lost acknowledgement, cancellation and reopen. The optional 
 managed recipients through the real treasury actor, scan reuse, confirmation depth,
 restart, cancellation after submission intent and funded same-height reorgs.
 The production funding worker also runs against local bridge/Base fixtures through
-concurrent quote acquisition, refund derivation, bootstrap completion and signed
-payment-triggered replacement funding, with scan-reuse and no-replay assertions.
+range-aware nominal selection, saved-choice reuse, provider-floor redraw before the
+next request, executable EXACT_INPUT route-minimum errors without a USDC redraw,
+concurrent quote acquisition,
+refund derivation, bootstrap completion and signed payment-triggered replacement
+funding, with scan-reuse and no-replay assertions.
 Reopened insufficient-funds diagnostics cannot block bootstrap or serving before
 the current worker rechecks them. A synthetic deposit regression verifies that
 readiness accepts a previously saved low estimate without a balance gate. Actual

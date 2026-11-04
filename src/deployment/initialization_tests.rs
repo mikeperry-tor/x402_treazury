@@ -20,13 +20,11 @@ base_rpc_fallback_url_envs=[]
 mode='zcash_rotation'
 max_api_payment_usdc='5'
 reserves={small={funding_amount_usdc='5'}}
-max_funding_spend_zec='0.02'
 max_conversion_overhead_percent=5
 [wallets.unselected]
 mode='zcash_rotation'
 max_api_payment_usdc='5'
 reserves={small={funding_amount_usdc='5'}}
-max_funding_spend_zec='0.02'
 max_conversion_overhead_percent=5
 [sources.api]
 spec='spec.json'

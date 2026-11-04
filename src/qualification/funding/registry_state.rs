@@ -659,7 +659,13 @@ mod tests {
         );
         db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',0,'$.limits.source_exposure_zec','0') WHERE id!='previous'", []).unwrap();
         guard.validate_state(&state).unwrap();
-        assert!(guard.check_preparation("treasury", "jc", 1).is_err());
+        assert!(
+            guard
+                .check_preparation("treasury", "jc", 1)
+                .unwrap_err()
+                .to_string()
+                .contains("funding permit missing for preparation")
+        );
         assert!(
             guard
                 .reserve_preparation("treasury", "jc", "op", 1)
@@ -763,7 +769,13 @@ mod tests {
         state["treasury_status"]["funding_jobs"].as_array_mut().unwrap().push(json!({"id":"jc","pool_id":"p","pool_name":"pool","wallet_id":"c","recipient":"0xc","phase":"QUOTED"}));
         guard.validate_state(&state).unwrap();
         assert!(guard.reserve_allocations("treasury", "pool", &[2]).is_err());
-        assert!(guard.check_preparation("treasury", "jc", 1).is_err());
+        assert!(
+            guard
+                .check_preparation("treasury", "jc", 1)
+                .unwrap_err()
+                .to_string()
+                .contains("funding permit missing for preparation")
+        );
         assert!(
             guard
                 .reserve_preparation("treasury", "jc", "old_operation", 1)
@@ -830,11 +842,10 @@ mod tests {
         );
         db.execute("UPDATE authorizations SET jobs=3,source=300", [])
             .unwrap();
-        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',3,'$.limits.source_exposure_zec','0.000002')", []).unwrap();
-        assert!(guard.validate_state(&state).is_err());
-        assert_eq!(count(), 0, "source exposure refusal is also atomic");
+        // Per-job source bounds are derived from the reviewed run exposure, so
+        // the three reviewed allocations fit the cumulative authority exactly.
         db.execute(
-            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000003')",
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',3,'$.limits.source_exposure_zec','0.000003')",
             [],
         )
         .unwrap();

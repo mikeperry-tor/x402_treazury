@@ -91,8 +91,6 @@ async fn run() -> Result<()> {
             request,
             &Limits {
                 max_output: u64::MAX,
-                max_input: 2_000_000,
-                max_fee: 100_000,
                 max_fee_bps: 500,
             },
             instant,

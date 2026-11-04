@@ -4,7 +4,8 @@ use crate::rotation::config::{ReserveConfig, ReservesConfig};
 pub(crate) fn small_reserve(target: &str) -> ReservesConfig {
     ReservesConfig {
         small: ReserveConfig {
-            funding_amount_usdc: target.into(),
+            funding_amount_usdc: Some(target.into()),
+            min_funding_amount_usdc: None,
             max_funding_amount_usdc: None,
         },
         large: None,

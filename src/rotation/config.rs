@@ -49,61 +49,233 @@ fn deadline() -> u64 {
 fn quote_window() -> u64 {
     7200
 }
+const DEFAULT_SMALL_MINIMUM_USDC: &str = "2.00";
+const DEFAULT_SMALL_MAXIMUM_USDC: &str = "5.00";
+const DEFAULT_LARGE_MINIMUM_USDC: &str = "10.00";
+const DEFAULT_LARGE_MAXIMUM_USDC: &str = "25.00";
+
+#[derive(Clone, Copy)]
+enum SizingSlot {
+    Small,
+    Large,
+}
+
+impl SizingSlot {
+    fn defaults(self) -> ReserveConfig {
+        let (minimum, maximum) = match self {
+            Self::Small => (DEFAULT_SMALL_MINIMUM_USDC, DEFAULT_SMALL_MAXIMUM_USDC),
+            Self::Large => (DEFAULT_LARGE_MINIMUM_USDC, DEFAULT_LARGE_MAXIMUM_USDC),
+        };
+        ReserveConfig {
+            funding_amount_usdc: None,
+            min_funding_amount_usdc: Some(minimum.into()),
+            max_funding_amount_usdc: Some(maximum.into()),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Small => "reserves.small",
+            Self::Large => "reserves.large",
+        }
+    }
+}
+
+/// Nominal sizing policy for one reserve slot. Bounds authorize sizing only;
+/// they are never a minimum credited balance or a maximum received amount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SizingPolicy {
+    Fixed { target: u64, maximum: u64 },
+    Range { minimum: u64, maximum: u64 },
+}
+impl SizingPolicy {
+    pub fn minimum(self) -> u64 {
+        match self {
+            Self::Fixed { target, .. } => target,
+            Self::Range { minimum, .. } => minimum,
+        }
+    }
+    pub fn maximum(self) -> u64 {
+        match self {
+            Self::Fixed { maximum, .. } => maximum,
+            Self::Range { maximum, .. } => maximum,
+        }
+    }
+    /// First nominal choice for a fresh operation: the fixed target or one
+    /// unbiased inclusive draw from the configured range.
+    pub fn draw_initial(self, rng: &mut impl rand::Rng) -> u64 {
+        match self {
+            Self::Fixed { target, .. } => target,
+            Self::Range { minimum, maximum } => inclusive_draw(minimum, maximum, rng),
+        }
+    }
+    /// Draw again after a provider floor increase. Fixed mode keeps its existing
+    /// deterministic bridge-minimum adjustment instead of becoming randomized.
+    pub fn draw_from_floor(self, floor: u64, rng: &mut impl rand::Rng) -> u64 {
+        match self {
+            Self::Fixed { target, maximum } => target.max(floor).min(maximum),
+            Self::Range { minimum, maximum } => {
+                inclusive_draw(minimum.max(floor).min(maximum), maximum, rng)
+            }
+        }
+    }
+}
+fn inclusive_draw(minimum: u64, maximum: u64, rng: &mut impl rand::Rng) -> u64 {
+    debug_assert!(minimum <= maximum);
+    if minimum >= maximum {
+        maximum
+    } else {
+        rng.random_range(minimum..=maximum)
+    }
+}
+
 /// Funding preferences for one reserve slot; never payment authority.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ReserveConfig {
-    pub funding_amount_usdc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub funding_amount_usdc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_funding_amount_usdc: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_funding_amount_usdc: Option<String>,
 }
 impl ReserveConfig {
-    pub fn target_atomic(&self) -> Result<u64> {
-        usdc_amount(&self.funding_amount_usdc).context("invalid reserve funding_amount_usdc")
+    fn resolved(self, slot: SizingSlot) -> Result<Self> {
+        match (
+            self.funding_amount_usdc.is_some(),
+            self.min_funding_amount_usdc.is_some(),
+            self.max_funding_amount_usdc.is_some(),
+        ) {
+            (false, false, false) => Ok(slot.defaults()),
+            (true, false, _) => Ok(self),
+            (false, true, true) => Ok(self),
+            (true, true, _) => anyhow::bail!(
+                "{} cannot combine funding_amount_usdc with min_funding_amount_usdc",
+                slot.label()
+            ),
+            (false, true, false) => anyhow::bail!(
+                "{} min_funding_amount_usdc requires max_funding_amount_usdc",
+                slot.label()
+            ),
+            (false, false, true) => anyhow::bail!(
+                "{} max_funding_amount_usdc requires min_funding_amount_usdc or funding_amount_usdc",
+                slot.label()
+            ),
+        }
+    }
+    pub fn policy(&self) -> Result<SizingPolicy> {
+        match (
+            &self.funding_amount_usdc,
+            &self.min_funding_amount_usdc,
+            &self.max_funding_amount_usdc,
+        ) {
+            (Some(target), None, maximum) => {
+                let target = usdc_amount(target).context("invalid reserve funding_amount_usdc")?;
+                let maximum = maximum
+                    .as_deref()
+                    .map(usdc_amount)
+                    .transpose()
+                    .context("invalid reserve max_funding_amount_usdc")?
+                    .unwrap_or(target);
+                ensure!(
+                    maximum >= target,
+                    "reserve max_funding_amount_usdc is below funding_amount_usdc"
+                );
+                Ok(SizingPolicy::Fixed { target, maximum })
+            }
+            (None, Some(minimum), Some(maximum)) => {
+                let minimum =
+                    usdc_amount(minimum).context("invalid reserve min_funding_amount_usdc")?;
+                let maximum =
+                    usdc_amount(maximum).context("invalid reserve max_funding_amount_usdc")?;
+                ensure!(
+                    maximum >= minimum,
+                    "reserve max_funding_amount_usdc is below min_funding_amount_usdc"
+                );
+                Ok(SizingPolicy::Range { minimum, maximum })
+            }
+            _ => anyhow::bail!(
+                "reserve must configure funding_amount_usdc or both min_funding_amount_usdc and max_funding_amount_usdc"
+            ),
+        }
+    }
+    pub fn minimum_atomic(&self) -> Result<u64> {
+        Ok(self.policy()?.minimum())
     }
     pub fn maximum_atomic(&self) -> Result<u64> {
-        self.max_funding_amount_usdc
-            .as_deref()
-            .map(usdc_amount)
-            .transpose()
-            .context("invalid reserve max_funding_amount_usdc")?
-            .map_or_else(|| self.target_atomic(), Ok)
+        Ok(self.policy()?.maximum())
     }
     pub fn validate(&self) -> Result<()> {
-        ensure!(
-            self.maximum_atomic()? >= self.target_atomic()?,
-            "reserve max_funding_amount_usdc is below funding_amount_usdc"
-        );
+        self.policy()?;
         Ok(())
     }
 }
-/// Named sizing slots. Slot labels are not permanent wallet classifications.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// Raw shape used to resolve absent or empty tables to slot-specific defaults.
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ReservesShape {
+    #[serde(default)]
+    small: Option<ReserveConfig>,
+    #[serde(default)]
+    large: Option<ReserveConfig>,
+}
+/// Named sizing slots. Slot labels are not permanent wallet classifications.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct ReservesConfig {
     pub small: ReserveConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub large: Option<ReserveConfig>,
+}
+impl<'de> Deserialize<'de> for ReservesConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let raw = ReservesShape::deserialize(d)?;
+        let small = raw
+            .small
+            .unwrap_or_else(|| SizingSlot::Small.defaults())
+            .resolved(SizingSlot::Small)
+            .map_err(serde::de::Error::custom)?;
+        let large = raw
+            .large
+            .map(|config| config.resolved(SizingSlot::Large))
+            .transpose()
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self { small, large })
+    }
+}
+impl Default for ReservesConfig {
+    fn default() -> Self {
+        Self {
+            small: SizingSlot::Small.defaults(),
+            large: None,
+        }
+    }
 }
 impl ReservesConfig {
     pub fn validate(&self) -> Result<()> {
         self.small.validate().context("invalid reserves.small")?;
         if let Some(large) = &self.large {
             large.validate().context("invalid reserves.large")?;
-            ensure!(
-                large.target_atomic()? >= self.small.target_atomic()?,
-                "reserves.large funding_amount_usdc is below reserves.small"
-            );
         }
         Ok(())
     }
     /// Configured reserve inventory before the first payment, not current usable capacity.
-    pub fn initial_inventory_target_atomic(&self) -> Result<U256> {
-        Ok(U256::from(self.small.target_atomic()?)
+    /// A randomized range has separate nominal lower and upper totals.
+    pub fn initial_inventory_minimum_atomic(&self) -> Result<U256> {
+        Ok(U256::from(self.small.minimum_atomic()?)
             + U256::from(
                 self.large
                     .as_ref()
-                    .map(ReserveConfig::target_atomic)
+                    .map(ReserveConfig::minimum_atomic)
+                    .transpose()?
+                    .unwrap_or(0),
+            ))
+    }
+    pub fn initial_inventory_maximum_atomic(&self) -> Result<U256> {
+        Ok(U256::from(self.small.maximum_atomic()?)
+            + U256::from(
+                self.large
+                    .as_ref()
+                    .map(ReserveConfig::maximum_atomic)
                     .transpose()?
                     .unwrap_or(0),
             ))
@@ -133,12 +305,11 @@ pub enum WalletConfig {
     },
     #[serde(rename = "zcash_rotation")]
     ZcashRotation {
+        #[serde(default)]
         reserves: ReservesConfig,
         max_api_payment_usdc: String,
         #[serde(default = "retirement_tolerance")]
         max_retirement_remainder_usdc: String,
-        #[serde(default)]
-        max_funding_spend_zec: Option<String>,
         max_conversion_overhead_percent: u32,
         #[serde(default = "attempts")]
         max_attempts: u32,
@@ -163,7 +334,6 @@ impl WalletConfig {
                 reserves,
                 max_retirement_remainder_usdc,
                 max_api_payment_usdc,
-                max_funding_spend_zec,
                 max_conversion_overhead_percent,
                 max_attempts,
             } => {
@@ -172,9 +342,6 @@ impl WalletConfig {
                     .context("invalid max_retirement_remainder_usdc")?;
                 SpendPolicy::dollars(max_api_payment_usdc)
                     .context("invalid max_api_payment_usdc")?;
-                if let Some(max) = max_funding_spend_zec {
-                    zatoshis(max).context("invalid max_funding_spend_zec")?;
-                }
                 ensure!(
                     *max_conversion_overhead_percent <= 100,
                     "max_conversion_overhead_percent must be an integer from 0 to 100"
@@ -198,7 +365,7 @@ pub fn positive_usdc(s: &str) -> Result<U256> {
     let n = SpendPolicy::dollars(s)?.max_atomic;
     ensure!(
         n.is_some_and(|n| n > U256::ZERO),
-        "funding_amount_usdc must be a positive USDC decimal"
+        "reserve funding amount must be a positive USDC decimal"
     );
     Ok(n.unwrap())
 }
@@ -490,5 +657,67 @@ impl FundingConfig {
             "invalid funding limits"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn range_draws_are_inclusive_and_fixed_sizing_never_randomizes() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let range = SizingPolicy::Range {
+            minimum: 1,
+            maximum: 2,
+        };
+        let draws = (0..256)
+            .map(|_| range.draw_initial(&mut rng))
+            .collect::<Vec<_>>();
+        assert!(draws.iter().all(|draw| (1..=2).contains(draw)));
+        assert!(draws.contains(&1) && draws.contains(&2));
+        assert_eq!(
+            SizingPolicy::Range {
+                minimum: 3,
+                maximum: 3
+            }
+            .draw_initial(&mut rng),
+            3
+        );
+        let fixed = SizingPolicy::Fixed {
+            target: 2,
+            maximum: 5,
+        };
+        assert_eq!(fixed.draw_initial(&mut rng), 2);
+        assert_eq!(fixed.draw_from_floor(4, &mut rng), 4);
+        assert_eq!(fixed.draw_from_floor(6, &mut rng), 5);
+        assert_eq!(range.draw_from_floor(2, &mut rng), 2);
+    }
+
+    #[test]
+    fn empty_or_absent_slots_resolve_their_own_defaults() {
+        let empty: ReservesConfig = toml::from_str("").unwrap();
+        assert_eq!(empty.small.minimum_atomic().unwrap(), 2_000_000);
+        assert_eq!(empty.small.maximum_atomic().unwrap(), 5_000_000);
+        assert!(empty.large.is_none());
+        let large: ReservesConfig = toml::from_str("[large]").unwrap();
+        assert_eq!(
+            large.large.as_ref().unwrap().minimum_atomic().unwrap(),
+            10_000_000
+        );
+        assert_eq!(
+            large.large.as_ref().unwrap().maximum_atomic().unwrap(),
+            25_000_000
+        );
+        let wallet: WalletConfig = toml::from_str(
+            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5",
+        )
+        .unwrap();
+        let WalletConfig::ZcashRotation { reserves, .. } = wallet else {
+            unreachable!()
+        };
+        reserves.validate().unwrap();
+        assert_eq!(reserves.small.minimum_atomic().unwrap(), 2_000_000);
     }
 }

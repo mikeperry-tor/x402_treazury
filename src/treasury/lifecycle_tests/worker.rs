@@ -347,7 +347,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     let base = BaseRpc::new(&format!("{origin}/base"), 2).unwrap();
     let (handle, commands) = actor::channel();
     let backend = Backend { treasury: handle.clone(), store: store.clone(), near: NearClient::synthetic_at(&origin).unwrap(), base: base.clone(),
-        wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())).collect(),
+        wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())).collect(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(), max_network_fee: 30_000 };
     let worker = FundingWorker::new(store.clone(), backend, 1);
     let sends = Arc::new(AtomicUsize::new(0));
@@ -559,7 +559,7 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         treasury: handle.clone(), store: store.clone(),
         near: NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
         base: BaseRpc::new("http://127.0.0.1:1", 2).unwrap(),
-        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())]),
+        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())]),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
         max_network_fee: 30_000,
     };
@@ -709,7 +709,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         treasury: handle.clone(), store: store.clone(),
         near: NearClient::synthetic_at(&origin).unwrap(),
         base: BaseRpc::new(&format!("{origin}/base"), 2).unwrap(),
-        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5,"max_attempts":1})).unwrap())]),
+        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5,"max_attempts":1})).unwrap())]),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
         max_network_fee: 30_000,
     };

@@ -618,10 +618,11 @@ async fn print_deployment_inspection(
             return Ok(true);
         }
         println!(
-            "{} managed pools ({} automatic); initial inventory target: {} USDC",
+            "{} managed pools ({} automatic); initial inventory range: {} to {} USDC",
             summary.managed_pool_count,
             summary.generated_pool_count,
-            summary.initial_inventory_target_usdc
+            summary.initial_inventory_target_usdc,
+            summary.initial_inventory_maximum_usdc
         );
         for server in deployment.inventory() {
             println!(

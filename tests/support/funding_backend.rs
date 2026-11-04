@@ -29,7 +29,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     let (store, worker) = StoreHandle::spawn(store);
     let (treasury, mut commands) = actor::channel();
     let policy = || {
-        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap()
+        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap()
     };
     let mut backend = Backend {
         treasury,
@@ -130,6 +130,17 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         );
         assert!(commands.test_is_empty(), "{field} dispatched a command");
     }
+    if let WalletConfig::ZcashRotation {
+        max_conversion_overhead_percent,
+        ..
+    } = backend.wallets.get_mut("pool").unwrap()
+    {
+        *max_conversion_overhead_percent = 3;
+    }
+    let error = backend.prepare(&job, &quote).await.unwrap_err();
+    assert!(error.is::<crate::rotation::error::QuotePolicyMismatch>());
+    assert!(commands.test_is_empty());
+    backend.wallets.insert("pool".into(), policy());
     let (result, observed) = tokio::join!(backend.prepare(&job, &quote), commands.test_observe());
     assert!(
         result
@@ -223,55 +234,18 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             .contains("funding mode changed")
     );
     backend.funding.confidentiality = "public".into();
-    if let WalletConfig::ZcashRotation {
-        max_funding_spend_zec,
-        ..
-    } = backend.wallets.get_mut("pool").unwrap()
-    {
-        *max_funding_spend_zec = Some("0.001".into());
-    }
+    // A later configuration edit has no per-quote ZEC budget to re-veto accepted
+    // work. Submission reaches the treasury owner under the prepared caps.
+    let (submitted, observed) = tokio::join!(backend.submit(&job), commands.test_observe());
+    assert!(matches!(observed, ObservedCommand::Submit(_, _)));
     assert!(
-        backend
-            .submit(&job)
-            .await
+        submitted
             .unwrap_err()
             .to_string()
-            .contains("exceeds current input cap")
+            .contains("fixture command observed")
     );
     assert!(commands.test_is_empty());
     backend.wallets.insert("pool".into(), policy());
-    // Corrupt public facts to exercise the adapter's checked sum independently
-    // of Store's preparation validator (which normally excludes this input).
-    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    let original: String = db
-        .query_row(
-            "SELECT facts FROM treasury_operations WHERE id=?1",
-            [&job.operation_id],
-            |r| r.get(0),
-        )
-        .unwrap();
-    let mut corrupt: serde_json::Value = serde_json::from_str(&original).unwrap();
-    corrupt["amount_zatoshis"] = json!(u64::MAX);
-    db.execute(
-        "UPDATE treasury_operations SET facts=?1 WHERE id=?2",
-        rusqlite::params![corrupt.to_string(), job.operation_id],
-    )
-    .unwrap();
-    assert!(
-        backend
-            .submit(&job)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds current input cap")
-    );
-    assert!(commands.test_is_empty());
-    db.execute(
-        "UPDATE treasury_operations SET facts=?1 WHERE id=?2",
-        rusqlite::params![original, job.operation_id],
-    )
-    .unwrap();
-    drop(db);
     let (result, observed) = tokio::join!(backend.submit(&job), commands.test_observe());
     assert!(result.is_err());
     let ObservedCommand::Submit(id, retry) = observed else {
@@ -570,7 +544,7 @@ fn credit_persistence_diagnostics_do_not_misidentify_local_failures_as_rpc_error
     for (reason, expected) in [
         (
             "insufficient confirmed credit",
-            "confirmed balance is below the funding target",
+            "no positive confirmed credit yet",
         ),
         (
             "credit verification requires an allocated candidate",
@@ -608,8 +582,11 @@ fn near_diagnostics_preserve_stage_and_safe_categories_only() {
             "response body transport failure",
         ),
         ("invalid NEAR JSON", "invalid JSON response"),
+        (
+            "near_bridge_minimum_atomic:400000",
+            "bridge minimum below offer",
+        ),
         ("quote overhead limit", "fee/overhead cap exceeded"),
-        ("quote input limit", "input cap exceeded"),
         ("quote output mismatch", "output target mismatch"),
         (
             "quote binding mismatch: secret-recipient",
@@ -630,6 +607,14 @@ fn near_diagnostics_preserve_stage_and_safe_categories_only() {
         safe_error(&error, &FundingPhase::Allocated)
             .contains("NEAR asset catalog: invalid asset catalog")
     );
+}
+
+#[test]
+fn overhead_policy_detection_requires_the_typed_error() {
+    let typed = anyhow::Error::new(crate::rotation::near::OverheadLimit("quote overhead limit"));
+    assert!(typed.is::<crate::rotation::near::OverheadLimit>());
+    let prose = anyhow::anyhow!("quote overhead limit");
+    assert!(!prose.is::<crate::rotation::near::OverheadLimit>());
 }
 
 #[test]
@@ -753,7 +738,7 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     let backend = Backend {
         treasury, store: store.clone(), near: super::super::near::NearClient::test_at(&origin).unwrap(),
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
-        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())].into(),
+        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())].into(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
         max_network_fee: 10000,
     };
@@ -907,7 +892,6 @@ fn startup_condition_classification_uses_producer_types_not_message_copies() {
         FundingCondition::Disabled,
         FundingCondition::CostLimit,
         FundingCondition::AmountLimit,
-        FundingCondition::InputLimit,
         FundingCondition::InsufficientFunds,
     ] {
         let text = condition.to_string();
@@ -930,5 +914,298 @@ fn startup_condition_classification_uses_producer_types_not_message_copies() {
     assert_eq!(
         super::funding_condition(&anyhow::Error::new(AdmissionError::FundingPermitDenied)),
         Some(FundingCondition::QualificationDenied)
+    );
+}
+
+#[tokio::test]
+async fn sizing_policy_resolves_the_job_slot_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::config::ReservesConfig {
+        small: crate::rotation::config::ReserveConfig {
+            funding_amount_usdc: None,
+            min_funding_amount_usdc: Some("2".into()),
+            max_funding_amount_usdc: Some("5".into()),
+        },
+        large: Some(crate::rotation::config::ReserveConfig {
+            funding_amount_usdc: None,
+            min_funding_amount_usdc: Some("10".into()),
+            max_funding_amount_usdc: Some("25".into()),
+        }),
+    };
+    let pool = store
+        .ensure_capacity_group(
+            "pool",
+            &reserves,
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+    store
+        .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Small, true)
+        .unwrap();
+    store
+        .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Large, true)
+        .unwrap();
+    let jobs = store.funding_jobs().unwrap();
+    let small = jobs
+        .iter()
+        .find(|job| job.target == "2000000")
+        .unwrap()
+        .clone();
+    let large = jobs
+        .iter()
+        .find(|job| job.target == "10000000")
+        .unwrap()
+        .clone();
+    let (store, _owner) = StoreHandle::spawn(store);
+    let (treasury, _commands) = actor::channel();
+    let backend = Backend {
+        treasury,
+        store,
+        near: super::super::near::NearClient::new(None).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        wallets: [(
+            "pool".into(),
+            serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"},"large":{"min_funding_amount_usdc":"10","max_funding_amount_usdc":"25"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap(),
+        )]
+        .into(),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
+        max_network_fee: 10000,
+    };
+    assert_eq!(
+        backend.sizing_policy(&small).await.unwrap(),
+        crate::rotation::config::SizingPolicy::Range {
+            minimum: 2_000_000,
+            maximum: 5_000_000,
+        }
+    );
+    assert_eq!(
+        backend.sizing_policy(&large).await.unwrap(),
+        crate::rotation::config::SizingPolicy::Range {
+            minimum: 10_000_000,
+            maximum: 25_000_000,
+        }
+    );
+}
+
+#[tokio::test]
+async fn quote_prerequisite_draws_and_persists_within_the_configured_slot_range() {
+    use crate::rotation::config::ReservesConfig;
+    use crate::rotation::store::AllocationKind;
+    use tokio_util::sync::CancellationToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut owner = crate::treasury::Treasury::create(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        2_000_000,
+        Some(zeroize::Zeroizing::new(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                .into(),
+        )),
+    )
+    .await
+    .unwrap();
+    owner.configure_sync(
+        crate::treasury::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
+    );
+    let reserves = ReservesConfig {
+        small: crate::rotation::config::ReserveConfig {
+            funding_amount_usdc: None,
+            min_funding_amount_usdc: Some("2".into()),
+            max_funding_amount_usdc: Some("5".into()),
+        },
+        large: None,
+    };
+    let pool = owner
+        .ensure_capacity_group(
+            "pool".into(),
+            reserves,
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let (treasury, commands) = actor::channel();
+    let mut backend = Backend {
+        treasury,
+        store: store.clone(),
+        near: super::super::near::NearClient::new(None).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        wallets: [(
+            "pool".into(),
+            serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap(),
+        )]
+        .into(),
+        funding: serde_json::from_value(
+            json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
+        )
+        .unwrap(),
+        max_network_fee: 10_000,
+    };
+    let stop = CancellationToken::new();
+    let actor = tokio::spawn(
+        owner.run_commands(
+            commands,
+            crate::treasury::submission::GrpcSubmission::new(
+                "http://127.0.0.1:1".into(),
+                "http://127.0.0.1:1".into(),
+            )
+            .unwrap(),
+            stop.clone(),
+        ),
+    );
+    let request = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        backend.quote_prerequisite(&job),
+    )
+    .await
+    .expect("quote prerequisite completed")
+    .unwrap();
+    let target: u64 = request.target.parse().unwrap();
+    assert!((2_000_000..=5_000_000).contains(&target));
+    assert_eq!(request.limits.max_output, 5_000_000);
+    let job_id = job.id.clone();
+    let operation = job.operation_id.clone();
+    let redrawn = store
+        .call(move |s| s.reselect_quote_terms(&job_id, &operation, "4000000", "4500000"))
+        .await
+        .unwrap();
+    let reused = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        backend.quote_prerequisite(&job),
+    )
+    .await
+    .expect("redrawn prerequisite completed")
+    .unwrap();
+    assert_eq!(reused.target, redrawn.target.to_string());
+    assert_eq!(reused.limits.max_output, 5_000_000);
+    let id = job.id.clone();
+    let saved = store
+        .call(move |s| s.quote_terms_snapshot(&id))
+        .await
+        .unwrap();
+    drop(backend);
+    drop(store);
+    stop.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), actor)
+        .await
+        .expect("treasury actor shutdown")
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved, Some((redrawn.target.to_string(), "5000000".into())));
+}
+
+#[tokio::test]
+async fn sizing_policy_uses_the_default_small_range_when_reserves_are_omitted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = store
+        .ensure_capacity_group(
+            "pool",
+            &crate::rotation::config::ReservesConfig::default(),
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+    store
+        .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Small, true)
+        .unwrap();
+    let job = store.funding_jobs().unwrap().remove(0);
+    let (store, _owner) = StoreHandle::spawn(store);
+    let (treasury, _commands) = actor::channel();
+    let backend = Backend {
+        treasury,
+        store,
+        near: super::super::near::NearClient::new(None).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        wallets: [(
+            "pool".into(),
+            serde_json::from_value(json!({"mode":"zcash_rotation","max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap(),
+        )]
+        .into(),
+        funding: serde_json::from_value(
+            json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
+        )
+        .unwrap(),
+        max_network_fee: 10_000,
+    };
+    assert_eq!(
+        backend.sizing_policy(&job).await.unwrap(),
+        crate::rotation::config::SizingPolicy::Range {
+            minimum: 2_000_000,
+            maximum: 5_000_000,
+        }
+    );
+}
+
+#[tokio::test]
+async fn sizing_policy_uses_the_default_large_range_for_an_empty_slot() {
+    let config: WalletConfig = serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"large":{}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap();
+    let WalletConfig::ZcashRotation { reserves, .. } = config.clone() else {
+        panic!("managed config")
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = store
+        .ensure_capacity_group(
+            "pool",
+            &reserves,
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+    store
+        .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Large, true)
+        .unwrap();
+    let job = store.funding_jobs().unwrap().remove(0);
+    let (store, _owner) = StoreHandle::spawn(store);
+    let (treasury, _commands) = actor::channel();
+    let backend = Backend {
+        treasury,
+        store,
+        near: super::super::near::NearClient::new(None).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        wallets: [("pool".into(), config)].into(),
+        funding: serde_json::from_value(
+            json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
+        )
+        .unwrap(),
+        max_network_fee: 10_000,
+    };
+    assert_eq!(
+        backend.sizing_policy(&job).await.unwrap(),
+        crate::rotation::config::SizingPolicy::Range {
+            minimum: 10_000_000,
+            maximum: 25_000_000,
+        }
     );
 }

@@ -4,6 +4,15 @@ pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recove
 
 use super::*;
 
+/// Selected nominal sizing terms for one unsigned quote. `target` is the chosen
+/// amount for this operation (or the fixed target); `ceiling` is the authorized
+/// maximum. Neither is a minimum credited balance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuoteTerms {
+    pub target: U256,
+    pub ceiling: U256,
+}
+
 /// Keep the USDC result separate from nominal sizing authority. Accepted output
 /// quotes, including journals without an explicit mode, use one amount for both.
 fn quote_amounts(value: &serde_json::Value) -> Result<(String, String)> {
@@ -92,7 +101,14 @@ pub struct FundingJob {
     pub pool_name: String,
     pub wallet_id: String,
     pub recipient: String,
+    /// Original allocation floor; not the selected or credited amount.
     pub target: String,
+    /// Selected nominal USDC amount for the current operation.
+    #[serde(default)]
+    pub selected_output: Option<String>,
+    /// Expected USDC output of the accepted executable quote.
+    #[serde(default)]
+    pub accepted_output: Option<String>,
     pub phase: FundingPhase,
     pub operation_id: String,
     pub attempts: u32,
@@ -375,6 +391,13 @@ impl Store {
         self.funding_restriction
             .require_new_funding("funding_attempt_start")?;
         self.check_job_permit(job, 1)?;
+        self.require_funding_recovery_allowance(job, max_attempts)
+    }
+    pub(crate) fn require_funding_recovery_allowance(
+        &self,
+        job: &str,
+        max_attempts: u32,
+    ) -> Result<()> {
         ensure!(
             self.funding_recovery_count(job)? <= u64::from(max_attempts),
             crate::rotation::error::RecoveryAttemptLimit
@@ -504,28 +527,146 @@ impl Store {
         Ok((self.id.clone(), revision, self.funding_sync_observation()?))
     }
 
-    /// Snapshot current configuration at a proven-clean quote boundary. This is
-    /// unsigned request history, never a source reservation or an accepted quote.
+    /// Test/fixture-facing selection at a proven-clean quote boundary. Production
+    /// attempts use `select_quote_terms_for_attempt`, which also checks the durable
+    /// recovery allowance. This is unsigned request history, never a source
+    /// reservation or an accepted quote.
+    /// A clean saved choice is reused across ordinary failures and restarts when
+    /// it remains within the current claim and operation floor. This avoids a
+    /// historical mode ledger while still repairing choices below a new floor.
+    #[doc(hidden)]
     pub fn select_quote_terms(
         &mut self,
         job: &str,
         operation: &str,
-        target: &str,
-        ceiling: &str,
-    ) -> Result<()> {
+        floor: &str,
+        preferred: &str,
+    ) -> Result<QuoteTerms> {
+        let claim = self.current_funding_claim(job)?;
+        self.select_quote_terms_for_claim(job, operation, &claim, floor, preferred, true)
+    }
+
+    /// Serialized selection for a fresh funding attempt. The recovery allowance
+    /// and current permit/claim authority are checked once at this boundary.
+    pub(crate) fn select_quote_terms_for_attempt(
+        &mut self,
+        job: &str,
+        operation: &str,
+        preferred: &str,
+        max_attempts: u32,
+    ) -> Result<QuoteTerms> {
+        self.require_funding_recovery_allowance(job, max_attempts)?;
+        let claim = self.current_funding_claim(job)?;
+        self.select_quote_terms_for_claim(
+            job,
+            operation,
+            &claim,
+            &claim.target.to_string(),
+            preferred,
+            true,
+        )
+    }
+
+    fn select_quote_terms_for_claim(
+        &mut self,
+        job: &str,
+        operation: &str,
+        claim: &super::capacity::FundingClaim,
+        floor: &str,
+        preferred: &str,
+        initial: bool,
+    ) -> Result<QuoteTerms> {
+        let (floor, preferred, ceiling) =
+            self.quote_term_authority(job, claim, floor, preferred, initial)?;
+        let chosen = if initial {
+            let saved: Option<Option<String>> = self
+                .db
+                .query_row(
+                    "SELECT quote_target FROM funding_progress WHERE job_id=?1 AND operation_id=?2",
+                    params![job, operation],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let saved = saved.flatten().and_then(|value| amount(&value).ok());
+            saved
+                .filter(|saved| *saved >= floor && *saved <= ceiling)
+                .unwrap_or(preferred)
+        } else {
+            preferred
+        };
+        self.persist_quote_terms(job, operation, chosen, ceiling)?;
+        Ok(QuoteTerms {
+            target: chosen,
+            ceiling,
+        })
+    }
+
+    /// Replace an unsigned choice after a provider floor increase. The saved
+    /// choice above the new floor is not reused, so restarts retain the redraw.
+    /// Current funding and permit authority is revalidated because the claim may
+    /// have changed since the initial selection; a bounded redraw must not bypass
+    /// withdrawal or qualification state.
+    pub(crate) fn reselect_quote_terms(
+        &mut self,
+        job: &str,
+        operation: &str,
+        floor: &str,
+        preferred: &str,
+    ) -> Result<QuoteTerms> {
+        let claim = self.current_funding_claim(job)?;
+        self.select_quote_terms_for_claim(job, operation, &claim, floor, preferred, false)
+    }
+
+    fn quote_term_authority(
+        &self,
+        job: &str,
+        claim: &super::capacity::FundingClaim,
+        floor: &str,
+        preferred: &str,
+        initial: bool,
+    ) -> Result<(U256, U256, U256)> {
         self.funding_restriction
             .require_new_funding("funding_quote_start")?;
         self.check_job_permit(job, 1)?;
-        let claim = self.current_funding_claim(job)?;
+        let floor = amount(floor)?;
+        let preferred = amount(preferred)?;
+        let ceiling = claim.maximum_output;
         ensure!(
-            amount(target)? == claim.target && amount(ceiling)? == claim.maximum_output,
+            floor == claim.target || (!initial && floor > claim.target),
             "funding quote policy changed"
         );
         ensure!(
-            amount(target)? > U256::ZERO && amount(ceiling)? >= amount(target)?,
+            floor > U256::ZERO && ceiling >= floor,
             "invalid funding quote terms"
         );
-        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?2 AND preparation IS NOT NULL) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1)",params![job,operation,target,ceiling])?;
+        // A fresh draw uses current policy, while the claim is the spending
+        // authority. Repair a stale draw into the current claim instead of
+        // failing the attempt when the two projections briefly differ.
+        let preferred = preferred.max(floor).min(ceiling);
+        Ok((floor, preferred, ceiling))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quote_terms_snapshot(&self, job: &str) -> Result<Option<(String, String)>> {
+        let row: Option<(Option<String>, Option<String>)> = self
+            .db
+            .query_row(
+                "SELECT quote_target,quote_ceiling FROM funding_progress WHERE job_id=?1",
+                [job],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(target, ceiling)| Some((target?, ceiling?))))
+    }
+
+    fn persist_quote_terms(
+        &mut self,
+        job: &str,
+        operation: &str,
+        target: U256,
+        ceiling: U256,
+    ) -> Result<()> {
+        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?2 AND preparation IS NOT NULL) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1)",params![job,operation,target.to_string(),ceiling.to_string()])?;
         ensure!(changed == 1, "funding quote boundary changed");
         Ok(())
     }
@@ -1213,7 +1354,7 @@ impl Store {
         self.save_quote(id, quote, None, None)
     }
     /// Persist the accepted bridge output separately from the immutable original
-    /// allocation target, after validating the current claim's allowed range.
+    /// allocation floor, after validating the current claim's allowed range.
     pub fn save_funding_quote_with_target(
         &mut self,
         id: &str,
@@ -1480,7 +1621,7 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
     read_jobs_matching(db, None, true)
 }
 fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Result<Vec<FundingJob>> {
-    let query = "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,j.phase,j.operation_id,j.attempts,j.next_poll,j.last_error,j.provider_observed_at FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id";
+    let query = "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,j.phase,j.operation_id,j.attempts,j.next_poll,j.last_error,j.provider_observed_at,j.quote_target,j.accepted_output FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id";
     let query = if job.is_some() {
         format!("{query} WHERE f.id=?1")
     } else {
@@ -1517,6 +1658,8 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
                 .ok()
                 .flatten()
                 .and_then(|n| u64::try_from(n).ok()),
+            r.get::<_, Option<String>>(12).unwrap_or(None),
+            r.get::<_, Option<String>>(13).unwrap_or(None),
         ))
     })?;
     rows.map(|r| {
@@ -1533,6 +1676,8 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             next_poll,
             last_error,
             provider_observed_at,
+            selected_output,
+            accepted_output,
         ) = r.context("missing or invalid funding operation journal")?;
         // Keep execution/stepping failures outside the diagnostic-value fallback.
         let (started_at, error_streak, timed_out): (Option<i64>, u32, bool) = db
@@ -1597,6 +1742,8 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             wallet_id,
             recipient,
             target,
+            selected_output,
+            accepted_output,
             phase: parsed_phase,
             operation_id,
             attempts,
@@ -2147,11 +2294,13 @@ mod completion_tests {
         let (_dir, mut store, _) = fixture();
         let reserves = crate::rotation::config::ReservesConfig {
             small: crate::rotation::config::ReserveConfig {
-                funding_amount_usdc: "1".into(),
+                funding_amount_usdc: Some("1".into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: None,
             },
             large: Some(crate::rotation::config::ReserveConfig {
-                funding_amount_usdc: "8".into(),
+                funding_amount_usdc: Some("8".into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: None,
             }),
         };
@@ -2415,7 +2564,8 @@ mod completion_tests {
         let (_dir, mut store, job) = fixture();
         let configured = |target: &str, ceiling: &str| crate::rotation::config::ReservesConfig {
             small: crate::rotation::config::ReserveConfig {
-                funding_amount_usdc: target.into(),
+                funding_amount_usdc: Some(target.into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: Some(ceiling.into()),
             },
             large: None,
@@ -2429,7 +2579,7 @@ mod completion_tests {
             )
             .unwrap();
         store
-            .select_quote_terms(&job.id, &job.operation_id, "20", "30")
+            .select_quote_terms(&job.id, &job.operation_id, "20", "20")
             .unwrap();
         store
             .configure_capacity_group(
@@ -2440,7 +2590,7 @@ mod completion_tests {
             )
             .unwrap();
         store
-            .select_quote_terms(&job.id, &job.operation_id, "2", "3")
+            .select_quote_terms(&job.id, &job.operation_id, "2", "2")
             .unwrap();
         let saved:(String,String,String)=store.db.query_row("SELECT f.target,j.quote_target,j.quote_ceiling FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1",[&job.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(saved, (job.target.clone(), "2".into(), "3".into()));
@@ -2449,7 +2599,7 @@ mod completion_tests {
             .unwrap();
         assert!(
             store
-                .select_quote_terms(&job.id, &job.operation_id, "20", "30")
+                .select_quote_terms(&job.id, &job.operation_id, "20", "20")
                 .is_err()
         );
         assert_eq!(
@@ -3994,6 +4144,10 @@ mod completion_tests {
         for terminal in [SwapStatus::Failed, SwapStatus::Refunded] {
             let (_dir, mut store, job) = fixture();
             store
+                .select_quote_terms(&job.id, &job.operation_id, &job.target, &job.target)
+                .unwrap();
+            assert!(store.quote_terms_snapshot(&job.id).unwrap().is_some());
+            store
                 .save_funding_quote(
                     &job.id,
                     &serde_json::to_vec(
@@ -4019,6 +4173,7 @@ mod completion_tests {
             let replacement = store.funding_job(&job.id).unwrap().unwrap();
             assert_ne!(replacement.operation_id, job.operation_id);
             assert_eq!(replacement.phase, FundingPhase::Allocated);
+            assert_eq!(store.quote_terms_snapshot(&job.id).unwrap(), None);
             assert_eq!(store.prepared_bytes(&job.operation_id).unwrap(), raw);
             assert_eq!(
                 store.operation(&job.operation_id).unwrap().submission,
@@ -4203,5 +4358,378 @@ mod recovery_classification_tests {
         );
         assert!(store.close_unprepared_funding(&job.id).is_err());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod quote_selection_tests {
+    use super::*;
+    use crate::rotation::config::{ReserveConfig, ReservesConfig};
+
+    fn scenario(
+        minimum: Option<&str>,
+        maximum: Option<&str>,
+        target: Option<&str>,
+    ) -> (tempfile::TempDir, Store, FundingJob) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = ReservesConfig {
+            small: ReserveConfig {
+                funding_amount_usdc: target.map(str::to_owned),
+                min_funding_amount_usdc: minimum.map(str::to_owned),
+                max_funding_amount_usdc: maximum.map(str::to_owned),
+            },
+            large: None,
+        };
+        let pool = store
+            .ensure_capacity_group("pool", &reserves, Some(U256::from(1_000_000)), 0)
+            .unwrap();
+        store
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap();
+        let job = store.funding_jobs().unwrap().remove(0);
+        (dir, store, job)
+    }
+
+    #[test]
+    fn randomized_choices_are_reused_and_provider_redraws_replace_them() {
+        let (dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        let treasury = store.id().to_owned();
+        let first = store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "3000000")
+            .unwrap();
+        assert_eq!(first.target, U256::from(3_000_000));
+        let reused = store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "4000000")
+            .unwrap();
+        assert_eq!(reused.target, U256::from(3_000_000));
+        let redrawn = store
+            .reselect_quote_terms(&job.id, &job.operation_id, "4000000", "4500000")
+            .unwrap();
+        assert_eq!(redrawn.target, U256::from(4_500_000));
+        drop(store);
+        store = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &treasury,
+        )
+        .unwrap();
+        let after_restart = store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "4000000")
+            .unwrap();
+        assert_eq!(after_restart.target, U256::from(4_500_000));
+        let second_redraw = store
+            .reselect_quote_terms(&job.id, &job.operation_id, "4800000", "4900000")
+            .unwrap();
+        assert_eq!(second_redraw.target, U256::from(4_900_000));
+        drop(store);
+        store = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &treasury,
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .select_quote_terms(&job.id, &job.operation_id, "2000000", "4000000")
+                .unwrap()
+                .target,
+            U256::from(4_900_000)
+        );
+        let saved: (String, String) = store
+            .db
+            .query_row(
+                "SELECT quote_target,quote_ceiling FROM funding_progress WHERE job_id=?1",
+                [&job.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, ("4900000".into(), "5000000".into()));
+    }
+
+    #[test]
+    fn attempt_selection_checks_recovery_allowance_and_draws_within_the_claim() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        let first = store
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000", 0)
+            .unwrap();
+        assert_eq!(first.target, U256::from(3_500_000));
+        assert_eq!(first.ceiling, U256::from(5_000_000));
+        let reused = store
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 0)
+            .unwrap();
+        assert_eq!(reused.target, U256::from(3_500_000));
+        store
+            .db
+            .execute(
+                "INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,?2,'\"QUOTED\"')",
+                params![uuid::Uuid::new_v4().to_string(), job.id],
+            )
+            .unwrap();
+        let error = store
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 0)
+            .unwrap_err();
+        assert!(error.is::<crate::rotation::error::RecoveryAttemptLimit>());
+        let allowed = store
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 1)
+            .unwrap();
+        assert_eq!(allowed.target, U256::from(3_500_000));
+    }
+
+    #[test]
+    fn saved_choice_outside_current_bounds_is_repaired() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "2500000")
+            .unwrap();
+        let reconfigure = |store: &mut Store, min: &str, max: &str| {
+            store
+                .ensure_capacity_group(
+                    "pool",
+                    &ReservesConfig {
+                        small: ReserveConfig {
+                            funding_amount_usdc: None,
+                            min_funding_amount_usdc: Some(min.into()),
+                            max_funding_amount_usdc: Some(max.into()),
+                        },
+                        large: None,
+                    },
+                    Some(U256::from(1_000_000)),
+                    0,
+                )
+                .unwrap();
+        };
+        reconfigure(&mut store, "3", "4");
+        let above_floor = store
+            .select_quote_terms(&job.id, &job.operation_id, "3000000", "3500000")
+            .unwrap();
+        assert_eq!(above_floor.target, U256::from(3_500_000));
+        reconfigure(&mut store, "2", "3");
+        let above_ceiling = store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "2000000")
+            .unwrap();
+        assert_eq!(above_ceiling.target, U256::from(2_000_000));
+        assert_eq!(
+            store.quote_terms_snapshot(&job.id).unwrap(),
+            Some(("2000000".into(), "3000000".into()))
+        );
+    }
+
+    #[test]
+    fn preferred_outside_current_claim_is_repaired_to_bounds() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        let high = store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "9000000")
+            .unwrap();
+        assert_eq!(high.target, U256::from(5_000_000));
+        let low = store
+            .reselect_quote_terms(&job.id, &job.operation_id, "3000000", "1000000")
+            .unwrap();
+        assert_eq!(low.target, U256::from(3_000_000));
+    }
+
+    #[test]
+    fn provider_redraw_does_not_consume_recovery_allowance() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        store
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3000000", 0)
+            .unwrap();
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM funding_recovery WHERE job_id=?1",
+                    [&job.id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        store
+            .reselect_quote_terms(&job.id, &job.operation_id, "4000000", "4500000")
+            .unwrap();
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM funding_recovery WHERE job_id=?1",
+                    [&job.id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn fixed_mode_reuses_its_bridge_adjusted_choice_within_bounds() {
+        let (_dir, mut store, job) = scenario(None, Some("5"), Some("2"));
+        store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "2000000")
+            .unwrap();
+        assert_eq!(
+            store
+                .reselect_quote_terms(&job.id, &job.operation_id, "4000000", "4000000")
+                .unwrap()
+                .target,
+            U256::from(4_000_000)
+        );
+        let reused = store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "2000000")
+            .unwrap();
+        assert_eq!(reused.target, U256::from(4_000_000));
+    }
+
+    #[test]
+    fn range_choice_survives_fixed_and_range_bound_changes() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        assert_eq!(
+            store
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3000000", 0)
+                .unwrap()
+                .target,
+            U256::from(3_000_000)
+        );
+        let reconfigure = |store: &mut Store, target: Option<&str>, min: &str, max: &str| {
+            store
+                .ensure_capacity_group(
+                    "pool",
+                    &ReservesConfig {
+                        small: ReserveConfig {
+                            funding_amount_usdc: target.map(str::to_owned),
+                            min_funding_amount_usdc: target.is_none().then(|| min.to_owned()),
+                            max_funding_amount_usdc: Some(max.to_owned()),
+                        },
+                        large: None,
+                    },
+                    Some(U256::from(1_000_000)),
+                    0,
+                )
+                .unwrap();
+        };
+        reconfigure(&mut store, Some("2"), "2", "5");
+        assert_eq!(
+            store
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 0)
+                .unwrap()
+                .target,
+            U256::from(3_000_000)
+        );
+        reconfigure(&mut store, None, "3", "4");
+        assert_eq!(
+            store
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000", 0)
+                .unwrap()
+                .target,
+            U256::from(3_000_000)
+        );
+        reconfigure(&mut store, None, "4", "5");
+        assert_eq!(
+            store
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4500000", 0)
+                .unwrap()
+                .target,
+            U256::from(4_500_000)
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_selection_serializes_and_reuses_the_first_draw() {
+        let (_dir, store, job) = scenario(Some("2"), Some("5"), None);
+        let (store, _owner) = crate::rotation::store::StoreHandle::spawn(store);
+        let (job_a, job_b) = (job.clone(), job.clone());
+        let (first, second) = tokio::join!(
+            store.call(move |s| {
+                Ok(
+                    s.select_quote_terms_for_attempt(&job_a.id, &job_a.operation_id, "3000000", 0)?
+                        .target,
+                )
+            }),
+            store.call(move |s| {
+                Ok(
+                    s.select_quote_terms_for_attempt(&job_b.id, &job_b.operation_id, "4000000", 0)?
+                        .target,
+                )
+            })
+        );
+        let (first, second) = (first.unwrap(), second.unwrap());
+        assert_eq!(first, second);
+        assert!((U256::from(3_000_000)..=U256::from(5_000_000)).contains(&first));
+    }
+
+    #[test]
+    fn accepted_quote_closes_the_unsigned_redraw_boundary() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "3000000")
+            .unwrap();
+        let quote = serde_json::to_vec(&serde_json::json!({
+            "request":{"amount":"3000000","recipient":job.recipient}
+        }))
+        .unwrap();
+        store.save_funding_quote(&job.id, &quote).unwrap();
+        assert!(
+            store
+                .reselect_quote_terms(&job.id, &job.operation_id, "4000000", "4500000")
+                .is_err()
+        );
+        assert_eq!(
+            store.quote_terms_snapshot(&job.id).unwrap(),
+            Some(("3000000".into(), "5000000".into()))
+        );
+    }
+
+    #[test]
+    fn provider_redraw_cannot_change_a_refreshed_operation() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "3000000")
+            .unwrap();
+        let quote = serde_json::to_vec(&serde_json::json!({
+            "request":{"amount":"3000000","recipient":job.recipient}
+        }))
+        .unwrap();
+        store.save_funding_quote(&job.id, &quote).unwrap();
+        store.refresh_unprepared_quote(&job.id).unwrap();
+        assert!(
+            store
+                .reselect_quote_terms(&job.id, &job.operation_id, "4000000", "4500000")
+                .is_err()
+        );
+        assert_eq!(store.quote_terms_snapshot(&job.id).unwrap(), None);
+    }
+
+    #[test]
+    fn redraw_revalidates_current_pool_authority() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        store
+            .select_quote_terms(&job.id, &job.operation_id, "2000000", "3000000")
+            .unwrap();
+        store.disable_pool(&job.pool_name).unwrap();
+        assert!(
+            store
+                .reselect_quote_terms(&job.id, &job.operation_id, "4000000", "4500000")
+                .is_err()
+        );
+        assert_eq!(
+            store.quote_terms_snapshot(&job.id).unwrap(),
+            Some(("3000000".into(), "5000000".into()))
+        );
+    }
+
+    #[test]
+    fn provider_floor_above_the_configured_ceiling_is_not_written() {
+        let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
+        assert!(
+            store
+                .reselect_quote_terms(&job.id, &job.operation_id, "6000000", "6000000")
+                .is_err()
+        );
     }
 }

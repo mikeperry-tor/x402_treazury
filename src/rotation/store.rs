@@ -133,7 +133,9 @@ pub struct ReserveClaimStatus {
     pub enabled: bool,
     pub generation: i64,
     pub wallet_id: Option<String>,
+    /// Lower nominal sizing bound for the slot; not a credited-balance promise.
     pub target_atomic: String,
+    /// Authorized nominal ceiling for this slot, including bridge-minimum headroom.
     pub maximum_output_atomic: String,
     pub destination_ready: bool,
     /// Completed initial funding still occupies an uncredited reserve slot.
@@ -157,7 +159,7 @@ pub struct AddressStatus {
     pub id: String,
     pub address: String,
     pub role: String,
-    /// Original immutable allocation target, never current payment capacity.
+    /// Original immutable allocation floor, never current payment capacity.
     pub target: String,
     /// Last saved confirmed observation, not fresh admission authority.
     #[serde(rename = "balance_estimate_atomic")]

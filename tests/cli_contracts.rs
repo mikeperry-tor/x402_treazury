@@ -75,7 +75,6 @@ base_rpc_fallback_url_envs=[]
 mode='zcash_rotation'
 max_api_payment_usdc='1'
 reserves={{small={{funding_amount_usdc='1'}}}}
-max_funding_spend_zec='0.02'
 max_conversion_overhead_percent=5
 [sources.api]
 spec='spec.json'
@@ -739,7 +738,6 @@ base_rpc_fallback_url_envs=[]
 mode="zcash_rotation"
 max_api_payment_usdc="1"
 reserves={small={funding_amount_usdc="1"},large={funding_amount_usdc="2"}}
-max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.static_unused]
 mode="static"
@@ -1774,7 +1772,6 @@ base_rpc_fallback_url_envs=[]
 mode="zcash_rotation"
 max_api_payment_usdc="1"
 reserves={small={funding_amount_usdc="1"},large={funding_amount_usdc="2"}}
-max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.static_unused]
 mode="static"

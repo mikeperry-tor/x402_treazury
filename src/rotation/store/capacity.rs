@@ -161,7 +161,7 @@ pub(super) fn publish_funded_role(db: &Connection, job: &str) -> Result<()> {
 }
 
 /// Reopen-only slot configuration changes affect new work. Incomplete allocations
-/// preserve their wallet, generation, original target and recovery history.
+/// preserve their wallet, generation, original allocation floor and recovery history.
 pub(super) fn configure_reserves(
     db: &Connection,
     pool: &str,
@@ -173,7 +173,7 @@ pub(super) fn configure_reserves(
         ("large", reserves.large.as_ref()),
     ] {
         if let Some(config) = config {
-            db.execute("INSERT INTO reserve_claims(pool_id,slot,enabled,target,maximum_output) VALUES (?1,?2,1,?3,?4) ON CONFLICT(pool_id,slot) DO UPDATE SET enabled=1,target=excluded.target,maximum_output=excluded.maximum_output",params![pool,slot,config.target_atomic()?.to_string(),config.maximum_atomic()?.to_string()])?;
+            db.execute("INSERT INTO reserve_claims(pool_id,slot,enabled,target,maximum_output) VALUES (?1,?2,1,?3,?4) ON CONFLICT(pool_id,slot) DO UPDATE SET enabled=1,target=excluded.target,maximum_output=excluded.maximum_output",params![pool,slot,config.minimum_atomic()?.to_string(),config.maximum_atomic()?.to_string()])?;
         } else {
             let ready: Option<(String,i64)>=db.query_row("SELECT c.wallet_id,c.generation FROM reserve_claims c JOIN wallets w ON w.id=c.wallet_id WHERE c.pool_id=?1 AND c.slot=?2 AND w.role='READY'",params![pool,slot],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
             if let Some((wallet, generation)) = ready {
@@ -482,11 +482,13 @@ mod tests {
     fn reserves(large: bool) -> ReservesConfig {
         ReservesConfig {
             small: ReserveConfig {
-                funding_amount_usdc: "2".into(),
+                funding_amount_usdc: Some("2".into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: None,
             },
             large: large.then(|| ReserveConfig {
-                funding_amount_usdc: "10".into(),
+                funding_amount_usdc: Some("10".into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: None,
             }),
         }
@@ -867,7 +869,7 @@ mod tests {
         configure_reserves(&db, "pool", &reserves(false)).unwrap();
         assert!(current_funding_claim(&db, &large).unwrap().is_none());
         let mut changed = reserves(true);
-        changed.large.as_mut().unwrap().funding_amount_usdc = "20".into();
+        changed.large.as_mut().unwrap().funding_amount_usdc = Some("20".into());
         configure_reserves(&db, "pool", &changed).unwrap();
         assert_eq!(
             current_funding_claim(&db, &large).unwrap().unwrap().target,

@@ -106,10 +106,7 @@ impl StartupPath {
             Some(Condition::Disabled) => "funding_disabled",
             Some(Condition::QualificationDenied) => "qualification_funding_denied",
             Some(
-                Condition::CostLimit
-                | Condition::AmountLimit
-                | Condition::InputLimit
-                | Condition::AuthenticationRequired,
+                Condition::CostLimit | Condition::AmountLimit | Condition::AuthenticationRequired,
             ) => "funding_policy_requires_review",
             Some(Condition::EvidenceInvalid) => "funding_evidence_requires_review",
             Some(Condition::InsufficientFunds) if !treasury_source_pending => {

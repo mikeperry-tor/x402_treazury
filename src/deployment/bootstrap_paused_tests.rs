@@ -53,7 +53,6 @@ base_rpc_fallback_url_envs=[]
 mode="zcash_rotation"
 reserves={{small={{funding_amount_usdc="5"}}}}
 max_api_payment_usdc="1"
-max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [sources.api]
 spec="unused.json"

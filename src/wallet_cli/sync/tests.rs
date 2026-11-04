@@ -68,7 +68,6 @@ async fn scope_ignores_unrelated_validation_and_retains_generated_and_accepted_r
         let mut value = serde_json::to_value(config()).unwrap();
         let mut template = value["wallets"]["configured"].clone();
         template["max_api_payment_usdc"] = json!("invalid");
-        template["max_funding_spend_zec"] = json!("invalid");
         value["wallets"]["not_allocated"] = template.clone();
         value["wallets"]["not_allocated"]["max_retirement_remainder_usdc"] =
             json!("invalid-unused-tolerance");
@@ -232,7 +231,8 @@ async fn finite_sync_applies_group_tolerance_and_retires_without_a_funding_owner
         let dir = tempfile::tempdir().unwrap();
         let mut state = state(dir.path());
         let reserve = ReserveConfig {
-            funding_amount_usdc: "2".into(),
+            funding_amount_usdc: Some("2".into()),
+            min_funding_amount_usdc: None,
             max_funding_amount_usdc: None,
         };
         let pool = state

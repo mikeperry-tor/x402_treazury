@@ -56,7 +56,7 @@ fn old_relay_config_preserves_offline_managed_identity_audit_without_live_author
         "version":1,"network":network,
         "treasury":{"id":treasury_id,"state_dir":state,"indexer_url":"https://indexer.example.com","submission_url":"https://submit.example.com"},
         "funding":{"base_rpc_fallback_url_envs":[]},
-        "wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}},"max_api_payment_usdc":"0.02","max_funding_spend_zec":"0.02","max_conversion_overhead_percent":5}},
+        "wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}},"max_api_payment_usdc":"0.02","max_conversion_overhead_percent":5}},
         "sources":{"api":{"spec":"local.json"}},
         "servers":{"main":{"listen":"127.0.0.1:0","bearer_token_env":"TOKEN","wallet":"pool","sources":["api"]}}
     })).unwrap();

@@ -47,7 +47,8 @@ principal and fee from existing transaction facts and saved source status
 separately from cross-chain swap progress. Swap progress includes the last
 validated response's local observation time, last safe error, and `timed_out`
 health threshold. The observation time includes pending/unknown responses and is
-not the provider's `updatedAt`. Swap amounts show the existing USDC target, not
+not the provider's `updatedAt`. Swap amounts show the operation's original allocation floor
+and, when recorded, its selected nominal amount and accepted bridge output, not
 received or available funds. These overlapping observations are never
 added into a total or treated as spending authority. The human summary adds no
 durable balance fields, schema changes, network requests or polling.
@@ -452,7 +453,9 @@ these include untouched quote refreshes and unpublished calculations closed afte
 exclusive offline SDK reconstruction. Unclassified historical records still count.
 Reaching that bound requires
 operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
-source capacity and per-operation safeguards apply to every new preparation. Qualification runs require separately authorized
+source capacity, output/conversion-overhead limits and the accepted operation fee
+cap apply to every new preparation. Qualification runs separately enforce source
+exposure derived from the reviewed manifest and require separately authorized
 recovery; this path does not grant new qualification authority. Unpublished work
 can use a fresh operation only after successful offline reconstruction establishes
 that neither outgoing bytes nor factual transaction metadata was committed. A
@@ -479,7 +482,7 @@ immutable operation IDs, encrypted quotes, guarded phases and persistent fair
 scheduling; status includes funding progress. Preparing a journaled funding job
 commits its PREPARED phase together with the wallet snapshot and signed bytes.
 Managed serving defaults to `[funding].auto_fund = true`: it funds the configured
-reserves under per-operation safeguards. Set it false
+reserves under actual spendable funds and operation fee caps. Set it false
 to pause automatic funding; reconciliation and treasury sync remain available.
 This default applies only to configured managed serving, not wallet commands or
 static wallets. Bounded qualification examples explicitly opt out. `near_api_key_env` names the partner credential;
@@ -602,7 +605,7 @@ exclusive SDK reconstruction and guarded recovery path; no manual abandonment
 is required for an ordinary pre-journal crash.
 
 `rotation/near.rs` sizes each new operation with a zero-slippage dry `EXACT_OUTPUT`
-preview for its nominal USDC target, then requests an executable `EXACT_INPUT`
+preview for its selected nominal USDC amount, then requests an executable `EXACT_INPUT`
 quote with that NEAR-priced ZEC principal fixed. `funding.slippage_bps` (default
 500, range 0–1000) applies once to the live quote's expected output. Its
 `minAmountOut` is an execution floor, distinct from a route's minimum supported
@@ -711,13 +714,17 @@ and key are not interchangeable backups.
 
 Managed groups persist exact enabled small/large reserve claims. Each new group
 starts with one wallet per enabled slot; the first payment promotes its payer and
-allows that slot to refill. Reserve targets are explicit funding preferences. An unsigned NEAR
-preview can raise its nominal sizing target to a bridge minimum only within that slot's explicit
-maximum (omission permits no increase); original allocation target and identity stay
-immutable. Source-input and fee safeguards still apply, with actual spendable treasury
-funds limiting ordinary funding. Each dry sizing negotiation allows at most three
-requests before requesting the executable fixed-input quote;
-other failures do not authorize amount changes or payment retries. Beneficial
+allows that slot to refill. A reserve is a fixed target or an inclusive nominal
+range, with slot defaults where configured. An unsigned NEAR preview can raise
+the operation-local floor to a bridge minimum and redraw within the remaining
+range up to the slot maximum; fixed sizing keeps its deterministic adjustment.
+Original allocation floor and identity stay immutable. Source-input and fee
+safeguards still apply, with actual spendable treasury funds limiting ordinary
+funding. Each dry sizing negotiation allows at most three requests before
+requesting the executable fixed-input quote; that cap bounds the provider-driven
+retry loop within one acquisition round and is not a recovery charge or spending
+limit. A later scheduler retry starts a new bounded round.
+Other failures do not authorize amount changes or payment retries. Beneficial
 extra execution output is not capped by the nominal USDC sizing maximum.
 
 A READY payment atomically retains the prior active, activates its exact payer and
@@ -753,7 +760,7 @@ coexist; their `private_key_env` is forbidden in managed profiles. Removing a
 profile while serving managed pools disables it without deleting its history.
 A name with durable managed state cannot become static; retain the treasury
 reference so this identity conflict can be detected. Re-adding a managed name
-resumes its existing UUID, keys and allocation targets.
+resumes its existing UUID, keys and allocation floors.
 
 Base verification defaults to **PublicNode → dRPC → Base**. The primary can be
 overridden through `funding.base_rpc_url_env` (default `BASE_RPC_URL`); when that
@@ -906,13 +913,19 @@ if any view fails. Use the same trusted
 RPC policy as the deployment; choosing another provider discloses those addresses
 to that provider.
 
-Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc`,
-`max_conversion_overhead_percent` (integer 0–100), and `reserves.small` with a
-positive `funding_amount_usdc`. Optional `reserves.large` must be at least as large.
-Each reserve has its own optional `max_funding_amount_usdc`; omission allows no
-increase above target. `max_funding_spend_zec` caps one transfer including its fee.
-The group payment cap is independent of reserve size; a price above a funding
-target can be attempted by an eligible wallet under that payment cap.
+Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc` and
+`max_conversion_overhead_percent` (integer 0–100). `reserves.small` defaults to a
+randomized $2-5 nominal range; an absent `reserves.large` stays disabled, while an
+explicit empty `[reserves.large]` opts into $10-25. A slot may instead set
+`funding_amount_usdc` for a fixed target (optionally with
+`max_funding_amount_usdc` headroom), or both `min_funding_amount_usdc` and
+`max_funding_amount_usdc` for an inclusive randomized range. Amounts are positive
+exact micro-USDC decimals, and a maximum must be at least its minimum/target.
+Actual spendable treasury funds and the accepted operation's configured
+network-fee cap bound each transfer; there is no separate per-operation ZEC
+spending budget. The group payment cap is independent of reserve size; a price
+above a nominal funding floor can be attempted by an eligible wallet under that
+payment cap.
 
 `max_retirement_remainder_usdc` defaults to `"0.001"` (1,000 atomic USDC units)
 independently per managed group; explicit `"0"` requires exact zero. Retired funds
@@ -1000,7 +1013,10 @@ funding or replay authority.
 Each funding job's additive `provider_observed_at` field exposes the existing
 database observation timestamp for its last validated provider response, including
 pending/unknown responses; it is null if unavailable. It is not provider
-`updatedAt`. This presentation change adds no persisted fields or schema version.
+`updatedAt`. The additive `selected_output` and `accepted_output` fields expose the
+current operation's selected nominal amount and the accepted executable quote's
+expected USDC output; both are nominal or expected amounts, not credited balances. These
+presentation changes add no persisted fields or schema version.
 
 Unsupported owner opens preserve the complete state directory before writable
 initialization. Live read-only SQLite inspection preserves database and existing
@@ -1018,8 +1034,12 @@ completion has an empty `incomplete_captured_jobs` list; obstruction or cancella
 inventory can become incomplete again after a reserve is consumed.
 
 Status replaces the old pool `deposit_atomic` and `bootstrapped` fields with current
-payment authority, retirement tolerance, exact `reserve_claims` and readiness. Original wallet `target` and last saved
-`balance_estimate_atomic` are advisory history, not available-capacity authority. Signed
+payment authority, retirement tolerance, exact `reserve_claims` and readiness. In
+each reserve claim, `target_atomic` is the slot's lower nominal sizing bound and
+`maximum_output_atomic` is its authorized nominal ceiling including bridge-minimum
+headroom; neither is a credited-balance promise. Original wallet `target`, the
+immutable allocation floor, and last saved `balance_estimate_atomic` are advisory
+history, not available-capacity authority. Signed
 exposure, financial repair blocks, destination discrepancies and retirement
 observations are reported separately. Null authority means unconfigured; explicit
 unlimited authority is represented by the maximum U256 atomic value.

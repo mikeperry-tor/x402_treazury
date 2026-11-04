@@ -180,12 +180,18 @@ pub(super) fn status(
         };
         writeln!(
             text,
-            "Saved swap progress for {} (operation {}): {progress}; target: {}",
+            "Saved swap progress for {} (operation {}): {progress}; original allocation floor: {}",
             job.pool_name,
             job.operation_id,
             usdc(&job.target)
         )
         .unwrap();
+        if let Some(selected) = &job.selected_output {
+            writeln!(text, "  Selected nominal amount: {}", usdc(selected)).unwrap();
+        }
+        if let Some(accepted) = &job.accepted_output {
+            writeln!(text, "  Accepted bridge output: {}", usdc(accepted)).unwrap();
+        }
         writeln!(
             text,
             "  Last validated NEAR response observed: {}",

@@ -8,7 +8,7 @@ use crate::{
     rotation::restriction::FundingPermits,
 };
 use anyhow::{Context, Result, ensure};
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -52,7 +52,17 @@ impl RegistryPermits {
         );
         Ok(manifest)
     }
-    fn pool_bound(&self, db: &Connection, manifest: &Value, pool: &str) -> Result<u64> {
+    fn permit_pool(&self, db: &Connection, job: &str) -> Result<String> {
+        db.query_row(
+            "SELECT pool FROM funding_permits WHERE run=?1 AND job=?2",
+            params![self.binding.run, job],
+            |r| r.get(0),
+        )
+        .optional()?
+        .context("funding permit missing for preparation")
+    }
+
+    fn validate_pool_scope(&self, db: &Connection, manifest: &Value, pool: &str) -> Result<()> {
         ensure!(
             manifest["start"]["pools"]
                 .as_array()
@@ -67,22 +77,32 @@ impl RegistryPermits {
             |r| r.get(0),
         )?;
         let pins = qualification::bounded(raw)?;
-        let config = &pins["resolved_config"]["resolved_wallets"][pool];
         ensure!(
-            config["mode"] == "zcash_rotation",
+            pins["resolved_config"]["resolved_wallets"][pool]["mode"] == "zcash_rotation",
             "qualification funding pool is not managed"
         );
-        // Frozen historical evidence remains readable; current TOML rejects old names.
-        let bound = crate::rotation::config::zatoshis(
-            config
-                .get("max_funding_spend_zec")
-                .or_else(|| config.get("max_input_zec"))
-                .unwrap_or(&Value::Null)
+        Ok(())
+    }
+
+    fn pool_bound(&self, db: &Connection, manifest: &Value, pool: &str) -> Result<u64> {
+        self.validate_pool_scope(db, manifest, pool)?;
+        // The reviewed run-wide source exposure is the qualification authority.
+        // Derive each job's immutable permit from it instead of a separate wallet
+        // spending budget; the cumulative reservation check still bounds the run.
+        let jobs = manifest["limits"]["new_funding_jobs"]
+            .as_u64()
+            .context("run job limit missing")?;
+        ensure!(jobs > 0, "qualification funding job limit must be positive");
+        let source = source_limit(
+            manifest["limits"]["source_exposure_zec"]
                 .as_str()
-                .context("qualification requires explicit max_funding_spend_zec")?,
+                .context("run source limit missing")?,
         )?;
-        let bound = u64::try_from(bound)?;
-        ensure!(bound > 0, "qualification source cap must be positive");
+        let bound = source / jobs;
+        ensure!(
+            bound > 0,
+            "reviewed source exposure does not cover every new funding job"
+        );
         Ok(bound)
     }
     fn limits(&self, db: &Connection, manifest: &Value) -> Result<(Limits, Limits)> {
@@ -192,15 +212,8 @@ impl FundingPermits for RegistryPermits {
         let mut db = qualification::connection(&self.binding)?;
         let tx = db.transaction()?;
         let manifest = self.authority(&tx, treasury)?;
-        let pool: String = tx.query_row(
-            "SELECT pool FROM funding_permits WHERE run=?1 AND job=?2",
-            params![self.binding.run, job],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            input_with_fee <= self.pool_bound(&tx, &manifest, &pool)?,
-            "qualification pinned source cap exceeded"
-        );
+        let pool = self.permit_pool(&tx, job)?;
+        self.validate_pool_scope(&tx, &manifest, &pool)?;
         super::check_preparation(&tx, &self.binding.run, job, input_with_fee)?;
         tx.commit()?;
         Ok(())
@@ -215,15 +228,8 @@ impl FundingPermits for RegistryPermits {
         let mut db = qualification::connection(&self.binding)?;
         let mut tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let manifest = self.authority(&tx, treasury)?;
-        let pool: String = tx.query_row(
-            "SELECT pool FROM funding_permits WHERE run=?1 AND job=?2",
-            params![self.binding.run, job],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            input_with_fee <= self.pool_bound(&tx, &manifest, &pool)?,
-            "qualification pinned source cap exceeded"
-        );
+        let pool = self.permit_pool(&tx, job)?;
+        self.validate_pool_scope(&tx, &manifest, &pool)?;
         super::reserve_source(&mut tx, &self.binding.run, job, operation, input_with_fee)?;
         tx.commit()?;
         Ok(())
@@ -251,6 +257,64 @@ mod tests {
             assert!(source_limit(value).is_err(), "{value}");
         }
     }
+    #[test]
+    fn pool_bound_uses_floor_division_and_rejects_zero() {
+        let (_dir, permits, db) = fixture();
+        let raw: String = db
+            .query_row("SELECT manifest FROM runs", [], |r| r.get(0))
+            .unwrap();
+        let mut manifest: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(permits.pool_bound(&db, &manifest, "pool").unwrap(), 100);
+        manifest["limits"]["source_exposure_zec"] = serde_json::json!("0.0000025");
+        assert_eq!(permits.pool_bound(&db, &manifest, "pool").unwrap(), 125);
+        manifest["limits"]["source_exposure_zec"] = serde_json::json!("0.00000001");
+        assert!(permits.pool_bound(&db, &manifest, "pool").is_err());
+        assert!(permits.pool_bound(&db, &manifest, "other").is_err());
+    }
+
+    #[test]
+    fn preparation_uses_the_immutable_permit_bound_after_manifest_revision() {
+        let (_dir, permits, db) = fixture();
+        let jobs = permits
+            .reserve_allocations("treasury", "pool", &[0, 1])
+            .unwrap();
+        db.execute("UPDATE authorizations SET source=300", [])
+            .unwrap();
+        db.execute(
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000003')",
+            [],
+        )
+        .unwrap();
+        permits
+            .check_preparation("treasury", &jobs[0], 100)
+            .unwrap();
+        assert!(
+            permits
+                .check_preparation("treasury", &jobs[0], 101)
+                .is_err()
+        );
+        permits
+            .reserve_preparation("treasury", &jobs[0], "operation", 100)
+            .unwrap();
+        assert!(
+            permits
+                .reserve_preparation("treasury", &jobs[0], "second_operation", 101)
+                .is_err()
+        );
+        let raw: String = db
+            .query_row("SELECT manifest FROM runs", [], |r| r.get(0))
+            .unwrap();
+        let mut manifest: Value = serde_json::from_str(&raw).unwrap();
+        manifest["start"]["pools"] = serde_json::json!([]);
+        db.execute("UPDATE runs SET manifest=?1", [manifest.to_string()])
+            .unwrap();
+        assert!(
+            permits
+                .check_preparation("treasury", &jobs[0], 100)
+                .is_err()
+        );
+    }
+
     pub(super) fn fixture() -> (tempfile::TempDir, RegistryPermits, Connection) {
         let (dir, guard, db) = qualification::tests::fixture();
         db.execute_batch("CREATE UNIQUE INDEX runs_id ON runs(id); ALTER TABLE authorizations ADD COLUMN jobs INTEGER; ALTER TABLE authorizations ADD COLUMN source INTEGER; UPDATE authorizations SET jobs=2,source=200;").unwrap();
@@ -271,7 +335,7 @@ mod tests {
             .query_row("SELECT payload FROM pins", [], |r| r.get(0))
             .unwrap();
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
-        pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}},"max_funding_spend_zec":"0.000001"}}});
+        pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}}}}});
         let raw = pins.to_string();
         binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
         db.execute(

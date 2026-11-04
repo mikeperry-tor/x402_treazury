@@ -40,8 +40,11 @@ pub struct GeneratedWallet {
 pub struct WalletSummary {
     pub managed_pool_count: usize,
     pub generated_pool_count: usize,
+    /// Nominal lower bound; exact for fixed sizing, not a guaranteed credit.
     pub initial_inventory_target_atomic: String,
     pub initial_inventory_target_usdc: String,
+    pub initial_inventory_maximum_atomic: String,
+    pub initial_inventory_maximum_usdc: String,
 }
 pub struct Resolution {
     pub source_bindings: crate::deployment::routing::EffectiveBindings,
@@ -180,26 +183,35 @@ pub(crate) fn resolve_with_bindings(
         }
         bindings.insert(server_name.clone(), server_bindings);
     }
-    let mut total = U256::ZERO;
+    let mut minimum = U256::ZERO;
+    let mut maximum = U256::ZERO;
     let mut count = 0;
     for wallet in wallets.values() {
         if let WalletConfig::ZcashRotation { reserves, .. } = wallet {
-            total = total
-                .checked_add(reserves.initial_inventory_target_atomic()?)
-                .context("combined funding target overflow")?;
+            minimum = minimum
+                .checked_add(reserves.initial_inventory_minimum_atomic()?)
+                .context("combined minimum funding target overflow")?;
+            maximum = maximum
+                .checked_add(reserves.initial_inventory_maximum_atomic()?)
+                .context("combined maximum funding target overflow")?;
             count += 1;
         }
     }
-    let scale = U256::from(1_000_000);
-    let summary = WalletSummary {
-        managed_pool_count: count,
-        generated_pool_count: generated.len(),
-        initial_inventory_target_atomic: total.to_string(),
-        initial_inventory_target_usdc: format!(
+    let usdc = |total: U256| -> Result<String> {
+        let scale = U256::from(1_000_000);
+        Ok(format!(
             "{}.{:06}",
             total / scale,
             u64::try_from(total % scale)?
-        ),
+        ))
+    };
+    let summary = WalletSummary {
+        managed_pool_count: count,
+        generated_pool_count: generated.len(),
+        initial_inventory_target_atomic: minimum.to_string(),
+        initial_inventory_target_usdc: usdc(minimum)?,
+        initial_inventory_maximum_atomic: maximum.to_string(),
+        initial_inventory_maximum_usdc: usdc(maximum)?,
     };
     Ok(Resolution {
         source_bindings,

@@ -441,15 +441,13 @@ other listener settings. This substitutes automatic pools for the explicit pool:
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
 max_retirement_remainder_usdc = "0.001" # Default per group; explicit "0" requires exact zero.
-max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 
 [wallet_templates.small.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00" # Explicit bridge-minimum headroom, not payment authority.
+# Default randomized nominal funding: $2-5.
 
-[wallet_templates.small.reserves.large]
-funding_amount_usdc = "10.00"
+# Explicitly enabling a large slot opts into its $10-25 default range:
+# [wallet_templates.small.reserves.large]
 
 [wallet_assignment]
 scope = "source"
@@ -458,7 +456,8 @@ template = "small"
 
 Sources and servers can then omit `wallet`; `[wallets]` may also be omitted.
 See [funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for
-actual spendable treasury capacity and per-operation ZEC/fee safeguards.
+actual spendable treasury capacity, conversion-overhead limits and accepted-operation
+fee caps.
 The singleton `[treasury]` and `[funding]` settings are still required when the
 resolved deployment has managed pools. Explicit source/server wallet references
 continue to take priority and must refer to entries in `[wallets]`, not templates.
@@ -493,29 +492,51 @@ Configuration changes take effect when the deployment is reopened. Managed
 profiles require an explicit `max_api_payment_usdc`; the static-wallet default
 remains unchanged. The cap applies to every active, reserve and retained wallet,
 independently of original funding size. Explicit unlimited spellings retain their
-existing meaning for payment authority only. A cap above every target is valid,
-and targets above the cap are valid; neither arrangement authorizes extra funding.
+existing meaning for payment authority only. A cap above every nominal bound is
+valid, and nominal bounds above the cap are valid; neither arrangement authorizes
+extra funding.
 
-`reserves.small` is required. `reserves.large` is optional and must have a target
-at least as large as small; equal targets are valid. Each slot requires a positive
-exact micro-USDC target. Its optional nominal sizing ceiling must be at least its target;
-omission permits no increase above target. New groups fund only the enabled slots,
-with no separate active allocation. The first journaled payment promotes its READY
-payer to ACTIVE and opens that slot for refill. Vacancies allocate small-first,
-independently of which wallet can pay.
+`reserves.small` defaults to a randomized $2-5 nominal range when omitted or empty.
+`reserves.large` is optional; an absent large table stays disabled, while an
+explicit empty `reserves.large` enables the randomized $10-25 default. Defaults are
+resolved per slot, so the small range never applies to large. A slot configures
+either `funding_amount_usdc` (fixed target, with optional
+`max_funding_amount_usdc` bridge-minimum headroom) or both
+`min_funding_amount_usdc` and `max_funding_amount_usdc` (inclusive randomized
+range). Equal range endpoints are valid. Amounts are positive exact micro-USDC
+decimals; a maximum must be at least its minimum/target. Do not combine a fixed
+target with a minimum or leave a custom range incomplete. Small and large ranges
+are independent; no cross-slot ordering is required. New groups fund only the
+enabled slots, with no separate active allocation. The first journaled payment
+promotes its READY payer to ACTIVE and opens that slot for refill. Vacancies
+allocate small-first, independently of which wallet can pay.
 Consumed reserve wallets become active, previous active wallets become retained,
 and retained wallets remain usable without automatic top-ups or slot reassignment.
 First positive external credit permanently consumes the initial funding claim,
 including partial credit. Disabling a slot retains accepted source ownership.
 
-Each new operation sizes its ZEC principal from a dry `EXACT_OUTPUT` preview with
-zero slippage. Structured route-minimum retries can raise the nominal USDC target
-only within the slot's `max_funding_amount_usdc`; that ceiling does not reject
-beneficial extra execution output. The executable `EXACT_INPUT` quote fixes that
-NEAR-priced ZEC principal and applies `funding.slippage_bps` (default 500 basis
-points, range 0–1000) once to its expected output. Its `minAmountOut` is the execution floor,
-not the route's minimum supported size. Existing ZEC principal/transaction-fee
-and conversion-overhead safeguards still apply. No external exchange-rate oracle
+Each new operation selects a nominal USDC amount at the serialized unsigned quote
+boundary: the fixed target, or one unbiased draw within the configured inclusive
+range. It then sizes its ZEC principal from a dry `EXACT_OUTPUT` preview with zero
+slippage. If NEAR reports that the selected amount is below its bridge minimum,
+the operation raises its local floor to `max(configured minimum, suggested USDC
+minimum)` and draws again uniformly within the remaining authorized range. A
+fixed target keeps its deterministic bridge adjustment. The replacement choice is
+persisted before the next request and reused across ordinary failures and
+restarts. Each acquisition round allows at most three unsigned dry sizing
+attempts; each rejection must raise the provider floor. That cap bounds the
+provider-driven retry loop within one round; the authorized USDC ceiling
+independently bounds the amount, and later scheduler retries start a new bounded
+round with their normal backoff. A provider minimum above the configured maximum
+stops that round with a funding amount-limit explanation and no deposit; the same
+saved draw is retried with normal backoff until configuration or external
+conditions change. This is not an empty treasury. The ceiling
+does not reject beneficial extra execution output. The executable `EXACT_INPUT`
+quote fixes the preview's NEAR-priced ZEC principal and applies
+`funding.slippage_bps` (default 500 basis points, range 0–1000) once to its
+expected output. Its `minAmountOut` is the execution floor, not the route's
+minimum supported size. Existing transaction-fee and conversion-overhead
+safeguards still apply. No external exchange-rate oracle
 or mutable balance tracking is introduced. Accepted older `EXACT_OUTPUT` work
 retains its original terms; configuration changes govern new quotes.
 
@@ -552,14 +573,18 @@ source-state mutation. Retained histories protect original financial ownership; 
 the [database rollback boundary](wallet-cli.md#treasury-and-managed-pools).
 
 Funding capital comes from actual spendable treasury funds after confirmations,
-reservations, liabilities and fees. Displayed total balance is not spendable
+reservations, liabilities and fees; that spendable ZEC balance is the operator's
+ZEC capital limit. Reserve ranges authorize nominal USDC sizing only and do not
+create a second per-transfer ZEC budget. `max_funding_spend_zec` was removed;
+delete it from existing configurations because unknown managed-profile fields are
+rejected. Displayed total balance is not spendable
 capacity. Adding spendable ZEC restores capacity without another aggregate-budget
 setting. `auto_fund=false` pauses new funding. Enabled unfilled reserve claims
 keep discovering later ZEC deposits and confirmations through the shared treasury
 owner; fully funded idle serving does not watch for incoming funds. Retirement
 continues only while its own unresolved candidate work remains. Keep group
-payment caps, per-operation ZEC/output/fee safeguards, explicit funding controls
-and separately authorized qualification-run limits.
+payment caps, output/conversion-overhead and accepted-operation fee safeguards,
+explicit funding controls and separately authorized qualification-run limits.
 
 `funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
 local funding inventory/owner scheduling and existing per-job jitter. Each
@@ -591,15 +616,20 @@ For automatic bindings, `config show` and inventory additionally report
 `template` and `scope`. Configuration inspection includes `resolved_wallets`
 (explicit plus generated profile settings), `generated_wallets` (generation
 metadata), and `wallet_summary` (distinct managed/generated pool counts and their
-combined initial-inventory target in `initial_inventory_target_atomic` and
-`initial_inventory_target_usdc`). `config check`
-also prints that summary. The total counts each managed pool once, including
+combined nominal lower and upper bounds in
+`initial_inventory_target_atomic`/`initial_inventory_target_usdc` and
+`initial_inventory_maximum_atomic`/`initial_inventory_maximum_usdc`; the `target`
+fields are retained for compatibility and mean the nominal lower bound, not an
+exact target or guaranteed credit). `config check`
+also prints that range. The total counts each managed pool once, including
 explicit unreferenced profiles; it excludes unused templates and static wallets.
-It is a configuration target, not a live balance or a quote for additional funds:
-the fresh-group formula is `S + L`, or `S` without large, before accepted
-bridge minimum increases. With $2/$10 reserves it is $12. Existing addresses keep
-their captured targets; accumulated retained holdings, fees and retirement amounts
-are separate. Offline inspection cannot infer migration cost or usable capacity.
+These are configured nominal bounds, not a live balance, guaranteed inventory total
+or quote for additional funds: the fresh-group formula is the sum of slot minima
+through the sum of slot maxima, including bridge-minimum headroom. With the
+default small range and an enabled large default it is $12-$30. Existing addresses
+keep their captured targets; accumulated retained holdings, fees and retirement
+amounts are separate. Offline inspection cannot infer migration cost or usable
+capacity.
 None of these inspection commands allocates keys or funds.
 
 ### Reserve sizing and fragmentation
@@ -622,11 +652,11 @@ order, with creation order within each role. Unknown or low estimates remain
 fallbacks. It does not sort wallets by balance; cheap calls can keep using a
 large-funded active wallet.
 
-With small $2 and large $10, fresh requested inventory is $12. Repeated $6
-calls can leave $4 at each large-funded address: after nine settled calls and
-eight replacements, $92 gross allocation has funded $54 of calls and leaves $38
-in holdings. Those holdings cannot collectively authorize another $6 payment.
-This illustrates sizing below the recommendation, not a wallet-count limit.
+With the default small and large ranges, each fresh wallet draws between $2-5 or
+$10-25 respectively. Repeated calls can still leave remainders at several
+addresses; those balances cannot collectively authorize one payment. This
+illustrates sizing below the recommendation, not a wallet-count limit, and
+randomized draws do not promise a particular remainder distribution.
 Learned cheap calls can drain compatible smaller balances; cold calls, expired
 hints or unavailable evidence can keep using a sufficient large active payer.
 Neither case establishes a quantitative privacy guarantee.
@@ -652,14 +682,17 @@ captures the enabled slot generations and waits for those original
 destination obligations, without chasing replacement generations or source-only
 settlement backlog. A stopped or cancelled waiter preserves accepted work.
 `auto_fund=false` still observes accepted operations but cannot allocate or prepare
-new funding. The first positive credit—even $3 toward a $10 target—consumes its
-initial funding claim permanently and publishes the funded role. No top-up follows;
+new funding. The first positive credit—even a partial credit below the slot's
+nominal minimum—consumes its initial funding claim permanently and publishes the
+funded role. No top-up follows;
 existing source liabilities remain owned even after disablement. Insufficient accepted source work remains owned for reconciliation,
 not automatically abandoned or replaced.
 
-Reopen applies changed caps, targets and slot enablement. Existing accepted terms,
-job identities and original targets remain immutable; current policy is rechecked
-before new quote acceptance/preparation. Configuration edits do not convert state.
+Reopen applies changed caps, reserve bounds and slot enablement. Existing accepted
+terms, job identities and original allocation floors remain immutable; current
+policy is rechecked before new quote acceptance. An unprepared quote that no longer
+satisfies current overhead or claim policy is refreshed, while prepared work keeps
+its fixed transaction fee/input caps. Configuration edits do not convert state.
 Ordinary startup rejects unsupported legacy schemas without mutation. Configuration
 edits and `wallet recover` cannot supply missing immutable destination-readiness
 evidence or convert unsupported state. Preserve complete backups and all accepted

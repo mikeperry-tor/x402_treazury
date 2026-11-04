@@ -14,6 +14,16 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
+/// A quote's USD overhead or platform fee exceeds the configured cap.
+#[derive(Debug)]
+pub(crate) struct OverheadLimit(pub(crate) &'static str);
+impl std::fmt::Display for OverheadLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for OverheadLimit {}
+
 #[derive(Debug)]
 pub(crate) struct QuoteWindowExpired;
 impl std::fmt::Display for QuoteWindowExpired {
@@ -72,8 +82,6 @@ impl Quote {
 #[derive(Clone)]
 pub struct Limits {
     pub max_output: u64,
-    pub max_input: u64,
-    pub max_fee: u64,
     pub max_fee_bps: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,7 +96,7 @@ pub enum SwapStatus {
     Unknown,
 }
 #[derive(Debug)]
-struct BridgeMinimum(u64);
+pub(crate) struct BridgeMinimum(pub(crate) u64);
 impl std::fmt::Display for BridgeMinimum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "near_bridge_minimum_atomic:{}", self.0)
@@ -403,92 +411,41 @@ impl NearClient {
         log_quote(&quote, "acquisition");
         Ok(quote)
     }
-    /// Size ZEC through an unsigned output preview, then obtain a fixed-input
-    /// offer. Slippage is applied only to the executable offer.
-    pub async fn quote_exact_input(
+    /// Obtain one unsigned zero-slippage output preview used only for sizing.
+    pub async fn sizing_preview(
         &self,
         mut request: Value,
         limits: &Limits,
         now: u64,
-        slippage: u32,
     ) -> Result<Quote> {
-        let started = std::time::Instant::now();
+        ensure!(
+            request["swapType"] == "EXACT_OUTPUT" && request["destinationAsset"] == USDC,
+            "sizing preview requires an EXACT_OUTPUT Base USDC request"
+        );
         request["dry"] = json!(true);
         request["slippageTolerance"] = json!(0);
-        let preview = self.quote_with_minimum(request, limits, now).await?;
+        self.quote(request, limits, now).await
+    }
+    /// Obtain the executable fixed-input offer from an accepted sizing preview.
+    /// Slippage is applied only to this executable offer and only once.
+    pub async fn executable_quote(
+        &self,
+        preview: &Quote,
+        limits: &Limits,
+        now: u64,
+        slippage: u32,
+    ) -> Result<Quote> {
         let mut request = preview.request.clone();
         request["dry"] = json!(false);
         request["swapType"] = json!("EXACT_INPUT");
         request["amount"] = json!(preview.input.to_string());
         request["slippageTolerance"] = json!(slippage);
-        let now = now.saturating_add(started.elapsed().as_secs());
         let mut quote = self.quote(request, limits, now).await?;
         quote.sizing_preview = Some(SizingPreview {
-            request: preview.request,
-            response: preview.response,
+            request: preview.request.clone(),
+            response: preview.response.clone(),
         });
         self.validate_saved_quote(&quote, limits, now)
-    }
-    /// Only rejected, unsigned quotes may adjust output; every accepted quote
-    /// still passes the complete route, echo, input-cost and fee-cap validation.
-    pub async fn quote_with_minimum(
-        &self,
-        mut request: Value,
-        limits: &Limits,
-        now: u64,
-    ) -> Result<Quote> {
-        let started = std::time::Instant::now();
-        ensure!(
-            request["swapType"] == "EXACT_OUTPUT" && request["destinationAsset"] == USDC,
-            "minimum adjustment requires exact-output Base USDC"
-        );
-        for attempt in 0..3 {
-            ensure!(
-                atomic(
-                    request["amount"]
-                        .as_str()
-                        .context("missing output amount")?
-                )? <= limits.max_output,
-                super::error::FundingCondition::AmountLimit
-            );
-            match self
-                .quote(
-                    request.clone(),
-                    limits,
-                    now.saturating_add(started.elapsed().as_secs()),
-                )
-                .await
-            {
-                Ok(quote) => return Ok(quote),
-                Err(error) => {
-                    let Some(minimum) = error.downcast_ref::<BridgeMinimum>() else {
-                        return Err(error);
-                    };
-                    let previous = atomic(
-                        request["amount"]
-                            .as_str()
-                            .context("missing output amount")?,
-                    )?;
-                    ensure!(minimum.0 > previous, "near_bridge_minimum_not_increasing");
-                    ensure!(
-                        minimum.0 <= limits.max_output,
-                        super::error::FundingCondition::AmountLimit
-                    );
-                    if attempt == 2 {
-                        anyhow::bail!(
-                            "near_bridge_minimum_unstable: three quote attempts exhausted; no funds submitted"
-                        );
-                    }
-                    tracing::debug!(
-                        previous_atomic = previous,
-                        minimum_atomic = minimum.0,
-                        "NEAR bridge minimum increased wallet funding target; source and fee caps still apply"
-                    );
-                    request["amount"] = json!(minimum.0.to_string());
-                }
-            }
-        }
-        unreachable!()
     }
     pub async fn status(&self, quote: &Quote) -> Result<SwapStatus> {
         let deposit = quote
@@ -769,7 +726,6 @@ fn validate_quote_costs(quote: &Quote, limits: &Limits) -> Result<()> {
     let request = &quote.request;
     let response = &quote.response;
     let q = &response["quote"];
-    let input = quote.input;
     let target = quote.output_atomic()?;
     if request["swapType"] == "EXACT_OUTPUT" {
         ensure!(
@@ -777,13 +733,6 @@ fn validate_quote_costs(quote: &Quote, limits: &Limits) -> Result<()> {
             super::error::FundingCondition::AmountLimit
         );
     }
-    ensure!(
-        input > 0
-            && input
-                .checked_add(limits.max_fee)
-                .is_some_and(|n| n <= limits.max_input),
-        super::error::FundingCondition::InputLimit
-    );
     // USD uses exact rational arithmetic (up to 18 fractional digits), never f64.
     let usd = q["amountInUsd"].as_str().context("missing USD input")?;
     let (whole, fraction) = usd.split_once('.').unwrap_or((usd, ""));
@@ -810,10 +759,8 @@ fn validate_quote_costs(quote: &Quote, limits: &Limits) -> Result<()> {
         .checked_mul(scale)
         .and_then(|n| n.checked_mul(10000 + u128::from(limits.max_fee_bps)))
         .context("USD overflow")?;
-    ensure!(
-        limits.max_fee_bps <= 10000 && left <= right,
-        "quote overhead limit"
-    );
+    ensure!(limits.max_fee_bps <= 10000, "invalid overhead cap");
+    ensure!(left <= right, OverheadLimit("quote overhead limit"));
     if let Some(fees) = response["quoteRequest"]["appFees"].as_array() {
         let total: u64 = fees
             .iter()
@@ -821,7 +768,7 @@ fn validate_quote_costs(quote: &Quote, limits: &Limits) -> Result<()> {
             .sum();
         ensure!(
             total <= u64::from(limits.max_fee_bps),
-            "platform fee exceeds overhead cap"
+            OverheadLimit("platform fee exceeds overhead cap")
         );
     }
     Ok(())
@@ -1026,8 +973,6 @@ mod tests {
         );
         let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":"5000000","amountInUsd":"5","depositAddress":refund,"deadline":request["deadline"]}});
         let limits = Limits {
-            max_input: 100_000,
-            max_fee: 30_000,
             max_output: 5_000_000,
             max_fee_bps: 500,
         };
@@ -1194,8 +1139,6 @@ mod tests {
             response,
             Limits {
                 max_output: u64::MAX,
-                max_input: 200000,
-                max_fee: 10000,
                 max_fee_bps: 500,
             },
         )
@@ -1300,6 +1243,27 @@ mod tests {
             .unwrap();
         assert_eq!(checked.request["slippageTolerance"], 100);
         assert_eq!(checked.request["swapType"], "EXACT_OUTPUT");
+    }
+
+    #[tokio::test]
+    async fn sizing_preview_rejects_non_output_or_non_usdc_requests_before_io() {
+        let client = NearClient::test_at("http://127.0.0.1:1").unwrap();
+        let (mut request, _, limits) = fixture(true);
+        request["swapType"] = json!("EXACT_INPUT");
+        let error = client
+            .sizing_preview(request, &limits, 2_000_000_000)
+            .await
+            .err()
+            .expect("sizing preview must reject a non-output request");
+        assert!(error.to_string().contains("sizing preview requires"));
+        let (mut request, _, limits) = fixture(true);
+        request["destinationAsset"] = json!("nep141:other");
+        assert!(
+            client
+                .sizing_preview(request, &limits, 2_000_000_000)
+                .await
+                .is_err()
+        );
     }
 
     #[test]
@@ -1424,10 +1388,13 @@ mod tests {
         let client =
             NearClient::test_at(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let (request, _, mut limits) = fixture(false);
-        limits.max_input = 400000;
+        let (request, _, limits) = fixture(false);
+        let preview = client
+            .sizing_preview(request, &limits, 2_000_000_000)
+            .await
+            .unwrap();
         let quote = client
-            .quote_exact_input(request, &limits, 2_000_000_000, 250)
+            .executable_quote(&preview, &limits, 2_000_000_000, 250)
             .await
             .unwrap();
         assert_eq!(quote.input, 321000);
@@ -1490,10 +1457,13 @@ mod tests {
             .with_max_level(tracing::Level::DEBUG)
             .with_writer(logs.reopen().unwrap())
             .finish();
-        let (request, _, mut limits) = fixture(false);
-        limits.max_input = 500000;
+        let (request, _, limits) = fixture(false);
+        let preview = client
+            .sizing_preview(request, &limits, 2_000_000_000)
+            .await
+            .unwrap();
         let error = client
-            .quote_exact_input(request, &limits, 2_000_000_000, 250)
+            .executable_quote(&preview, &limits, 2_000_000_000, 250)
             .with_subscriber(subscriber)
             .await
             .err()
@@ -1604,7 +1574,6 @@ mod tests {
                 ),
                 ("/quoteRequest/refundTo", json!("other")),
                 ("/quote/amountInUsd", json!("5.250000000000000001")),
-                ("/quote/amountIn", json!("190001")),
                 ("/quote/amountOut", json!("4999999")),
             ] {
                 let mut bad = response.clone();
@@ -1645,8 +1614,6 @@ mod tests {
         assert!(req.get("appFees").is_none());
         let limits = Limits {
             max_output: u64::MAX,
-            max_input: 2_000_000,
-            max_fee: 100_000,
             max_fee_bps: 500,
         };
         let quote =
@@ -1745,76 +1712,44 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn floating_minimum_quotes_are_bounded_and_revalidate_every_accepted_offer() {
+    async fn sizing_preview_surfaces_a_bridge_minimum_without_retrying() {
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
         };
-        for mode in [
-            "floor",
-            "raise",
-            "twice",
-            "unstable",
-            "lower",
-            "malformed",
-            "input_cap",
-            "output_cap",
-            "fee_cap",
-            "binding",
-        ] {
-            let calls = Arc::new(AtomicUsize::new(0));
-            let seen = calls.clone();
-            let app = axum::Router::new().route("/v0/quote", axum::routing::post(move |axum::Json(req): axum::Json<Value>| {
-                let index = seen.fetch_add(1, Ordering::SeqCst);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        let app = axum::Router::new().route(
+            "/v0/quote",
+            axum::routing::post(move |axum::Json(_req): axum::Json<Value>| {
+                seen.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let reject = mode != "floor" && (index == 0 || mode == "unstable" || (mode == "twice" && index == 1));
-                    if reject {
-                        let minimum = match mode {
-                            "lower" => "4000000".to_string(),
-                            "malformed" => "6000000 untrusted text".to_string(),
-                            _ => ((6 + index) * 1_000_000).to_string(),
-                        };
-                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"message":format!("Amount is too low for bridge, try at least {minimum}")})));
-                    }
-                    let mut response = json!({"quoteRequest":req,"quote":{"amountIn":if mode=="input_cap" {"200001"} else {"100000"},"amountOut":req["amount"],"amountInUsd":if mode=="fee_cap" {"9.00"} else {"5.25"}}});
-                    if mode == "binding" { response["quoteRequest"]["recipient"] = json!("0x0000000000000000000000000000000000000002"); }
-                    (axum::http::StatusCode::OK, axum::Json(response))
+                    (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        axum::Json(json!({
+                            "message":"Amount is too low for bridge, try at least 6000000"
+                        })),
+                    )
                 }
-            }));
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let client = NearClient::at(
-                &format!("http://{}", listener.local_addr().unwrap()),
-                None,
-                None,
-            )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = NearClient::at(
+            &format!("http://{}", listener.local_addr().unwrap()),
+            None,
+            None,
+        )
+        .unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (request, _, limits) = fixture(true);
+        let error = client
+            .sizing_preview(request, &limits, 2_000_000_000)
+            .await
+            .err()
             .unwrap();
-            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-            let (req, _, mut limits) = fixture(true);
-            if mode == "output_cap" {
-                limits.max_output = 5_000_000;
-            }
-            let result = client.quote_with_minimum(req, &limits, 2_000_000_000).await;
-            match mode {
-                "floor" | "raise" | "twice" => assert_eq!(
-                    result.unwrap().request["amount"],
-                    match mode {
-                        "floor" => "5000000",
-                        "raise" => "6000000",
-                        _ => "7000000",
-                    }
-                ),
-                _ => assert!(result.is_err(), "{mode}"),
-            }
-            assert_eq!(
-                calls.load(Ordering::SeqCst),
-                match mode {
-                    "floor" | "lower" | "malformed" | "output_cap" => 1,
-                    "twice" | "unstable" => 3,
-                    _ => 2,
-                }
-            );
-            server.abort();
-        }
+        assert_eq!(error.downcast_ref::<BridgeMinimum>().unwrap().0, 6_000_000);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        server.abort();
     }
     mod boundaries {
         include!("../../tests/support/near_boundaries.rs");

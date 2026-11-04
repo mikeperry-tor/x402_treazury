@@ -3,7 +3,8 @@ use super::*;
 pub(crate) fn reserves(target: &str) -> crate::rotation::config::ReservesConfig {
     crate::rotation::config::ReservesConfig {
         small: crate::rotation::config::ReserveConfig {
-            funding_amount_usdc: target.into(),
+            funding_amount_usdc: Some(target.into()),
+            min_funding_amount_usdc: None,
             max_funding_amount_usdc: None,
         },
         large: None,

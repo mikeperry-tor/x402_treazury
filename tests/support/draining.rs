@@ -88,11 +88,13 @@ async fn retained_inventory_setup(two: bool, paused: bool) -> Harness {
                 0,
                 &ReservesConfig {
                     small: ReserveConfig {
-                        funding_amount_usdc: "5".into(),
+                        funding_amount_usdc: Some("5".into()),
+                        min_funding_amount_usdc: None,
                         max_funding_amount_usdc: None,
                     },
                     large: Some(ReserveConfig {
-                        funding_amount_usdc: "5".into(),
+                        funding_amount_usdc: Some("5".into()),
+                        min_funding_amount_usdc: None,
                         max_funding_amount_usdc: None,
                     }),
                 },

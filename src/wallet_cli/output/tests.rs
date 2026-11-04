@@ -52,6 +52,8 @@ fn saved_status_explains_zero_balances_and_unavailable_snapshot_amounts() {
             wallet_id: "wallet".into(),
             recipient: "recipient".into(),
             target: "5000000".into(),
+            selected_output: Some("4500000".into()),
+            accepted_output: Some("4500000".into()),
             phase: crate::rotation::store::funding::FundingPhase::Swapping,
             operation_id: "original".into(),
             attempts: 1,
@@ -106,9 +108,11 @@ fn saved_status_explains_zero_balances_and_unavailable_snapshot_amounts() {
     assert!(text.contains("Saved source status: broadcast; awaiting confirmation"));
     assert!(text.contains("ZEC source transaction original: 0.00050000 ZEC"));
     assert!(text.contains(
-        "Saved swap progress for example (operation original): awaiting settlement; target:"
+        "Saved swap progress for example (operation original): awaiting settlement; original allocation floor:"
     ));
     assert!(text.contains(&usdc("5000000")));
+    assert!(text.contains("Selected nominal amount: 4.500000 USDC"));
+    assert!(text.contains("Accepted bridge output: 4.500000 USDC"));
     assert!(text.contains("do not add them to the balances above"));
     saved.sync = None;
     saved.treasury_operations[0].submission = "PREPARED".into();

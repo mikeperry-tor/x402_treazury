@@ -827,13 +827,11 @@ confidentiality="public"
 mode="zcash_rotation"
 reserves={{small={{funding_amount_usdc="1"}}}}
 max_api_payment_usdc="1"
-max_funding_spend_zec="0.01"
 max_conversion_overhead_percent=5
 [wallets.beta]
 mode="zcash_rotation"
 reserves={{small={{funding_amount_usdc="1"}}}}
 max_api_payment_usdc="1"
-max_funding_spend_zec="0.01"
 max_conversion_overhead_percent=5
 [sources.api]
 spec="spec.json"

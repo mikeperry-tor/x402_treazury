@@ -2092,7 +2092,6 @@ near_user_session_env="SESSION"
 [wallets.shared]
 mode="zcash_rotation"
 max_api_payment_usdc="1"
-max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [wallets.shared.reserves.small]
 funding_amount_usdc="5"

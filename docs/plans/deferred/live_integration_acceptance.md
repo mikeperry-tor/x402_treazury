@@ -18,8 +18,8 @@ balances never establish current funding readiness. No new architecture is requi
 
 Review current bridge minimums, input/fee bounds, API prices, allocation slots,
 existing liabilities and cumulative remaining authority. Retain all declared pools.
-Each new funding target respects max($2, the validated current bridge minimum);
-existing jobs/targets are immutable. Do not lower safety bounds, sweep retired
+Each new funding draw respects the configured slot bounds and the validated
+current bridge minimum within the slot ceiling; existing jobs/targets are immutable. Do not lower safety bounds, sweep retired
 balances, reuse completed cases or manufacture a slow refill to force a pass.
 
 Use the existing rotation/refill-service preset first, then the two-round lifecycle

@@ -73,9 +73,12 @@ quirks, workarounds, and compatibility exemptions are documented in
   resolve the issue.
 - Needless double-enforcement is forbidden. Treasury funding expresses the
   operator's capital limit: actual spendable funds govern ordinary enabled
-  auto-funding. Do not reintroduce daily/cumulative allocation or ZEC spending
-  budgets. Per-payment authority, actual operation/fee safeguards, accepted-work
-  ownership and separately authorized qualification limits protect distinct things.
+  auto-funding, and the ZEC wallet balance the operator funds is the ZEC capital
+  limit. Do not reintroduce daily/cumulative allocation, per-transfer ZEC spending
+  budgets, or mirror a USDC reserve target into a ZEC cap. Reserve ranges authorize
+  nominal USDC sizing only. Per-payment authority, actual network-fee caps,
+  accepted-work ownership and separately authorized qualification source exposure
+  protect distinct things.
 - Ordinary USDC payment selection treats balances and price hints as advisory;
   current payer ownership and amount authority govern signing.
 - After recognized structured insufficient funds, try each existing eligible wallet

@@ -21,8 +21,7 @@ fn resolved(value: &Value) -> Value {
 }
 fn managed() -> Value {
     json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},
-        "max_api_payment_usdc":"1","max_retirement_remainder_usdc":"0",
-        "max_funding_spend_zec":null,"max_conversion_overhead_percent":5,"max_attempts":3})
+        "max_api_payment_usdc":"1","max_retirement_remainder_usdc":"0","max_conversion_overhead_percent":5,"max_attempts":3})
 }
 fn treasury() -> Value {
     json!({"state_dir":"never-opened-state","confirmations":1})
@@ -258,7 +257,7 @@ fn complete_static_resolution_preserves_source_override_and_listener_sharing() {
         "bindings":{
             "one":{"a":{"wallet":"payer","origin":"sources.a.wallet"},"b":{"wallet":"other","origin":"servers.one.wallet"}},
             "two":{"a":{"wallet":"payer","origin":"sources.a.wallet"},"b":{"wallet":"other","origin":"servers.two.wallet"}}},
-        "summary":{"managed_pool_count":0,"generated_pool_count":0,"initial_inventory_target_atomic":"0","initial_inventory_target_usdc":"0.000000"}})
+        "summary":{"managed_pool_count":0,"generated_pool_count":0,"initial_inventory_target_atomic":"0","initial_inventory_target_usdc":"0.000000","initial_inventory_maximum_atomic":"0","initial_inventory_maximum_usdc":"0.000000"}})
     );
 }
 
@@ -278,7 +277,7 @@ fn complete_generated_resolution_and_explicit_managed_resolution() {
     v["funding"] = json!({"base_rpc_url_env":"ABSENT_TEST_RPC"});
     v["servers"]["two"] = v["servers"]["one"].clone();
     let binding = json!({"wallet":"auto_v1_deployment","origin":"wallet_assignment","template":"small","scope":"deployment"});
-    let summary = json!({"managed_pool_count":1,"generated_pool_count":1,"initial_inventory_target_atomic":"5000000","initial_inventory_target_usdc":"5.000000"});
+    let summary = json!({"managed_pool_count":1,"generated_pool_count":1,"initial_inventory_target_atomic":"5000000","initial_inventory_target_usdc":"5.000000","initial_inventory_maximum_atomic":"5000000","initial_inventory_maximum_usdc":"5.000000"});
     assert_eq!(
         resolved(&v),
         json!({"wallets":{"auto_v1_deployment":managed()},
@@ -293,7 +292,7 @@ fn complete_generated_resolution_and_explicit_managed_resolution() {
         resolved(&explicit),
         json!({"wallets":{"payer":managed()},"generated":{},
         "bindings":{"one":{"a":{"wallet":"payer","origin":"sources.a.wallet"},"b":{"wallet":"payer","origin":"servers.one.wallet"}}},
-        "summary":{"managed_pool_count":1,"generated_pool_count":0,"initial_inventory_target_atomic":"5000000","initial_inventory_target_usdc":"5.000000"}})
+        "summary":{"managed_pool_count":1,"generated_pool_count":0,"initial_inventory_target_atomic":"5000000","initial_inventory_target_usdc":"5.000000","initial_inventory_maximum_atomic":"5000000","initial_inventory_maximum_usdc":"5.000000"}})
     );
 }
 

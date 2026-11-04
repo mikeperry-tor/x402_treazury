@@ -48,7 +48,6 @@ pub enum FundingCondition {
     QualificationDenied,
     CostLimit,
     AmountLimit,
-    InputLimit,
     AuthenticationRequired,
     InsufficientFunds,
     EvidenceInvalid,
@@ -60,7 +59,6 @@ impl std::fmt::Display for FundingCondition {
             Self::QualificationDenied => "qualification_funding_denied",
             Self::CostLimit => "funding_cost_limit_exceeded",
             Self::AmountLimit => "funding_amount_limit_exceeded",
-            Self::InputLimit => "quote input limit",
             Self::AuthenticationRequired => "near_authentication_required",
             Self::InsufficientFunds => "treasury_insufficient_spendable_funds",
             Self::EvidenceInvalid => "funding_integrity_conflict",
@@ -68,6 +66,17 @@ impl std::fmt::Display for FundingCondition {
     }
 }
 impl std::error::Error for FundingCondition {}
+
+/// An unprepared quote no longer satisfies the current conversion-overhead or
+/// claim policy. Preparation refreshes it as new work instead of wedging.
+#[derive(Debug)]
+pub(crate) struct QuotePolicyMismatch;
+impl std::fmt::Display for QuotePolicyMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("funding_quote_policy_changed")
+    }
+}
+impl std::error::Error for QuotePolicyMismatch {}
 
 /// A replacement would exceed the durable transaction recovery allowance.
 #[derive(Debug)]

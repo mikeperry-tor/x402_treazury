@@ -82,7 +82,8 @@ impl Fixture {
         )
         .unwrap();
         let reserve = ReserveConfig {
-            funding_amount_usdc: "0.000001".into(),
+            funding_amount_usdc: Some("0.000001".into()),
+            min_funding_amount_usdc: None,
             max_funding_amount_usdc: None,
         };
         let reserves = ReservesConfig {
@@ -264,7 +265,8 @@ impl Fixture {
                 "retirement",
                 &ReservesConfig {
                     small: ReserveConfig {
-                        funding_amount_usdc: "0.000001".into(),
+                        funding_amount_usdc: Some("0.000001".into()),
+                        min_funding_amount_usdc: None,
                         max_funding_amount_usdc: None,
                     },
                     large: None,
@@ -1256,7 +1258,8 @@ async fn empty_serving_start_discovers_later_retained_candidate_without_scalar_d
         .store
         .call(move |s| {
             let reserve = ReserveConfig {
-                funding_amount_usdc: "0.000001".into(),
+                funding_amount_usdc: Some("0.000001".into()),
+                min_funding_amount_usdc: None,
                 max_funding_amount_usdc: None,
             };
             s.configure_capacity_group(
@@ -1301,7 +1304,8 @@ async fn empty_serving_start_discovers_later_retained_candidate_without_scalar_d
                 1_000,
                 &ReservesConfig {
                     small: ReserveConfig {
-                        funding_amount_usdc: "0.000001".into(),
+                        funding_amount_usdc: Some("0.000001".into()),
+                        min_funding_amount_usdc: None,
                         max_funding_amount_usdc: None,
                     },
                     large: None,

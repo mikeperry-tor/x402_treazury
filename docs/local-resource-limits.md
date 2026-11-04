@@ -7,6 +7,11 @@ limits so operators can investigate unexpected failures. Listing a limit does no
 justify retaining it or adding another one. Review the concrete resource or
 correctness invariant before enforcing a limit; prefer removing redundant policy.
 
+Funding reserve ranges and wallet payment caps are not resource limits and do not
+authorize a second per-transfer ZEC budget. The operator's actual spendable ZEC
+balance is the ZEC capital limit; only actual network-fee caps and separately
+authorized qualification source exposure may reject a transfer.
+
 This guide covers foreground ownership, API caches, response transport and treasury
 maintenance. The [network inventory](network-egress.md#remaining-timers-and-budgets)
 tracks other timers, queues and polling policies.

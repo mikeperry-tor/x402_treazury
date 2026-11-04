@@ -18,15 +18,9 @@ fn asset_and_quote_boundaries_fail_closed() {
         decimals[index]["decimals"] = json!(99);
         assert!(validate_assets(&decimals).is_err());
     }
-    let (request, response, mut limits) = fixture(false);
-    limits.max_input = 110000;
+    let (request, response, limits) = fixture(false);
     assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_000_700).is_ok());
     assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_001_000).is_err());
-    limits.max_input = 109999;
-    assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000).is_err());
-    limits.max_input = u64::MAX;
-    limits.max_fee = u64::MAX;
-    assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000).is_err());
     let (_, _, limits) = fixture(false);
     for text in [
         "5.250001",

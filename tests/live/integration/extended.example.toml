@@ -21,6 +21,7 @@ require_isolation_evidence = true
 [limits]
 api_reservation_usdc = "5.60"
 new_funding_jobs = 2
+# Per-job permit = source_exposure_zec / new_funding_jobs; review against the largest enabled draw.
 source_exposure_zec = "0.004"
 max_in_flight = 2
 run_seconds = 14400

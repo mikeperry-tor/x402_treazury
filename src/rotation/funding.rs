@@ -412,7 +412,24 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
         // The treasury owner commits PREPARING with selected input ownership
         // after read-only proposal checks and a current-authority recheck.
-        self.backend.lock().await.prepare(job, &quote).await?;
+        let prepared = self.backend.lock().await.prepare(job, &quote).await;
+        if let Err(error) = prepared {
+            if !error.is::<super::error::QuotePolicyMismatch>() {
+                return Err(error);
+            }
+            let id = job.id.clone();
+            let operation = job.operation_id.clone();
+            tracing::debug!(
+                wallet=%job.pool_name,
+                operation=%job.operation_id,
+                "The unprepared quote no longer satisfies current overhead policy; refreshing it under current policy"
+            );
+            return self
+                .store
+                .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
+                .await
+                .map(|()| Observation::None);
+        }
         Ok(Observation::Prepared)
     }
 
@@ -456,9 +473,28 @@ impl Backend {
         );
         Ok(())
     }
+    async fn sizing_policy(&self, job: &FundingJob) -> Result<super::config::SizingPolicy> {
+        let super::config::WalletConfig::ZcashRotation { reserves, .. } = self
+            .wallets
+            .get(&job.pool_name)
+            .context("funding pool disabled")?
+        else {
+            anyhow::bail!("funding pool disabled")
+        };
+        let id = job.id.clone();
+        let slot = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
+        let config = match slot.as_str() {
+            "small" => &reserves.small,
+            "large" => reserves
+                .large
+                .as_ref()
+                .context("funding reserve slot disabled")?,
+            _ => anyhow::bail!("unknown funding reserve slot"),
+        };
+        config.policy()
+    }
     fn policy(&self, job: &FundingJob) -> Result<(super::near::Limits, u32)> {
         let super::config::WalletConfig::ZcashRotation {
-            max_funding_spend_zec,
             max_conversion_overhead_percent,
             max_attempts,
             ..
@@ -469,20 +505,13 @@ impl Backend {
         else {
             anyhow::bail!("funding pool disabled")
         };
-        let max_input = max_funding_spend_zec
-            .as_deref()
-            .map(super::config::zatoshis)
-            .transpose()?
-            .unwrap_or(i64::MAX) as u64;
-        // The hard input cap includes source fees. The exact remainder is reserved
-        // after quoting, and preparation tightens it to the actual ZIP-317 fee.
+        // Actual spendable treasury funds and the accepted operation's fee cap
+        // bound a swap. There is no separate per-quote ZEC spending budget.
         Ok((
             super::near::Limits {
                 // Only quote/preparation use this field; they supply the exact
                 // current claim's output ceiling before validating any quote.
                 max_output: u64::MAX,
-                max_input,
-                max_fee: 0,
                 max_fee_bps: max_conversion_overhead_percent
                     .checked_mul(100)
                     .context("invalid conversion overhead percent")?,
@@ -531,15 +560,11 @@ impl FundingBackend for Backend {
     }
     async fn ready(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()?;
-        let (limits, _) = self.policy(job)?;
         let job_id = job.id.clone();
-        // SDK selection checks the actual fee; the owner journals its exact
-        // inputs before calculation, without reserving a capital amount.
         let principal = quote.input;
-        ensure!(
-            principal < limits.max_input,
-            super::error::FundingCondition::CostLimit
-        );
+        // Actual spendable funds bound the accepted quote's principal. SDK
+        // selection checks the actual fee; the owner journals its exact inputs
+        // before calculation, without reserving a capital amount.
         self.store
             .call(move |s| s.check_job_permit(&job_id, principal))
             .await
@@ -547,31 +572,32 @@ impl FundingBackend for Backend {
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {
         self.require_auto_funding()?;
         let (mut limits, max_attempts) = self.policy(job)?;
+        let policy = self.sizing_policy(job).await?;
+        let preferred = policy.draw_initial(&mut rand::rng());
         let id = job.id.clone();
         let operation = job.operation_id.clone();
-        let claim = self
+        let terms = self
             .store
             .call(move |s| {
-                s.require_funding_attempt(&id, max_attempts)?;
-                let claim = s.current_funding_claim(&id)?;
-                s.select_quote_terms(
+                s.select_quote_terms_for_attempt(
                     &id,
                     &operation,
-                    &claim.target.to_string(),
-                    &claim.maximum_output.to_string(),
-                )?;
-                Ok(claim)
+                    &preferred.to_string(),
+                    max_attempts,
+                )
             })
             .await?;
-        let target = claim.target.to_string();
-        limits.max_output = u64::try_from(claim.maximum_output)
-            .context("funding output exceeds route amount range")?;
+        let target = terms.target.to_string();
+        let ceiling =
+            u64::try_from(terms.ceiling).context("funding output exceeds route amount range")?;
+        limits.max_output = ceiling;
         let refund = self.treasury.refund_address(job.id.clone()).await?;
         Ok(QuoteRequest {
             job: job.clone(),
             refund,
             target,
             limits,
+            sizing: policy,
             max_attempts,
             confidentiality: self.funding.confidentiality.clone(),
             slippage_bps: self.funding.slippage_bps,
@@ -600,6 +626,8 @@ impl FundingBackend for Backend {
             .await?;
         limits.max_output = u64::try_from(claim.maximum_output)
             .context("funding output exceeds route amount range")?;
+        // Accepted work carries the quote's fixed principal and the configured
+        // fee ceiling below, so a later configuration edit cannot re-veto it.
         let checked = self
             .near
             .validate_saved_quote(quote, &limits, now()?)
@@ -607,6 +635,8 @@ impl FundingBackend for Backend {
                 // Quote expiry here precedes the treasury command and input acceptance.
                 if error.is::<super::near::QuoteWindowExpired>() {
                     error.context(super::transaction::PreparationDeferred)
+                } else if error.is::<super::near::OverheadLimit>() {
+                    error.context(super::error::QuotePolicyMismatch)
                 } else {
                     error
                 }
@@ -633,16 +663,11 @@ impl FundingBackend for Backend {
                     deadline: checked.deadline,
                     recipient: checked.deposit.context("missing deposit")?,
                     amount_zatoshis: checked.input,
-                    max_fee_zatoshis: limits
-                        .max_input
-                        .checked_sub(checked.input)
-                        .context("input cap exceeded")?
-                        .min(self.max_network_fee),
+                    max_fee_zatoshis: self.max_network_fee,
                     max_input_zatoshis: checked
                         .input
                         .checked_add(self.max_network_fee)
-                        .context("funding cost overflow")?
-                        .min(limits.max_input),
+                        .context("funding cost overflow")?,
                 },
                 self.base.clone(),
             )
@@ -651,7 +676,6 @@ impl FundingBackend for Backend {
     }
     async fn submit(&mut self, job: &FundingJob) -> Result<()> {
         self.require_auto_funding()?;
-        let (limits, _) = self.policy(job)?;
         let job_id = job.id.clone();
         let quote: Quote = self
             .store
@@ -660,18 +684,6 @@ impl FundingBackend for Backend {
         ensure!(
             quote.request["confidentiality"] == self.funding.confidentiality,
             "funding mode changed; explicit recovery required"
-        );
-        let id = job.operation_id.clone();
-        let facts = self
-            .store
-            .call(move |s| Ok(s.operation(&id)?.facts))
-            .await?;
-        ensure!(
-            facts
-                .amount_zatoshis
-                .checked_add(facts.fee_zatoshis)
-                .is_some_and(|n| n <= limits.max_input),
-            "prepared source exceeds current input cap"
         );
         tracing::debug_span!("funding_quote", wallet=%job.pool_name, job_id=%job.id, operation=%job.operation_id)
             .in_scope(|| super::near::log_quote(&quote, "source_submission_requested"));
@@ -710,6 +722,7 @@ pub struct QuoteRequest {
     refund: String,
     target: String,
     limits: super::near::Limits,
+    sizing: super::config::SizingPolicy,
     max_attempts: u32,
     confidentiality: String,
     slippage_bps: u32,
@@ -755,31 +768,91 @@ impl FundingObservations for Observations {
             .await
             .context(NearStage("asset catalog"))?;
         let instant = now()?;
-        let quote_request = self.near.request(
-            &assets,
-            &request.job.recipient,
-            &request.refund,
-            &request.target,
-            &request.confidentiality,
-            0,
-            instant
-                .checked_add(request.deadline_seconds)
-                .context("deadline overflow")?,
-            true,
-        )?;
-        self.near
-            .quote_exact_input(
-                quote_request,
-                &request.limits,
-                instant,
-                request.slippage_bps,
-            )
-            .instrument(
-                tracing::debug_span!("funding_quote", wallet=%request.job.pool_name,
-                job_id=%request.job.id, operation=%request.job.operation_id),
-            )
-            .await
-            .context(NearStage("quote"))
+        let deadline = instant
+            .checked_add(request.deadline_seconds)
+            .context("deadline overflow")?;
+        let mut chosen = request
+            .target
+            .parse::<u64>()
+            .context("invalid selected funding target")?;
+        let mut floor = request.sizing.minimum();
+        for attempt in 1..=3 {
+            let attempt_now = now()?;
+            let quote_request = self.near.request(
+                &assets,
+                &request.job.recipient,
+                &request.refund,
+                &chosen.to_string(),
+                &request.confidentiality,
+                0,
+                deadline,
+                true,
+            )?;
+            let preview = match self
+                .near
+                .sizing_preview(quote_request, &request.limits, attempt_now)
+                .await
+            {
+                Ok(preview) => preview,
+                Err(error) => {
+                    let Some(minimum) = error.downcast_ref::<super::near::BridgeMinimum>() else {
+                        return Err(error.context(NearStage("quote")));
+                    };
+                    ensure!(minimum.0 > chosen, "near_bridge_minimum_not_increasing");
+                    let previous = chosen;
+                    floor = floor.max(minimum.0);
+                    ensure!(
+                        floor <= request.limits.max_output,
+                        super::error::FundingCondition::AmountLimit
+                    );
+                    if attempt == 3 {
+                        anyhow::bail!(
+                            "near_bridge_minimum_unstable: three unsigned quote attempts exhausted; no funds submitted"
+                        );
+                    }
+                    let next = request.sizing.draw_from_floor(floor, &mut rand::rng());
+                    let (store, id, operation) = (
+                        self.store.clone(),
+                        request.job.id.clone(),
+                        request.job.operation_id.clone(),
+                    );
+                    let terms = store
+                        .call(move |s| {
+                            s.reselect_quote_terms(
+                                &id,
+                                &operation,
+                                &floor.to_string(),
+                                &next.to_string(),
+                            )
+                        })
+                        .await?;
+                    chosen = u64::try_from(terms.target)
+                        .context("funding output exceeds route amount range")?;
+                    tracing::debug!(
+                        wallet=%request.job.pool_name,
+                        job_id=%request.job.id,
+                        operation=%request.job.operation_id,
+                        previous_atomic = previous,
+                        minimum_atomic = minimum.0,
+                        "NEAR bridge minimum raised the operation's sizing floor; a fresh sizing choice was persisted"
+                    );
+                    continue;
+                }
+            };
+            let executable_now = now()?;
+            let quote = self
+                .near
+                .executable_quote(
+                    &preview,
+                    &request.limits,
+                    executable_now,
+                    request.slippage_bps,
+                )
+                .await
+                .context(NearStage("quote"))?;
+            return Ok(quote);
+        }
+        unreachable!()
     }
     async fn status(&self, quote: Quote) -> Result<SwapStatus> {
         self.near.status(&quote).await
@@ -836,12 +909,12 @@ fn near_diagnostic(error: &anyhow::Error) -> String {
             "near_response_failed: timeout" => "response body timeout",
             "near_response_failed: body transport" => "response body transport failure",
             "invalid NEAR JSON" => "invalid JSON response",
-            "quote input limit" => "input cap exceeded",
             "quote overhead limit" | "platform fee exceeds overhead cap" => {
                 "fee/overhead cap exceeded"
             }
             "quote deadline too close" => "quote deadline too close",
             "near_bridge_minimum_not_increasing" => "invalid bridge minimum",
+            _ if text.starts_with("near_bridge_minimum_atomic:") => "bridge minimum below offer",
             "required asset missing or ambiguous" => "required asset missing or ambiguous",
             "invalid token catalog" => "invalid asset catalog",
             "quote output mismatch" => "output target mismatch",
@@ -918,7 +991,7 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
         .is_some_and(|stage| stage.0 == "funding credit persistence")
     {
         let reason = error.chain().find_map(|cause| match cause.to_string().as_str() {
-            "insufficient confirmed credit" => Some("confirmed balance is below the funding target; waiting for independent Base credit"),
+            "insufficient confirmed credit" => Some("no positive confirmed credit yet; waiting for independent Base credit"),
             "credit verification requires an allocated candidate" => Some("candidate role changed during verification; inspect wallet status for concurrent completion"),
             _ => None,
         }).unwrap_or("local credit state could not be committed; inspect wallet status and local storage");
@@ -980,19 +1053,23 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
     for cause in error.chain() {
         match cause.to_string().as_str() {
             "funding_cost_limit_exceeded" => {
-                return "funding_cost_limit_exceeded; review max_funding_transaction_fee_zec and max_funding_spend_zec; standard network fee was not overridden; inspect unprepared recovery before trying again";
+                return "funding_cost_limit_exceeded; review max_funding_transaction_fee_zec; standard network fee was not overridden; inspect unprepared recovery before trying again";
             }
             "funding_amount_limit_exceeded" => {
-                return "funding_amount_limit_exceeded; bridge minimum exceeds max_funding_amount_usdc (defaults to funding_amount_usdc); no funds submitted";
+                return "funding_amount_limit_exceeded; bridge minimum exceeds the configured maximum funding amount; raise max_funding_amount_usdc or change the configured range; no funds submitted; the saved draw is retried with backoff until configuration or external conditions change";
             }
             "near_http_401" | "near_http_403" => {
                 return "near_authentication_required; check selected mode and configured credentials";
             }
-            "near_bridge_minimum_unstable: three quote attempts exhausted; no funds submitted" => {
-                return "near_bridge_minimum_unstable; three unsigned quote attempts exhausted; no funds submitted";
+            "near_bridge_minimum_not_increasing" => {
+                return "near_bridge_minimum_not_increasing; provider floor did not rise; no funds submitted";
             }
-            "quote input limit" => {
-                return "funding_input_cap_exceeded; bridge quote exceeds max_funding_spend_zec; no funds submitted";
+            _ if cause.to_string().starts_with("near_bridge_minimum_atomic:") => {
+                return "near_quote_minimum_atomic; executable EXACT_INPUT offer is below the provider's ZEC minimum; no redraw or funds submitted; review the route minimum";
+            }
+            "near_bridge_minimum_unstable: three unsigned quote attempts exhausted; no funds submitted" =>
+            {
+                return "near_bridge_minimum_unstable; three unsigned quote attempts exhausted; no funds submitted";
             }
             "near_http_429" => return "near_rate_limited; backing off",
             "prepared_quote_window_exhausted" => {
@@ -1034,3 +1111,7 @@ mod tests;
 #[cfg(test)]
 #[path = "funding/credit_tests.rs"]
 mod credit_tests;
+
+#[cfg(test)]
+#[path = "funding/redraw_tests.rs"]
+mod redraw_tests;

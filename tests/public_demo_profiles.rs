@@ -22,7 +22,6 @@ async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
                 shown["wallets"]["demo"]["reserves"]["small"]["funding_amount_usdc"],
                 "5.00"
             );
-            assert_eq!(shown["wallets"]["demo"]["max_funding_spend_zec"], "0.006");
             assert!(
                 shown["treasury"]
                     .get("daily_treasury_spend_limit_zec")

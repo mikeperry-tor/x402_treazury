@@ -391,12 +391,12 @@ impl Treasury {
             .checked_add(fee)
             .context("source cost overflow")?;
         if fee > request.max_fee_zatoshis || total > request.max_input_zatoshis {
-            tracing::warn!(
+            tracing::debug!(
                 fee_zatoshis = fee,
                 fee_limit_zatoshis = request.max_fee_zatoshis,
                 total_zatoshis = total,
                 transfer_limit_zatoshis = request.max_input_zatoshis,
-                "funding proposal exceeds max_funding_transaction_fee_zec or max_funding_spend_zec; standard network fee was not overridden"
+                "funding proposal exceeds the accepted operation's transaction fee or input cap; standard network fee was not overridden"
             );
             anyhow::bail!(crate::rotation::error::FundingCondition::CostLimit);
         }
