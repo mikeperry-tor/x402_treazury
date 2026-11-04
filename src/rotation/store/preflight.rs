@@ -63,12 +63,14 @@ pub(super) fn snapshot(dir: &Path) -> Result<Snapshot> {
         });
     }
 
-    let mut temporary = tempfile::Builder::new();
+    let temporary = tempfile::Builder::new();
     #[cfg(unix)]
-    {
+    let temporary = {
         use std::os::unix::fs::PermissionsExt;
+        let mut temporary = temporary;
         temporary.permissions(std::fs::Permissions::from_mode(0o700));
-    }
+        temporary
+    };
     let temporary = temporary.tempdir_in(dir)?;
     // Nonempty journals may contain the authoritative schema. Let SQLite recover
     // only a disposable copy, without parsing WAL/rollback formats ourselves.

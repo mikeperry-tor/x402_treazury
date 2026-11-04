@@ -12,6 +12,18 @@ Discovery tests inject public-URL documents and localhost fixtures only under
 
 ## Native Windows evidence
 
+Focused `network::qualification_probe_tests` classify permission denials using
+production reporting and native OS-code mappings, then exercise real loopback
+TCP/UDP positive controls, reserved-port refusal, received-request reply timeout
+and destination preflight. These unfunded controls require no firewall changes
+and do not establish actual OS confinement. The runner EgressProbe command
+consumes this classifier; the legacy standalone live-Tor socket controls are a
+separate implementation and do not validate it. The accompanying builder-binding
+changes remove non-Unix unused-mut warnings
+without changing their existing platform-specific behavior. Native
+all-target/storage and parent-lifecycle gaps remain open until their actual tests
+pass; compiler cleanliness does not establish Windows privacy or durability.
+
 The [standard-runner Windows workflow](../.github/workflows/windows.yml) and
 [PowerShell entrypoint](../scripts/README.md#native-windows-validation) select
 ordinary native build/help smokes, format/vendor checks, the production and full
