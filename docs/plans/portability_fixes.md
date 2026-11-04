@@ -46,9 +46,14 @@ P1 source correction is committed as `4fff946f`, with independently reviewed
 fixture/CI fixups `574e0b38` and `5251194e`. Portable `ErrorKind` replaces the
 Unix-only probe classification, and cfg-specific builder bindings remove the two
 reported Windows warnings. All six controls and production/all-target warning
-gates pass on macOS through `a50d4f7a`; Windows/Linux execution remains pending.
-The standalone `42e394c0` namespace probe is a source-reviewed native CI experiment,
-not P2 privacy/durability acceptance. The table's probe finding records the
+gates pass on macOS. Windows release build and CLI smoke tests passed at `7126f716`;
+Checks stopped at vendor verification before native probe controls. The binary
+stdin/working-directory correction and earlier cheap CI preflight in `68a93c0b`
+need a native rerun. Linux execution remains pending.
+The standalone `42e394c0` namespace experiment verified ordinary restricted-token
+controls on local NTFS, but both candidates failed at the shared rename before
+directory flush. Buffer-only control `098a2397` needs native execution; error 87's
+cause remains unproven. No P2 privacy/durability acceptance follows. The table records the
 assessment baseline; storage, parent control and native workflow gates remain open.
 
 | Gap and evidence | Impact | Options and required preservation |

@@ -14,13 +14,15 @@ O0 and the selected replacement-authority milestone started from
 `d220eb95f766f98afe95dd8c2551778d993f5e6b`. Their replacement-authority implementation
 and scoped child gates
 are complete, including the publisher-consumer correction accepted below. Catalog
-expansion G1 is complete; remaining child work and whole-branch GR/GI are unfinished.
-The completed child plan has yielded the maintained
+expansion G1 and indexer recovery G1/G2/G3 are complete. Financial GF is accepted
+through `68a93c0b` and reopens after F3; remaining child work and whole-branch
+GR/GI are unfinished. The completed children have yielded the maintained
 [funding/source contract](../wallet-rotation.md#funding-and-source-safety) and
+[SDK recovery guide](../zingo-integration.md), with
 [lifecycle coverage](../../tests/LIFECYCLE.md). The fixture validation foundation
 below is complete through focused continuations.
 The inherited publisher-completion finding is corrected without changing settled
-replacement authority. Wider GF remains required after financial F2 and F3.
+replacement authority. Execution changes in financial F3 require renewed GF.
 
 The child plans own implementation commits, tests and permanent documentation;
 this document owns ordering, shared ownership and integration. It introduces no
@@ -67,12 +69,12 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | Milestone / lane | Child commits and default order | Integration acceptance |
 | --- | --- | --- |
 | O0 / coordination | Complete for the selected replacement scope: tracked baseline, preserved local changes, shared-worktree ownership, serialized builds and independent design review recorded in private evidence. | Material design findings resolved before implementation. O0 is preparation, not another application feature commit. |
-| F1 / financial | Replacement authority and publisher-consumer correction complete. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`; publisher fixups `e9d3dcb4`, `9fd610ce`, `2ef9dcc0`. Contracts live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 and the scoped publisher-consumer gate accepted exact authority, archive/reconfirmation and actual publication/actor/funding/close chains. Confirmed deposit plus FAILED/REFUNDED grants no replacement; late fulfillment retains original liabilities. Wider GF after F2/F3 remains required. |
+| F1 / financial | Replacement authority and publisher-consumer correction complete. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`; publisher fixups `e9d3dcb4`, `9fd610ce`, `2ef9dcc0`. Contracts live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 and the scoped publisher-consumer gate accepted exact authority, archive/reconfirmation and actual publication/actor/funding/close chains. Confirmed deposit plus FAILED/REFUNDED grants no replacement; late fulfillment retains original liabilities. Wider GF is accepted after F2 and reopens after F3. |
 | C1 / catalog | [Expansion/schema safety](catalog_safety_and_schema.md): C1 and its G1 accepted through `a50d4f7a`; C2 remains next in this child. | All ingestion/direct-Value paths protected. C2 must preserve faithful generated schemas/outbound serialization and reopen affected expansion concerns at combined G2. |
-| F2 / financial | [Indexer regression/recovery](indexer_regression_recovery.md), I1 through I3, integrated after financial F1. | Stale tip cannot destructively reset valid state; genuine deep-reorg recovery and accepted randomized work survive. Complete GF below. |
+| F2 / financial | Complete: I1 `0baed039`, I2 `8fa105fa` and reviewed fixups, I3 `7e5648be`. Contracts live in [SDK recovery](../zingo-integration.md) and [wallet reconciliation](../wallet-rotation.md#recovery-and-reconciliation-policy). | G1/G2/G3 and wider GF accepted through `68a93c0b`. Stale-only tips preserve observations; future completion metadata cannot block current SDK funds. Actual disclosed originals retain exact liabilities through cancellation, restart and genuine replacement. F3 reopens GF. |
 | C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, integrated after catalog C1 settles construction contracts. | Correct invalidation, atomic durable publication and progressing readers; no caching around expansion safety. Child gates pass. |
 | F3 / financial | [Proving execution](proving_execution.md), T1 then T2, integrated after financial F2. | Accepted principal/fee authority, proposal exclusion and owned calculation completion survive cancellation/restart; complete GF again for execution changes. |
-| P1 / portability | [Portability](portability_fixes.md): `4fff946f` plus `574e0b38`/`5251194e` implement portable classification and native control wiring; shared-storage/lifecycle design proceeds independently. | macOS six probe controls and compiler gates pass. Exact Windows/Linux execution remains pending; standalone native namespace probe `42e394c0` provides a reviewed CI experiment, not storage acceptance. |
+| P1 / portability | [Portability](portability_fixes.md): `4fff946f` plus `574e0b38`/`5251194e` implement portable classification and native control wiring; shared-storage/lifecycle design proceeds independently. | macOS six controls pass; Windows release build/CLI smoke tests pass at `7126f716`. Windows Checks stopped at vendor verification before probe execution; `68a93c0b` corrects the invocation and diagnostics, pending native rerun. Namespace probe `42e394c0` failed before directory flush; buffer-only control `098a2397` is unexecuted. Native P1/Linux/storage gates remain open. |
 | P2 / portability | Child P2 shared storage, then P3/P4 lifecycle/native workflows. Schedule shared-storage edits after financial F3 and catalog C2 by default. | Child native storage/recovery and ordinary-platform gates pass; complete GS below. Coordinate earlier integration only after affected owners settle their contracts. |
 | R0 / R9 follow-up | [Focused R9 plan](hot_path_efficiency.md) prepared in this separate R0 documentation boundary before implementation. Scoping proceeds independently. | Fresh consumer/query audit separates qualification budget/status work from ordinary regex/client-cache work; ordered commits, authority-preserving tests and review gates agreed. Do not presume a cached monetary ledger or measured speedup. |
 | R1 / R9 implementation | Execute [R9 child commits](hot_path_efficiency.md); normally integrate code after financial F2 and catalog C1 correctness gates, coordinating overlapping catalog/network/Store owners. | Child gates pass; exact budget arithmetic, concurrent admission, rollback/restart and uncertain charges preserved. Ordinary optimizations retain transport isolation and live-I/O ownership. Assess remaining history-dependent work before claiming it solved. |
@@ -114,17 +116,22 @@ state/public unfunded keys; offline results establish no live or Tor qualificati
 The fixture prerequisite is complete through `1ca4f524`, with maintained contracts
 in [verified TLS fixtures](../testing.md#verified-tls-fixtures),
 [network ownership](../network-egress.md) and
-[lifecycle coverage](../../tests/LIFECYCLE.md). The assembled macOS check uses
-focused continuations: all 58 default/compatibility targets account for 1,775
-passing tests and 41 ignored helpers/optional cases; proving passes four tests,
-synthetic treasury lifecycle passes 36 (including the full worker), and the codec
-passes one. Production/full all-target warning gates and source-matched complexity
-passed; unchanged static evidence plus the verifier regression is retained with
-explicit source/feature/carry provenance in private evidence. This is an assembled
-check, not a single successful `make check` invocation. The known macOS test-link
-compact-unwind diagnostic remains recorded. Later changes reopen affected checks.
-No live-funded, consensus or live Tor qualification ran. Windows CI is an execution
-route pending native results; Linux preparation is not native test acceptance.
+[lifecycle coverage](../../tests/LIFECYCLE.md). Independent C1 G1, indexer G1/G2/G3
+and financial GF accept scoped assembled evidence through `68a93c0b`: all 58
+default/compatibility targets account for 1,802 passes and 41 ignored cases;
+proving passes four, synthetic lifecycle 45 and the codec one. The lifecycle
+ledger counts each current case once, combining 39 unchanged passes with four
+corrected cases and two new disclosed-original scenarios. Earlier failed runs
+remain failed. This is an assembled check, not one successful `make check`.
+
+Production/full all-target warning gates and format pass. Source-matched
+complexity covers 447 files without exclusions; paired SDK analysis and unchanged
+financial hotspots have explicit simplification review. Evidence carries only
+where source, feature and input domains remain valid. One changed SDK metadata
+unit also passed in an exact-source standalone cohort using existing locked
+packages and a scoped `proptest` `std` dev feature; this does not claim
+full upstream/default-feature testing. The macOS test-link compact-unwind warning
+remains recorded. Generated ledgers and source/command provenance remain private.
 
 The inherited `560b31796` publisher defect is corrected by `e9d3dcb4`, with
 independently reviewed fixups `9fd610ce` and `2ef9dcc0`. Durable acknowledgment is
@@ -136,18 +143,22 @@ The correction grants no closure, spending, replay, input-release or replacement
 authority. Its scoped consumer gate is accepted; T2 design may use this boundary,
 while T2 integration still follows financial F2.
 
-Through frozen `a50d4f7a`, independent combined C1 G1/publisher review accepts
-assembled coverage of all 58 default/compatibility targets: 1,801 passes and
-41 ignored cases. Proving passes four, lifecycle 36 and codec one. Production/full
-all-target compiler/Clippy and format pass; source-matched complexity covers
-444 files with no exclusions. The new expansion/sanitizer advisory scores have
-explicit simplification and full-chain review. Scoped unchanged results carry
-with provenance; stopped runs stay failed, focused repeats are counted once, and
-this is not a single successful `make check`. The macOS test-link compact-unwind
-warning remains. Native P1 and Windows storage/lifecycle gates remain open; the
-reviewed standalone namespace CI probe is an experiment, not support evidence.
-No live-funded, consensus or live Tor qualification ran. Later child changes
-reopen affected checks and combined concerns.
+
+Indexer recovery additionally exposed a real future shard-completion metadata
+bug and fixture assumptions about retained anchors, status balances and snapshot
+persistence. Reviewed fixups preserve tree data while repairing scheduling
+metadata; regressions now exercise actual selected block identities, SDK
+spendability and persisted restart state. Independent recurrence audits found no
+additional material gaps. G3 and financial GF accepted full SDK/Store/publisher/
+funding/qualification call chains; execution changes in F3 reopen that review.
+
+Windows release build and CLI smoke tests passed at `7126f716`; Checks failed at
+vendor patch reconstruction before Rust test gates. The reviewed invocation/
+diagnostic correction and buffer-only namespace control need native reruns.
+Namespace experiment failures reached neither directory-flush candidate, so they
+establish no storage acceptance. Linux preparation is not native test acceptance.
+No live-funded, consensus or live Tor qualification ran. Later changes reopen
+affected checks and combined concerns.
 
 ## Independent review gates and completion
 
