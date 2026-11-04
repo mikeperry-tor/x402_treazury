@@ -406,6 +406,14 @@ async fn future_cached_roots_preserve_current_spendability_across_tail_shrink_an
             .unwrap()
             .is_some()
     );
+    assert_eq!(
+        wallet
+            .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+            .unwrap()
+            .into_u64(),
+        1_000_000,
+        "local SDK selection is repaired even though the scan failed"
+    );
     drop(wallet);
     let sync = owner.status().await.unwrap().sync.unwrap();
     assert_eq!(sync.phase, SyncPhase::Failed);
@@ -468,6 +476,36 @@ async fn future_cached_roots_preserve_current_spendability_across_tail_shrink_an
     let sync = owner.status().await.unwrap().sync.unwrap();
     assert_eq!(sync.phase, SyncPhase::Failed);
     assert_eq!(sync.spendable_shielded_zatoshis, 1_000_000);
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert!(wallet.sync_state.ironwood_shard_ranges().is_empty());
+        assert_eq!(
+            wallet
+                .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+                .unwrap()
+                .into_u64(),
+            1_000_000,
+            "the reopened equal-tip SDK is repaired before the failed request"
+        );
+        let tree = &wallet.shard_trees.ironwood;
+        assert_eq!(
+            tree.root_at_checkpoint_id(&23.into()).unwrap(),
+            Some(expected_root)
+        );
+        assert_eq!(
+            tree.witness_at_checkpoint_id(position, &23.into())
+                .unwrap()
+                .unwrap()
+                .path_elems(),
+            expected_path
+        );
+        assert!(
+            tree.store()
+                .get_shard(Address::from_parts(Level::from(16), 1))
+                .unwrap()
+                .is_some()
+        );
+    }
     owner.sync_once(&CancellationToken::new()).await.unwrap();
     let address = owner
         .client
