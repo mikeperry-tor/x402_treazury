@@ -618,7 +618,12 @@ existing independent status lane and cadence; one slow old request
 cannot serialize the newer request's observation. A late bound SUCCESS fulfills
 the same initial claim and prevents any replacement deposit not yet disclosed.
 It does not rewrite another operation's provider result or close that operation's
-already-disclosed source liability. Initial credit can finish the job regardless
+already-disclosed source liability. If success arrives during a replacement's
+accepted calculation, the exact result is still journaled as resolved; it cannot
+receive first-disclosure authority. A replacement already disclosed remains owned
+until its own bound fulfillment, source confirmation or finite-expiry recovery, including after
+positive credit completes the funding job. Changed nominal bounds and an unsigned
+redraw do not change these original obligations. Initial credit can finish the job regardless
 of which attempt was current when the scalar observation was saved; unresolved
 external requests and disclosed originals keep their existing observation owners.
 Each actual status lookup for a retained unresolved request emits DEBUG explaining

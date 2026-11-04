@@ -3553,6 +3553,300 @@ mod completion_tests {
         assert!(!destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
     }
 
+    /// Retain a disclosed original and its authenticated finite-expiry proof.
+    fn expired_replacement(store: &mut Store, old: &FundingJob) -> FundingJob {
+        store
+            .save_funding_quote(
+                &old.id,
+                &serde_json::to_vec(&serde_json::json!({
+                    "request":{"amount":old.target,"recipient":old.recipient}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        submit_source_for_status(store, old);
+        let revision = store.snapshot().unwrap().0;
+        let observation = SyncObservation {
+            phase: SyncPhase::Ready,
+            last_error: None,
+            snapshot_revision: revision,
+            checked_at: Some(1),
+            checkpoint_at: 1,
+            scanned_blocks: 200,
+            target_height: Some(200),
+            observed_tip_height: Some(200),
+            height: Some(200),
+            confirmations: 2,
+            confirmed_pool_balances_zatoshis: None,
+            confirmed_shielded_zatoshis: 1000,
+            spendable_shielded_zatoshis: 1000,
+        };
+        let revision = store
+            .save_sync_snapshot(revision, b"expiry SDK", Some(observation))
+            .unwrap();
+        store.resolve_expired(&old.operation_id, revision).unwrap();
+        store
+            .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+            .unwrap();
+        store.funding_job(&old.id).unwrap().unwrap()
+    }
+
+    #[test]
+    fn archived_success_preserves_replacement_ownership_at_each_source_boundary() {
+        use crate::rotation::{
+            config::{ReserveConfig, ReservesConfig},
+            near::SwapStatus,
+        };
+        for (stage, ranged, credit) in [
+            ("before_acceptance", false, "1"),
+            ("during_calculation", true, "25"),
+            ("before_disclosure", true, "1"),
+            ("credit_before_disclosure", true, "1"),
+            ("after_disclosure", false, "25"),
+        ] {
+            let (dir, mut store, old) = fixture();
+            let job = expired_replacement(&mut store, &old);
+            let old_bytes = store.prepared_bytes(&old.operation_id).unwrap();
+            let old_quote = store
+                .funding_status_quote(&old.id, &old.operation_id)
+                .unwrap();
+            let output = if ranged { "17" } else { "10" };
+            if ranged {
+                store
+                    .ensure_capacity_group(
+                        "pool",
+                        &ReservesConfig {
+                            small: ReserveConfig {
+                                funding_amount_usdc: None,
+                                min_funding_amount_usdc: Some("0.000012".into()),
+                                max_funding_amount_usdc: Some("0.000020".into()),
+                            },
+                            large: None,
+                        },
+                        Some(U256::from(1_000_000)),
+                        0,
+                    )
+                    .unwrap();
+                store
+                    .select_quote_terms(&job.id, &job.operation_id, "12", "14")
+                    .unwrap();
+                store
+                    .reselect_quote_terms(&job.id, &job.operation_id, "15", output)
+                    .unwrap();
+            } else {
+                store
+                    .select_quote_terms(&job.id, &job.operation_id, "10", output)
+                    .unwrap();
+            }
+            let terms = store.quote_terms_snapshot(&job.id).unwrap();
+            store
+                .save_funding_quote(
+                    &job.id,
+                    &serde_json::to_vec(&serde_json::json!({
+                        "request":{"amount":output,"recipient":job.recipient}
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+            if stage != "before_acceptance" {
+                store
+                    .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                    .unwrap();
+            }
+            let raw = super::super::test_support::transaction_raw(300);
+            let facts = TransactionFacts {
+                txid: super::super::test_support::transaction_txid(300),
+                expiry_height: 300,
+                amount_zatoshis: 50,
+                fee_zatoshis: 10,
+                deadline: Some(u64::MAX),
+            };
+            if matches!(
+                stage,
+                "before_disclosure" | "credit_before_disclosure" | "after_disclosure"
+            ) {
+                store
+                    .prepare_with_facts(
+                        &job.operation_id,
+                        store.snapshot().unwrap().0,
+                        b"replacement SDK",
+                        &raw,
+                        Some(facts.clone()),
+                    )
+                    .unwrap();
+            }
+            if stage == "after_disclosure" {
+                store
+                    .request_broadcast(&job.operation_id, 1, 200, false)
+                    .unwrap();
+            }
+            // A positive observation during replacement closes new-work authority,
+            // even below the nominal minimum. It does not close disclosed work.
+            if stage == "credit_before_disclosure" {
+                store
+                    .record_destination_readiness(&job.id, credit, "replacement credit", 1)
+                    .unwrap();
+                assert!(
+                    store
+                        .request_broadcast(&job.operation_id, 2, 200, false)
+                        .is_err()
+                );
+            }
+            store
+                .record_provider_outcome(&old.id, &old.operation_id, &SwapStatus::Success, 2)
+                .unwrap();
+            let facts_after = store.funding_facts(&job.id, &job.operation_id).unwrap();
+            assert!(facts_after.claim_fulfilled && !facts_after.provider_success);
+            assert!(!facts_after.new_funding_allowed);
+            if stage == "before_acceptance" {
+                assert!(
+                    store
+                        .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                        .is_err()
+                );
+            } else {
+                if stage == "during_calculation" {
+                    store
+                        .prepare_with_facts(
+                            &job.operation_id,
+                            store.snapshot().unwrap().0,
+                            b"replacement SDK",
+                            &raw,
+                            Some(facts),
+                        )
+                        .unwrap();
+                }
+                assert_eq!(
+                    store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                    raw.as_slice()
+                );
+                assert_eq!(
+                    store.operation_pending(&job.operation_id).unwrap(),
+                    stage == "after_disclosure"
+                );
+                assert_eq!(
+                    store.operation(&job.operation_id).unwrap().attempts,
+                    i64::from(stage == "after_disclosure")
+                );
+                if stage != "after_disclosure" {
+                    assert!(
+                        store
+                            .request_broadcast(&job.operation_id, 3, 200, false)
+                            .is_err()
+                    );
+                }
+            }
+            store
+                .record_destination_readiness(&job.id, credit, "positive credit", 2)
+                .unwrap();
+            assert!(
+                store
+                    .finish_funding_if_proven(&job.id, &job.operation_id)
+                    .unwrap()
+            );
+            assert_eq!(
+                store.destination_requirement(&job.id).unwrap().amount,
+                credit
+            );
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().target,
+                old.target
+            );
+            assert_eq!(store.quote_terms_snapshot(&job.id).unwrap(), terms);
+            let identity = store.id().to_owned();
+            drop(store);
+            store = Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &identity,
+            )
+            .unwrap();
+            assert_eq!(store.prepared_bytes(&old.operation_id).unwrap(), old_bytes);
+            assert_eq!(
+                store
+                    .funding_status_quote(&old.id, &old.operation_id)
+                    .unwrap(),
+                old_quote
+            );
+            assert_eq!(store.operation(&old.operation_id).unwrap().attempts, 1);
+            assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 1);
+            assert!(store.current_funding_claim(&job.id).is_err());
+            assert_eq!(
+                store.operation_pending(&job.operation_id).unwrap(),
+                stage == "after_disclosure"
+            );
+            assert!(
+                store
+                    .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn archived_success_during_unsigned_redraw_retains_current_nominal_choice() {
+        use crate::rotation::{
+            config::{ReserveConfig, ReservesConfig},
+            near::SwapStatus,
+        };
+        let (_dir, mut store, old) = fixture();
+        let job = expired_replacement(&mut store, &old);
+        store
+            .ensure_capacity_group(
+                "pool",
+                &ReservesConfig {
+                    small: ReserveConfig {
+                        funding_amount_usdc: None,
+                        min_funding_amount_usdc: Some("0.000012".into()),
+                        max_funding_amount_usdc: Some("0.000020".into()),
+                    },
+                    large: None,
+                },
+                Some(U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+        store
+            .select_quote_terms(&job.id, &job.operation_id, "12", "14")
+            .unwrap();
+        let terms = store.quote_terms_snapshot(&job.id).unwrap();
+        store
+            .record_provider_outcome(&old.id, &old.operation_id, &SwapStatus::Success, 2)
+            .unwrap();
+        assert!(
+            store
+                .reselect_quote_terms(&job.id, &job.operation_id, "15", "17")
+                .is_err()
+        );
+        assert!(
+            store
+                .save_funding_quote(
+                    &job.id,
+                    &serde_json::to_vec(&serde_json::json!({
+                        "request":{"amount":"17","recipient":job.recipient}
+                    }))
+                    .unwrap()
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .is_err()
+        );
+        assert_eq!(store.quote_terms_snapshot(&job.id).unwrap(), terms);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().target,
+            old.target
+        );
+        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
+        let prepared: i64 = store
+            .db
+            .query_row("SELECT COUNT(*) FROM outgoing", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(prepared, 1, "only the retained original has signed bytes");
+    }
+
     #[test]
     fn fulfilled_operation_closes_before_acceptance_or_disclosure_and_retains_late_calculation() {
         use crate::rotation::near::SwapStatus;

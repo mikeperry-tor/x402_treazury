@@ -337,6 +337,17 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
     let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let stop = CancellationToken::new();
     let (old, old_raw) = prepare(&mut owner).await;
+    let mut submitter = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint.clone(),
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    owner
+        .submit_prepared(old.operation_id.clone(), &mut submitter, false, &stop)
+        .await
+        .unwrap();
+
     {
         let mut chain = net.chain.write().await;
         let remaining = old_raw.facts().unwrap().expiry_height + 2 - chain.tip();
@@ -358,12 +369,6 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
     let deadline = now().unwrap() + 7200;
     save_quotes(&owner.store, vec![current.clone()], deadline).await;
     let prepared = owner.prepare(request(&current, deadline)).await.unwrap();
-    let mut submitter = submission::GrpcSubmission::with_network(
-        endpoint.clone(),
-        endpoint,
-        TreasuryNetwork::Synthetic,
-    )
-    .unwrap();
     owner
         .submit_prepared(current.operation_id.clone(), &mut submitter, false, &stop)
         .await
@@ -433,6 +438,8 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
         .unwrap();
     assert!(observed.source_observed);
     assert_eq!(observed.outcome, recovery::RecoveryOutcome::Recovered);
+    let old_operation = old.operation_id.clone();
+    let old_bytes = old_raw.bytes().to_vec();
     let original_bytes = prepared.bytes().to_vec();
     store
         .call(move |s| {
@@ -443,6 +450,12 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
                 s.prepared_bytes(&current.operation_id)?.as_slice(),
                 original_bytes.as_slice()
             );
+            assert_eq!(
+                s.prepared_bytes(&old_operation)?.as_slice(),
+                old_bytes.as_slice()
+            );
+            assert_eq!(s.operation(&old_operation)?.attempts, 1);
+            assert!(!s.operation_pending(&old_operation)?);
             assert_eq!(s.funding_jobs()?.len(), 1);
             assert_eq!(s.funding_recovery_count(&current.id)?, 1);
             Ok(())
@@ -450,6 +463,41 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
         .await
         .unwrap();
     assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    let independent = store
+        .call(|s| {
+            let pool = s.ensure_capacity_group(
+                "independent",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                Some(alloy_primitives::U256::from(1_000_000)),
+                0,
+            )?;
+            s.allocate_capacity_kind(&pool, AllocationKind::Small, true)?;
+            Ok(s.funding_jobs()?
+                .into_iter()
+                .find(|job| job.pool_id == pool)
+                .unwrap())
+        })
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![independent.clone()], deadline).await;
+    let independent_bytes = handle
+        .prepare(request(&independent, deadline))
+        .await
+        .unwrap();
+    let independent_operation = independent.operation_id;
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&independent_operation)?.attempts, 0);
+            assert_eq!(
+                s.prepared_bytes(&independent_operation)?.as_slice(),
+                independent_bytes.bytes()
+            );
+            assert!(s.operation_pending(&independent_operation)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
     stop.cancel();
     drop(handle);
     drop(store);
