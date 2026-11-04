@@ -260,10 +260,13 @@ rustup toolchain install $pin --profile minimal --component rustfmt --component 
 Release builds the ordinary release executable, runs root/wallet/catalog help
 smokes and prints its hash. Cargo metadata supplies the artifact directory,
 including inherited CARGO_TARGET_DIR; cross-target overrides are rejected. Checks
-runs format and byte-exact vendor reconstruction, production/all-target warning
-gates, compatibility/default remainder, then synthetic proving/lifecycle/codec
+runs format and byte-exact vendor reconstruction, the production warning gate,
+focused library probe controls, full all-target Clippy, compatibility/default
+remainder, then synthetic proving/lifecycle/codec
 phases sequentially. Git for Windows supplies the patch utility used by existing
 provenance verifiers. Missing prerequisites and native failures return errors.
+The focused controls emit a CI notice with their actual nonzero passing count;
+later all-target failures still fail Checks and do not qualify storage or lifecycle.
 The two CI jobs use fresh VMs so release and dev/test output profiles do not share
 the standard runner's limited disk. This is not the full POSIX tooling selection
 of check-static; coordinated source-matched complexity and shell-tooling evidence

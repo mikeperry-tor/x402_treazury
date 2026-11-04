@@ -13,7 +13,7 @@ mod http_timeout_tests;
 #[cfg(test)]
 mod listener_tests;
 #[cfg(test)]
-#[path = "network/qualification_probe_tests.rs"]
+#[path = "../tests/support/qualification_probes.rs"]
 mod qualification_probe_tests;
 #[cfg(test)]
 mod retry_policy_tests;

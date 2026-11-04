@@ -76,6 +76,13 @@ Invoke-Checked 'python' @('vendor/verify_pepper.py')
 # Keep the same production and full all-target warning owners as Make. No
 # dependency warnings, features or failing native tests are silently filtered.
 Invoke-Checked 'python' @('scripts/check_warnings.py', 'cargo', 'check', '--locked', '--manifest-path', 'Cargo.toml', '--lib', '--bins', '--message-format=json')
+# Run affected probe contracts before unrelated all-target portability failures
+# can prevent their execution. The complete warning gate below remains fatal.
+Invoke-Checked 'cargo' @('test', '--locked', '--manifest-path', 'Cargo.toml', '--lib', 'network::qualification_probe_tests', '--', '--test-threads=8') | Tee-Object -Variable probeLines
+$probeSummaries = @($probeLines | Select-String -Pattern '^test result: ok\. ([1-9][0-9]*) passed; 0 failed; 0 ignored;')
+if ($probeSummaries.Count -ne 1) { throw 'Native probe controls did not report a nonzero passing test count' }
+$probeCount = $probeSummaries[0].Matches[0].Groups[1].Value
+Write-Host "::notice title=Native P1 probe result::$probeCount passed; 0 failed. Storage, lifecycle and overall Checks acceptance remain separate."
 Invoke-Checked 'python' @('scripts/check_warnings.py', 'cargo', 'clippy', '--locked', '--manifest-path', 'Cargo.toml', '--all-targets', '--features', 'zcash-regtest', '--message-format=json', '--', '-D', 'warnings')
 Invoke-Checked 'cargo' @('test', '--locked', '--manifest-path', 'Cargo.toml', '--test', 'sdk_compat', '--test', 'payments', '--test', 'server', '--test', 'crypto_vectors', '--', '--test-threads=8')
 Invoke-Checked 'python' @('scripts/default_targets.py', '--compat', 'sdk_compat', '--compat', 'payments', '--compat', 'server', '--compat', 'crypto_vectors', '--', 'cargo', 'test', '--locked', '--manifest-path', 'Cargo.toml', '--', '--test-threads=8')
