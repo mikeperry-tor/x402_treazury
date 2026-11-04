@@ -654,15 +654,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn confirmed_source_reauthorizes_only_after_bound_negative_swap_without_network() {
+    async fn confirmed_source_waits_after_bound_negative_swap_without_network() {
         use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
         for terminal in [None, Some(SwapStatus::Failed), Some(SwapStatus::Refunded)] {
-            let (_dir, mut owner, jobs) = unfunded_recovery_fixture().await;
+            let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
             let job = jobs[0].clone();
             let original = job.operation_id.clone();
             let selected = job.clone();
             let sdk = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
-            let has_terminal = terminal.is_some();
             let result = terminal;
             owner.revision = owner
                 .store
@@ -707,41 +706,47 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let outcome = owner
-                .recover_funding_job(
-                    job.id.clone(),
-                    3,
-                    true,
-                    &mut NoNetwork,
-                    &CancellationToken::new(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                outcome,
-                if has_terminal {
-                    RecoveryOutcome::Recovered
-                } else {
-                    RecoveryOutcome::Waiting("swap_outcome_pending")
+            let identity = owner.status().await.unwrap().treasury_id;
+            for stage in ["ordinary", "cancelled", "restarted"] {
+                if stage == "restarted" {
+                    owner.close().await.unwrap();
+                    owner = Treasury::open(
+                        dir.path().join("state"),
+                        dir.path().join("key"),
+                        identity.clone(),
+                    )
+                    .await
+                    .unwrap();
                 }
-            );
-            owner
-                .store
-                .call(move |s| {
-                    let current = s.funding_job(&job.id)?.unwrap();
-                    assert_eq!(current.operation_id != original, has_terminal);
-                    assert_eq!(s.funding_recovery_count(&job.id)?, u64::from(has_terminal));
-                    assert_eq!(s.operation(&original)?.submission, "CONFIRMED");
-                    assert_eq!(s.operation(&original)?.attempts, 1);
-                    assert_eq!(
-                        s.prepared_bytes(&original)?.as_slice(),
-                        crate::rotation::store::test_support::transaction_raw(2_000_100).as_slice()
-                    );
-                    assert!(!s.operation_pending(&original)?);
-                    Ok(())
-                })
-                .await
-                .unwrap();
+                let stop = CancellationToken::new();
+                if stage == "cancelled" {
+                    stop.cancel();
+                }
+                let outcome = owner
+                    .recover_funding_job(job.id.clone(), 3, true, &mut NoNetwork, &stop)
+                    .await
+                    .unwrap();
+                assert_eq!(outcome, RecoveryOutcome::Waiting("swap_outcome_pending"));
+                let (id, original) = (job.id.clone(), original.clone());
+                owner
+                    .store
+                    .call(move |s| {
+                        let current = s.funding_job(&id)?.unwrap();
+                        assert_eq!(current.operation_id, original);
+                        assert_eq!(s.funding_recovery_count(&id)?, 0);
+                        assert_eq!(s.operation(&original)?.submission, "CONFIRMED");
+                        assert_eq!(s.operation(&original)?.attempts, 1);
+                        assert_eq!(
+                            s.prepared_bytes(&original)?.as_slice(),
+                            crate::rotation::store::test_support::transaction_raw(2_000_100)
+                                .as_slice()
+                        );
+                        assert!(!s.operation_pending(&original)?);
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
             owner.close().await.unwrap();
         }
     }
