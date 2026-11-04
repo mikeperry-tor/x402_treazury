@@ -1,5 +1,6 @@
 //! Real signing and HTTP dispatch with advisory data unavailable.
 use super::*;
+use axum::serve::Listener as _;
 use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
@@ -24,11 +25,13 @@ impl Fixture {
         rusqlite::Connection::open(self.dir.path().join("state/state.sqlite")).unwrap()
     }
     async fn pay(&self) -> Result<(reqwest::Response, bool)> {
-        let http = crate::network::NetworkContext::new(Default::default())?.http(
-            &crate::network::IsolationId::evm(&self.payer.address)?,
-            &self.url,
-            None,
-        )?;
+        let http = crate::network::NetworkContext::new(Default::default())?
+            .with_test_root(crate::test_tls::CA)
+            .http(
+                &crate::network::IsolationId::evm(&self.payer.address)?,
+                &self.url,
+                None,
+            )?;
         let retry = http.get(&self.url).build()?;
         let challenge = http.execute(retry.try_clone().unwrap()).await?;
         self.pool
@@ -47,10 +50,43 @@ async fn fixture() -> Fixture {
 }
 
 #[tokio::test]
+async fn direct_cleartext_retry_cannot_create_payment_liability() {
+    let f = fixture().await;
+    let http = crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .with_test_root(crate::test_tls::CA)
+        .http(
+            &crate::network::IsolationId::evm(&f.payer.address).unwrap(),
+            &f.url,
+            None,
+        )
+        .unwrap();
+    let mut retry = http.get(&f.url).build().unwrap();
+    let challenge = http.execute(retry.try_clone().unwrap()).await.unwrap();
+    retry.url_mut().set_scheme("http").unwrap();
+    let error = f
+        .pool
+        .pay(&http, f.payer.clone(), retry, challenge)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("HTTPS"));
+    assert_eq!(f.signed.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        f.db()
+            .query_row("SELECT count(*) FROM payment_attempts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    f.close().await;
+}
+
+#[tokio::test]
 async fn direct_payment_header_overflow_creates_no_liability_or_dispatch() {
     let f = fixture().await;
     let http = crate::network::NetworkContext::new(Default::default())
         .unwrap()
+        .with_test_root(crate::test_tls::CA)
         .http(
             &crate::network::IsolationId::evm(&f.payer.address).unwrap(),
             &f.url,
@@ -186,8 +222,8 @@ async fn fixture_with_held_response(hold: bool) -> Fixture {
         };
         Json(serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/pay", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}/pay", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (store, worker) = StoreHandle::spawn(store);
     let pool = ManagedPool::new(
@@ -238,6 +274,7 @@ async fn qualification_canonical_loop_ignores_bad_historical_readiness_and_resol
         .unwrap();
     let http = crate::network::NetworkContext::new(Default::default())
         .unwrap()
+        .with_test_root(crate::test_tls::CA)
         .http(
             &crate::network::IsolationId::evm(&other.address).unwrap(),
             &f.url,

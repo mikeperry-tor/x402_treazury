@@ -4,15 +4,19 @@ mod capacity_fixture;
 mod log_capture;
 #[path = "support/funding_quote.rs"]
 mod quote_fixture;
+#[path = "support/tls.rs"]
+mod tls;
 #[path = "support/zcash_transaction.rs"]
 mod zcash_transaction;
 use std::path::Path;
+use x402_treazury::network;
 #[path = "support/consume_reserve.rs"]
 mod consume_reserve;
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
 use x402_treazury::rotation::store::{Store, StoreHandle, status};
 fn create(dir: &Path) -> Store {
+    consume_reserve::install_trust();
     Store::create(
         &dir.join("state"),
         &dir.join("key"),

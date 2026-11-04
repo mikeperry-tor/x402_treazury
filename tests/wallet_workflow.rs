@@ -1,8 +1,12 @@
 //! The ordinary deployment-driven wallet workflow never fetches API catalogs or funds pools.
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
 use std::{
     path::Path,
     process::{Command, Output},
 };
+use x402_treazury::network;
 fn wallet(config: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .arg("wallet")
@@ -316,14 +320,15 @@ async fn wallet_rejections_and_saved_inspection_never_request_catalogs() {
             async { axum::Json(serde_json::json!({"paths":{}})) }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let endpoint = format!("http://{}/catalog", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let endpoint = format!("https://{}/catalog", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("deployment.toml");
-    std::fs::write(&config,format!("version=1\nservers={{}}\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[sources.unused]\nspec='{endpoint}'\n")).unwrap();
+    let ca = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem");
+    std::fs::write(&config,format!("version=1\nservers={{}}\n[network]\ntrusted_ca_files=[{ca:?}]\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[sources.unused]\nspec='{endpoint}'\n")).unwrap();
     let initialized = wallet(&config, &["init", "--birthday", "1"]);
     assert!(initialized.status.success());
     let initialized = String::from_utf8(initialized.stdout).unwrap();

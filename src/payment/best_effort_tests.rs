@@ -5,6 +5,7 @@ use crate::rotation::{
     manager::ManagedPool,
     store::{Store, StoreHandle},
 };
+use axum::serve::Listener as _;
 use axum::{
     Json, Router,
     body::Bytes,
@@ -72,7 +73,7 @@ fn challenge() -> Value {
 }
 async fn seller(
     State(f): State<Fixture>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ConnectInfo(crate::test_tls::PeerAddr(peer)): ConnectInfo<crate::test_tls::PeerAddr>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
@@ -415,12 +416,12 @@ async fn run_private(
             }),
         )
         .with_state(f.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
+            app.into_make_service_with_connect_info::<crate::test_tls::PeerAddr>(),
         )
         .await
         .unwrap()
@@ -635,7 +636,7 @@ async fn run_private(
     (success, signed, requests, error)
 }
 fn legacy_challenge() -> Value {
-    json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","asset":USDC,"maxAmountRequired":"100","resource":"http://localhost/pay","description":"legacy fixture","mimeType":"application/json","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
+    json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","asset":USDC,"maxAmountRequired":"100","resource":"https://localhost/pay","description":"legacy fixture","mimeType":"application/json","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
 }
 
 #[tokio::test]
@@ -678,12 +679,12 @@ async fn qualification_budget_refusal_rolls_back_admission_before_signed_dispatc
     let app = Router::new()
         .route("/pay", any(seller))
         .with_state(f.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
+            app.into_make_service_with_connect_info::<crate::test_tls::PeerAddr>(),
         )
         .await
         .unwrap()
@@ -953,7 +954,9 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
     let app = Router::new().route(
         "/pay",
         any(
-            move |ConnectInfo(peer): ConnectInfo<SocketAddr>,
+            move |ConnectInfo(crate::test_tls::PeerAddr(peer)): ConnectInfo<
+                crate::test_tls::PeerAddr,
+            >,
                   method: Method,
                   uri: Uri,
                   headers: HeaderMap,
@@ -987,7 +990,7 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
                         let id = crate::network::IsolationId::treasury(&format!("evict-{i}"));
                         let _ = factory.http_transport(
                             &id,
-                            &format!("http://127.0.0.1:{}", 10000 + i),
+                            &format!("https://127.0.0.1:{}", 10000 + i),
                             None,
                             false,
                             Default::default(),
@@ -1007,12 +1010,12 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
             },
         ),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
+            app.into_make_service_with_connect_info::<crate::test_tls::PeerAddr>(),
         )
         .await
         .unwrap()
@@ -1138,7 +1141,7 @@ enum TorStep {
 
 async fn tor_script_handler(
     State(script): State<TorScript>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ConnectInfo(crate::test_tls::PeerAddr(peer)): ConnectInfo<crate::test_tls::PeerAddr>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
@@ -1277,9 +1280,9 @@ async fn tor_unsigned_retry_child() {
     };
     let script_a = TorScript::default();
     let script_b = TorScript::default();
-    let listener_a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener_a = crate::test_tls::listener().await;
     let addr_a = listener_a.local_addr().unwrap();
-    let listener_b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener_b = crate::test_tls::listener().await;
     let addr_b = listener_b.local_addr().unwrap();
     let app_a = Router::new()
         .route("/pay", any(tor_script_handler))
@@ -1290,7 +1293,7 @@ async fn tor_unsigned_retry_child() {
     let server_a = tokio::spawn(async move {
         axum::serve(
             listener_a,
-            app_a.into_make_service_with_connect_info::<SocketAddr>(),
+            app_a.into_make_service_with_connect_info::<crate::test_tls::PeerAddr>(),
         )
         .await
         .unwrap()
@@ -1298,7 +1301,7 @@ async fn tor_unsigned_retry_child() {
     let server_b = tokio::spawn(async move {
         axum::serve(
             listener_b,
-            app_b.into_make_service_with_connect_info::<SocketAddr>(),
+            app_b.into_make_service_with_connect_info::<crate::test_tls::PeerAddr>(),
         )
         .await
         .unwrap()
@@ -1318,7 +1321,8 @@ async fn tor_unsigned_retry_child() {
         connect_timeout_seconds: Some(1),
         ..Default::default()
     })
-    .unwrap();
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
     crate::network::install_test_context(ctx);
 
     let find_token = |peer: SocketAddr| -> (String, String) {
@@ -1363,7 +1367,7 @@ async fn tor_unsigned_retry_child() {
                 let make_matrix_route = || RoutedRequest {
                     headers: Default::default(),
                     method: method.into(),
-                    url: "http://api-a.example.com/pay".into(),
+                    url: "https://api-a.example.com/pay".into(),
                     query: BTreeMap::from([("q".into(), json!("exact & value"))]),
                     body: (method == "POST").then(|| json!({"payload":[1,2,3]})),
                 };
@@ -1410,7 +1414,7 @@ async fn tor_unsigned_retry_child() {
                 let current_selected = crate::network::global()
                     .http_participating(
                         &id,
-                        "http://api-a.example.com/pay",
+                        "https://api-a.example.com/pay",
                         None,
                         false,
                         Default::default(),
@@ -1460,7 +1464,7 @@ async fn tor_unsigned_retry_child() {
                 let after_free = crate::network::global()
                     .http_participating(
                         &id,
-                        "http://api-a.example.com/pay",
+                        "https://api-a.example.com/pay",
                         None,
                         false,
                         Default::default(),
@@ -1478,7 +1482,7 @@ async fn tor_unsigned_retry_child() {
     let before_exhaust = crate::network::global()
         .http_participating(
             &id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1496,7 +1500,7 @@ async fn tor_unsigned_retry_child() {
     let make_route = || RoutedRequest {
         headers: Default::default(),
         method: "POST".into(),
-        url: "http://api-a.example.com/pay".into(),
+        url: "https://api-a.example.com/pay".into(),
         query: BTreeMap::new(),
         body: Some(json!({"exhaust":true})),
     };
@@ -1537,7 +1541,7 @@ async fn tor_unsigned_retry_child() {
     let after_exhaust = crate::network::global()
         .http_participating(
             &id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1559,7 +1563,7 @@ async fn tor_unsigned_retry_child() {
         crate::network::global()
             .http_participating(
                 &id,
-                "http://api-a.example.com/pay",
+                "https://api-a.example.com/pay",
                 Some(std::time::Duration::from_millis(100)),
                 false,
                 Default::default(),
@@ -1636,7 +1640,7 @@ async fn tor_unsigned_retry_child() {
         let dead_route = RoutedRequest {
             headers: Default::default(),
             method: method.into(),
-            url: "http://dead.example.com/pay".into(),
+            url: "https://dead.example.com/pay".into(),
             query: BTreeMap::new(),
             body: (method == "POST").then(|| json!({"original":"same"})),
         };
@@ -1654,17 +1658,17 @@ async fn tor_unsigned_retry_child() {
     let other_origin_pre = crate::network::global()
         .http_participating(
             &id,
-            "http://api-b.example.com/pay",
+            "https://api-b.example.com/pay",
             None,
             false,
             Default::default(),
         )
         .unwrap();
-    let disc_id = IsolationId::discovery("http://api-a.example.com/pay").unwrap();
+    let disc_id = IsolationId::discovery("https://api-a.example.com/pay").unwrap();
     let disc_pre = crate::network::global()
         .http_participating(
             &disc_id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1673,7 +1677,7 @@ async fn tor_unsigned_retry_child() {
     let selected_before_bad = crate::network::global()
         .http_participating(
             &id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1691,7 +1695,7 @@ async fn tor_unsigned_retry_child() {
     let after_malformed = crate::network::global()
         .http_participating(
             &id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1710,7 +1714,7 @@ async fn tor_unsigned_retry_child() {
     let after_bad_utf8 = crate::network::global()
         .http_participating(
             &id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1747,7 +1751,7 @@ async fn tor_unsigned_retry_child() {
     let after_bad_render = crate::network::global()
         .http_participating(
             &id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1765,7 +1769,7 @@ async fn tor_unsigned_retry_child() {
         crate::network::global()
             .http_participating(
                 &id,
-                "http://api-a.example.com/pay",
+                "https://api-a.example.com/pay",
                 Some(std::time::Duration::from_millis(100)),
                 false,
                 Default::default(),
@@ -1876,7 +1880,7 @@ async fn tor_unsigned_retry_child() {
     let other_origin_post = crate::network::global()
         .http_participating(
             &id,
-            "http://api-b.example.com/pay",
+            "https://api-b.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1886,7 +1890,7 @@ async fn tor_unsigned_retry_child() {
     let disc_post = crate::network::global()
         .http_participating(
             &disc_id,
-            "http://api-a.example.com/pay",
+            "https://api-a.example.com/pay",
             None,
             false,
             Default::default(),
@@ -1926,7 +1930,7 @@ async fn tor_unsigned_retry_child() {
         let current = factory
             .http_participating(
                 &id_for_hook,
-                "http://api-a.example.com/pay",
+                "https://api-a.example.com/pay",
                 None,
                 false,
                 Default::default(),
@@ -1938,7 +1942,7 @@ async fn tor_unsigned_retry_child() {
             let evict_id = IsolationId::treasury(&format!("tor-evict-{i}"));
             let _ = factory.http_transport(
                 &evict_id,
-                &format!("http://127.0.0.1:{}", 20000 + i),
+                &format!("https://127.0.0.1:{}", 20000 + i),
                 None,
                 false,
                 Default::default(),
@@ -2021,7 +2025,7 @@ async fn tor_unsigned_retry_child() {
         ManagedPool::new(
             handle.clone(),
             pool.clone(),
-            BaseRpc::new(&format!("http://{addr_b}/rpc"), 12).unwrap(),
+            BaseRpc::new(&format!("https://{addr_b}/rpc"), 12).unwrap(),
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),
@@ -2044,7 +2048,7 @@ async fn tor_unsigned_retry_child() {
     let managed_route = RoutedRequest {
         headers: Default::default(),
         method: "POST".into(),
-        url: "http://api-b.example.com/pay".into(),
+        url: "https://api-b.example.com/pay".into(),
         query: BTreeMap::from([("mode".into(), json!("handoff"))]),
         body: Some(json!({"step":"combined"})),
     };
@@ -2088,7 +2092,7 @@ async fn tor_unsigned_retry_child() {
     let slot_a = crate::network::global()
         .http_participating(
             &IsolationId::evm(&payers[0].to_string()).unwrap(),
-            "http://api-b.example.com/pay",
+            "https://api-b.example.com/pay",
             None,
             false,
             Default::default(),
@@ -2097,7 +2101,7 @@ async fn tor_unsigned_retry_child() {
     let slot_b = crate::network::global()
         .http_participating(
             &IsolationId::evm(&payers[1].to_string()).unwrap(),
-            "http://api-b.example.com/pay",
+            "https://api-b.example.com/pay",
             None,
             false,
             Default::default(),
@@ -2195,7 +2199,7 @@ async fn prior_wallet_liability_relay_child() {
     let app = Router::new()
         .route("/pay", any(tor_script_handler))
         .with_state(script.clone())
-        .layer(axum::Extension(ConnectInfo("127.0.0.1:1".parse::<SocketAddr>().unwrap())))
+        .layer(axum::Extension(ConnectInfo(crate::test_tls::PeerAddr("127.0.0.1:1".parse::<SocketAddr>().unwrap()))))
         .route("/relay", post({
             let calls = relay_calls.clone();
             move |Json(request): Json<Value>| {

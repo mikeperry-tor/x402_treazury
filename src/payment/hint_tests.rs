@@ -8,6 +8,7 @@ use crate::{
         store::{Store, StoreHandle},
     },
 };
+use axum::serve::Listener as _;
 use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
@@ -108,8 +109,8 @@ async fn fixture() -> Fixture {
             Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
         }}
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let mut state = Store::create(

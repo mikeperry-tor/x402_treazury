@@ -1,4 +1,7 @@
 //! Catalog inspection uses authored prices and never requests API endpoints.
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
 use axum::{Router, extract::Request, http::StatusCode, routing::any};
 use serde_json::{Value, json};
 use std::{
@@ -9,7 +12,17 @@ use std::{
     },
     time::Duration,
 };
+use x402_treazury::network;
 async fn cli(dir: &Path, args: &[&str]) -> std::process::Output {
+    let trust = dir.join("fixture-network.toml");
+    std::fs::write(
+        &trust,
+        format!(
+            "[network]\ntrusted_ca_files=[{:?}]\n",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem")
+        ),
+    )
+    .unwrap();
     tokio::time::timeout(
         Duration::from_secs(30),
         tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
@@ -17,6 +30,8 @@ async fn cli(dir: &Path, args: &[&str]) -> std::process::Output {
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .args(args)
+            .arg("--network-config")
+            .arg(trust)
             .kill_on_drop(true)
             .output(),
     )
@@ -36,8 +51,8 @@ fn output(result: std::process::Output) -> Value {
 async fn inspection_keeps_authored_prices_unknown_cost_and_zero_endpoint_io() {
     let calls = Arc::new(AtomicUsize::new(0));
     let seen = calls.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let app = Router::new().fallback(any(move |request: Request| {
         seen.fetch_add(1, Ordering::SeqCst);
         assert!(!request.headers().contains_key("payment-signature"));

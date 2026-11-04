@@ -548,6 +548,9 @@ pub async fn force_signal() -> std::io::Result<()> {
 }
 
 #[cfg(test)]
+mod security_tests;
+
+#[cfg(test)]
 mod pricing_instruction_tests {
     use super::*;
     #[test]

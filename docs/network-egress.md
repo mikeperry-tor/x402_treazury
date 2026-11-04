@@ -719,6 +719,24 @@ compatibility. No alternative production HTTP constructor exists.
 
 ## Provider protocol policy
 
+Operators can add private-PKI certificates with `[network].trusted_ca_files`,
+a list of absolute paths to PEM files or bundles. `NetworkContext::new` reads and
+validates these certificates once before constructing transports; missing/invalid
+files fail without leaking certificate contents. Configuration inspection reports
+paths without reading certificates. Additional anchors extend the ordinary trust
+stores, including through Tor and explicit direct catalog warming.
+
+Embedders can add private-PKI trust anchors with
+`NetworkContext::with_trusted_roots` before installing the context through
+`network::install_context`. Trust is immutable after process installation; repeated
+context installation requires the same policy and roots. `network::install(policy)` without configured CA files preserves installed
+embedding trust for an equivalent policy. Explicit CA-file installation compares
+both policy and loaded certificate bytes. Added roots extend platform HTTP trust and gRPC web-PKI trust, with ordinary
+certificate and hostname verification. No CLI/environment override disables checks.
+Local MCP/control connections and infrastructure adapters retain their own URL
+policies. Relays remain trusted for remote target TLS and returned content, as
+explained above; local validation cannot prove a relay's remote TLS handshake.
+
 Provider HTTPS uses HTTP/2-only ALPN/client mode and a TLS 1.3 minimum by default.
 Provider/source `allow_http1` and `allow_tls12` independently permit older versions,
 without weakening trust, redirect, retry or proxy policy. Catalog, help
@@ -728,7 +746,11 @@ acquisition, explicit refresh, bound API execution and lazy help. Their
 provider-management public-destination policy still applies. Generic specification
 imports, their dynamic bindings and raw calls use strict defaults. No vendor
 transport bypass is introduced. Infrastructure adapters retain their existing
-policy; explicit cleartext HTTP remains unchanged. See the
+policy. Provider catalogs, help, API requests and relay targets require HTTPS,
+including authored cross-origin operation URLs. Cleartext provider URLs fail
+before network disclosure, signing or relay fallback; local catalog files remain
+local. Every local TLS leg retains certificate-chain and hostname validation.
+See the
 [configuration guide](configuration.md#provider-http-and-tls-policy).
 
 Pool keys include protocol permissions as well as origin, isolation identity,
@@ -808,7 +830,7 @@ financial or qualification authority.
 | Runtime price hints: 24-hour receipt lifetime, 65,535 entries | Shares the API catalog disk-cache default lifetime. Bounded process memory for trusted operation/group/transport keys. Access and late validation never renew receipt age. Hints guide selection and fresh MCP descriptions; expiry or eviction restores fallback text and triggers no HTTP, probe or authority renewal. Capacity eviction/drop logs DEBUG; normal expiry is silent. See [local resource limits](local-resource-limits.md). |
 | NEAR sizing retries | No independent attempt cutoff. Each recognized USDC minimum must strictly raise the floor within the authorized nominal ceiling; every replacement draw persists before the next request. The original quote deadline is checked before each request and never renewed by retries. Existing response-inactivity guards and scheduler backoff remain independent. |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund contract remains unresolved; broadcast acceptance is not settlement. |
-| x402 authorization validity | Signed payment authority and canonical expiry recovery, independent of HTTP progress. |
+| x402 authorization validity | New static v1/v2 exact/upto and managed exact signatures expire at the shorter of the provider's requested lifetime or 300 seconds after signing. This bounds transfer authority, independently of HTTP progress. Original accepted offers, actual journaled expiries and existing signatures are preserved; expiry never grants replay. |
 | Payment challenge bodies | One collection under the provider's `max_response_bytes` (16 MiB default); direct low-level managed body-only challenges use the default. V1 body normalization adds no second cap or deadline. |
 | Funding observation owner | Per store: four credit reads, four status reads, four prerequisite-complete unsigned quotes, one serialized source step and one pending quote prerequisite. Each of the four traversal lanes (credit, status, source and quote prerequisite) retains at most 64 acquired rows; independent cursors have no inventory-count cutoff. These bounds protect acquired work, not funding capital. Saturated lane deferrals emit aggregate DEBUG events with static capacities and the active source operation, retaining all pending work. Candidates may not yet be due. Source-step start/finish emit DEBUG with the operation, wallet, starting phase, elapsed seconds and step success; these identify the holder, not its internal wait or swap outcome. |
 | Funding scheduling metadata: 256 records per observation kind | At most 1,024 runtime records retain exact operation/kind due times and failure streaks. Active work and unelapsed backoff cannot be evicted; due inactive records may be forgotten. Reopen reconstructs missing work from committed facts without resetting transaction recovery attempts. Admission deferral and due-inactive metadata eviction log DEBUG with limit 256 per kind. |

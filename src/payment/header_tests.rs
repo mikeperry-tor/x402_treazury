@@ -1,5 +1,6 @@
 //! Business headers and generated keys survive the existing payment lifecycle.
 use super::*;
+use axum::serve::Listener as _;
 use axum::{
     Router,
     extract::State,
@@ -80,7 +81,7 @@ async fn respond(State(seller): State<Seller>, headers: HeaderMap) -> axum::resp
     if seller.hold_challenge {
         seller.release.notified().await;
     }
-    let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/orders"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+    let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/orders"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     (
         StatusCode::PAYMENT_REQUIRED,
         [(
@@ -96,8 +97,8 @@ async fn fixture(
     hold_challenge: bool,
 ) -> (Seller, String, tokio::task::JoinHandle<()>) {
     let seller = seller(outcome, hold_challenge);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let app = Router::new()
         .route("/orders", post(respond))
         .with_state(seller.clone());
@@ -428,8 +429,8 @@ async fn concurrent_manual_credentials_and_keys_stay_with_each_signed_request() 
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let client = client();
     let cases = [

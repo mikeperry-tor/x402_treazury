@@ -244,6 +244,7 @@ impl ManagedPool {
         response: reqwest::Response,
         mut cover: Option<crate::cover::runtime::Call>,
     ) -> Result<ManagedResponse> {
+        crate::network::provider_url(retry.url().as_str())?;
         let pool = self.clone();
         let http = http.clone();
         crate::payment::ownership::run(
@@ -514,9 +515,9 @@ async fn sign_authorization(
     );
     let signer = Arc::new(signer);
     let candidates = if offer.version == 1 {
-        crate::payment::V1ExactClient::new(signer).accept(challenge)
+        crate::payment::BoundedClient(crate::payment::V1ExactClient::new(signer)).accept(challenge)
     } else {
-        V2Eip155ExactClient::new(signer).accept(challenge)
+        crate::payment::BoundedClient(V2Eip155ExactClient::new(signer)).accept(challenge)
     };
     let candidate = offer
         .select(&candidates)
@@ -663,10 +664,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
             let timeout = raw["maxTimeoutSeconds"]
                 .as_u64()
                 .context("invalid payment timeout")?;
-            ensure!(
-                timeout > 0 && timeout <= i64::MAX as u64 - now()?,
-                "invalid payment timeout"
-            );
+            ensure!(timeout > 0, "invalid payment timeout");
             Ok(Offer {
                 version,
                 raw: raw.clone(),
@@ -741,7 +739,12 @@ fn validate_payload(payload: &Value, offer: &Offer, payer: &str) -> Result<Autho
             && before > clock
             && before
                 <= clock
-                    .checked_add(offer.raw["maxTimeoutSeconds"].as_u64().unwrap())
+                    .checked_add(
+                        offer.raw["maxTimeoutSeconds"]
+                            .as_u64()
+                            .unwrap()
+                            .min(crate::payment::MAX_AUTHORITY_SECONDS)
+                    )
                     .context("timeout overflow")?
             && after < before,
         "invalid signed validity interval"
@@ -767,6 +770,65 @@ mod offer_tests {
             "amount":amount,"payTo":format!("0x{payee:040x}"),"maxTimeoutSeconds":60,
             "extra":{"name":"USD Coin","version":"2"},"annotation":{"opaque":true}})
     }
+    #[tokio::test]
+    async fn managed_sdk_lifetime_is_bounded_without_changing_selected_authority() {
+        let signer = Arc::new(PrivateKeySigner::from_slice(&[91; 32]).unwrap());
+        for version in [1, 2] {
+            for timeout in [30, 3600, u64::MAX] {
+                let mut raw = offer("1", 1);
+                raw["maxTimeoutSeconds"] = timeout.into();
+                if version == 1 {
+                    raw["network"] = "base".into();
+                    raw["maxAmountRequired"] =
+                        raw.as_object_mut().unwrap().remove("amount").unwrap();
+                    raw["resource"] = "https://example.com/pay".into();
+                    raw["description"] = "test".into();
+                    raw["mimeType"] = "application/json".into();
+                }
+                let envelope = serde_json::json!({"x402Version":version,
+                    "resource":{"url":"https://example.com/pay"},"accepts":[raw.clone()]});
+                let response = reqwest::Response::from(
+                    axum::http::Response::builder()
+                        .status(402)
+                        .header("payment-required", STANDARD.encode(envelope.to_string()))
+                        .body(Vec::<u8>::new())
+                        .unwrap(),
+                );
+                let (challenge, selected, _) =
+                    prepare_challenge(&response, &SpendPolicy { max_atomic: None }).unwrap();
+                assert_eq!(selected.raw, raw);
+                let candidates = if version == 1 {
+                    crate::payment::BoundedClient(crate::payment::V1ExactClient::new(
+                        signer.clone(),
+                    ))
+                    .accept(&challenge)
+                } else {
+                    crate::payment::BoundedClient(V2Eip155ExactClient::new(signer.clone()))
+                        .accept(&challenge)
+                };
+                let start = now().unwrap();
+                let signed = selected.select(&candidates).unwrap().sign().await.unwrap();
+                let mut payload: Value =
+                    serde_json::from_slice(&STANDARD.decode(signed).unwrap()).unwrap();
+                let accepted =
+                    validate_payload(&payload, &selected, &signer.address().to_string()).unwrap();
+                assert!(
+                    accepted.valid_before
+                        >= start + timeout.min(crate::payment::MAX_AUTHORITY_SECONDS)
+                );
+                assert!(
+                    accepted.valid_before
+                        <= now().unwrap() + timeout.min(crate::payment::MAX_AUTHORITY_SECONDS)
+                );
+                payload["payload"]["authorization"]["validBefore"] =
+                    (now().unwrap() + 3600).to_string().into();
+                assert!(
+                    validate_payload(&payload, &selected, &signer.address().to_string()).is_err()
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn sdk_payload_validation_rejects_changed_authority_and_validity() {
         // One public, unfunded signer; no Store, RPC or HTTP dispatch is needed

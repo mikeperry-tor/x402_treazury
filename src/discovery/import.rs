@@ -127,6 +127,7 @@ pub async fn fixture_fetch(
         "max_spec_bytes",
     );
     options.public_only = false;
+    options.transport = crate::network::HttpPolicy::COMPATIBLE;
     options.timeout = timeout;
     crate::discovery_relay::document::read(&crate::payment::PaidClient::unsigned(), &options).await
 }

@@ -1,4 +1,6 @@
 //! Ordered paid read relays; static cache/readiness ownership stays with discovery.
+#[cfg(test)]
+use axum::serve::Listener as _;
 mod adapters;
 pub(crate) mod api;
 pub(crate) mod document;
@@ -728,7 +730,7 @@ pub(crate) mod tests {
             }
             return axum::Json(f.body).into_response();
         }
-        let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/curl","description":"fixture","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"10000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+        let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/curl","description":"fixture","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"10000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
         (
             StatusCode::PAYMENT_REQUIRED,
             [(
@@ -753,8 +755,8 @@ pub(crate) mod tests {
             arrived: Default::default(),
             stall,
         };
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}/curl", listener.local_addr().unwrap());
+        let listener = crate::test_tls::listener().await;
+        let endpoint = format!("https://{}/curl", listener.local_addr().unwrap());
         let app = Router::new()
             .route("/curl", post(handler))
             .with_state(f.clone());
@@ -1003,10 +1005,10 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn pre_submission_failure_leaves_other_targets_available() {
         let (mut relay, _, task) = fixture(envelope(TARGET), false, false).await;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = crate::test_tls::listener().await;
         set_endpoint(
             &mut relay,
-            format!("http://{}/", listener.local_addr().unwrap()),
+            format!("https://{}/", listener.local_addr().unwrap()),
         );
         drop(listener);
         assert!(relay.fetch(TARGET, 4096, "max_spec_bytes").await.is_err());

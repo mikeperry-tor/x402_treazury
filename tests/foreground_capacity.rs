@@ -1,4 +1,6 @@
 //! Isolated process-wide bound across real authenticated MCP listeners and payers.
+#[path = "support/tls.rs"]
+mod tls;
 use axum::{
     Router,
     body::{Body, Bytes},
@@ -16,6 +18,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Semaphore;
+use x402_treazury::network;
 use x402_treazury::{
     catalog::{Config, build_tools},
     mcp_wire::McpResponse,
@@ -23,6 +26,11 @@ use x402_treazury::{
     server::{Server, http_app},
 };
 
+async fn serve_provider(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    tls::install_trust();
+    let (address, task) = tls::serve(app).await;
+    (format!("https://{address}"), task)
+}
 async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -42,6 +50,7 @@ async fn until(mut predicate: impl FnMut() -> bool) -> Result<(), tokio::time::e
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listeners() {
+    tls::install_trust();
     let unsigned = Arc::new(AtomicUsize::new(0));
     let signed = Arc::new(AtomicUsize::new(0));
     let reading = Arc::new(AtomicUsize::new(0));
@@ -57,7 +66,7 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
                     unsigned.fetch_add(1, Ordering::SeqCst);
                     headers.acquire().await.unwrap().forget();
                     if path.0 == "paid" {
-                        let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/paid"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+                        let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/paid"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
                         return (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(challenge.to_string()))], "challenge").into_response();
                     }
                 }
@@ -69,7 +78,7 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
             }
         }
     }));
-    let (origin, vendor) = serve(vendor).await;
+    let (origin, vendor) = serve_provider(vendor).await;
     let mut listeners = Vec::new();
     let mut owners = Vec::new();
     let mut clients = Vec::new();

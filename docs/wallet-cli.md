@@ -1018,8 +1018,12 @@ current operation's selected nominal amount and the accepted executable quote's
 expected USDC output; both are nominal or expected amounts, not credited balances. These
 presentation changes add no persisted fields or schema version.
 
-Unsupported owner opens preserve the complete state directory before writable
-initialization. Live read-only SQLite inspection preserves database and existing
+Unsupported owner opens preserve existing state files before writable
+initialization. Stopped-state preflight recovers nonempty journals only in a
+private disposable subdirectory of the state directory; normal completion and
+errors remove that copy without changing original database or journal bytes.
+Clean stopped databases are read in place without creating a copy.
+Live read-only SQLite inspection preserves database and existing
 financial journal bytes; SQLite may create WAL/SHM coordination files or update
 SHM reader metadata. It uses a coherent read transaction so committed WAL data
 remains visible while the owner is running.

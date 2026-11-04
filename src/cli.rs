@@ -139,6 +139,7 @@ pub struct Serve {
     host: String,
     #[arg(long, default_value = "8000")]
     port: u16,
+    /// Prefer X402_MCP_BEARER_TOKEN; command-line tokens are visible to process inspection.
     #[arg(long)]
     bearer_token: Option<String>,
     /// Explicitly disable authentication for standalone HTTP serving.

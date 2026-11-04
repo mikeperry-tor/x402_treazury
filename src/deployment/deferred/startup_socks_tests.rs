@@ -60,7 +60,7 @@ async fn late_socks_child() {
     let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_address = reserved.local_addr().unwrap();
     drop(reserved);
-    let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = crate::test_tls::listener().await;
     let origin_address = origin.local_addr().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let balances = Arc::new(AtomicUsize::new(0));
@@ -114,7 +114,7 @@ async fn late_socks_child() {
     )
     .unwrap();
     let path = dir.path().join("deployment.toml");
-    std::fs::write(&path, format!("version=1\n[network]\nmode='tor'\nsocks_endpoint='{proxy_address}'\ncover_traffic_enabled=false\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n[sources.local]\nspec='local.json'\nbase_url='http://catalog.example.com'\n[sources.remote]\nspec='http://catalog.example.com/spec'\nbase_url='http://catalog.example.com'\n[servers.one]\nwait_for_catalogs=false\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['local','remote']\n")).unwrap();
+    std::fs::write(&path, format!("version=1\n[network]\nmode='tor'\nsocks_endpoint='{proxy_address}'\ncover_traffic_enabled=false\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n[sources.local]\nspec='local.json'\nbase_url='https://catalog.example.com'\n[sources.remote]\nspec='https://catalog.example.com/spec'\nbase_url='https://catalog.example.com'\n[servers.one]\nwait_for_catalogs=false\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['local','remote']\n")).unwrap();
     let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
         .await
         .unwrap();
@@ -123,7 +123,7 @@ async fn late_socks_child() {
         dir.path().join("treasury"), dir.path().join("treasury-key"), 2_000_000,
         Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
     ).await.unwrap();
-    let indexer = format!("http://127.0.0.1:{}", origin_address.port());
+    let indexer = format!("https://127.0.0.1:{}", origin_address.port());
     treasury.configure_sync(crate::treasury::SyncSettings::new(indexer.clone(), 3).unwrap());
     let (handle, commands) = crate::treasury::actor::channel();
     let treasury_stop = CancellationToken::new();
@@ -140,7 +140,7 @@ async fn late_socks_child() {
             store.clone(),
             group.clone(),
             BaseRpc::new(
-                &format!("http://127.0.0.1:{}/rpc", origin_address.port()),
+                &format!("https://127.0.0.1:{}/rpc", origin_address.port()),
                 12,
             )
             .unwrap(),

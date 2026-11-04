@@ -212,7 +212,7 @@ version = 1
 [sources.shared]
 spec = "api.json"
 prefix = "api"
-base_url = "http://127.0.0.1:1"
+base_url = "https://127.0.0.1:1"
 [wallets.default]
 mode = "static"
 private_key_env = "PRIVATE_ENV_REFERENCE"

@@ -266,6 +266,13 @@ logs at DEBUG; failure to publish a positive observation still defers preparatio
 NEAR header/body timeout attempts also log at DEBUG with a safe stage and reason;
 the owning funding or CLI operation determines any terminal severity.
 
+A terminal automatic-funding owner failure emits ERROR immediately, before its
+caller handles service shutdown, with a fixed cause category and available typed
+SQLite codes, I/O kind or JSON category. It never prints arbitrary error or panic
+prose. Accepted financial work stays recorded; this diagnostic adds no restart or
+replay authority. A funding-owner panic with existing retry remaining reports its
+recovery at INFO; an already-retained owner remains DEBUG.
+
 Retried local SDK reconstruction and completed-transaction publication report
 individual failures at DEBUG, with fixed snapshot categories, SQLite error codes
 or I/O kinds when available. Arbitrary error prose is never logged. These

@@ -1,6 +1,8 @@
 //! Consume READY through the real paid admission/journal path; no promotion API.
 #![allow(dead_code)]
+use crate::tls;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
+pub use tls::install_trust;
 use x402_treazury::{
     catalog::RoutedRequest,
     payment::{PaidClient, SpendPolicy, USDC},
@@ -54,12 +56,12 @@ fn consume(store: Store, state: &Path, key: &Path, pool: &str, replace: bool) ->
                 }
             })).route("/pay",get(|headers:HeaderMap|async move {
                 if headers.contains_key("payment-signature") {return (StatusCode::OK,"paid").into_response();}
-                let challenge=json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"fixture","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+                let challenge=json!({"x402Version":2,"resource":{"url":"https://localhost/pay","description":"fixture","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
                 (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))],"payment required").into_response()
             }));
-            let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let url=format!("http://{}",listener.local_addr().unwrap());
-            let server=tokio::spawn(async move {axum::serve(listener,app).await.unwrap()});
+            tls::install_trust();
+            let (address,server)=tls::serve(app).await;
+            let url=format!("https://{address}");
             let (handle,owner)=StoreHandle::spawn(store);
             let manager=ManagedPool::new(handle.clone(),pool.clone(),BaseRpc::new(&format!("{url}/rpc"), 12).unwrap(),SpendPolicy::dollars("1").unwrap()).unwrap();
             let client=PaidClient::managed(Arc::new(manager));

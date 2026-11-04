@@ -1,3 +1,6 @@
+#[path = "support/tls.rs"]
+mod tls;
+use x402_treazury::network;
 #[path = "support/log_capture.rs"]
 mod log_capture;
 use axum::{Router, routing::get};
@@ -16,6 +19,11 @@ use x402_treazury::{
     server::{Server, http_app},
 };
 
+async fn serve_provider(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    tls::install_trust();
+    let (address, task) = tls::serve(app).await;
+    (format!("https://{address}"), task)
+}
 async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -29,6 +37,7 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
 
 #[tokio::test]
 async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains() {
+    tls::install_trust();
     use axum::{
         extract::Path,
         http::{HeaderMap, StatusCode},
@@ -38,7 +47,7 @@ async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains(
     let signed = Arc::new(AtomicUsize::new(0));
     let unsigned = Arc::new(AtomicUsize::new(0));
     let (s, u) = (signed.clone(), unsigned.clone());
-    let (vendor, vendor_task) = serve(Router::new().route("/status/{code}", get(move |Path(code): Path<u16>, headers: HeaderMap| {
+    let (vendor, vendor_task) = serve_provider(Router::new().route("/status/{code}", get(move |Path(code): Path<u16>, headers: HeaderMap| {
         let (s,u) = (s.clone(),u.clone());
         async move {
             if headers.contains_key("payment-signature") {
@@ -104,10 +113,11 @@ async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains(
 
 #[tokio::test]
 async fn direct_and_on_demand_calls_route_declared_headers_and_own_distinct_keys() {
+    tls::install_trust();
     use axum::http::HeaderMap;
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let captured = seen.clone();
-    let (base, task) = serve(Router::new().route(
+    let (base, task) = serve_provider(Router::new().route(
         "/read",
         get(move |headers: HeaderMap| {
             captured.lock().unwrap().push((
@@ -176,10 +186,15 @@ async fn direct_and_on_demand_calls_route_declared_headers_and_own_distinct_keys
 
 #[tokio::test]
 async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result() {
+    tls::install_trust();
     use axum::http::{HeaderMap, StatusCode};
     use base64::{Engine, engine::general_purpose::STANDARD};
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let vendor = format!("http://{}", listener.local_addr().unwrap());
+    tls::install_trust();
+    let listener = tls::listener().await;
+    let vendor = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let challenge = STANDARD.encode(
         json!({
             "x402Version": 2,
@@ -264,7 +279,7 @@ async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result
     assert_eq!(unsigned.load(Ordering::SeqCst), 0);
     assert_eq!(signed.load(Ordering::SeqCst), 0);
     let result: Value = request()
-        .bearer_auth("test-token")
+        .header("authorization", "bEaReR test-token")
         .send()
         .await
         .unwrap()
@@ -281,9 +296,11 @@ async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result
 
 #[tokio::test]
 async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
+    tls::install_trust();
     use rmcp::ServerHandler;
     let (vendor, task) =
-        serve(Router::new().route("/cover_status", get(|| async { "ordinary API" }))).await;
+        serve_provider(Router::new().route("/cover_status", get(|| async { "ordinary API" })))
+            .await;
     let tools = build_tools(
         &Config::default(),
         &json!({"paths":{"/cover_status":{"get":{}}}}),
@@ -304,9 +321,10 @@ async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
 }
 #[tokio::test]
 async fn authenticated_stateless_http_initializes_lists_and_calls() {
+    tls::install_trust();
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
-    let (vendor, vendor_task) = serve(
+    let (vendor, vendor_task) = serve_provider(
         Router::new()
             .route("/hello", get(|| async { "hello" }))
             .route(
@@ -473,11 +491,12 @@ fn schemas_filters_and_routes_handle_boundaries_collisions_and_refs() {
 
 #[tokio::test]
 async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
+    tls::install_trust();
     use x402_treazury::catalog_state::{self, CatalogSnapshot};
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let (e, r) = (entered.clone(), release.clone());
-    let (url, task) = serve(
+    let (url, task) = serve_provider(
         Router::new()
             .route(
                 "/old",
@@ -531,6 +550,7 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
 
 #[tokio::test]
 async fn untagged_help_failures_warn_once_without_exposing_content() {
+    tls::install_trust();
     if log_capture::run_in_child("untagged_help_failures_warn_once_without_exposing_content") {
         return;
     }
@@ -552,7 +572,7 @@ async fn untagged_help_failures_warn_once_without_exposing_content() {
     ] {
         let hits = Arc::new(AtomicUsize::new(0));
         let observed = hits.clone();
-        let (base, task) = serve(Router::new().route(
+        let (base, task) = serve_provider(Router::new().route(
             "/help",
             get(move |headers: HeaderMap| {
                 observed.fetch_add(1, Ordering::SeqCst);
@@ -603,6 +623,7 @@ async fn untagged_help_failures_warn_once_without_exposing_content() {
 
 #[tokio::test]
 async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_content() {
+    tls::install_trust();
     use axum::{
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
@@ -612,7 +633,7 @@ async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_cont
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let (h, e, r) = (hits.clone(), entered.clone(), release.clone());
-    let (url, task) = serve(
+    let (url, task) = serve_provider(
         Router::new()
             .route(
                 "/help",
@@ -749,4 +770,31 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
         route.body.unwrap(),
         json!({"items":[{"boolean_bound":4,"numeric_bound":8}]})
     );
+}
+
+#[tokio::test]
+async fn standalone_non_loopback_listener_is_rejected_before_provider_io() {
+    tls::install_trust();
+    let directory = tempfile::tempdir().unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .current_dir(directory.path())
+        .args([
+            "serve",
+            "--transport",
+            "http",
+            "--host",
+            "0.0.0.0",
+            "--provider",
+            "missing.toml",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let diagnostic = String::from_utf8(output.stderr).unwrap();
+    assert!(diagnostic.contains("loopback"), "{diagnostic}");
+    assert!(!diagnostic.contains("missing.toml"), "{diagnostic}");
 }

@@ -1,5 +1,6 @@
 //! Direct library calls retain dispatch and body ownership after waiter cancellation.
 use super::*;
+use axum::serve::Listener as _;
 use axum::{
     Router,
     extract::State,
@@ -32,7 +33,7 @@ async fn serve(State(s): State<Seller>, headers: HeaderMap) -> axum::response::R
     s.unsigned.fetch_add(1, Ordering::SeqCst);
     s.challenged.notify_one();
     s.release_challenge.notified().await;
-    let challenge = serde_json::json!({"x402Version":2,"resource":{"url":"http://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+    let challenge = serde_json::json!({"x402Version":2,"resource":{"url":"https://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     (
         StatusCode::PAYMENT_REQUIRED,
         [(
@@ -45,8 +46,8 @@ async fn serve(State(s): State<Seller>, headers: HeaderMap) -> axum::response::R
 #[tokio::test]
 async fn canceled_direct_waiter_retains_exact_signed_dispatch_and_body_drain() {
     let seller = Seller::default();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/pay", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}/pay", listener.local_addr().unwrap());
     let app = Router::new()
         .route("/pay", get(serve))
         .with_state(seller.clone());
@@ -111,7 +112,7 @@ async fn canceled_direct_waiter_retains_exact_signed_dispatch_and_body_drain() {
             .execute_response(RoutedRequest {
                 headers: Default::default(),
                 method: "GET".into(),
-                url: "http://127.0.0.1:1".into(),
+                url: "https://127.0.0.1:1".into(),
                 query: Default::default(),
                 body: None
             })

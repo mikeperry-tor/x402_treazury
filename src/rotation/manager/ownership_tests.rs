@@ -97,6 +97,7 @@ async fn canceled_direct_waiters_retain_accepted_work_before_and_after_journalin
         }));
         let http = crate::network::NetworkContext::new(Default::default())
             .unwrap()
+            .with_test_root(crate::test_tls::CA)
             .http(
                 &crate::network::IsolationId::evm(&f.payer.address).unwrap(),
                 &f.url,

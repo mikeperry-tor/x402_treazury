@@ -85,7 +85,6 @@ fn safe_reason(error: &anyhow::Error) -> String {
                 | "receipt block height mismatch"
                 | "receipt transaction reverted"
                 | "receipt transaction/block mismatch"
-                | "receipt log limit exceeded"
                 | "receipt log provenance mismatch"
                 | "receipt lacks unique matching USDC transfer and authorization nonce"
                 | "receipt event topics malformed"

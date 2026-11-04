@@ -583,7 +583,7 @@ async fn paid_document_fixture() {
             axum::Json(json!({"url":url,"method":"GET","statusCode":if path == "/relayed-402" { 402 } else { 200 },"headers":{"content-type":mime},"body":body,"redirectChain":[],"error":null})).into_response()
         }
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::test_tls::listener().await;
     let relay_address = listener.local_addr().unwrap();
     let relay_task = tokio::spawn(async move {
         axum::serve(listener, relay).await.unwrap();
@@ -607,7 +607,7 @@ async fn paid_document_fixture() {
         .with_test_root(crate::test_tls::CA),
     );
     let sequence = Arc::new(crate::discovery_relay::SearchRelay::fixture(
-        format!("http://{relay_address}/curl"),
+        format!("https://{relay_address}/curl"),
         Default::default(),
     ));
     let payer = PaidClient::new(
@@ -864,3 +864,6 @@ async fn paid_document_fixture() {
     origin_task.abort();
     relay_task.abort();
 }
+
+#[cfg(test)]
+use axum::serve::Listener as _;

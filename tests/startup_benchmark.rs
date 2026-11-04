@@ -1,4 +1,7 @@
 //! Opt-in localhost replay, not a live provider/Tor performance claim.
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
 use axum::{
     Router,
     extract::{OriginalUri, State},
@@ -13,6 +16,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use x402_treazury::network;
 use x402_treazury::{catalog::Config, deployment::Deployment};
 const LARGE_ROUTES: usize = 32;
 
@@ -65,6 +69,7 @@ async fn response(
 #[tokio::test]
 #[ignore = "explicit localhost performance measurement; no mainnet requests or signing"]
 async fn representative_startup_replay() {
+    tls::install_trust();
     let inputs: Vec<_> = synthetic_documents()
         .into_iter()
         .map(|document| {
@@ -80,8 +85,8 @@ async fn representative_startup_replay() {
         .map(|(_, document)| serde_json::to_vec(document).unwrap())
         .collect();
     let unique_specs = specs.len();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let replay = Replay {
         specs: Arc::new(specs),
         catalogs: Arc::default(),

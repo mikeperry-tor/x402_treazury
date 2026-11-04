@@ -18,8 +18,8 @@ mode='static'
 private_key_env='UNUSED'
 max_api_payment_usdc='0.01'
 [sources.api]
-spec='http://127.0.0.1:1/spec'
-base_url='http://127.0.0.1:1'
+spec='https://127.0.0.1:1/spec'
+base_url='https://127.0.0.1:1'
 [servers.test]
 listen='127.0.0.1:0'
 bearer_token_env='UNUSED'

@@ -54,8 +54,8 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         .ensure_capacity_group("relay", &reserves, None, 0)
         .unwrap();
     let (store, worker) = StoreHandle::spawn(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let timestamp = crate::rotation::base::now().unwrap();
     let rpc_task = tokio::spawn(async move {
         axum::serve(
@@ -324,10 +324,10 @@ async fn definitive_unsigned_failure_is_published_once_without_a_second_retry_lo
     let (mut relay, f, unused) = fixture(envelope(TARGET), false, false).await;
     unused.abort();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::test_tls::listener().await;
     set_endpoint(
         &mut relay,
-        format!("http://{}/curl", listener.local_addr().unwrap()),
+        format!("https://{}/curl", listener.local_addr().unwrap()),
     );
     let app = Router::new().route(
         "/curl",

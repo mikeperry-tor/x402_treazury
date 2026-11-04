@@ -1,4 +1,7 @@
 //! Server-held credentials must not become diagnostic content. Vendor bodies are distinct.
+#[path = "support/tls.rs"]
+mod tls;
+use x402_treazury::network;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
 use axum::{Router, http::StatusCode, routing::any};
@@ -20,19 +23,17 @@ fn payer() -> PaidClient {
 }
 #[tokio::test]
 async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
-    let http = reqwest::Client::builder().no_proxy().build().unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            // Fetches use GET and JSON-RPC uses POST; both must see the intended
-            // availability failure rather than an unrelated method rejection.
-            Router::new().route("/", any(|| async { StatusCode::BAD_GATEWAY })),
-        )
-        .await
+    tls::install_trust();
+    tls::install_trust();
+    let http = reqwest::Client::builder()
+        .no_proxy()
+        .tls_certs_merge([reqwest::Certificate::from_pem(tls::CA).unwrap()])
+        .build()
         .unwrap();
-    });
+    // Fetches use GET and JSON-RPC uses POST; both see the intended failure.
+    let (address, task) =
+        tls::serve(Router::new().route("/", any(|| async { StatusCode::BAD_GATEWAY }))).await;
+    let origin = format!("https://{address}");
     let url = format!("{origin}/?api_key={SECRET}");
     // Positive control: reqwest's unfiltered status error really contains this sentinel.
     let raw = http
@@ -123,7 +124,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     task.abort();
     // Connect failure exercises the initial payment request and spec fetch paths.
     let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/?token={SECRET}", closed.local_addr().unwrap());
+    let url = format!("https://{}/?token={SECRET}", closed.local_addr().unwrap());
     drop(closed);
     let route = RoutedRequest {
         headers: Default::default(),
@@ -138,6 +139,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
 
 #[tokio::test]
 async fn executable_startup_and_inspection_do_not_print_environment_secrets() {
+    tls::install_trust();
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(
         tmp.path().join("spec.json"),

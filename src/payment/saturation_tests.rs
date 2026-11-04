@@ -5,6 +5,7 @@ use crate::rotation::{
     manager::ManagedPool,
     store::{Store, StoreHandle},
 };
+use axum::serve::Listener as _;
 use axum::{
     Router,
     http::{HeaderMap, StatusCode},
@@ -67,13 +68,13 @@ async fn saturation_child() {
                 }
                 unsigned.fetch_add(1, Ordering::SeqCst);
                 challenges.acquire().await.unwrap().forget();
-                let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":600,"extra":{"name":"USD Coin","version":"2"}}]});
+                let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":600,"extra":{"name":"USD Coin","version":"2"}}]});
                 (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
             }
         }
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let rpc = BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap();
     let mut state = Store::create(

@@ -5,9 +5,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 async fn streamed_import_limits_partial_chunks_and_slow_download() {
     for mode in ["exact", "overflow", "interrupted", "slow"] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/spec", listener.local_addr().unwrap());
+        let url = format!("https://{}/spec", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = crate::test_tls::acceptor().accept(socket).await.unwrap();
             let mut request = Vec::new();
             while !request.ends_with(b"\r\n\r\n") {
                 request.push(socket.read_u8().await.unwrap());
@@ -369,9 +370,10 @@ async fn import_redirect_and_read_timeout_warn_without_response_prose() {
     }
     for stall in [false, true] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/PRIVATE_SPEC", listener.local_addr().unwrap());
+        let url = format!("https://{}/PRIVATE_SPEC", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = crate::test_tls::acceptor().accept(socket).await.unwrap();
             let mut request = Vec::new();
             while !request.ends_with(b"\r\n\r\n") {
                 request.push(socket.read_u8().await.unwrap());

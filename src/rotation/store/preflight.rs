@@ -69,7 +69,7 @@ pub(super) fn snapshot(dir: &Path) -> Result<Snapshot> {
         use std::os::unix::fs::PermissionsExt;
         temporary.permissions(std::fs::Permissions::from_mode(0o700));
     }
-    let temporary = temporary.tempdir()?;
+    let temporary = temporary.tempdir_in(dir)?;
     // Nonempty journals may contain the authoritative schema. Let SQLite recover
     // only a disposable copy, without parsing WAL/rollback formats ourselves.
     // Wallet payloads remain encrypted; database metadata is plaintext.
@@ -143,11 +143,14 @@ mod tests {
                 .len()
                 > 0
         );
+        let before = contents(source.path());
         let copy = snapshot(source.path()).unwrap();
         let directory = copy
             ._directory
             .as_ref()
             .expect("nonempty journal requires a copy");
+        let copy_path = directory.path().to_owned();
+        assert_eq!(copy_path.parent(), Some(source.path()));
         for path in [
             directory.path().to_owned(),
             directory.path().join("state.sqlite"),
@@ -164,6 +167,16 @@ mod tests {
             7
         );
         assert!(copy.db.execute("DELETE FROM fixture", []).is_err());
+        drop(copy);
+        assert!(!copy_path.exists());
+        assert_eq!(before, contents(source.path()));
+        let failed_read = (|| -> rusqlite::Result<()> {
+            let copy = snapshot(source.path()).unwrap();
+            copy.db.execute("DELETE FROM fixture", [])?;
+            Ok(())
+        })();
+        assert!(failed_read.is_err());
+        assert_eq!(before, contents(source.path()));
     }
 
     #[test]

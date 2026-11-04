@@ -1,4 +1,5 @@
-//! Public fixture key/CA only. No production trust or verification changes.
+//! Public fixture key/CA only. Certificate and hostname verification stays enabled.
+#![allow(dead_code)]
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{
@@ -9,10 +10,48 @@ use tokio_rustls::{
     },
 };
 pub const CA: &[u8] = include_bytes!("../fixtures/tls/ca.pem");
-struct Listener {
+/// Explicit immutable private-PKI trust; certificate and hostname checks stay on.
+pub fn install_trust() {
+    crate::network::install_context(
+        crate::network::NetworkContext::new(Default::default())
+            .unwrap()
+            .with_trusted_roots([CA])
+            .unwrap(),
+    )
+    .unwrap();
+}
+/// A raw TLS acceptor for fixtures that assert exact HTTP bytes.
+pub fn acceptor() -> TlsAcceptor {
+    let mut config = config(
+        &[&rustls::version::TLS13, &rustls::version::TLS12],
+        &[b"h2", b"http/1.1"],
+    );
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    TlsAcceptor::from(Arc::new(config))
+}
+pub async fn listener() -> Listener {
+    Listener {
+        tcp: TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        tls: TlsAcceptor::from(Arc::new(config(
+            &[&rustls::version::TLS13, &rustls::version::TLS12],
+            &[b"h2", b"http/1.1"],
+        ))),
+        delay: std::time::Duration::ZERO,
+    }
+}
+pub struct Listener {
     tcp: TcpListener,
     tls: TlsAcceptor,
     delay: std::time::Duration,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct PeerAddr(pub SocketAddr);
+impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, Listener>>
+    for PeerAddr
+{
+    fn connect_info(stream: axum::serve::IncomingStream<'_, Listener>) -> Self {
+        Self(*stream.remote_addr())
+    }
 }
 impl axum::serve::Listener for Listener {
     type Io = tokio_rustls::server::TlsStream<TcpStream>;
@@ -54,20 +93,7 @@ pub async fn serve_delayed(
     alpn: &[&[u8]],
     delay: std::time::Duration,
 ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let provider = tokio_rustls::rustls::crypto::ring::default_provider();
-    let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
-        .with_protocol_versions(versions)
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![CertificateDer::from(
-                include_bytes!("../fixtures/tls/server.der").to_vec(),
-            )],
-            PrivatePkcs8KeyDer::from(include_bytes!("../fixtures/tls/server-key.der").to_vec())
-                .into(),
-        )
-        .unwrap();
-    config.alpn_protocols = alpn.iter().map(|v| v.to_vec()).collect();
+    let config = config(versions, alpn);
     let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = tcp.local_addr().unwrap();
     let task = tokio::spawn(async move {
@@ -83,4 +109,22 @@ pub async fn serve_delayed(
         .unwrap();
     });
     (address, task)
+}
+
+fn config(versions: &[&'static rustls::SupportedProtocolVersion], alpn: &[&[u8]]) -> ServerConfig {
+    let provider = tokio_rustls::rustls::crypto::ring::default_provider();
+    let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
+        .with_protocol_versions(versions)
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![CertificateDer::from(
+                include_bytes!("../fixtures/tls/server.der").to_vec(),
+            )],
+            PrivatePkcs8KeyDer::from(include_bytes!("../fixtures/tls/server-key.der").to_vec())
+                .into(),
+        )
+        .unwrap();
+    config.alpn_protocols = alpn.iter().map(|v| v.to_vec()).collect();
+    config
 }

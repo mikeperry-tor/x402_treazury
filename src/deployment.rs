@@ -266,10 +266,8 @@ impl MetaConfig {
                 server.disable_host_check,
             )
             .with_context(|| format!("server {name}: invalid Host policy"))?;
-            ensure!(
-                server.listen.ip().is_loopback(),
-                "server {name}: this release requires a loopback listen address"
-            );
+            crate::server::host::require_loopback(server.listen.ip())
+                .with_context(|| format!("server {name}"))?;
             ensure!(
                 server.listen.port() == 0 || addresses.insert(server.listen),
                 "duplicate listener {}",

@@ -340,7 +340,7 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     let source = dir.path().join("source.toml");
     std::fs::write(
         &source,
-        "spec = 'http://unreachable.invalid/openapi.json'\n",
+        "spec = 'https://unreachable.invalid/openapi.json'\n",
     )
     .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))

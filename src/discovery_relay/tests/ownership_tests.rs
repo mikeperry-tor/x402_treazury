@@ -32,10 +32,10 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             let unsigned_arrived = CancellationToken::new();
             let unsigned_release = CancellationToken::new();
             let body_release = CancellationToken::new();
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let listener = crate::test_tls::listener().await;
             set_endpoint(
                 &mut relay,
-                format!("http://{}/curl", listener.local_addr().unwrap()),
+                format!("https://{}/curl", listener.local_addr().unwrap()),
             );
             let app = Router::new().route(
                 "/curl",
@@ -188,9 +188,9 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
     let arrived = CancellationToken::new();
     let release = CancellationToken::new();
     let healthy_calls = Arc::new(AtomicUsize::new(0));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::test_tls::listener().await;
     let address = listener.local_addr().unwrap();
-    set_endpoint(&mut relay, format!("http://{address}/curl"));
+    set_endpoint(&mut relay, format!("https://{address}/curl"));
     let app = Router::new()
         .route(
             "/curl",
@@ -261,7 +261,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
         15,
         "relay queue reserved idle capacity"
     );
-    let healthy_url = format!("http://{address}/healthy");
+    let healthy_url = format!("https://{address}/healthy");
     let healthy = crate::network::global()
         .discovery(&healthy_url, None)
         .unwrap();

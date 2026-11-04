@@ -1,5 +1,10 @@
 //! Real production child, keyless MCP calls, and a parent-owned pipe; localhost only.
 #![cfg(unix)]
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
+use x402_treazury::network;
+const FIXTURE_CA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem");
 use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
@@ -65,8 +70,8 @@ async fn vendor() -> (String, Vendor, tokio::task::JoinHandle<()>) {
                 }
             }),
         );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     (
         base,
         v,
@@ -89,6 +94,8 @@ fn config(dir: &Path, base: &str, remote_spec: bool) {
     // These missing paths and absent private-key environment prove no wallet access.
     let text = format!(
         r#"version=1
+[network]
+trusted_ca_files=["{FIXTURE_CA}"]
 [treasury]
 id="00000000-0000-4000-8000-000000000001"
 state_dir="must-not-be-created"
@@ -463,21 +470,23 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
     use x402_treazury::network::{IsolationId, NetworkContext, NetworkPolicy};
     for fault in [socks::Fault::None, socks::Fault::Refuse] {
         let (base, v, server) = vendor().await;
-        let destination = base.strip_prefix("http://").unwrap().parse().unwrap();
+        let destination = base.strip_prefix("https://").unwrap().parse().unwrap();
         let proxy = socks::Socks::start(
-            BTreeMap::from([("unsigned.invalid".into(), destination)]),
+            BTreeMap::from([("unsigned.example.com".into(), destination)]),
             fault,
         )
         .await;
         let dir = tempfile::tempdir().unwrap();
-        config(dir.path(), "http://unsigned.invalid", false);
+        config(dir.path(), "https://unsigned.example.com", false);
         let path = dir.path().join("config.toml");
         let network = format!(
-            "[network]\nmode='tor'\nsocks_endpoint='{}'\nconnect_timeout_seconds=1\nread_timeout_seconds=1\n",
+            "[network]\nmode='tor'\nsocks_endpoint='{}'\nconnect_timeout_seconds=1\nread_timeout_seconds=1\ntrusted_ca_files=['{FIXTURE_CA}']\n",
             proxy.address
         );
-        let text = std::fs::read_to_string(&path).unwrap() + &network;
-        std::fs::write(&path, text).unwrap();
+        let mut text: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        text["network"] = toml::from_str::<toml::Value>(&network).unwrap()["network"].clone();
+        std::fs::write(&path, toml::to_string(&text).unwrap()).unwrap();
         let mut child = spawn(dir.path(), true);
         let pipe = child.stdin.take().unwrap();
         let url = endpoint(&wait_log(dir.path(), "MCP listening").await);
@@ -496,7 +505,7 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
             .unwrap();
         let credentials = NetworkContext::new(policy)
             .unwrap()
-            .credentials(&IsolationId::discovery("http://unsigned.invalid/paid").unwrap());
+            .credentials(&IsolationId::discovery("https://unsigned.example.com/paid").unwrap());
         {
             let records = proxy.records.lock().unwrap();
             let attempts = if matches!(fault, socks::Fault::Refuse) {
@@ -516,7 +525,7 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
             );
             for record in records.iter() {
                 assert_eq!(record.address_type, 3);
-                assert_eq!(record.host, "unsigned.invalid");
+                assert_eq!(record.host, "unsigned.example.com");
                 assert_eq!(record.user, credentials.0);
                 assert_ne!(
                     record.password, credentials.1,

@@ -68,7 +68,7 @@ async fn handler(
         }
         return axum::Json(fixture.responses[provider].clone()).into_response();
     }
-    let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/relay","description":"fixture","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"10000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+    let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/relay","description":"fixture","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"10000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     (
         StatusCode::PAYMENT_REQUIRED,
         [(
@@ -128,8 +128,8 @@ impl Harness {
             stall_first_unsigned_501,
             first_signed_status,
         };
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
+        let listener = crate::test_tls::listener().await;
+        let base = format!("https://{}", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
             axum::serve(
                 listener,

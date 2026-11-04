@@ -1,6 +1,9 @@
+#[path = "support/tls.rs"]
+mod tls;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use x402_treazury::mcp_wire::McpResponse;
+use x402_treazury::network;
 use x402_treazury::output::{HttpOutput, ImageLimits, ObservedPrice, ResponseMapping, ToolOutput};
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
@@ -304,6 +307,11 @@ fn image_limits_reject_whole_results_and_log_each_cutoff() {
     );
 }
 
+async fn serve_provider(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    tls::install_trust();
+    let (address, task) = tls::serve(app).await;
+    (format!("https://{address}"), task)
+}
 async fn serve(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", l.local_addr().unwrap());
@@ -314,6 +322,7 @@ async fn serve(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
 }
 #[tokio::test]
 async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversion_errors() {
+    tls::install_trust();
     use axum::{Router, routing::get};
     use std::sync::{
         Arc,
@@ -326,7 +335,7 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
     };
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
-    let (vendor, vendor_task) = serve(
+    let (vendor, vendor_task) = serve_provider(
         Router::new()
             .route(
                 "/raw",
@@ -413,6 +422,7 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
 
 #[tokio::test]
 async fn json_projection_reaches_direct_and_discovered_mcp_calls_without_changing_raw_calls() {
+    tls::install_trust();
     use axum::{Router, routing::get};
     use std::sync::{
         Arc,
@@ -435,7 +445,7 @@ async fn json_projection_reaches_direct_and_discovered_mcp_calls_without_changin
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
     let body = original.clone();
-    let (vendor, vendor_task) = serve(Router::new().route(
+    let (vendor, vendor_task) = serve_provider(Router::new().route(
         "/search",
         get(move || {
             count.fetch_add(1, Ordering::SeqCst);
@@ -543,6 +553,7 @@ fn projection_notice_preserves_transport_advisories_and_payment_evidence() {
 
 #[tokio::test]
 async fn paid_output_decode_failures_are_explicit_and_never_replay() {
+    tls::install_trust();
     use axum::{
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
@@ -567,7 +578,7 @@ async fn paid_output_decode_failures_are_explicit_and_never_replay() {
         let signed = Arc::new(AtomicUsize::new(0));
         let unsigned = Arc::new(AtomicUsize::new(0));
         let (s, u) = (signed.clone(), unsigned.clone());
-        let (base,task)=serve(axum::Router::new().route("/image",get(move|headers:HeaderMap| {
+        let (base,task)=serve_provider(axum::Router::new().route("/image",get(move|headers:HeaderMap| {
         let(s,u)=(s.clone(),u.clone());async move {
             if headers.contains_key("payment-signature") {
                 s.fetch_add(1,Ordering::SeqCst);
@@ -606,6 +617,7 @@ async fn paid_output_decode_failures_are_explicit_and_never_replay() {
 
 #[tokio::test]
 async fn toml_response_mappings_compose_and_invalid_unused_mappings_fail() {
+    tls::install_trust();
     use x402_treazury::config;
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("provider.toml");
@@ -664,6 +676,7 @@ omit=["/results/*/figures"]
 
 #[tokio::test]
 async fn reviewed_provider_envelopes_render_without_guessing_fields() {
+    tls::install_trust();
     let cfg = x402_treazury::config::load(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agent402.toml"),
     )

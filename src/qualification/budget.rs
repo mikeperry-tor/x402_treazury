@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 pub fn atomic(text: &str) -> Result<u64> {
+    anyhow::ensure!(!text.is_empty(), "test budget must be finite");
     let amount = crate::payment::SpendPolicy::dollars(text)?
         .max_atomic
         .context("test budget must be finite")?;

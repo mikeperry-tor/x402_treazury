@@ -282,6 +282,11 @@ before preparation, and prepared work retains its fixed transaction fee/input
 caps. Configured slippage
 (`funding.slippage_bps`, default 500 basis points, range 0–1000) applies once to
 that live quote's expected output.
+Conversion overhead compares quoted input valuation with expected output;
+slippage separately bounds the executable minimum. These bounds compound: with
+5% overhead and 5% slippage, input valuation relative to minimum output can be
+`1.05 / 0.95 - 1`, about 10.53%. They do not promise the allocation target as a
+minimum credited balance.
 `minAmountOut` is its execution floor, not the route's minimum supported swap
 size. There is no fixed ZEC conversion or external rate oracle, and this mode
 does not promise smaller swaps, faster execution or absence of refunds. Original
@@ -1175,8 +1180,16 @@ Historical price hints rank estimates without excluding an otherwise authorized
 payer, including after a cap change. The current challenge and serialized journal
 enforce the actual payment amount against current authority.
 
-Each new authorization is durably journaled before disclosure. That transaction
-subtracts its maximum amount once from the current estimate, saturating at zero.
+Each new authorization is durably journaled before disclosure with its actual
+signed expiry. Newly signed v1/v2 exact USDC authorizations and static upto
+payments expire no later than 300 seconds after signing, or the provider's
+shorter requested lifetime. The original accepted offer remains intact; only the
+signing lifetime is shortened. The SDK may backdate `validAfter` for clock
+tolerance, so this ceiling bounds future validity, not the full interval.
+Previously accepted signatures keep their original expiry. This is financial
+authority, not an HTTP deadline; expiration alone never grants request replay.
+The journal transaction subtracts its maximum amount once from the current
+estimate, saturating at zero.
 Unknown or malformed estimates stay unknown. Unresolved exposure is not subtracted
 a second time. Chain observations may replace estimates even while signatures
 remain chargeable; estimates are not a replica of canonical available capacity.

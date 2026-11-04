@@ -43,6 +43,12 @@ pub async fn read_table(path: &Path) -> Result<toml::Table> {
 }
 pub fn validate(settings: &Config) -> Result<()> {
     ensure!(!settings.spec.trim().is_empty(), "spec is required");
+    for url in settings.base_url.iter().chain(settings.help_url.iter()) {
+        crate::network::provider_url(url)?;
+    }
+    if settings.spec.starts_with("http://") || settings.spec.starts_with("https://") {
+        crate::network::provider_url(&settings.spec)?;
+    }
     if let Some(key) = &settings.operation_url_extension {
         ensure!(
             key.starts_with("x-") && key.len() > 2 && key.trim() == key,

@@ -80,7 +80,10 @@ pub async fn warm_cache_with_network(
         );
     }
     let actual_policy = if direct {
-        crate::network::NetworkPolicy::default()
+        crate::network::NetworkPolicy {
+            trusted_ca_files: config.network.trusted_ca_files.clone(),
+            ..Default::default()
+        }
     } else {
         config.network.clone()
     };
