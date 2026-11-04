@@ -810,6 +810,15 @@ authoritative observations to repair derived estimates, outcomes and workflow
 phases, and finish work whose outcome is established. Preserve immutable accepted
 inputs, signed bytes, original identities and liabilities while doing so.
 
+A verified chain replacement may reconstruct newly owned credits before the declared
+wallet birthday while dropping orphaned inputs from current SDK observations.
+That repair does not remove an accepted original's Store input manifest, signed
+bytes or immutable preparation snapshot. An actually disclosed original retains
+its liability through failed/canceled observations and reopen until canonical
+confirmation or the existing source-disposition proof resolves it. New spendable
+capital and a zero recovery allowance do not authorize another deposit, release
+or replay; an original below its signed expiry continues to wait.
+
 Reuse existing validated observations, exact operation bindings and confirmed
 journals. Acquire a missing fact only when it can advance the affected operation,
 through the existing network/SDK owners and observation policy. Do not add fresh

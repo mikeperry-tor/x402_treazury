@@ -293,4 +293,14 @@ spendability with future cached shard annotations/bare roots after a lower targe
 including failure before root ingestion and equal-tip stale metadata after reopen.
 Future completion ranges are repaired without pruning actual roots or witnesses;
 later owned commitments and both original/new witnesses remain spendable.
+The `indexer_recovery` module adds disclosed-once treasury ownership: a faithful
+shorter prefix preserves exact input/byte/snapshot/quote and identity bindings
+through failure, a pre-canceled scan and reopen, then healthy canonical confirmation
+finishes only the original. A genuine deep fork finds a new credit below birthday
+after interrupted/reopened activation rescan while the orphaned original input
+manifest and liability remain pending. Unused SendTransaction markers prove no
+replay or replacement disclosure, and zero recovery allowance cannot override an
+unburied original. The pre-canceled case establishes accepted-source preservation,
+not active-I/O drain; existing `treasury_sync` in-flight cancellation tests retain
+that separate evidence.
 These local fixtures establish no consensus, live bridge settlement or Tor claim.
