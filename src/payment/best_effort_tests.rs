@@ -448,6 +448,7 @@ async fn run_private(
         16384,
     );
     let mut route = RoutedRequest {
+        json_media_type: None,
         headers: BTreeMap::from([
             ("idempotency-key".into(), "same-logical-call-key".into()),
             ("x-quote-id".into(), "same-quote".into()),
@@ -700,6 +701,7 @@ async fn qualification_budget_refusal_rolls_back_admission_before_signed_dispatc
         .unwrap(),
     ));
     let route = || RoutedRequest {
+        json_media_type: None,
         headers: BTreeMap::from([
             ("idempotency-key".into(), "same-logical-call-key".into()),
             ("x-quote-id".into(), "same-quote".into()),
@@ -1040,6 +1042,7 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
     for method in ["GET", "POST"] {
         peers.lock().unwrap().clear();
         let route = RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: method.into(),
             url: format!("{origin}/pay"),
@@ -1075,6 +1078,7 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
         for method in ["GET", "POST"] {
             peers.lock().unwrap().clear();
             let route = RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: method.into(),
                 url: format!("{origin}/pay"),
@@ -1365,6 +1369,7 @@ async fn tor_unsigned_retry_child() {
                     steps.push_back(TorStep::Signed200(b"paid-ok".to_vec()));
                 }
                 let make_matrix_route = || RoutedRequest {
+                    json_media_type: None,
                     headers: Default::default(),
                     method: method.into(),
                     url: "https://api-a.example.com/pay".into(),
@@ -1504,6 +1509,7 @@ async fn tor_unsigned_retry_child() {
         }
     }
     let make_route = || RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "POST".into(),
         url: "https://api-a.example.com/pay".into(),
@@ -1644,6 +1650,7 @@ async fn tor_unsigned_retry_child() {
         let before_dead = proxy.records.lock().unwrap().len();
         let before_signed = script_a.signed_payers.lock().unwrap().len();
         let dead_route = RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: method.into(),
             url: "https://dead.example.com/pay".into(),
@@ -2052,6 +2059,7 @@ async fn tor_unsigned_retry_child() {
         steps.push_back(TorStep::Signed200(b"managed-paid".to_vec()));
     }
     let managed_route = RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "POST".into(),
         url: "https://api-b.example.com/pay".into(),
@@ -2258,6 +2266,7 @@ async fn prior_wallet_liability_relay_child() {
         }),
     );
     let route = || RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "GET".into(),
         url: "https://api.example.com/pay".into(),

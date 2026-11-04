@@ -61,7 +61,7 @@ fn header_aliases_survive_tool_serialization_without_overwriting_query_or_body()
         .remove(0);
     let restored: ToolSpec = serde_json::from_value(serde_json::to_value(&tool).unwrap()).unwrap();
     for tool in [tool, restored] {
-        let args = json!({"shared":"query","shared_header":"header","body-key":"body","body-key_header":"another header"});
+        let args = json!({"shared":"query","shared_header":"header","body":{"body-key":"body"},"body-key":"another header"});
         let route = tool
             .route("https://example.com", args.as_object().unwrap())
             .unwrap();
@@ -158,7 +158,7 @@ fn optional_declared_idempotency_is_also_automatic_and_missing_headers_fail_befo
 }
 
 #[test]
-fn unsupported_header_contracts_and_alias_collisions_are_visible_errors() {
+fn unsupported_header_contracts_are_visible_errors() {
     for parameter in [
         json!({"name":"X-Test","in":"header","style":"form"}),
         json!({"name":"X-Test","in":"header","content":{"application/json":{"schema":{"type":"object"}}}}),
@@ -177,9 +177,59 @@ fn unsupported_header_contracts_and_alias_collisions_are_visible_errors() {
             .is_err()
         );
     }
-    assert!(build_tools(&Config::default(), &json!({"paths":{"/purchase":{"post":{"parameters":[
-        {"name":"x","in":"query"},{"name":"x_header","in":"query"},{"name":"x","in":"header"}
-    ]}}}}), "fixture").is_err());
+}
+
+#[test]
+fn numeric_header_alias_preserves_authored_query_names_and_wire_routing() {
+    let generated = tool(json!([
+        {"name":"x","in":"query"},
+        {"name":"x_header","in":"query"},
+        {"name":"x","in":"header"}
+    ]));
+    let restored: ToolSpec =
+        serde_json::from_value(serde_json::to_value(&generated).unwrap()).unwrap();
+    for tool in [generated, restored] {
+        assert_eq!(
+            tool.input_schema,
+            json!({"type":"object","properties":{
+                "x":{"type":"string"},
+                "x_header":{"type":"string"},
+                "x_header_2":{"type":"string"}
+            }})
+        );
+        assert_eq!(
+            serde_json::to_value(&tool.param_routes).unwrap(),
+            json!({"x":"query","x_header":"query"})
+        );
+        assert_eq!(
+            serde_json::to_value(&tool.header_params).unwrap(),
+            json!({
+                "x_header_2":{"name":"x","required":false,"explode":false}
+            })
+        );
+        assert!(tool.wire_names.is_empty());
+        let route = tool
+            .route(
+                "https://example.com",
+                json!({
+                    "x":"query x", "x_header":"authored query", "x_header_2":"header x"
+                })
+                .as_object()
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(route.method, "POST");
+        assert_eq!(route.url, "https://example.com/purchase");
+        assert_eq!(
+            serde_json::to_value(&route.query).unwrap(),
+            json!({"x":"query x","x_header":"authored query"})
+        );
+        assert_eq!(
+            serde_json::to_value(&route.headers).unwrap(),
+            json!({"x":"header x"})
+        );
+        assert!(route.body.is_none());
+    }
 }
 
 #[test]
@@ -287,4 +337,55 @@ fn documented_payment_headers_are_ignored_but_cannot_be_injected_into_routes() {
             );
         }
     }
+}
+
+#[test]
+fn actual_boolean_and_untyped_header_schemas_are_preserved_without_string_injection() {
+    let tool = tool(json!([
+        {"name":"X-Never","in":"header","schema":false},
+        {"name":"X-Any","in":"header","schema":true},
+        {"name":"X-Empty","in":"header","schema":{}},
+        {"name":"X-Choice","in":"header","schema":{"enum":[1,2],"x-annotation":{"$ref":"opaque annotation"}}},
+        {"name":"X-Legacy","in":"header"}
+    ]));
+    let properties = &tool.input_schema["properties"];
+    assert_eq!(properties["X-Never"], false);
+    assert_eq!(properties["X-Any"], true);
+    assert!(properties["X-Empty"].get("type").is_none());
+    assert!(properties["X-Choice"].get("type").is_none());
+    assert_eq!(properties["X-Choice"]["enum"], json!([1, 2]));
+    assert_eq!(
+        properties["X-Choice"]["x-annotation"]["$ref"],
+        "opaque annotation"
+    );
+    assert!(
+        properties["X-Empty"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("flat array/object")
+    );
+    assert_eq!(properties["X-Legacy"]["type"], "string");
+    // The false schema is optional and stays absent. The actual simple codec
+    // handles each otherwise permitted scalar/flat value without a new validator.
+    let route = tool
+        .route(
+            "https://example.com",
+            json!({"X-Any":{"a":1,"b":true},"X-Empty":["a",2],"X-Choice":2,"X-Legacy":"original"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.headers["x-any"], "a,1,b,true");
+    assert_eq!(route.headers["x-empty"], "a,2");
+    assert_eq!(route.headers["x-choice"], "2");
+    assert_eq!(route.headers["x-legacy"], "original");
+    assert!(!route.headers.contains_key("x-never"));
+    assert!(route.body.is_none() && route.query.is_empty());
+    assert!(
+        tool.route(
+            "https://example.com",
+            json!({"X-Any":{"nested":{"a":1}}}).as_object().unwrap()
+        )
+        .is_err()
+    );
 }

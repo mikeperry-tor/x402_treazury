@@ -8,6 +8,23 @@ use tokio::sync::oneshot;
 pub(super) type FundingPools = Option<Vec<Arc<ManagedPool>>>;
 
 impl Deployment {
+    // Static loads use the same listener-owned readiness result as deferred publication.
+    pub(super) fn resolved_catalog_readiness(
+        &self,
+    ) -> BTreeMap<String, oneshot::Receiver<Result<()>>> {
+        self.listeners
+            .iter()
+            .filter(|(_, config)| config.wait_for_catalogs)
+            .map(|(name, _)| {
+                let (send, receive) = oneshot::channel();
+                let result = self
+                    .endpoint_readiness(name)
+                    .expect("nondeferred catalogs have a terminal result");
+                let _ = send.send(result);
+                (name.clone(), receive)
+            })
+            .collect()
+    }
     pub(super) fn endpoint_readiness(&self, name: &str) -> Option<Result<()>> {
         let sources = &self.listeners[name].sources;
         if let Some(reason) = self.selection_errors.get(name) {
@@ -18,10 +35,22 @@ impl Deployment {
         }
         if let Some(id) = sources.iter().find(|id| {
             !self.pending_sources.contains_key(*id)
-                && !self.sources.contains_key(*id)
+                && self
+                    .sources
+                    .get(*id)
+                    .is_none_or(Source::compatibility_unavailable)
                 && !self.config.sources[*id].optional_startup
         }) {
-            return Some(Err(anyhow::anyhow!("required catalog unavailable: {id}")));
+            let mut error = anyhow::anyhow!("required catalog unavailable: {id}");
+            if let Some(source) = self.sources.get(id) {
+                // Summary contains only fixed explanations, never upstream paths/prose.
+                if let Some(reason) = catalog::omission_instructions(&source.issues) {
+                    error = error
+                        .context(reason)
+                        .context(catalog::LoadStage::Generation);
+                }
+            }
+            return Some(Err(error));
         }
         sources
             .iter()

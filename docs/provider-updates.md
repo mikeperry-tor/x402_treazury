@@ -106,7 +106,9 @@ ordinary fields. This view includes operations hidden by current filters and
 method-pair changes, while effective tools retain actual selection semantics.
 Compiler failures are explicit diagnostics, never empty successful inventories.
 Both effective and unoverridden tools are included, with existing authored patches,
-missing tool targets and missing parameter-note targets, including help. Review
+missing tool targets and missing parameter-note targets, including help. Parameter-note
+diagnostics share production override target resolution for existing arguments and
+whole-body properties, including legacy body aliases. Review
 old/new unoverridden contracts alongside authored overrides and resulting tools;
 replacement text can mask upstream changes. Raw differences remain necessary
 because compilation omits unsupported constructs. The authored runtime asset and

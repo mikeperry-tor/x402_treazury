@@ -18,9 +18,10 @@ departure_token = "Token returned by Google Flights search for the selected itin
 return_date = "Return date in YYYY-MM-DD; required when type is 1 (including its default)."
 
 [overrides.stabletravel_flightaware_flights_ident_intents]
-description = "Submit the vendor's advertised flight-intent request using ident and intent. This is a write operation, not a flight lookup. The guide calls it push notifications, but exposes no callback registration or notification-management workflow. FlightAware's upstream intent semantics differ from that label; delivery semantics are unqualified."
+description = "Submit the vendor's advertised flight-intent request using the path ident and a body object containing ident and intent. This is a write operation, not a flight lookup. The guide calls it push notifications, but exposes no callback registration or notification-management workflow. FlightAware's upstream intent semantics differ from that label; delivery semantics are unqualified."
 pricing_description = "Cost: ~$0.001/call [spec]."
 
 [overrides.stabletravel_flightaware_flights_ident_intents.params]
-ident = "Flight identifier in the URL. Use the same identifier in ident_body."
-ident_body = "Flight identifier in the JSON body; use the same value as the path ident."
+ident = "Flight identifier in the URL. Use the same identifier in body.ident."
+# Legacy metadata alias targets the existing nested body.ident schema.
+ident_body = "Flight identifier inside the body object; use the same value as the path ident."

@@ -102,12 +102,12 @@ fn operation_urls_require_opt_in_and_do_not_validate_discarded_get_twins() {
         let tools = build_tools(&cfg, &document, "api").unwrap();
         assert_eq!(tools.len(), 1);
         let tool = &tools[0];
-        let args = json!({"amount":3});
+        let args = json!({"body":{"amount":3}});
         let route = tool
             .route("https://gateway.example.com", args.as_object().unwrap())
             .unwrap();
         assert_eq!(route.method, "POST");
-        assert_eq!(route.body, Some(args));
+        assert_eq!(route.body, Some(args["body"].clone()));
         assert_eq!(
             route.url,
             if cfg.operation_url_extension.is_some() {

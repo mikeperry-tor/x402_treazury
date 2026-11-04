@@ -104,6 +104,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             assert_eq!(other.description(), fallback);
         }
         let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
+            registration_issues: Default::default(),
             generation: 11,
             views: BTreeMap::from([("default".into(), tools.clone())]),
             instructions: Default::default(),
@@ -145,6 +146,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
         let mut refreshed = tools.clone();
         refreshed[0].tool.catalog_hints = None;
         catalog.publish(CatalogSnapshot {
+            registration_issues: Default::default(),
             generation: 12,
             views: BTreeMap::from([("default".into(), refreshed)]),
             instructions: Default::default(),

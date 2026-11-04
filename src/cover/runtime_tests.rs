@@ -137,6 +137,7 @@ async fn paid_fixture() {
     )
     .with_cover(Some(config.clone()), scope.clone());
     let route = || crate::catalog::RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "GET".into(),
         url: "https://api.example.com/api".into(),

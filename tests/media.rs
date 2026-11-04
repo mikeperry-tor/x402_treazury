@@ -501,6 +501,7 @@ async fn json_projection_reaches_direct_and_discovered_mcp_calls_without_changin
     }
     let raw = PaidClient::unsigned()
         .execute_response(RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: format!("{vendor}/search"),
@@ -594,6 +595,7 @@ async fn paid_output_decode_failures_are_explicit_and_never_replay() {
         );
         let output = client
             .execute_response(RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: "GET".into(),
                 url: format!("{base}/image"),

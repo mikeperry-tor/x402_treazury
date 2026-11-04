@@ -47,6 +47,7 @@ fn request(args: &Map<String, Value>) -> Result<(RoutedRequest, ManualRawHeaders
     let headers = ManualRawHeaders::parse(args.contains_key("headers").then_some(&input.headers))?;
     Ok((
         RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: method.to_string(),
             url: url.into(),
@@ -190,6 +191,25 @@ mod tests {
 
     #[test]
     fn manual_header_parsing_rejects_unrepresentable_sets() {
+        for (name, expected) in [
+            ("Cookie", crate::catalog::Unsupported::HeaderReserved),
+            ("bad\nname", crate::catalog::Unsupported::HeaderName),
+        ] {
+            let error =
+                ManualRawHeaders::parse(Some(&json!({(name):"PRIVATE_HEADER_VALUE"}))).unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<crate::catalog::Unsupported>(),
+                Some(&expected)
+            );
+            assert_eq!(
+                error
+                    .downcast_ref::<crate::catalog::diagnostics::Problem>()
+                    .unwrap()
+                    .0,
+                expected.explanation()
+            );
+            assert!(!format!("{error:#}").contains("PRIVATE_HEADER_VALUE"));
+        }
         let mut represented = reqwest::header::HeaderMap::new();
         let mut values = Map::new();
         let mut index = 0;

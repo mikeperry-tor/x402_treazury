@@ -91,6 +91,29 @@ allows the same case to proceed. Funding has no ZEC spending budget; reviewed
 allocation counts, reserve sizes, actual treasury spendability and fee/overhead
 safeguards apply.
 
+Catalog media regressions preserve precedence, parameter case and first-duplicate
+lookup semantics, plus usable wildcard fallback and exact selected Content-Type.
+Repeated shared-body names, including invalid/unsupported media, wildcard
+synthesis, candidate/range and nested parameter amplification must exhaust the existing
+conversion budget deterministically while the physical document still fits;
+wall-clock thresholds and a separate media quota are unnecessary. A long flat
+reference chain must reach the depth bound before growing the projection stack;
+small exact-budget tests charge repeated pointer lookups once each and reject
+excess work before copying or allocating it.
+Seeded-budget tests also cover repeated OpenAPI path/metadata copies, duplicated
+pricing fields, parameter issue metadata and fallback description copies without
+large fixtures or charging moved schema contents twice. An isolated diagnostic
+regression catches depth/node/byte rejections and arithmetic overflow errors and
+requires a sanitized WARN for each, even when the caller handles the error.
+Used dynamic/recursive schema references are covered in body, nested property,
+parameter/header and referenced-target positions. Partial builders retain healthy
+siblings; strict builders reject omissions. Opaque examples/defaults/unused
+definitions and OpenAPI3.0 ignored reference siblings retain their own semantics.
+Scalar parameter compatibility tests cover direct non-scalar array-item/null-only
+omissions, representable scalar/tuple alternatives, ignored protocol declarations
+and managed Idempotency-Key diagnostics. Static checks stay limited to explicit
+type domains; runtime codecs retain their actual-value guards.
+
 ## Testing efficiency
 
 Keep ordinary validation on the pinned production compiler and maintained named
@@ -837,6 +860,14 @@ explicit captured inputs for its selected remote sources and resolved production
 local catalogs, independently of generated catalog snapshots.
 [Deferred acceptance](plans/deferred/live_integration_acceptance.md) specifies the
 remaining lifecycle and cover gates.
+
+Qualification argument certification preflights every schema branch before checking
+values. Unknown assertions, custom vocabularies and unsupported dialects fail
+closed, including in absent properties and alternatives. OpenAPI `discriminator`
+and `x-` documentation metadata remain opaque and do not bypass type, required or
+composition checks. The exact `propertyNames: { type: "string" }` assertion is
+accepted because JSON object names are strings; other property-name constraints
+remain unsupported. This offline subset is not a general JSON Schema evaluator.
 
 ## Runner regression map
 

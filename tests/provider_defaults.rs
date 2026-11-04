@@ -42,12 +42,13 @@ async fn ordinary_providers_admit_new_reads_inside_and_outside_naming_anchors() 
             .iter()
             .find(|t| t.path == "/api/v1/future-research")
             .unwrap_or_else(|| panic!("{provider}"));
-        let args = json!({"query":"public records"});
+        let body = json!({"query":"public records"});
+        let args = json!({"body":body});
         let route = tool
             .route("https://example.com", args.as_object().unwrap())
             .unwrap();
         assert_eq!(route.method, "POST");
-        assert_eq!(route.body, Some(args));
+        assert_eq!(route.body, Some(body));
         assert!(route.query.is_empty());
     }
 }

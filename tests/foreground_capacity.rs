@@ -153,6 +153,7 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
         // The same bound covers direct library calls sharing this process.
         let error = clients[0]
             .execute(x402_treazury::catalog::RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: "GET".into(),
                 url: format!("{origin}/free"),
@@ -208,6 +209,7 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
     assert_eq!(
         clients[0]
             .execute(x402_treazury::catalog::RoutedRequest {
+                json_media_type: None,
                 headers: Default::default(),
                 method: "GET".into(),
                 url: format!("{origin}/free"),

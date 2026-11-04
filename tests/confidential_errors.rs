@@ -127,6 +127,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let url = format!("https://{}/?token={SECRET}", closed.local_addr().unwrap());
     drop(closed);
     let route = RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "GET".into(),
         url: url.clone(),

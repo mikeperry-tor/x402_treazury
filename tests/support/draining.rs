@@ -7,6 +7,9 @@ fn binding(h: &Harness, method: &str) -> BoundTool {
     BoundTool {
         tool: ToolSpec {
             catalog_hints: None,
+            body_closed: false,
+            json_media_type: None,
+            whole_body: None,
             response_mapping: None,
             image_limits: Default::default(),
             name: method.into(),
@@ -20,7 +23,7 @@ fn binding(h: &Harness, method: &str) -> BoundTool {
             header_params: Default::default(),
             has_body: false,
             help_url: None,
-            body_names: Default::default(),
+            wire_names: Default::default(),
         },
         client: h.client.clone(),
         base: h.base.clone(),

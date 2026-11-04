@@ -1,160 +1,171 @@
 use super::*;
 
-fn complete_input(op: &Value) -> Value {
-    let input = operation_input(op).unwrap();
-    json!({"schema":input.schema,"routes":input.routes,
-        "body_names":input.body_names,"has_body":input.has_body})
-}
-
 #[test]
-fn parameter_defaults_duplicates_and_skips_preserve_complete_input() {
-    let op = json!({"params":[
-        {"name":"duplicate","in":"path","required":true,"schema":{"type":"integer"}},
-        {"name":"duplicate","in":"cookie","required":false,"description":"last","schema":null},
-        {"name":"Authorization","in":"header","required":true,"schema":{"type":"number"}},
-        {"in":"path","required":true}, {"name":7,"required":true},
-        {"name":"bare","required":"true","schema":[]},
-        {"name":"empty","description":"","schema":false},
-        {"name":"schema_wins","description":"parameter","schema":{"description":"","type":null}},
-        {"name":"path","in":"path","required":true,"schema":{"minimum":2,"exclusiveMinimum":true}},
-        {"name":"","required":true}
-    ]});
+fn cookies_are_explicitly_unsupported_and_locations_do_not_overwrite() {
+    let error = input::prepare(&json!({"params":[{"name":"session","in":"cookie"}]}))
+        .err()
+        .unwrap();
     assert_eq!(
-        complete_input(&op),
-        json!({
-            "schema":{"type":"object","properties":{
-                "duplicate":{"type":"string","description":"last"},
-                "bare":{"type":"string"},"empty":{"type":"string"},
-                "schema_wins":{"description":"","type":null},
-                "path":{"type":"string","minimum":2,"exclusiveMinimum":2},
-                "":{"type":"string"}},"required":["","duplicate","path"]},
-            "routes":{"duplicate":"query","bare":"query","empty":"query","schema_wins":"query","path":"path","":"query"},
-            "body_names":{},"has_body":false
-        })
+        error.downcast_ref::<Unsupported>(),
+        Some(&Unsupported::CookieParameter)
     );
-    // Later optional duplicates replace schema and route, but do not remove an
-    // earlier required name. A header collision gets its own argument.
-    let op = json!({"params":[{"name":"x","in":"query","required":true},
-        {"name":"x","in":"header","schema":{"type":"number"}}]});
+    let input = input::prepare(&json!({"params":[
+        {"name":"id","in":"query","schema":{"type":"integer"}},
+        {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+        {"name":"id_query","in":"query","schema":{"type":"string"}}
+    ]}))
+    .unwrap();
+    assert_eq!(input.routes["id"], "path");
+    assert_eq!(input.routes["id_query_2"], "query");
+    assert_eq!(input.wire_names["id_query_2"], "id");
+    assert_eq!(input.schema["properties"]["id_query_2"]["type"], "integer");
+    assert_eq!(input.schema["required"], json!(["id"]));
+}
+
+#[test]
+fn optional_body_preserves_inner_required_and_separate_presence() {
+    let op = json!({"params":[{"name":"body","in":"query"}],"body":{"required":false,
+        "schema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}}});
+    let input = input::prepare(&op).unwrap();
+    let body = input.whole_body.unwrap();
+    assert_eq!(body.name, "body_body");
+    assert!(!body.required);
+    assert!(input.schema.get("required").is_none());
     assert_eq!(
-        complete_input(&op),
-        json!({"schema":{"type":"object","properties":{"x":{"type":"string"},"x_header":{"type":"number"}},"required":["x"]},"routes":{"x":"query"},"body_names":{},"has_body":false})
+        input.schema["properties"]["body_body"]["required"],
+        json!(["id"])
     );
-}
-
-#[test]
-fn missing_null_empty_and_nonobject_bodies_preserve_presence() {
-    for op in [
-        json!({}),
-        json!({"params":null,"body":null}),
-        json!({"params":{}}),
-    ] {
-        assert_eq!(
-            complete_input(&op),
-            json!({"schema":{"type":"object","properties":{}},"routes":{},"body_names":{},"has_body":false})
-        );
-    }
-    for body in [
-        json!({}),
-        json!(false),
-        json!(0),
-        json!([]),
-        json!({"schema":null}),
-        json!({"schema":{"type":"string","required":["missing"]}}),
-        json!({"schema":{"properties":[],"required":["missing"]}}),
-    ] {
-        assert_eq!(
-            complete_input(&json!({"body":body})),
-            json!({"schema":{"type":"object","properties":{}},"routes":{},"body_names":{},"has_body":true})
-        );
-    }
-}
-
-#[test]
-fn body_properties_preserve_renaming_defaults_required_and_recursive_sanitization() {
-    let op = json!({"params":[{"name":"id","in":"path","required":true}, {"name":"q","in":"query"}],
-        "body":{"required":false,"schema":{"properties":{
-            "id":{"type":"integer","maximum":9,"exclusiveMaximum":true},
-            "q":false,"empty":{},"null":null,
-            "nested":{"type":"array","items":{"type":"number","minimum":1,"exclusiveMinimum":false,"exclusiveMaximum":7}}
-        },"required":["q","id","missing",7]}}});
     assert_eq!(
-        complete_input(&op),
-        json!({"schema":{"type":"object","properties":{
-        "id":{"type":"string"},"q":{"type":"string"},
-        "id_body":{"type":"integer","maximum":9,"exclusiveMaximum":9},
-        "q_body":{"type":"string"},"empty":{},"null":{"type":"string"},
-        "nested":{"type":"array","items":{"type":"number","minimum":1,"exclusiveMaximum":7}}
-    },"required":["id","id_body","q_body"]},
-    "routes":{"id":"path","q":"query","id_body":"body","q_body":"body","empty":"body","null":"body","nested":"body"},
-    "body_names":{"id_body":"id","q_body":"q","empty":"empty","null":"null","nested":"nested"},"has_body":true})
+        input.schema["properties"]["body_body"]["additionalProperties"],
+        false
     );
 }
 
 #[test]
-fn occupied_body_names_reject_with_exact_first_collision() {
-    for (op, expected) in [
-        (
-            json!({"params":[{"name":"q"},{"name":"q_body"}],"body":{"schema":{"properties":{"q":{}}}}}),
-            "q",
-        ),
-        (
-            json!({"params":[{"name":"a"},{"name":"a_body"},{"name":"z"},{"name":"z_body"}],"body":{"schema":{"properties":{"z":{},"a":{}}}}}),
-            "a",
-        ),
-        (
-            json!({"params":[{"name":"q"},{"name":"q_body_body"}],"body":{"schema":{"properties":{"q":{},"q_body":{}}}}}),
-            "q_body",
-        ),
-    ] {
-        let error = match operation_input(&op) {
-            Ok(_) => panic!("collision was accepted"),
-            Err(error) => error,
-        };
-        assert_eq!(
-            error.to_string(),
-            format!("unresolvable body/query collision: {expected}")
-        );
-    }
-    // A collision with an already merged body property is renamed again when
-    // that second renamed key is free; this is existing accepted behavior.
-    assert_eq!(
-        complete_input(
-            &json!({"params":[{"name":"q"}],"body":{"schema":{"properties":{"q":{},"q_body":{}}}}})
-        ),
-        json!({"schema":{"type":"object","properties":{"q":{"type":"string"},"q_body":{},"q_body_body":{}}},"routes":{"q":"query","q_body":"body","q_body_body":"body"},"body_names":{"q_body":"q","q_body_body":"q_body"},"has_body":true})
-    );
+fn required_closed_flat_body_and_suffix_collisions_keep_original_wire_keys() {
+    let op = json!({"params":[{"name":"id","in":"path"},{"name":"id_body","in":"query"}],
+        "body":{"required":true,"schema":{"type":"object","properties":{"id":{"type":"integer"},"id_body_2":{"type":"string"}},"required":["id"],"additionalProperties":false}}});
+    let input = input::prepare(&op).unwrap();
+    assert!(input.whole_body.is_none());
+    assert!(input.body_closed);
+    assert_eq!(input.wire_names["id_body_3"], "id");
+    assert_eq!(input.routes["id_body"], "query");
+    assert_eq!(input.schema["required"], json!(["id_body_3"]));
 }
 
 #[test]
-fn presence_alternatives_translate_only_complete_supported_branches() {
-    let base = json!({"params":[{"name":"ids","in":"query"}],"body":{"schema":{"properties":{"ids":{},"urls":{}}}}});
-    let expected = json!({"schema":{"type":"object","properties":{"ids":{"type":"string"},"ids_body":{},"urls":{}}},"routes":{"ids":"query","ids_body":"body","urls":"body"},"body_names":{"ids_body":"ids","urls":"urls"},"has_body":true});
+fn property_bearing_allof_and_exclusive_closed_alternatives_remain_whole() {
+    let op = json!({"body":{"required":true,"schema":{"allOf":[
+        {"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},
+        {"type":"object","properties":{"b":{"type":"integer"}}}
+    ]}}});
+    let input = input::prepare(&op).unwrap();
+    assert_eq!(input.whole_body.unwrap().name, "body");
+    assert_eq!(input.schema["properties"]["body"], op["body"]["schema"]);
+    assert_eq!(input.schema["required"], json!(["body"]));
+    let schema = json!({"oneOf":[
+        {"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false},
+        {"type":"object","properties":{"b":{"type":"integer"}},"required":["b"],"additionalProperties":false}
+    ],"unevaluatedProperties":false,"readOnly":false,"discriminator":{"propertyName":"kind"},"x-annotation":{"preserved":true}});
+    let input = input::prepare(&json!({"body":{"required":true,"schema":schema}})).unwrap();
+    assert_eq!(input.whole_body.unwrap().name, "body");
+    assert_eq!(input.schema["properties"]["body"], schema);
+    assert_eq!(input.schema["required"], json!(["body"]));
+}
+
+#[test]
+fn presence_alternatives_rename_only_body_arguments() {
     for keyword in ["oneOf", "anyOf", "allOf"] {
-        for (branches, translated) in [
-            (
-                json!([{"required":["ids"]},{"required":["urls","ids","ids"]}]),
-                Some(
-                    json!([{"required":["ids_body"]},{"required":["urls","ids_body","ids_body"]}]),
-                ),
-            ),
-            (json!([]), Some(json!([]))),
-            (json!([{"required":[]}]), Some(json!([{"required":[]}]))),
-            (json!([{"required":["ids"]},{"required":["unknown"]}]), None),
-            (json!([{"required":["ids"]},{"required":[7]}]), None),
-            (json!([{"required":["ids"],"type":"object"}]), None),
-            (json!([{}]), None),
-            (json!([null]), None),
-            (json!([{"required":"ids"}]), None),
-            (json!({}), None),
-        ] {
-            let mut op = base.clone();
-            op["body"]["schema"][keyword] = branches;
-            let mut output = expected.clone();
-            if let Some(translated) = translated {
-                output["schema"][keyword] = translated;
-            }
-            assert_eq!(complete_input(&op), output, "{keyword}: {op}");
+        let mut schema =
+            json!({"type":"object","properties":{"ids":{},"urls":{}},"additionalProperties":false});
+        schema[keyword] = json!([{"required":["ids"]},{"required":["urls"]}]);
+        let input = input::prepare(&json!({"params":[{"name":"ids","in":"query"}],
+            "body":{"required":true,"schema":schema}}))
+        .unwrap();
+        assert!(input.whole_body.is_none());
+        assert_eq!(
+            input.schema[keyword],
+            json!([{"required":["ids_body"]},{"required":["urls"]}])
+        );
+        assert_eq!(input.wire_names["ids_body"], "ids");
+    }
+}
+
+#[test]
+fn exact_string_array_query_union_preserves_schema_and_uses_existing_codec_guards() {
+    let original = json!({"anyOf":[{"type":"array","items":{"type":"string"}},{"type":"string"}],
+        "default":["photos"],"description":"Fields to exclude.","x-note":{"opaque":true}});
+    for reversed in [false, true] {
+        let mut schema = original.clone();
+        if reversed {
+            schema["anyOf"].as_array_mut().unwrap().reverse();
         }
+        for explode in [None, Some(true)] {
+            let mut parameter = json!({"name":"q","in":"query","schema":schema});
+            if let Some(explode) = explode {
+                parameter["explode"] = json!(explode);
+                parameter["style"] = json!("form");
+            }
+            let result = input::prepare(&json!({"params":[parameter]})).unwrap();
+            let mut expected = schema.clone();
+            expected["description"] =
+                json!("Fields to exclude. Use a scalar value or an array of scalars.");
+            assert_eq!(result.schema["properties"]["q"], expected);
+            assert!(result.schema["properties"]["q"].get("type").is_none());
+            assert_eq!(result.routes["q"], "query");
+        }
+    }
+    for patch in [
+        json!({"explode":false}),
+        json!({"style":"spaceDelimited"}),
+        json!({"allowReserved":true}),
+        json!({"in":"path"}),
+    ] {
+        let mut parameter = json!({"name":"q","in":"query","schema":original});
+        parameter
+            .as_object_mut()
+            .unwrap()
+            .extend(patch.as_object().unwrap().clone());
+        let error = input::prepare(&json!({"params":[parameter]}))
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.downcast_ref::<Unsupported>(),
+            Some(&Unsupported::ParameterSerialization)
+        );
+    }
+    let rejected = [
+        json!({"anyOf":[{"type":"string"},{"type":"object"}]}),
+        json!({"anyOf":[{"type":"string"},{"type":"array"}]}),
+        json!({"anyOf":[{"type":"string"},{"type":"array","items":true}]}),
+        json!({"anyOf":[{"type":"string"},{"type":"array","items":{"type":"object"}}]}),
+        json!({"anyOf":[{"type":"string"},{"type":"array","items":{"type":"array","items":{"type":"string"}}}]}),
+        json!({"anyOf":[{"type":"string"},{"type":"array","prefixItems":[{"type":"string"}]}]}),
+        json!({"oneOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}]}),
+        json!({"anyOf":[{"type":"string"},true]}),
+    ];
+    for schema in rejected {
+        let error = input::prepare(&json!({"params":[{"name":"q","in":"query","schema":schema}]}))
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.downcast_ref::<Unsupported>(),
+            Some(&Unsupported::ParameterSerialization)
+        );
+    }
+    for key in ["allOf", "oneOf", "not", "if", "then", "else", "prefixItems"] {
+        let mut schema = original.clone();
+        schema[key] = if matches!(key, "allOf" | "oneOf" | "prefixItems") {
+            json!([{"type":"string"}])
+        } else {
+            json!({"type":"string"})
+        };
+        let error = input::prepare(&json!({"params":[{"name":"q","in":"query","schema":schema}]}))
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.downcast_ref::<Unsupported>(),
+            Some(&Unsupported::ParameterSerialization)
+        );
     }
 }

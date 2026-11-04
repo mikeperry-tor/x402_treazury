@@ -1,6 +1,6 @@
 //! Declared business headers and per-invocation idempotency, without replay policy.
 use super::diagnostics::Problem;
-use super::{HeaderParameter, arg_text};
+use super::{HeaderParameter, Unsupported, arg_text};
 use anyhow::{Context, Result, ensure};
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{Map, Value};
@@ -13,11 +13,11 @@ pub(crate) fn capacity_error(_: reqwest::header::MaxSizeReached) -> anyhow::Erro
     ))
 }
 
-fn ignored(name: &str) -> bool {
+pub(super) fn ignored(name: &str) -> bool {
     matches!(name, "accept" | "content-type" | "authorization")
 }
 
-fn payment(name: &str) -> bool {
+pub(super) fn payment(name: &str) -> bool {
     matches!(
         name,
         "payment-signature"
@@ -32,7 +32,8 @@ fn payment(name: &str) -> bool {
 /// Apply the same boundary when a Rust caller constructs a routed request directly.
 pub(crate) fn business_name(name: &str) -> Result<HeaderName> {
     let name = HeaderName::from_bytes(name.as_bytes())
-        .context(Problem("An API header name is invalid"))?;
+        .context(Problem(Unsupported::HeaderName.explanation()))
+        .context(Unsupported::HeaderName)?;
     ensure!(
         !ignored(name.as_str())
             && !payment(name.as_str())
@@ -51,7 +52,8 @@ pub(crate) fn business_name(name: &str) -> Result<HeaderName> {
                     | "cookie"
                     | "cookie2"
             ),
-        Problem("API header is reserved for HTTP transport, authentication or payment")
+        anyhow::Error::new(Problem(Unsupported::HeaderReserved.explanation()))
+            .context(Unsupported::HeaderReserved)
     );
     Ok(name)
 }
@@ -123,6 +125,7 @@ pub(super) fn collect(
     params: &Value,
     props: &mut Map<String, Value>,
     required: &mut BTreeSet<String>,
+    names: &mut super::input::Names,
 ) -> Result<BTreeMap<String, HeaderParameter>> {
     let mut headers = BTreeMap::new();
     let mut seen = BTreeSet::new();
@@ -132,9 +135,9 @@ pub(super) fn collect(
         .flatten()
         .filter(|p| p["in"] == "header")
     {
-        let name = parameter["name"].as_str().context(Problem(
-            "The catalog contains a header parameter without a name",
-        ))?;
+        let name = parameter["name"]
+            .as_str()
+            .context(Unsupported::HeaderMissingName)?;
         let lower = name.to_ascii_lowercase();
         // These declarations document the protocol, not caller-supplied input.
         // Routing still rejects them through business_name, including forged metadata.
@@ -142,45 +145,32 @@ pub(super) fn collect(
             continue;
         }
         let wire = business_name(name)?;
-        ensure!(
-            seen.insert(wire.to_string()),
-            Problem("The catalog declares the same HTTP header more than once")
-        );
+        ensure!(seen.insert(wire.to_string()), Unsupported::HeaderDuplicate);
         ensure!(
             parameter.get("content").is_none()
                 && parameter.get("style").is_none_or(|style| style == "simple")
                 && parameter.get("explode").is_none_or(Value::is_boolean),
-            Problem(
-                "The catalog uses unsupported HTTP header serialization; expected OpenAPI simple style"
-            )
+            Unsupported::HeaderSerialization
         );
         let managed = wire == "idempotency-key";
         if managed {
-            automatic_key_schema(&parameter["schema"]).context(Problem(
-                "The catalog's Idempotency-Key schema does not allow an automatically generated UUID",
-            ))?;
+            automatic_key_schema(&parameter["schema"])
+                .context(Unsupported::IdempotencyKeySchema)?;
         }
-        let argument = if props.contains_key(name) {
-            format!("{name}_header")
-        } else {
-            name.into()
-        };
+        let argument = names.argument(name, "header");
         ensure!(
             !props.contains_key(&argument) && !headers.contains_key(&argument),
-            Problem("The catalog's HTTP header argument conflicts with another input argument")
+            Unsupported::HeaderArgument
         );
         let is_required = parameter["required"] == true;
         if !managed {
-            let mut schema = parameter["schema"].as_object().cloned().unwrap_or_default();
-            schema
-                .entry("type")
-                .or_insert(Value::String("string".into()));
-            if let Some(description) = parameter["description"].as_str() {
-                schema
-                    .entry("description")
-                    .or_insert(Value::String(description.into()));
-            }
-            props.insert(argument.clone(), Value::Object(schema));
+            ensure!(
+                !super::input::unsupported_scalar_shape(&parameter["schema"]),
+                Unsupported::HeaderContract
+            );
+            let schema =
+                super::input::parameter_schema(parameter, "Use a scalar or a flat array/object.");
+            props.insert(argument.clone(), schema);
             if is_required {
                 required.insert(argument.clone());
             }

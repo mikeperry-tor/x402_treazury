@@ -30,6 +30,8 @@ impl Failure {
         } else if error.is::<crate::limits::DownloadLimit>() {
             "The catalog exceeds the configured download size limit; no partial catalog was accepted"
         } else if error.is::<super::IncompleteCatalog>() {
+            "Selected API operations have unsupported input contracts; complete inspection requires resolving or explicitly excluding the reported operations"
+        } else if error.is::<super::IncompleteRelayCatalog>() {
             "The server returned only part of the catalog; a complete document is required"
         } else if http_status.is_some() {
             "The catalog server returned an unsuccessful HTTP status"
@@ -165,5 +167,29 @@ mod tests {
             assert!(failure.reason.contains(expected));
             assert!(!failure.reason.contains("private-upstream-tag"));
         }
+    }
+}
+
+#[cfg(test)]
+mod incomplete_contract_tests {
+    #[test]
+    fn operation_and_http_completeness_have_distinct_safe_reasons() {
+        use super::Failure;
+        let operation = anyhow::Error::new(crate::catalog::IncompleteCatalog(vec![
+            crate::catalog::OperationIssue {
+                method: "POST".into(),
+                path: "/private_path".into(),
+                reason: crate::catalog::Unsupported::CookieParameter,
+            },
+        ]));
+        let failure = Failure::from_error(&operation, "generation");
+        assert!(failure.reason.contains("unsupported input contracts"));
+        assert!(!failure.reason.contains("private_path"));
+        let partial = anyhow::Error::new(super::super::IncompleteRelayCatalog);
+        assert!(
+            Failure::from_error(&partial, "body")
+                .reason
+                .contains("server returned only part")
+        );
     }
 }

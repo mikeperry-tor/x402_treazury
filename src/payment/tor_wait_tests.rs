@@ -114,6 +114,7 @@ async fn handler(State(observed): State<Observations>, uri: Uri, headers: Header
 
 fn route(path: &str) -> RoutedRequest {
     RoutedRequest {
+        json_media_type: None,
         headers: Default::default(),
         method: "POST".into(),
         url: format!("https://wait-api.example.com{path}"),

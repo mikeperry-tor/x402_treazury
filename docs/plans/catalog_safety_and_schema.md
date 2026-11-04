@@ -67,11 +67,30 @@ and make any rejected/omitted operation visible to the affected consumer.
    collision-safe tool names with explicit original-name routing; retain header
    casing/idempotency and inherited overrides. Reject unsupported cookies explicitly.
    Verify allOf/oneOf/anyOf bodies and required alternatives before fixing actual
-   gaps: merge only compatible allOf fields and preserve exclusive alternatives
+   gaps: preserve property-bearing compositions as whole bodies, and retain
+   only ordinary object roots with pure required-only alternatives as flat inputs
    or explicitly reject unsupported shapes. Select supported content types truthfully; reject unsupported bodies with
    useful diagnostics. Test serialized outbound path/query/body/header bytes and
    negative cases with zero paid disclosure, including suffix collisions, inherited
-   overrides, same-path POST preference and filters. Update
+   overrides, same-path POST preference and filters.
+   The used-schema follow-through must preserve valid JSON Schema2020-12 basic-annotation3.1 reference
+   siblings (title/description strings, opaque default, examples array and
+   deprecated/readOnly/writeOnly booleans) without applying defaults and prove only the exact unrestricted recursive six-type JSON union;
+   constrained near matches, ambiguous resource bases/dialects and other cycles stay
+   visible. Restrict these new transformations to known standard semantics without
+   broadening rejection of ordinary existing reference projection; opaque declarations
+   and component/property names must not select schema context.
+   Keep strict whole-document dynamic import unchanged and document its recursive
+   Exa limitation. Qualification must certify selected static Search/Contents calls
+   with original reviewed HTTP bodies: admit only truthful annotation metadata and
+   the exact string-key propertyNames tautology, keeping unknown assertions closed.
+   Preserve demonstrated query unions of exactly string and string-array branches
+   through the existing form/explode codec, without injecting type or rewriting
+   anyOf/default. Other unproven compositions keep their fixed compatibility refusal;
+   prove scalar/repeated-array wire bytes and rejection before payment/I/O.
+   Charge bounded proof comparisons and generated output through the existing C1
+   budget before copies; no generic resolver/evaluator or new resource cap.
+   Update
    configuration/architecture and agent-source guidance, review endpoint summaries
    and discovery keywords, and document only named provider quirks in caveats.
 

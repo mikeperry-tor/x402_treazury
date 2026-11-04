@@ -257,7 +257,18 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
     x402_treazury::config::validate(&cfg)?;
-    let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    let built = catalog::build_catalog(&cfg, &root, &prefix)?;
+    let issues = built.issues.clone();
+    let mut tools = if args.list_tools
+        || args.check
+        || args.route_tool.is_some()
+        || built.tools.is_empty() && !built.issues.is_empty()
+    {
+        built.complete()?
+    } else {
+        built.tools
+    };
+    catalog::append_omissions(&mut cfg.instructions_text, "standalone", &issues);
     for tool in &mut tools {
         tool.catalog_hints = root.hints.clone();
     }

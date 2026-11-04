@@ -469,6 +469,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     let payer = crate::payment::PaidClient::managed(manager);
     payer
         .execute(crate::catalog::RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: format!("{origin}/pay"),

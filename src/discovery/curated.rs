@@ -1,5 +1,5 @@
 //! Accepted provider contracts, independent of the currently shipped bundle.
-use crate::catalog::{self, Config, ToolSpec};
+use crate::catalog::{self, Config};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -68,24 +68,25 @@ pub(super) fn build(
     provider: &AcceptedProvider,
     name: &str,
     root: &Value,
-) -> Result<(Vec<ToolSpec>, Option<String>)> {
+) -> Result<(catalog::CatalogBuild, Option<String>)> {
     super::import::validate_source_name(name)?;
     crate::config::validate(&provider.settings)?;
     let mut settings = provider.settings.clone();
     settings.use_recommended_tools = false;
     let canonical = settings.prefix.as_deref().unwrap_or(&provider.id);
-    let mut tools = catalog::build_tools(&settings, root, canonical)?;
+    let mut built = catalog::build_catalog(&settings, root, canonical)?;
+    let tools = &mut built.tools;
     let prefix = format!("{canonical}_");
     let dynamic = super::import::tool_prefix(name)?;
     let mut names = BTreeMap::from([(format!("{canonical}_*"), format!("{dynamic}*"))]);
-    for tool in &tools {
+    for tool in tools.iter() {
         let suffix = tool
             .name
             .strip_prefix(&prefix)
             .context("provider tool prefix mismatch")?;
         names.insert(tool.name.clone(), format!("{dynamic}{suffix}"));
     }
-    for tool in &mut tools {
+    for tool in tools.iter_mut() {
         tool.name = names[&tool.name].clone();
         tool.description = rebind(&tool.description, &names);
         if let Some(rendering) = &mut tool.description_rendering {
@@ -96,7 +97,7 @@ pub(super) fn build(
         .instructions_text
         .as_ref()
         .map(|text| rebind(text, &names));
-    Ok((tools, instructions))
+    Ok((built, instructions))
 }
 
 // Replace known symbols in prose, never wire/schema values or URL tokens. A single

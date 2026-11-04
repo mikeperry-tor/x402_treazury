@@ -355,6 +355,7 @@ async fn failed_refresh_preserves_estimate_and_survives_restart_then_wallet_is_r
     let client = crate::payment::PaidClient::managed(f.pool.clone());
     client
         .execute(crate::catalog::RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: format!("{}/pay", f.endpoint),
@@ -384,6 +385,7 @@ async fn slow_balance_read_does_not_delay_paid_wallet_fallback() {
     let outcome = tokio::time::timeout(
         Duration::from_secs(10),
         client.execute(crate::catalog::RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: format!("{}/pay", f.endpoint),

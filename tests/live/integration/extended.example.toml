@@ -42,7 +42,7 @@ id = "round1_deplete_01"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -51,7 +51,7 @@ id = "round1_deplete_02"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -60,7 +60,7 @@ id = "round1_deplete_03"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -69,7 +69,7 @@ id = "round1_deplete_04"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -78,7 +78,7 @@ id = "round1_deplete_05"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -87,7 +87,7 @@ id = "round1_deplete_06"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -96,7 +96,7 @@ id = "round1_deplete_07"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -105,7 +105,7 @@ id = "round1_deplete_08"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -114,7 +114,7 @@ id = "round1_deplete_09"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -123,7 +123,7 @@ id = "round1_deplete_10"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -132,7 +132,7 @@ id = "round1_deplete_11"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -141,7 +141,7 @@ id = "round1_deplete_12"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -168,7 +168,7 @@ id = "round2_deplete_01"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -177,7 +177,7 @@ id = "round2_deplete_02"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -186,7 +186,7 @@ id = "round2_deplete_03"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -195,7 +195,7 @@ id = "round2_deplete_04"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -204,7 +204,7 @@ id = "round2_deplete_05"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -213,7 +213,7 @@ id = "round2_deplete_06"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -222,7 +222,7 @@ id = "round2_deplete_07"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -231,7 +231,7 @@ id = "round2_deplete_08"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -240,7 +240,7 @@ id = "round2_deplete_09"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -249,7 +249,7 @@ id = "round2_deplete_10"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -258,7 +258,7 @@ id = "round2_deplete_11"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 
@@ -267,7 +267,7 @@ id = "round2_deplete_12"
 server = "a"
 source = "depletion"
 tool = "depletion_balances_address"
-arguments = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" }
+arguments = { body = { "address" = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" } }
 reserve_usdc = "0.20"
 reviewed_read_only = true
 

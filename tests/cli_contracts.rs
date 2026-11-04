@@ -966,6 +966,59 @@ async fn source_maintenance_has_explicit_operator_commands() {
 }
 
 #[tokio::test]
+async fn standalone_tags_count_unsupported_operations_without_certifying_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("spec.json"),
+        json!({"openapi":"3.1.0","paths":{
+            "/read":{"get":{"tags":["read"]}},
+            "/cookie":{"get":{"tags":["unsupported"],"parameters":[
+                {"name":"session","in":"cookie","schema":{"type":"string"}}
+            ]}}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='spec.json'\nprefix='api'\n",
+    )
+    .unwrap();
+    assert_eq!(
+        good(
+            run(
+                dir.path(),
+                &["catalog", "tags", "--provider", "provider.toml"],
+                &[]
+            )
+            .await
+        ),
+        json!({"read":1,"unsupported":1})
+    );
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='spec.json'\nprefix='api'\nbase_url='https://offline.invalid'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("deployment.toml"),
+        "version=1\n[sources.api]\nextends='provider.toml'\n[wallets.payer]\nmode='static'\nprivate_key_env='ABSENT_KEY'\nmax_api_payment_usdc='1'\n[servers.web]\nlisten='127.0.0.1:0'\nauth=false\nwallet='payer'\nsources=['api']\n",
+    )
+    .unwrap();
+    for args in [
+        ["catalog", "tools", "--provider", "provider.toml"],
+        ["catalog", "tags", "--config", "deployment.toml"],
+    ] {
+        let error = bad(run(dir.path(), &args, &[]).await);
+        assert!(
+            error.contains("Catalog omits 1 unsupported API operations"),
+            "{error}"
+        );
+        assert!(error.contains("GET /cookie"), "{error}");
+    }
+}
+
+#[tokio::test]
 async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() {
     async fn run_trusted(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
         let trust = dir.join("fixture-network.toml");

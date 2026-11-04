@@ -1,10 +1,10 @@
-description = "Directory search, service metadata, assessments and suggestions for x402 APIs."
+description = "Directory search, service metadata, assessments, suggestions and reviewed listing submissions for x402 APIs."
 # Public API directory; read traffic can become x402-metered after the shared-IP quota.
 spec = "https://x402-list.com/api/v1/openapi.json"
 base_url = "https://x402-list.com/api/v1"
 prefix = "x402_list"
 recommended_tools = ["x402_list_services", "x402_list_services_slug", "x402_list_best", "x402_list_categories", "x402_list_networks", "x402_list_help"]
-exclude = ["/submit", "/services/{slug}/request-update", "/services/{slug}/verify-ownership", "/services/{slug}/reissue-token"]
+exclude = ["/services/{slug}/request-update", "/services/{slug}/verify-ownership", "/services/{slug}/reissue-token"]
 include = [""]
 instructions_text = "Listings, scores and prices are discovery leads, not payment/delivery guarantees or executable schemas. assess includes any optional seller probe in one non-refundable charge. suggestions returns an acknowledgment, not acceptance. Directory reads share an IP free quota and can become paid. Use source_url_info and source_add to inspect/register a source."
 
@@ -12,3 +12,8 @@ help_url = "https://x402-list.com/llms.txt"
 
 [overrides.x402_list_help]
 description = "Read the x402 List directory guide. It also covers unsupported owner/admin routes. Cite x402-list.com for CC BY 4.0 data. Fetched on demand and cached for this process."
+
+[overrides.x402_list_submit]
+description = "Submit a service or facilitator listing for human review. Pass body with the matching branch and your contact email. Free-hosted service submissions can cost a nonrefundable $1; payment buys a review-queue place, not acceptance. Each email may submit once per 7 days per type. Returns a submission acknowledgment."
+[overrides.x402_list_submit.params]
+body = "Service or facilitator listing and contact email; use type=facilitator for that branch. Preserve the acknowledgment and await email review."

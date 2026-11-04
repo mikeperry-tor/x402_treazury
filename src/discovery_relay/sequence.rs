@@ -607,6 +607,7 @@ impl Entry {
         let result = scoped
             .execute_response_scoped_status(
                 RoutedRequest {
+                    json_media_type: None,
                     headers: Default::default(),
                     method: "POST".into(),
                     url: self.endpoint.clone(),

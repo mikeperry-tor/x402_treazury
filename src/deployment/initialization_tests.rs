@@ -104,11 +104,10 @@ async fn serving_preflight_rejects_credentials_and_providers_before_state_or_req
         if missing_token {
             env.remove("TOKEN");
         }
-        let error = match Deployment::load_with_warnings(
+        let error = match Deployment::load_for_serving_with_relay_and_network(
             &path,
-            true,
-            Some((&env, FundingRestriction::Ordinary)),
-            false,
+            &env,
+            FundingRestriction::Ordinary,
             None,
         )
         .await
@@ -613,6 +612,7 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
                 let error = tokio::time::timeout(
                     Duration::from_secs(2),
                     payer.execute(crate::catalog::RoutedRequest {
+                        json_media_type: None,
                         headers: Default::default(),
                         method: "GET".into(),
                         url: provider_url,
@@ -716,6 +716,7 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     let error = tokio::time::timeout(
         Duration::from_secs(2),
         payer.execute(crate::catalog::RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: provider_url,

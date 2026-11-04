@@ -119,8 +119,8 @@ reusable provider; no account session or local background owner is required.
 | SocialFetch | Exclude account, monitor ownership and webhook lifecycle. Public `/v1/monitors/sources`, diagnostics and ordinary ask are compatible; exact parent-operation exclusions preserve the public child. |
 | StableEnrich | Crawl/job, Hunter verifier lifecycle and aerial-video rendering/result families are unsupported; synchronous/image contracts remain. |
 | Vaaya | Exclude specific MPP-only, upload/async, persistent account, message/purchase and payment-forwarding contracts. Broad research subset is editorial; complete result chains matter. |
-| x402-list | Broader public GET catalog is compatible; ownership/reissue and submit conversion loss have explicit boundaries; assessment and suggestions remain available. Embedded directory is a separate intentional three-read consumer contract. |
-| AgentUtility | Preserve enrichment/alias provenance. One-shot browser, IPFS and QR return ordinary JSON, including encoded media. Persistent watch ownership and six full oneOf conversion losses require restrictions; optional formats do not justify whole-family suppression. |
+| x402-list | Public reads, assessments, suggestions and listing submissions are exposed; owner-proof/update/reissue routes retain their explicit boundaries. Embedded directory is a separate intentional three-read consumer contract. |
+| AgentUtility | Preserve enrichment/alias provenance. One-shot browser, IPFS and QR return ordinary JSON, including encoded media. Persistent watch ownership requires a restriction; full repo/files audit alternatives remain intact; optional formats do not justify whole-family suppression. |
 | Concordance | Preserve authored price/ref enrichment; free catalog discovery completes series lookup. |
 | Curl | Authored request/response relay contract; the relay accepts unsigned upstream GET requests. |
 | Glassnode | Authored metadata-to-metric workflow; deeper bulk paths cannot be addressed by the current gateway template. |
@@ -191,8 +191,12 @@ The canonical names are `genuinegood_search`, `genuinegood_detail`,
 `genuinegood_fit`, `genuinegood_brief`, `genuinegood_preflight`,
 `otto_llm_research`, `otto_tx_explainer` and `otto_meta_intelligence`.
 Exact deployment selectors use these canonical names. Set `prefer_post = false`
-in a provider/source to inspect both methods.
-Do not create aliases or alter explicit raw HTTP methods.
+in a provider/source to assess both methods. Compatibility still applies:
+unsupported GET array forms remain omitted
+with visible reasons, and strict inspection rejects an incomplete selection. In
+the captured schemas this affects GenuineGood GET search, fit, brief and preflight,
+and Otto GET meta-intelligence; their POST forms remain supported. Do not create aliases or alter explicit raw
+HTTP methods.
 
 
 ## Reliability annotations
@@ -746,7 +750,12 @@ result. Separate Contents requests cost $0.001 per page for each requested type
 (text, highlights or summary). Signing continues to use the actual challenge.
 
 The vendor's OpenAPI 3.1 nullable unions, nested content options and local schema
-references work with the generic converter. Contents uses a root presence-only
+references work with the generic converter. Its exact recursive `JsonValue` union
+accepts every finite JSON value and is normalized without losing constraints; a
+reference's sole description sibling is preserved through `allOf`. This supports
+the selected static provider/catalog path. Dynamic registration retains its
+stricter whole-document cycle rejection and cannot import this captured recursive
+catalog; static support does not remove that existing import limitation. Contents uses a root presence-only
 `oneOf` requiring exactly one of `ids` or `urls`. The converter now preserves
 presence-only `oneOf`/`anyOf`/`allOf` alternatives and renames body keys in them when
 query/body arguments collide. This is agent-facing schema information, not a new
@@ -1065,15 +1074,15 @@ Venice/Fal/CloudConvert credentials or initialize a separate vendor wallet/clien
   state for up to 365 days; its ownership/access semantics need review. The
   browser-workflow cluster, in contrast, analyzes supplied traces/HTML and returns
   advisory plans/diffs; those operations do not themselves execute browser actions.
-- Six audit routes are excluded: db-migration-risk, dep-risk-summary,
-  deploy-config-risk, production-readiness-score, prompt-injection-surface, and
-  secrets-exposure-check. Their complete `oneOf` branches declare alternative
-  repo/files properties; the current converter succeeds but emits an empty-properties object, losing the
-  complete repo/files alternatives. Each captured operation is independently
-  exercised offline to establish that precise loss; these are not converter errors.
-  Do not replace them with the registry's empty object schemas. No captured aliases
-  target these six operations or watch-page, so no alias exclusions are invented. Required-only
-  alternatives on keyword-suggest, wallet-label and company-intel-pack are retained.
+- Six source audits are exposed with their complete repo/files `oneOf` input:
+  db-migration-risk, dep-risk-summary, deploy-config-risk,
+  production-readiness-score, prompt-injection-surface and secrets-exposure-check.
+  Pass `body` with a public repo/optional branch or supplied files. Their declared
+  HTTP contracts perform synchronous analysis and return findings/scores; no
+  authenticated polling, persistent watch ownership or local file access is added.
+  The full schemas, including nested files, composite weights and limits, remain
+  intact. Required-only alternatives on keyword-suggest, wallet-label and
+  company-intel-pack are also retained. Do not substitute registry empty schemas.
 - Compose routes are synchronous bundles executed upstream in a single request. Preserve
   component failures and degraded markers rather than presenting partial reports
   as complete. Web-search can return an explicitly marked recent-news fallback;
@@ -1484,9 +1493,12 @@ The reusable provider exposes public directory reads, synchronous `/assess` and
 completed `/suggestions` submissions. Later human review does not turn the
 submission acknowledgment into an unsupported result lifecycle. Assessment may
 perform a seller probe within its single quoted nonrefundable charge; payment
-caps and uncertainty rules still apply. `/submit` is excluded because its full
-top-level `oneOf` request alternatives are lost by the generic converter;
-request-update, verify-ownership and reissue-token require domain/email proof or
+caps and uncertainty rules still apply. `/submit` retains its full service/facilitator
+`oneOf` as a required `body` argument. It returns a review-queue acknowledgment;
+manual acceptance and email review are separate outcomes. A free-hosted service
+can incur the declared nonrefundable $1 charge; ordinary payment authority applies.
+Its email cooldown grants no automatic retry. Request-update, verify-ownership
+and reissue-token remain excluded because they require domain/email proof or
 owner tokens. This is distinct from the embedded directory's intentional three
 read operations. Recommendations contain the familiar five directory reads and
 help without constraining reusable defaults.
@@ -1785,8 +1797,9 @@ origin directly; paid requests do not follow redirects. The resource is POST;
 GET returns 405. Only Verdict is currently advertised for external callers.
 
 The upstream request body combines external and Privy Console schemas in a
-full-object `anyOf`. Generic conversion loses its request fields. The local
-runtime schema selects the original first (external) branch, preserving its
+full-object `anyOf`. The local runtime schema deliberately selects the external
+contract rather than exposing Console-only alternatives. It retains the original
+first (external) branch, preserving its
 required tokenAddress, optional chain/requestKey and original constraints, plus
 all original response contracts. The authenticated Console run read is excluded;
 public `/api/q-verdict/operations/{operationId}` remains available. The
@@ -1837,6 +1850,11 @@ API endpoints. The vendor explicitly omits commercial-only live award search.
 Maps have opaque JSON response schemas, so no image extraction mapping is guessed.
 
 The advertised paid flight-intent POST remains available as a write operation.
+Its open JSON body shares `ident` with the URL path, so its input uses the path
+`ident` plus a body object containing `ident` and `intent`. The historical
+`ident_body` metadata alias targets the existing body.ident description; it is not
+a separate caller argument. This preserves arbitrary body keys without conflating
+them with URL parameters.
 StableTravel calls it push notifications, whereas the
 [upstream FlightAware operation table](https://www.flightaware.com/commercial/aeroapi/)
 separates submitting flight intent from alert creation and callback endpoints.

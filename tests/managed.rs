@@ -481,6 +481,7 @@ impl Harness {
     }
     fn route(&self) -> RoutedRequest {
         RoutedRequest {
+            json_media_type: None,
             headers: Default::default(),
             method: "GET".into(),
             url: self.url.clone(),

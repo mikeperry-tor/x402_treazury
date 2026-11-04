@@ -226,7 +226,7 @@ async fn paid_operation_urls() {
     }
     let key = hints.operation("POST", "/gateway/purchase");
     assert!(key.get().is_none());
-    let args = json!({"q":"original","X-Region":"north","item":"map"});
+    let args = json!({"q":"original","X-Region":"north","body":{"item":"map"}});
     let (first, second) = tokio::join!(
         tools[0].invoke_output(args.as_object().unwrap()),
         tools[1].invoke_output(args.as_object().unwrap())

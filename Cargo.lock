@@ -6985,6 +6985,7 @@ dependencies = [
  "incrementalmerkletree",
  "jubjub",
  "libc",
+ "mime",
  "orchard",
  "pepper-sync",
  "percent-encoding",

@@ -1270,9 +1270,17 @@ fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
     for (key, value) in route.query {
         if let Some(values) = value.as_array() {
             for v in values {
+                ensure!(
+                    v.is_string() || v.is_number() || v.is_boolean(),
+                    "query array values must be scalars"
+                );
                 query.push((key.clone(), arg_text(v)));
             }
         } else {
+            ensure!(
+                value.is_string() || value.is_number() || value.is_boolean(),
+                "query values must be scalars or scalar arrays"
+            );
             query.push((key, arg_text(&value)));
         }
     }
@@ -1283,10 +1291,14 @@ fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
         *request.body_mut() = Some(serde_json::to_vec(&body)?.into());
         request
             .headers_mut()
-            .try_insert(
-                reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_static("application/json"),
-            )
+            .try_insert(reqwest::header::CONTENT_TYPE, {
+                let media = route
+                    .json_media_type
+                    .as_deref()
+                    .unwrap_or("application/json");
+                crate::catalog::media::json_type(media)?;
+                reqwest::header::HeaderValue::from_str(media)?
+            })
             .map_err(crate::catalog::headers::capacity_error)?;
     }
     Ok(request)

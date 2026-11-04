@@ -779,6 +779,43 @@ async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
 
 #[tokio::test]
 async fn optional_outage_defers_only_unambiguous_listener_selectors() {
+    async fn endpoint_instructions(deployment: Deployment) -> String {
+        let running = deployment
+            .bind_unsigned(&BTreeMap::from([(
+                "UNUSED_TEST_TOKEN".into(),
+                "test-token".into(),
+            )]))
+            .await
+            .unwrap();
+        let address = running.addresses()[0].1;
+        let stop = tokio_util::sync::CancellationToken::new();
+        let task = tokio::spawn(running.serve(stop.clone()));
+        let response: anyhow::Result<serde_json::Value> = async {
+            reqwest::Client::new()
+                .post(format!("http://{address}/mcp"))
+                .bearer_auth("test-token")
+                .header("accept", "application/json, text/event-stream")
+                .json(
+                    &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                        "protocolVersion":"2025-03-26","capabilities":{},
+                        "clientInfo":{"name":"fixture","version":"1"}
+                    }}),
+                )
+                .send()
+                .await?
+                .mcp_json()
+                .await
+        }
+        .await;
+        stop.cancel();
+        let completed = task.await;
+        let response = response.unwrap();
+        completed.unwrap().unwrap();
+        response["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
     tls::install_trust();
     let fixture = Fixture::new(2, Some(1)).await;
     for gate in &fixture.gates {
@@ -794,10 +831,15 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
         Some(2),
         "",
     );
-    let original = std::fs::read_to_string(&path).unwrap().replace(
-        "[sources.s01]",
-        "[sources.s01]\noptional_startup=true\nextends='optional.toml'",
-    );
+    // Inspect endpoint-scoped selection failures through MCP even when catalogs
+    // are incomplete; this does not change selector ownership or validation.
+    let original = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("[servers.test]", "[servers.test]\nwait_for_catalogs=false")
+        .replace(
+            "[sources.s01]",
+            "[sources.s01]\noptional_startup=true\nextends='optional.toml'",
+        );
     for (selection, succeeds) in [
         ("include_tools=['s00_read','offline_read']", true),
         ("include_tools=['offline_read']", true),
@@ -812,8 +854,13 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
             original.replace("[servers.test]", &format!("[servers.test]\n{selection}")),
         )
         .unwrap();
-        let result = Deployment::load_for_unsigned_serving(&path).await;
-        assert_eq!(result.is_ok(), succeeds, "{selection}: {:?}", result.err());
+        let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+        let instructions = endpoint_instructions(deployment).await;
+        assert_eq!(
+            !instructions.contains("UNAVAILABLE endpoint tool selection"),
+            succeeds,
+            "{selection}: {instructions}"
+        );
     }
     // The optional source must not claim a namespace also owned by a ready one,
     // including nested prefixes that could be ordinary required tool suffixes.
@@ -828,7 +875,12 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
             &format!("[servers.test]\ninclude_tools=['{prefix}_typo']"),
         );
         std::fs::write(&path, text).unwrap();
-        assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
+        let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+        let instructions = endpoint_instructions(deployment).await;
+        assert!(
+            instructions.contains("UNAVAILABLE endpoint tool selection"),
+            "{prefix}: {instructions}"
+        );
     }
 }
 

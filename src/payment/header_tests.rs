@@ -177,14 +177,39 @@ fn direct_routed_requests_cannot_override_reserved_headers_or_inject_values() {
         "X-Payment-Response",
     ] {
         let request = RoutedRequest {
+            json_media_type: None,
             method: "POST".into(),
             url: "https://api.example.com/orders".into(),
             headers: std::collections::BTreeMap::from([(name.into(), "fixture".into())]),
             query: Default::default(),
             body: None,
         };
-        assert!(build_request(request).is_err(), "reserved header: {name}");
+        let error = build_request(request).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::catalog::Unsupported>(),
+            Some(&crate::catalog::Unsupported::HeaderReserved)
+        );
+        let error = presentation::ResponseFacts::default().attach(error);
+        let error = presentation::ApiExecution { non_read: true }.attach(error);
+        let shown = presentation::present(&error).unwrap();
+        assert!(shown.contains("API header is reserved"), "{shown}");
+        assert!(shown.contains("Do not retry automatically"));
+        assert!(!shown.contains("fixture"));
     }
+    let mut request = route("https://api.example.com");
+    request
+        .headers
+        .insert("bad\nname".into(), "PRIVATE_HEADER_VALUE".into());
+    let error = build_request(request).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<crate::catalog::Unsupported>(),
+        Some(&crate::catalog::Unsupported::HeaderName)
+    );
+    let error = presentation::ApiExecution { non_read: true }.attach(error);
+    let shown = presentation::present(&error).unwrap();
+    assert!(shown.contains("An API header name is invalid"), "{shown}");
+    assert!(!shown.contains("PRIVATE_HEADER_VALUE") && !shown.contains("bad\nname"));
+
     let mut request = route("https://api.example.com");
     request
         .headers
@@ -480,5 +505,55 @@ async fn concurrent_manual_credentials_and_keys_stay_with_each_signed_request() 
         nonces[0], nonces[1],
         "concurrent calls own separate payment authorizations"
     );
+    server.abort();
+}
+
+#[tokio::test]
+async fn string_array_query_union_uses_existing_wire_codec_and_rejects_objects_before_io() {
+    let document = json!({"openapi":"3.1.0","paths":{"/values":{"get":{"parameters":[{
+        "name":"q","in":"query","schema":{"anyOf":[{"type":"string"},{"type":"array","items":{"type":"string"}}],"default":["photos"]}
+    }]}}}});
+    let tool = crate::catalog::build_tools(&Default::default(), &document, "fixture")
+        .unwrap()
+        .pop()
+        .unwrap();
+    for (value, encoded) in [
+        (json!("photo names"), "q=photo+names"),
+        (json!(["photo names", "a&b"]), "q=photo+names&q=a%26b"),
+    ] {
+        let routed = tool
+            .route(
+                "https://api.example.com",
+                json!({"q":value}).as_object().unwrap(),
+            )
+            .unwrap();
+        let request = build_request(routed).unwrap();
+        assert_eq!(request.method(), reqwest::Method::GET);
+        assert_eq!(
+            request.url().as_str(),
+            format!("https://api.example.com/values?{encoded}")
+        );
+        assert!(request.body().is_none());
+    }
+    let (seller, base, server) = fixture(Outcome::Success, false).await;
+    let client = client();
+    for value in [
+        json!({"nested":"object"}),
+        json!([{"nested":"object"}]),
+        json!([["nested"]]),
+    ] {
+        // Retain the real working seller's POST/header contract so a mistaken
+        // dispatch would be recorded instead of disappearing behind a404 route.
+        let mut request = route(&base);
+        request.query.insert("q".into(), value);
+        let error = client.execute(request).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("must be scalars"),
+            "{error:#}"
+        );
+    }
+    assert!(seller.seen.lock().unwrap().is_empty());
+    assert!(seller.signers.lock().unwrap().is_empty());
+    assert!(seller.nonces.lock().unwrap().is_empty());
     server.abort();
 }

@@ -1,4 +1,4 @@
-description = "Web research, patents, scraping, structured extraction and supported developer data utilities."
+description = "Web research, patents, scraping, structured extraction, supplied-code audits and developer data utilities."
 # Reviewed same-origin cover resources ignore Range or are unavailable; see providers/CAVEATS.md.
 cover_traffic_enabled = false
 
@@ -8,8 +8,8 @@ name = "AgentUtility"
 base_url = "https://x402.agentutility.ai"
 prefix = "agentutility"
 include = [""]
-# Full branch schemas cannot be advertised by the converter; watch-page owns remote state.
-exclude_operations = ["POST /db-migration-risk", "POST /dep-risk-summary", "POST /deploy-config-risk", "POST /production-readiness-score", "POST /prompt-injection-surface", "POST /secrets-exposure-check", "POST /watch-page"]
+# Watch-page retains caller-selected remote state and needs a distinct ownership contract.
+exclude_operations = ["POST /watch-page"]
 recommended_tools = ["agentutility_web_search", "agentutility_answer_web", "agentutility_research_brief", "agentutility_scrape", "agentutility_scrape_to_json", "agentutility_link_extract", "agentutility_archive_snapshot", "agentutility_arxiv_search", "agentutility_arxiv_summarize", "agentutility_pubmed_search", "agentutility_hn_search", "agentutility_wikipedia_search", "agentutility_github_readme", "agentutility_youtube_transcript", "agentutility_pdf_to_markdown", "agentutility_help"]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 90
@@ -33,3 +33,21 @@ images = [
   { pointer = "/before/data_base64", mime_pointer = "/content_type" },
   { pointer = "/after/data_base64", mime_pointer = "/content_type" },
 ]
+
+[overrides.agentutility_db_migration_risk]
+description = "Audit migration files from a public repo or supplied files for destructive SQL and deployment risks. Returns a risk score and findings with locations and recommendations."
+
+[overrides.agentutility_dep_risk_summary]
+description = "Audit manifests and lockfiles from a public repo or supplied files for dependency risks. Returns a risk score and findings; registry checks sample direct dependencies."
+
+[overrides.agentutility_deploy_config_risk]
+description = "Audit deploy configuration from a public repo or supplied files for unsafe exposure and configuration. Returns a score and findings with locations and recommendations."
+
+[overrides.agentutility_production_readiness_score]
+description = "Combine source, dependency, migration, deployment and secret audits for a public repo or supplied files. Returns a readiness score, component results and ranked findings; preserve component failures."
+
+[overrides.agentutility_prompt_injection_surface]
+description = "Audit AI application source from a public repo or supplied files for prompt injection risks at model call sites. Returns a risk score and located findings with recommendations."
+
+[overrides.agentutility_secrets_exposure_check]
+description = "Audit configuration from a public repo or supplied files for hardcoded secrets and public environment leaks. Returns a risk score and findings with redacted evidence."

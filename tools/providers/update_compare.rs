@@ -82,7 +82,7 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
         let inventory = plain.as_ref().ok().or_else(||diagnostic.as_ref().ok());
         let tool = inventory.and_then(|items|items.iter().find(|t|&t.name==name));
         let missing = inventory.map(|_|tool.is_none()).or_else(||operations.is_empty().then_some(true));
-        let missing_params: Vec<_> = patch["params"].as_object().into_iter().flatten().filter(|(key,_)|tool.is_some_and(|t|t.input_schema["properties"].get(key).is_none()) || missing==Some(true)).map(|(key,_)|key).collect();
+        let missing_params: Vec<_> = patch["params"].as_object().into_iter().flatten().filter(|(key,_)|tool.is_some_and(|t|t.parameter_note_pointer(key).is_none()) || missing==Some(true)).map(|(key,_)|key).collect();
         json!({"name":name,"authored_override":patch,"missing_tool":missing,"missing_parameter_notes":missing_params,"unoverridden":tool,"effective":effective.as_ref().ok().and_then(|items|items.iter().find(|t|&t.name==name))})
     }).collect::<Vec<_>>();
     Ok(
@@ -340,6 +340,49 @@ mod tests {
                 .any(|v| v["name"] == name && v["missing_tool"] == true)
         );
     }
+    #[test]
+    fn parameter_notes_follow_production_whole_body_targets() {
+        let mut cfg = cfg();
+        let document = json!({"openapi":"3.1.0","paths":{"/one":{"post":{
+            "parameters":[
+                {"name":"id","in":"query","schema":{"type":"string"}},
+                {"name":"body","in":"query","schema":{"type":"string"}}
+            ],
+            "requestBody":{"required":false,"content":{"application/json":{"schema":{
+                "type":"object","additionalProperties":false,"properties":{
+                    "id":{"type":"string"},"choice":{"type":"string"},
+                    "choice_body":{"type":"string"},"a/b~c":{"type":"string"},"flag":false
+                }
+            }}}}
+        }}}});
+        let tool = catalog::build_tools(&cfg, &document, "demo")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            tool.whole_body.as_ref().map(|body| body.name.as_str()),
+            Some("body_body")
+        );
+        let name = tool.name.clone();
+        cfg.overrides = json!({name:{"params":{
+            "id":"outer id","id_body":"nested id","choice_body":"exact spelling",
+            "a/b~c":"escaped name","flag":"not an object","missing":"not present"
+        }}});
+        let view = projection(&cfg, &document).unwrap();
+        assert_eq!(
+            view["overrides"][0]["missing_parameter_notes"],
+            json!(["flag", "missing"])
+        );
+        let properties = &view["effective"]["POST /one"]["input_schema"]["properties"];
+        assert_eq!(properties["id"]["description"], "outer id");
+        let body = &properties["body_body"]["properties"];
+        assert_eq!(body["id"]["description"], "nested id");
+        assert_eq!(body["choice_body"]["description"], "exact spelling");
+        assert!(body["choice"].get("description").is_none());
+        assert_eq!(body["a/b~c"]["description"], "escaped name");
+        assert_eq!(body["flag"], false);
+        assert!(body.get("missing").is_none());
+    }
+
     #[test]
     fn raw_arrays_extensions_filtered_additions_and_method_names() {
         let mut cfg = cfg();

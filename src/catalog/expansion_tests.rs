@@ -33,27 +33,38 @@ fn direct_value_entrypoints_reject_reference_depth_before_conversion() {
 }
 
 #[test]
-fn authored_reference_fallback_and_import_reference_policy_remain_distinct() {
-    for node in [
-        json!({"$ref":"#/missing"}),
-        json!({"$ref":"https://example.com/schema"}),
-        json!({"$ref":"#/cycle"}),
-    ] {
-        let root = json!({"cycle":{"$ref":"#/cycle"}});
-        let mut budget = expansion::Budget::default();
-        assert_eq!(resolve(&root, &node, &mut budget).unwrap(), node);
-        assert!(expansion::import(&json!({"cycle":node})).is_err());
-    }
-    let root = json!({"s":{"type":"string"}});
-    let node = json!({"$ref":"#/s","allOf":[{"$ref":"#/missing"}]});
-    assert_eq!(
-        resolve(&root, &node, &mut expansion::Budget::default()).unwrap(),
-        root["s"]
-    );
+fn flat_reference_chains_reject_before_recursive_projection_can_grow_the_stack() {
+    let document = chain(20_000);
+    let input = &document["paths"]["/test"]["get"]["parameters"][0]["schema"];
+    let error = contracts::schema(&document, input, &mut expansion::Budget::default()).unwrap_err();
+    let limit = error.downcast_ref::<expansion::ComplexityLimit>().unwrap();
+    assert_eq!(limit.depth, 65);
 }
 
 #[test]
-fn composed_repeated_expansion_is_rejected_without_allocating_its_result() {
+fn actual_reference_objects_replace_targets_and_input_failures_remain_operation_local() {
+    let document = json!({"openapi":"3.1.0","components":{"parameters":{"id":{"name":"id","in":"query","schema":{"type":"string"},"description":"target"}}},"paths":{
+        "/healthy":{"get":{"parameters":[{"$ref":"#/components/parameters/id","description":"ignored sibling"}]}},
+        "/missing":{"get":{"parameters":[{"name":"q","in":"query","schema":{"$ref":"#/missing"}}]}},
+        "/external":{"get":{"parameters":[{"name":"q","in":"query","schema":{"$ref":"https://example.com/schema"}}]}}
+    }});
+    let built = build_catalog(&Config::default(), &document, "test").unwrap();
+    assert_eq!(built.tools.len(), 1);
+    assert_eq!(built.issues.len(), 2);
+    assert_eq!(
+        built.tools[0].input_schema["properties"]["id"]["description"],
+        "target"
+    );
+    assert!(
+        built
+            .issues
+            .iter()
+            .all(|issue| issue.reason == Unsupported::InputReference)
+    );
+    assert!(expansion::import(&document).is_err());
+}
+#[test]
+fn composed_repeated_expansion_is_rejected_before_excessive_output_allocation() {
     let mut definitions = Map::new();
     definitions.insert("0".into(), json!({"type":"string"}));
     for index in 1..20 {
@@ -63,15 +74,11 @@ fn composed_repeated_expansion_is_rejected_without_allocating_its_result() {
             json!({"allOf":[{"$ref":reference},{"$ref":reference}]}),
         );
     }
-    let root = json!({"defs":definitions});
+    let root = json!({"defs":definitions,"paths":{"/test":{"get":{"parameters":[{"name":"q","in":"query","schema":{"$ref":"#/defs/19"}}]}}}});
     assert!(
-        resolve(
-            &root,
-            &json!({"$ref":"#/defs/19"}),
-            &mut expansion::Budget::default()
-        )
-        .unwrap_err()
-        .is::<expansion::ComplexityLimit>()
+        build_catalog(&Config::default(), &root, "test")
+            .unwrap_err()
+            .is::<expansion::ComplexityLimit>()
     );
 }
 

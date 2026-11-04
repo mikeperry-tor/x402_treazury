@@ -62,7 +62,26 @@ mod tests {
                         .unwrap();
                 let tool = tools.iter().find(|t| t.name == case.tool).unwrap();
                 schema::validate(&tool.input_schema, &Value::Object(case.arguments.clone()))
-                    .unwrap();
+                    .unwrap_or_else(|e| panic!("{name}/{}: {e:#}", case.id));
+                if case.tool == "depletion_balances_address" {
+                    assert_eq!(case.source, "depletion");
+                    assert_eq!(
+                        case.arguments
+                            .keys()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>(),
+                        ["body"]
+                    );
+                    let expected =
+                        serde_json::json!({"address":"0xd8da6bf26964af9d7eed9e03e53415d37aa96045"});
+                    let route = tool
+                        .route(settings.base_url.as_deref().unwrap(), &case.arguments)
+                        .unwrap();
+                    assert_eq!(route.method, "POST");
+                    assert_eq!(route.url, "https://api.arkm.com/x402/balances/address");
+                    assert_eq!(route.body, Some(expected));
+                    assert!(route.query.is_empty() && route.headers.is_empty());
+                }
                 assert!(
                     config["servers"][&case.server]["include_tools"]
                         .as_array()
@@ -96,6 +115,79 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn migrated_preset_body_arguments_preserve_original_reviewed_wire_requests() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest: Manifest = toml::from_str(
+            &std::fs::read_to_string(root.join("tests/live/integration/providers.example.toml"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            manifest.validate().is_err(),
+            "placeholders must still prohibit execution"
+        );
+        let config =
+            Deployment::show_config(&root.join("tests/live/deployments/live-tor-providers.toml"))
+                .await
+                .unwrap();
+        let reviewed: Vec<Value> =
+            serde_json::from_str(include_str!("../fixtures/provider_requests.json")).unwrap();
+        for (id, source, fixture, url, required) in [
+            (
+                "sweep_arkham",
+                "arkham",
+                "tests/live/fixtures/arkham.json",
+                "https://api.arkm.com/x402/balances/address",
+                true,
+            ),
+            (
+                "sweep_agentfund",
+                "agentfund",
+                "tests/fixtures/agentfund_openapi.json",
+                "https://x402.agentfund.net/x402/treasury_yield_curve",
+                false,
+            ),
+        ] {
+            let case = manifest.cases.iter().find(|case| case.id == id).unwrap();
+            let legacy = reviewed.iter().find(|entry| entry["id"] == id).unwrap();
+            assert_eq!(case.source, source);
+            assert_eq!(
+                case.arguments
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["body"]
+            );
+            assert_eq!(&case.arguments["body"], &legacy["arguments"]);
+            assert_eq!(case.tool, legacy["tool"].as_str().unwrap());
+            assert_eq!(case.reserve_usdc, legacy["reserve_usdc"].as_str().unwrap());
+            let settings: Config =
+                serde_json::from_value(config["sources"][source]["settings"].clone()).unwrap();
+            let document: Value =
+                serde_json::from_slice(&std::fs::read(root.join(fixture)).unwrap()).unwrap();
+            // Build only these two actual catalogs, independently of Exa capability work.
+            let tools =
+                catalog::build_tools(&settings, &document, settings.prefix.as_deref().unwrap())
+                    .unwrap();
+            let tool = tools.iter().find(|tool| tool.name == case.tool).unwrap();
+            let body = tool.whole_body.as_ref().unwrap();
+            assert_eq!(body.name, "body");
+            assert_eq!(body.required, required);
+            schema::validate(&tool.input_schema, &Value::Object(case.arguments.clone())).unwrap();
+            let base = settings
+                .base_url
+                .as_deref()
+                .unwrap_or_else(|| document["servers"][0]["url"].as_str().unwrap());
+            let route = tool.route(base, &case.arguments).unwrap();
+            assert_eq!(route.method, "POST");
+            assert_eq!(route.url, url);
+            assert_eq!(route.body.as_ref(), Some(&legacy["arguments"]));
+            assert_eq!(route.json_media_type.as_deref(), Some("application/json"));
+            assert!(route.query.is_empty() && route.headers.is_empty());
         }
     }
 
@@ -185,10 +277,8 @@ mod tests {
             }
         }
         // Independently reviewed requests, extracted from the original manifest.
-        let reviewed: Vec<Value> = serde_json::from_str(include_str!(
-            "../fixtures/provider_requests.json"
-        ))
-        .unwrap();
+        let reviewed: Vec<Value> =
+            serde_json::from_str(include_str!("../fixtures/provider_requests.json")).unwrap();
         assert_eq!(reviewed.len(), 22);
         for legacy in &reviewed {
             let case = manifest
@@ -196,10 +286,21 @@ mod tests {
                 .iter()
                 .find(|c| Some(c.id.as_str()) == legacy["id"].as_str())
                 .unwrap();
-            assert_eq!(
-                serde_json::to_value(&case.arguments).unwrap(),
-                serde_json::to_value(&legacy["arguments"]).unwrap()
-            );
+            if matches!(case.id.as_str(), "sweep_arkham" | "sweep_agentfund") {
+                assert_eq!(
+                    case.arguments
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                    ["body"]
+                );
+                assert_eq!(&case.arguments["body"], &legacy["arguments"]);
+            } else {
+                assert_eq!(
+                    serde_json::to_value(&case.arguments).unwrap(),
+                    serde_json::to_value(&legacy["arguments"]).unwrap()
+                );
+            }
             assert_eq!(case.tool, legacy["tool"].as_str().unwrap());
             assert_eq!(case.reserve_usdc, legacy["reserve_usdc"].as_str().unwrap());
         }

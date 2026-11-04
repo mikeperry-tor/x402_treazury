@@ -16,8 +16,9 @@ spending authority.
 
 ## Catalog, configuration and execution
 
-Standalone commands separate inspection/routing from server construction. Tags can
-return before base-URL validation; ordinary tools/check/route inspection needs no
+Standalone commands separate inspection/routing from server construction. Tags
+inventory raw source metadata, including unsupported operations, before base-URL
+or tool compatibility validation; ordinary tools/check/route inspection needs no
 payment credentials. Serving validates spending policy and credentials before accepting calls. The stdio lifecycle retains one pinned service waiter and the
 accepted-work owner through cancellation, drain and cover shutdown.
 
@@ -43,8 +44,11 @@ against `tests/fixtures/`. Operation validation and stable sorting precede path,
 method and tag selection. Exact original `exclude_operations` identities override
 operation inclusions without hiding child paths or depending on generated names;
 absent exclusions remain valid under independent source filters. Exact same-path
-GET/POST pairs then retain POST by default (`prefer_post` can
-disable this). Only surviving operations contribute to name collisions.
+GET/POST pairs retain POST only after unsupported input contracts have been removed; supported POST wins by default (`prefer_post` can
+disable this). Suppressed exact GET twins are outside both selected tools and
+omissions; disabling preference exposes their compatibility issues. An unsupported
+POST cannot suppress a compatible GET. Only surviving operations contribute to
+name collisions.
 Tool-name filters apply after collision resolution. Recommendation metadata is
 advisory until provider/source `use_recommended_tools` opts in. Include, exclude
 and recommendation selectors validate against the same compatible named inventory
@@ -54,23 +58,55 @@ expansion, while unused stale advice only warns. Operator inventories add
 recommendation markers separately from `ToolSpec` and MCP publication. Explicit
 `catalog tools --all-tools` bypasses only advice after typed configuration resolution,
 retains ordinary filters. Digest metadata copying and
-OpenAPI operation conversion remain separate. Before cloning or projecting input,
-an iterative shared guard bounds physical depth and actual reference expansion to
-depth 64, 500,000 nodes and 64 MiB of string/key traversal and copy work. Repeated
-references and local pointer lookup bytes count each time; unused definitions are
+OpenAPI operation conversion remain separate. An iterative guard checks physical input before cloning; conversion charges actual
+reference expansion and output copying against the shared bounds of depth 64,
+500,000 nodes and 64 MiB of string/key traversal and copy work. Repeated
+references and local pointer lookup bytes count each time.
+OpenAPI paths and opaque operation metadata count for each emitted operation,
+including repeated pricing fields. Parameter issue metadata and descriptions
+copied from projected schemas also count before allocation; moving already
+projected parameters or bodies does not charge their contents a second time.
+Used media names, including malformed or unsupported ones, are charged before
+parsing on each request-body expansion. Explicit candidate names stay borrowed;
+wildcard synthesis and selected media output charge their actual copies before
+allocation. Candidate ordering compares borrowed text without cloned sort keys;
+ordinary sorting/indexing is not an instruction-count or total-memory bound.
+Media candidate parsing/range matching and each inspected parameter-name/value comparison charge the same
+node/byte budget before comparison; nested lookups cannot bypass it. Unused definitions are
 not hypothetically expanded. Raw-Value operations, naming and tool-building APIs
-use the same guard as local, origin, cached and relay catalog acceptance. Invalid
-candidates cannot enter or refresh caches. Each structural-budget
+use the same guard as local, origin, cached and relay catalog acceptance.
+Structurally unsafe candidates cannot enter or refresh caches. Each structural-budget
 rejection emits a sanitized WARN at the shared guard, including caught errors and
-rejected candidates with fallback remaining; no catalog text or URLs are logged. Authored unresolved, external and cyclic
-references keep the existing resolver fallback; dynamic imports separately retain
-their stricter reference policy. Sanitization is iterative even for direct callers.
+rejected candidates with fallback remaining; no catalog text or URLs are logged. Input schemas use one schema-position-aware projection: only used schema refs
+expand. Every descent checks its increasing depth before lookup or output allocation,
+so even flat reference chains cannot grow the projection stack past that bound.
+Opaque values are charged before cloning, and completed child output moves into its
+parent without another traversal or uncharged breadth allocation. Pointer lookup
+and exact normalization proofs are charged once for their actual work. Used
+refs requiring resolution in an active string-valued `$id` resource receive an
+explicit unsupported-operation issue; no URI base is guessed. Target ancestry
+carries context for further refs, while exact no-ref targets remain supported.
+No-reference IDs and opaque ID data remain unchanged. Used
+`$dynamicRef`/`$recursiveRef` cannot retain their resolution semantics after
+schema relocation and receive `input_reference`, rather than dangling tool refs.
+OpenAPI3.0 `$ref` replacement still ignores unused siblings. Reference-like
+keys in opaque data or unused definitions do not trigger this check. Example,
+default and unknown annotation payloads remain opaque and unchanged. Parameter and
+RequestBody Reference Objects retain target replacement; unresolved input contracts
+become operation issues. Dynamic imports retain separate stricter whole-document
+reference admission. The direct public sanitizer remains iterative.
 Conversion retains operation-level
-parameters and the existing reference-resolution rules. Input construction collects
-parameters before merging body properties; renamed body arguments retain their
-original wire keys, and presence-only alternatives follow those renamed arguments.
-Final sanitization applies to the assembled schema. Path filters respect segment
-boundaries; OpenAPI boolean exclusive bounds normalize to numeric bounds.
+parameters and the existing reference-resolution rules. Input construction reserves original argument spellings and assigns collision-safe
+names across path, query, body and header locations; serialized wire aliases retain
+original keys. Required simple object bodies may remain flat; optional bodies and
+compositions that cannot be flattened faithfully use one JSON body argument.
+Inner schema requirements and HTTP body presence remain separate. Complete body
+constraints/annotations stay body-local. Property-bearing allOf and
+closed/exclusive alternatives retain their whole body schema; only pure
+required-only alternatives on ordinary object roots stay flat. Presence-only alternatives follow
+renamed body arguments.
+Boolean exclusive bounds normalize only at actual schema positions; tool assembly
+does not reinterpret annotations as schemas. Path filters respect segment boundaries.
 Declared business header parameters retain their original names and simple-style
 serialization in serializable tool routing metadata. Collisions with flattened
 query/body arguments use a `_header` argument suffix. OpenAPI's ignored Accept,
@@ -82,6 +118,37 @@ headers through persisted or directly constructed routing metadata.
 A declared Idempotency-Key is generated once per routed invocation and retained
 in the request cloned by existing unsigned and signed attempts. It is not a caller
 argument and grants no retry authority. See [header contracts](configuration.md#openapi-header-parameters-and-idempotency).
+Catalog construction returns tools plus fixed method/path/reason issues to ordinary
+serving and registration. Selected unsupported operations do not hide usable
+siblings or suppress same-path GETs. Endpoint omission notices follow configured
+instruction overrides; detailed registration/operator inspection retains identities.
+Public Vec builders and strict tool/qualification inspection refuse partial results.
+Standalone tag inventory is metadata-only; deployment tag inspection retains strict loading.
+Operation/path/method/tag exclusions precede compatibility; later tool-name filters
+see compatible names only and do not erase source-level omissions.
+A serving source with no supported selected API operations retains its issue metadata
+and is unavailable to dependent `wait_for_catalogs = true` endpoints; other endpoints
+follow their own readiness and serving settings. A help document does not convert
+that source into a successful API catalog. Intentionally empty selections remain
+configuration errors, and explicit help-only selection remains valid when supported
+API operations existed before name filtering. Dynamic registration may reject an
+all-unsupported candidate without changing existing registrations. Strict inspection
+and qualification still reject any omission.
+
+The existing JSON encoder carries the selected declared application/json or +json
+Content-Type and parameters through routing; non-UTF8 or non-JSON-only bodies are
+unsupported rather than advertised as JSON. Schema conversion is not a general
+OpenAPI evaluator: cookies and unrepresentable parameter serialization are explicit
+operation issues. Assertion-bearing OpenAPI3.1/unspecified-version input-schema
+reference siblings receive the fixed schema_reference_siblings reason. The seven
+JSON Schema2020-12 basic annotations with valid shapes are retained as a separate
+allOf branch alongside the target. Their payloads stay opaque and defaults do not
+insert request fields; unknown or malformed siblings remain unsupported. An exact unrestricted recursive
+six-type JSON union is reduced to its description-only schema after a bounded
+proof, while constrained near matches and other cycles remain unsupported. Inspection follows only actual schema positions
+and used reference targets before lossy resolution, not unused definitions or
+annotations. General Reference Object and stricter importer policies remain separate.
+See [input contracts](configuration.md#openapi-inputs-and-request-bodies).
 
 Tool input schemas describe supported caller contracts; argument routing is not
 complete JSON Schema validation. Narrowing an enum advertises a supported subset,

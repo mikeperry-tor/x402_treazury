@@ -62,6 +62,15 @@ fn preflight(schema: &Value, depth: usize, remaining: &mut usize) -> Result<()> 
                 }
             }
             "additionalProperties" | "items" | "not" => preflight(v, depth + 1, remaining)?,
+            "propertyNames" => {
+                ensure!(
+                    v.as_object().is_some_and(|v| v.len() == 1)
+                        && v.get("type").and_then(Value::as_str) == Some("string"),
+                    "unsupported propertyNames constraint; cannot certify arguments"
+                );
+                // JSON object keys are strings; this exact assertion is tautological.
+                preflight(v, depth + 1, remaining)?;
+            }
             "allOf" | "anyOf" | "oneOf" => {
                 let branches = v.as_array().context("invalid schema alternatives")?;
                 ensure!(!branches.is_empty(), "empty schema alternatives");
@@ -94,7 +103,8 @@ fn preflight(schema: &Value, depth: usize, remaining: &mut usize) -> Result<()> 
                 "unsupported schema dialect"
             ),
             "const" | "description" | "title" | "default" | "examples" | "deprecated"
-            | "readOnly" | "writeOnly" => {}
+            | "readOnly" | "writeOnly" | "discriminator" => {}
+            key if key.starts_with("x-") => {}
             _ => anyhow::bail!("unsupported schema keyword {key}; cannot certify arguments"),
         }
     }
@@ -158,43 +168,6 @@ fn check_common(schema: &Value, value: &Value) -> Result<()> {
     let object = schema
         .as_object()
         .context("schema must be object or boolean")?;
-    for key in object.keys() {
-        ensure!(
-            [
-                "type",
-                "properties",
-                "required",
-                "additionalProperties",
-                "enum",
-                "const",
-                "items",
-                "minimum",
-                "maximum",
-                "exclusiveMinimum",
-                "exclusiveMaximum",
-                "minLength",
-                "maxLength",
-                "minItems",
-                "maxItems",
-                "pattern",
-                "format",
-                "allOf",
-                "anyOf",
-                "oneOf",
-                "not",
-                "description",
-                "title",
-                "default",
-                "examples",
-                "deprecated",
-                "readOnly",
-                "writeOnly",
-                "$schema"
-            ]
-            .contains(&key.as_str()),
-            "unsupported schema keyword {key}; cannot certify arguments"
-        );
-    }
     if let Some(types) = object.get("type") {
         let matches = |t: &Value| match t.as_str() {
             Some("null") => value.is_null(),
@@ -518,7 +491,9 @@ mod tests {
         validate(&Value::Bool(true), &arguments).unwrap();
         arguments.as_array_mut().unwrap().push(Value::Null);
         assert_eq!(
-            validate(&Value::Bool(true), &arguments).unwrap_err().to_string(),
+            validate(&Value::Bool(true), &arguments)
+                .unwrap_err()
+                .to_string(),
             "arguments exceed 64-level or 100000-node qualification limit"
         );
     }
@@ -573,5 +548,98 @@ mod preflight_tests {
             assert!(validate(&s, &json!({})).is_err(), "{s}");
         }
         assert!(validate(&json!({"type":"integer"}), &json!(9007199254740993u64)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn known_annotations_and_string_key_tautology_do_not_bypass_assertions() {
+        let schema = json!({"propertyNames":{"type":"string"},"type":"object","required":["kind"],
+            "x-vendor":{"$ref":"opaque","required":"not a schema"},
+            "discriminator":{"propertyName":"kind","mapping":{"a":"ignored"}},
+            "oneOf":[{"properties":{"kind":{"const":"a"}}},{"properties":{"kind":{"const":"b"}}}]});
+        validate(&schema, &json!({"kind":"a","any-key":null})).unwrap();
+        assert!(validate(&schema, &json!({"kind":"c"})).is_err());
+        assert!(validate(&schema, &json!({})).is_err());
+        for constraint in [
+            json!({"type":"string","pattern":"^x"}),
+            json!({"type":"number"}),
+            json!(true),
+        ] {
+            let hidden = json!({"properties":{"absent":{"propertyNames":constraint}}});
+            assert!(validate(&hidden, &json!({})).is_err());
+        }
+        for assertion in [
+            json!({"$vocabulary":{}}),
+            json!({"unknownAssertion":true}),
+            json!({"$schema":"https://example.com/custom"}),
+        ] {
+            let hidden = json!({"anyOf":[true,assertion]});
+            assert!(validate(&hidden, &json!(null)).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod exa_tests {
+    use super::*;
+    use serde_json::json;
+    #[tokio::test]
+    async fn captured_exa_selected_calls_certify_and_preserve_original_http_bodies() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let settings = x402_treazury::config::load(&root.join("providers/exa.toml"))
+            .await
+            .unwrap()
+            .settings;
+        let document: Value =
+            serde_json::from_str(include_str!("../../fixtures/exa_openapi.json")).unwrap();
+        let tools = x402_treazury::catalog::build_tools(&settings, &document, "exa").unwrap();
+        let reviewed: Vec<Value> =
+            serde_json::from_str(include_str!("../fixtures/provider_requests.json")).unwrap();
+        let search_request = reviewed
+            .iter()
+            .find(|request| request["tool"] == "exa_search")
+            .unwrap();
+        for (name, path, original) in [
+            ("exa_search", "/search", search_request["arguments"].clone()),
+            // Contents is the second supported static operation, not another paid preset case.
+            (
+                "exa_contents",
+                "/contents",
+                json!({"urls":["https://example.com"]}),
+            ),
+        ] {
+            let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+            assert!(
+                tool.whole_body.is_none(),
+                "the existing flat public argument shape remains supported"
+            );
+            let arguments = original.as_object().unwrap();
+            validate(&tool.input_schema, &original).unwrap();
+            let route = tool
+                .route(settings.base_url.as_deref().unwrap(), arguments)
+                .unwrap();
+            assert_eq!(route.body.as_ref(), Some(&original));
+            assert_eq!(route.method, "POST");
+            assert_eq!(route.url, format!("https://api.exa.ai{path}"));
+            assert_eq!(route.json_media_type.as_deref(), Some("application/json"));
+            assert!(route.query.is_empty() && route.headers.is_empty());
+        }
+        let contents = tools
+            .iter()
+            .find(|tool| tool.name == "exa_contents")
+            .unwrap();
+        for arguments in [
+            json!({}),
+            json!({"ids":["a"],"urls":["https://example.com"]}),
+        ] {
+            assert!(
+                validate(&contents.input_schema, &arguments).is_err(),
+                "presence-only oneOf must remain enforced"
+            );
+        }
     }
 }

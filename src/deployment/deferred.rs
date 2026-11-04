@@ -159,12 +159,18 @@ impl Runtime {
         Ok(())
     }
     fn accept_source(&mut self, id: &str, source: Source) -> Result<()> {
+        let unavailable = source.compatibility_unavailable();
         self.deployment.sources.insert(id.into(), source);
         let prefix = self
             .deployment
             .unavailable_sources
             .remove(id)
             .expect("pending source prefix");
+        if unavailable {
+            self.deployment
+                .unavailable_sources
+                .insert(id.into(), prefix.clone());
+        }
         match self.deployment.refresh_selection(true) {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -269,7 +275,14 @@ impl Runtime {
                     });
                     match result {
                         Ok(()) => {
-                            tracing::info!(source = id, "Catalog ready");
+                            if self.deployment.sources[&id].compatibility_unavailable() {
+                                tracing::debug!(
+                                    source = id,
+                                    "Catalog has no supported API operations; dependent waiting endpoints remain unavailable"
+                                );
+                            } else {
+                                tracing::info!(source = id, "Catalog ready");
+                            }
                         }
                         Err(error) => {
                             let failure = startup::catalog_failure(&error, "fetch_parse");
@@ -327,6 +340,78 @@ mod tests {
     use axum::{Router, routing::get};
     use serde_json::json;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn deferred_unsupported_contract_publishes_issues_before_endpoint_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deployment.toml");
+        std::fs::write(
+            directory.path().join("spec.json"),
+            json!({"paths":{"/healthy":{"get":{}}}}).to_string(),
+        )
+        .unwrap();
+        let mut config = String::from(
+            "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='KEY'\n[sources.healthy]\nspec='spec.json'\nbase_url='https://example.com'\n[sources.late]\nspec='spec.json'\nbase_url='https://example.com'\n",
+        );
+        for (name, sources, wait) in [
+            ("waiting", "['late']", true),
+            ("nonwaiting", "['late','healthy']", false),
+            ("healthy", "['healthy']", true),
+        ] {
+            config.push_str(&format!("[servers.{name}]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='payer'\nsources={sources}\nwait_for_catalogs={wait}\ninstructions_text=''\n"));
+        }
+        std::fs::write(&path, config).unwrap();
+        let mut deployment = Deployment::load(&path).await.unwrap();
+        let old = deployment.sources.remove("late").unwrap();
+        deployment
+            .unavailable_sources
+            .insert("late".into(), old.config.prefix.clone().unwrap());
+        deployment.refresh_selection(true).unwrap();
+        let unsupported = Source::from_document("late", old.config,
+            Arc::new(json!({"paths":{"/unsupported":{"post":{"parameters":[{"in":"cookie","name":"token"}]}}}}))).unwrap();
+        let catalog = Arc::new(crate::catalog_state::CatalogState::new(
+            crate::catalog_state::CatalogSnapshot {
+                views: deployment
+                    .listeners
+                    .keys()
+                    .map(|name| (name.clone(), Vec::new()))
+                    .collect(),
+                ..Default::default()
+            },
+        ));
+        let mut runtime = Runtime::new(
+            deployment,
+            BTreeMap::from([("payer".into(), PaidClient::unsigned())]),
+            catalog.clone(),
+            None,
+            false,
+        );
+        let mut readiness = runtime.catalog_readiness();
+        runtime.accept_source("late", unsupported).unwrap();
+        assert!(runtime.deployment.unavailable_sources.contains_key("late"));
+        runtime.publish().await.unwrap();
+        // Visibility and tools come from the same published generation before readiness resolves.
+        let snapshot = catalog.read();
+        assert!(snapshot.views["waiting"].is_empty());
+        assert_eq!(snapshot.views["healthy"].len(), 1);
+        assert_eq!(snapshot.views["nonwaiting"].len(), 1);
+        assert!(
+            snapshot.instructions["waiting"]
+                .as_deref()
+                .unwrap()
+                .contains("1 API operations are omitted")
+        );
+        assert!(
+            snapshot.instructions["nonwaiting"]
+                .as_deref()
+                .unwrap()
+                .contains("Cookie parameters")
+        );
+        runtime.signal_readiness();
+        assert!(readiness.remove("waiting").unwrap().await.unwrap().is_err());
+        assert!(readiness.remove("healthy").unwrap().await.unwrap().is_ok());
+        assert!(!readiness.contains_key("nonwaiting"));
+    }
 
     #[tokio::test]
     async fn conflicting_catalogs_withdraw_all_owners_in_either_completion_order() {
@@ -687,7 +772,7 @@ discover_on_demand=true
             &deployment.config,
             &deployment.wallet_resolution.source_bindings,
             &path,
-            true,
+            startup::CatalogPurpose::Serving,
             BTreeMap::from([("a".into(), relay.clone()), ("b".into(), relay)]),
             true,
             false,

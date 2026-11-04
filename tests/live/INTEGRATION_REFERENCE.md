@@ -14,6 +14,18 @@ fetch/hit pairs and a keyless directory call. Its placeholders prohibit executio
 until deployment, treasury, authority and windows are reviewed. It retains known
 body-quality failures and the AgentUtility manual-review gap.
 
+## Preset arguments and reviewed request bodies
+
+Preset arguments follow the exposed MCP tool schema. Arkham balance calls use
+`body = { address = "..." }` because the declared JSON body retains typed extra
+properties; AgentFund's yield-curve case uses `body = { days = 1 }` so an optional
+body remains distinct from no body. These wrappers preserve the original HTTP
+JSON payloads. The original 22-request review fixture remains unchanged, and
+offline tests compare the migrated calls' actual routed method, URL and body
+against it. Case identities, wallet scopes, allocations, rounds, API reservations
+and execution-blocking placeholders are unchanged. This migration grants no new
+funding, payment, replay or live-qualification authority.
+
 ## Case selection
 
 `select-cases` writes a new manifest from an already reviewed provider-sweep,

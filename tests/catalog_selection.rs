@@ -1,6 +1,6 @@
 use serde_json::json;
 use x402_treazury::{
-    catalog::{Config, build_tools},
+    catalog::{Config, IncompleteCatalog, OperationIssue, Unsupported, build_catalog, build_tools},
     config,
 };
 
@@ -20,11 +20,13 @@ fn post_preference_uses_exact_paths_before_collision_naming_and_name_filters() {
         (pair.method.as_str(), pair.path.as_str()),
         ("POST", "/pair")
     );
-    let args = json!({"q":"private query"});
+    assert_eq!(pair.whole_body.as_ref().unwrap().name, "body");
+    let body = json!({"q":"private query"});
+    let args = json!({"body":body.clone()});
     let route = pair
         .route("https://example.com", args.as_object().unwrap())
         .unwrap();
-    assert_eq!(route.body, Some(args));
+    assert_eq!(route.body, Some(body));
     assert!(route.query.is_empty());
     for name in [
         "api_get",
@@ -111,7 +113,7 @@ async fn preference_inherits_and_sources_override_either_value() {
 #[tokio::test]
 async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    for (provider, paths) in [
+    for (provider, paths, unsupported_gets) in [
         (
             "genuinegood",
             vec![
@@ -120,6 +122,12 @@ async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
                 "/v1/grants/fit",
                 "/v1/grants/brief",
                 "/v1/grants/preflight",
+            ],
+            vec![
+                "/v1/grants/brief",
+                "/v1/grants/fit",
+                "/v1/grants/preflight",
+                "/v1/grants/search",
             ],
         ),
         (
@@ -130,6 +138,7 @@ async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
                 "/tx-explainer",
                 "/meta-intelligence",
             ],
+            vec!["/meta-intelligence"],
         ),
     ] {
         let mut cfg = config::load(&root.join(format!("providers/{provider}.toml")))
@@ -145,7 +154,27 @@ async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
             assert!(!canonical.iter().any(|t| t.path == "/v1/grants/pass"));
         }
         cfg.prefer_post = false;
-        let twins = build_tools(&cfg, &doc, provider).unwrap();
+        let reported = build_catalog(&cfg, &doc, provider).unwrap();
+        assert_eq!(
+            reported.issues,
+            unsupported_gets
+                .iter()
+                .map(|path| OperationIssue {
+                    method: "GET".into(),
+                    path: (*path).into(),
+                    reason: Unsupported::ParameterSerialization,
+                })
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            build_tools(&cfg, &doc, provider)
+                .unwrap_err()
+                .downcast_ref::<IncompleteCatalog>()
+                .unwrap()
+                .0,
+            reported.issues
+        );
+        let twins = reported.tools;
         for path in paths {
             let tool = canonical.iter().find(|t| t.path == path).unwrap();
             assert_eq!(canonical.iter().filter(|t| t.path == path).count(), 1);
@@ -154,7 +183,22 @@ async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
                 .iter()
                 .find(|t| t.path == path && t.method == "POST")
                 .unwrap();
-            assert_eq!(post.name, format!("{}_post", tool.name));
+            if unsupported_gets.contains(&path) {
+                // Only compatible methods participate in collision naming.
+                assert_eq!(post.name, tool.name);
+                assert!(
+                    !twins
+                        .iter()
+                        .any(|tool| tool.path == path && tool.method == "GET")
+                );
+            } else {
+                assert_eq!(post.name, format!("{}_post", tool.name));
+                assert!(
+                    twins
+                        .iter()
+                        .any(|tool| tool.path == path && tool.method == "GET")
+                );
+            }
             assert_eq!(tool.input_schema, post.input_schema);
             let args = match path {
                 "/v1/grants/search" => json!({"keyword":"education","rows":1,"agencies":["ED"]}),
