@@ -427,6 +427,8 @@ async fn future_cached_roots_preserve_current_spendability_across_tail_shrink_an
         &[(1, 1001), (1000, 1251)],
         23,
     );
+    let observation = owner.status().await.unwrap().sync.unwrap();
+    owner.checkpoint(observation).await.unwrap();
     let identity = owner.status().await.unwrap().treasury_id;
     owner.close().await.unwrap();
     owner = Treasury::open_with_network(
