@@ -40,8 +40,9 @@ The [tracked original review and maintainer disposition](x402_treazury_review.md
 provides the finding-by-finding reference for integration and final review. Its
 original recommendations are source material, not implementation instructions;
 settled decisions and owning guides govern. Update dispositions/evidence at the
-owning gates and reconcile every finding at GI, including intentionally retained
-behavior and deferred work. Preserve the original report body while annotating.
+owning gates and reconcile every finding at GR and GI, including intentionally
+retained behavior and deferred work. Preserve the original report body while
+annotating.
 
 ## Lanes and ordered integration boundaries
 
@@ -63,7 +64,7 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | P2 / portability | Child P2 shared storage, then P3/P4 lifecycle/native workflows. Schedule shared-storage edits after financial F3 and catalog C2 by default. | Child native storage/recovery and ordinary-platform gates pass; complete GS below. Coordinate earlier integration only after affected owners settle their contracts. |
 | R0 / R9 follow-up | Separate documentation commit creating a focused R9 plan before R9 implementation. Scoping can proceed independently. | Fresh consumer/query audit separates qualification budget/status work from ordinary regex/client-cache work; ordered commits, authority-preserving tests and review gates agreed. Do not presume a cached monetary ledger or measured speedup. |
 | R1 / R9 implementation | Execute the resulting child commit map; normally integrate code after financial F2 and catalog C1 correctness gates, coordinating overlapping catalog/network/Store owners. | Child gates pass; exact budget arithmetic, concurrent admission, rollback/restart and uncertain charges preserved. Ordinary optimizations retain transport isolation and live-I/O ownership. Assess remaining history-dependent work before claiming it solved. |
-| O1 / final integration | Assemble reviewed completed milestones, fixups and maintained-guide handoff. Optional portability P5 qualification backends remain separately selected work under their child plan. | Complete GI below, including exact cleanup review. Unfinished required milestones keep this orchestration active. |
+| O1 / final integration | Assemble reviewed completed milestones, fixups and maintained-guide handoff. Optional portability P5 qualification backends remain separately selected work under their child plan. | Complete GR against the tracked review before GI and cleanup, then exact cleanup/final combined review. Unfinished required milestones keep this orchestration active. |
 
 These are chosen integration orders, not universal technical dependencies. A2
 investigation/reproducers and A4 parameter-reuse design can begin earlier. R9 may
@@ -119,6 +120,30 @@ reopen affected gates. Earlier per-commit approval does not exempt code.
   historical evidence and platform-specific protections. Exit with no privacy,
   durability, alias, ownership or replay gap and native evidence for each support
   claim. Later lifecycle changes reopen relevant concerns at the child gates.
+- **GR, at orchestration/O1 before GI and removal of working review material:**
+  have an independent read-only subagent review the **whole accumulated branch**
+  against the [original review and maintainer disposition](x402_treazury_review.md).
+  Supply user intent, settled S1/S3/S7/C1 decisions, agreed scope, exact comparison
+  base and candidate SHA, all implementation/integration commits and fixups, and
+  validation evidence/limitations. Inspect complete relevant consumers and failure
+  paths across lanes, including changes inherited from `main`; reviewing the
+  latest diff or relying on child approvals is insufficient. Reconcile every one
+  of the 42 finding IDs with current code, tests, documentation and its disposition.
+  Check for missed, incompletely addressed or newly aggravated issues and
+  unsupported claims of resolution; distinguish justified policy/deferred scope
+  from required work. Original recommendations do not override settled decisions.
+  Report concrete gaps with evidence, introducing SHA where identifiable and
+  affected consumers. Address appropriate gaps with
+  `git commit --fixup=<introducing-SHA>`; independently review each exact fixup,
+  add needed regressions, revalidate affected behavior and reopen relevant child
+  or wider gates. Where a gap has no introducing commit on this branch, identify
+  its actual owner/baseline and define a coherent corrective commit rather than
+  manufacture an attribution. Recheck the combined branch after corrections and
+  update finding dispositions/evidence. Exit requires no unresolved material gaps
+  in required scope and explicit, justified dispositions for the other findings.
+  Tell the user about substantive additions, changes or removals resulting from
+  this review. Retain the exact reference-document commit in private review
+  evidence so GI can compare against that Git version after cleanup removes it.
 - **GI, at orchestration/O1 and after cleanup:** review the entire assembled branch and all prior
   fixups, child gates, documentation and evidence. Exit with no material unresolved
   findings, no required unfinished work represented as complete, and claims limited
