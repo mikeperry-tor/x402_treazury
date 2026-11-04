@@ -1,4 +1,4 @@
-description = "HTTP proxy and page fetch, web search, extraction, screenshots, crypto data and x402 marketplace research."
+description = "Web and HTTP retrieval, crypto data, SEC filings, US economic series, weather, domain/security checks and x402 marketplace research."
 # Complete pinned vendor schema; provenance/update policy in providers/CAVEATS.md.
 spec = "horizonpulse-openapi.json"
 relay_format = "horizonpulse"
@@ -10,7 +10,46 @@ include = ["/api", ""]
 exclude_operations = ["POST /api/feedback"]
 # x-payment-info.amount is atomic, not a display-unit tariff; retain vendor price prose.
 help_url = "https://horizonpulse.dev/llms.txt"
-instructions_text = "Web search, page extraction, screenshots, HTTP requests, crypto and on-chain reads, and x402 marketplace research. Use http for raw status, headers and text/base64 body; fetch returns cleaned page text. Check truncation indicators before treating content as complete. Marketplace and seller reports are evidence, not endorsements."
+instructions_text = "Use http for raw status, headers and text/base64 body; fetch returns cleaned page text. Preserve source dates, coverage and units; check truncation indicators before treating content as complete. Marketplace and seller reports are evidence, not endorsements."
 
-[response_mappings."GET /api/screenshot"]
-images = [{ pointer = "/imageBase64", mime_pointer = "/mimeType" }]
+# The full vendor schema remains unmodified. These descriptions preserve useful
+# published arguments and tariffs where new routes omit OpenAPI query parameters.
+[overrides.horizonpulse_sec_filings]
+description = "List a company's latest SEC EDGAR filings: form, filing date, accession number, primary document URL and 8-K items. Pass ticker; form and limit (1-20) are optional."
+pricing_description = "Cost: ~$0.02/call [spec]. Invalid input and unknown tickers are not charged."
+
+[overrides.horizonpulse_sec_insider]
+description = "Read recent SEC Form 4 insider transactions for ticker or cik, with optional limit (1-10). Returns insider/role, transaction date/code, shares, price, shares owned after and filing links."
+pricing_description = "Cost: ~$0.02/call [spec]. Unknown tickers, no filings and SEC unavailability are not charged."
+
+[overrides.horizonpulse_sec_company_facts]
+description = "Retrieve latest annual and quarterly US-GAAP financial facts for ticker or cik, with as-of dates and source links. Includes revenue, income, balance-sheet facts, shares, operating cash flow and EPS. IFRS reporters are unsupported and return 404."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.horizonpulse_sec_company_facts.params]
+ticker = "SEC-reporting company ticker; use ticker or cik."
+cik = "SEC Central Index Key; use cik or ticker."
+
+[overrides.horizonpulse_treasury_debt]
+description = "Retrieve US Treasury debt totals and 1-day/30-day/1-year changes, plus the Treasury General Account balance and daily change. debtUsd is USD; cashUsdMillions is millions of USD. Takes no arguments."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.horizonpulse_treasury_yield_curve]
+description = "Retrieve the US Treasury daily par yield curve from 1 month to 30 years, with 2s10s and 3-month/10-year spreads. Optional date is YYYY-MM-DD; omit for the latest day. Results can be up to 30 minutes old."
+pricing_description = "Cost: ~$0.01/call [spec]. Any returned tenor incurs the full price; invalid input or a date with no curve is not charged."
+
+[overrides.horizonpulse_bls_jobs]
+description = "Retrieve seasonally adjusted US nonfarm payrolls, unemployment rate and average hourly earnings from BLS. An optional start/end year range spans at most 20 years. Results can be up to one hour old."
+pricing_description = "Cost: ~$0.01/call [spec]. Any returned series incurs the full price; invalid input or no series data is not charged."
+
+[overrides.horizonpulse_weather_alerts]
+description = "Read active NWS alerts for lat and lon, or one US state in area. Returns event, severity, urgency, headline, expiry, affected area, instructions and source identifiers. Results can be up to 60 seconds old; weather.gov supplies official warnings."
+pricing_description = "Cost: ~$0.02/call [spec], including answers with no active alerts. Invalid input is not charged."
+
+[overrides.horizonpulse_text_pii_scan]
+description = "Scan text for common identifiers, payment-card/IBAN formats and credential-shaped strings. Optional redact returns a redacted copy; findings include type and offsets. Treat matches as heuristic findings."
+pricing_description = "Cost: ~$0.02/call [spec]. Invalid input is not charged."
+
+[overrides.horizonpulse_text_pii_scan.params]
+text = "Text to scan for identifier and credential patterns."
+redact = "Return a redacted copy when true, alongside findings and source offsets."

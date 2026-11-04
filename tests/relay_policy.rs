@@ -243,8 +243,14 @@ fn relay_bootstrap_assets_preserve_complete_primary_catalogs_and_internal_refs()
     let horizon: Value =
         serde_json::from_str(include_str!("../providers/horizonpulse-openapi.json")).unwrap();
     assert!(
-        horizon["paths"]["/api/screenshot"].is_object(),
-        "retain non-relay catalog consumers"
+        horizon["paths"]["/api/sec/company-facts"]["post"]["requestBody"].is_object(),
+        "retain non-relay company-facts request contracts"
+    );
+    assert!(horizon["paths"].get("/api/screenshot").is_none());
+    assert!(
+        horizon["components"]["schemas"]
+            .get("ScreenshotResponse")
+            .is_none()
     );
 }
 

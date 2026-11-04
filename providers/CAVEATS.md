@@ -87,7 +87,7 @@ reusable provider; no account session or local background owner is required.
 | Definition(s) | Boundary or integration contract |
 | --- | --- |
 | AGProxy | Root base URL overrides the schema’s `/v1` server; both `/x402` and `/mpp` aliases advertise x402 support. Fetch truncation, residential exit behavior and proxy credentials retain their documented meaning. |
-| Horizon Pulse | POST supersets and screenshot mapping preserve request/output contracts; free feedback is an unprotected persistent write excluded from unsigned x402 replay. Proxy limits and filtered headers constrain fallback suitability. |
+| Horizon Pulse | POST supersets preserve request contracts; screenshot is absent from the current catalog; free feedback is an unprotected persistent write excluded from unsigned x402 replay. Proxy limits and filtered headers constrain fallback suitability. |
 | AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no additional compatibility restriction identified. |
 | botsmith, Google Trends | No additional compatibility restriction identified; structured price/offer metadata remains advisory. |
 | AgOSINT | `/mpp` is the unsupported payment rail; `/x402` anchors names while public discovery remains visible. Root base URL repairs upstream `/v1`. |
@@ -1456,20 +1456,26 @@ another payment after an unresolved signed outcome.
 Primary contracts: [agent guide](https://horizonpulse.dev/llms.txt) and
 [OpenAPI](https://horizonpulse.dev/openapi.json), pinned in full as
 `horizonpulse-openapi.json` for local bootstrap. The reusable definition exposes
-its supported HTTP catalog with `/api` naming and a root fallback. Its five
-same-path GET/POST pairs use default POST selection: HTTP and extraction add body
+its supported HTTP catalog with `/api` naming and a root fallback. Its seven
+same-path GET/POST pairs use default POST selection. HTTP and extraction add body
 support, grocery routes add structured inputs/batches, and batch accepts a JSON
-array rather than URL-encoded JSON. Results and documented per-call billing are
-the same; GET is not needed to recover unsupported functionality. Free public
-data remain available alongside paid routes. Only `POST /api/feedback` is excluded:
+array rather than URL-encoded JSON. For these five routes, results and documented
+per-call billing are the same; GET is not needed to recover unsupported functionality.
+The company-facts and domain-precheck pairs have the evidence boundaries described
+below. Free public data remain available alongside paid routes. Only
+`POST /api/feedback` is excluded:
 it stores a message without a payment gate or documented idempotency key. The
 ordinary unsigned x402 retry assumption does not cover this unprotected persistent
 write; a failed response after storage could otherwise repeat the submission.
 This is not a restriction on unsigned POST retries for payment-gated x402 routes.
 
-Screenshot responses map `imageBase64` and `mimeType` into MCP image content,
-preserving surrounding metadata. Generic HTTP `body`/`bodyEncoding` responses
-remain ordinary JSON, including binary results; they are not all images.
+The current vendor catalog has no screenshot operation or screenshot response
+schema; the obsolete image mapping is removed. No deployment example selected
+that route, so its removal does not delete an active endpoint capability. The
+bundled catalog retains screenshot alternatives such as Agent402, AgData, 2s,
+AgentUtility and SocialFetch with their own formats and request controls; they
+are not established equivalents merely because their names match. Generic HTTP
+`body`/`bodyEncoding` responses remain ordinary JSON, including binary results.
 `/api/research/report/brief` is an ordinary synchronous HTTP x402 route even
 though the vendor's hosted MCP exposes only its quote. The definition omits
 `pricing_key`: ordinary `x-payment-info.amount` values are atomic units (10000
@@ -1491,8 +1497,25 @@ not a failed unpaid relay call. `/api/fetch` instead returns cleaned page text;
 it is not a raw-response replacement. Filtered header support does not establish
 that x402 payment headers, duplicate headers or cookies survive unaltered.
 
-No paid delivery or Tor reachability has been qualified here. AGProxy and Horizon
-Pulse follow redirects remotely and return a final URL rather than Curl's
+Representative SEC company-facts reads succeeded through GET and the canonical
+POST body for AAPL. Horizon returned separate annual and three-month flow periods;
+the same annual facts matched 2s, whose sampled interim flows were fiscal year-to-date.
+Preserve per-fact start/end dates and point-in-time balance dates. Both gateways use
+SEC EDGAR, so they add gateway redundancy rather than independent underlying data.
+The research-desk selects both as complementary company-fact contracts. The new
+BLS, Treasury, domain/security and weather routes remain available in the reusable
+catalog; sparse vendor query declarations retain published argument guidance
+without invented schema constraints. BLS jobs publishes a maximum 20-year optional
+year range but no query-parameter names; preserve that range without guessing names.
+`/api/domain/precheck` declares neither query parameters nor a POST request body.
+The compiler therefore leaves its inputs unspecified and routes supplied arguments
+as query parameters. Captured guidance lists GET and POST but does not establish
+input names, POST body support or method equivalence. Preserve the published schema
+and default method selection without inventing controls or claiming verified POST
+behavior. Specific sample success does not qualify other routes, paid relay delivery
+or live Tor confinement.
+
+AGProxy and Horizon Pulse follow redirects remotely and return a final URL rather than Curl's
 reported redirect chain. Relay use checks requested and final URLs against the
 caller's destination/origin policies, but a final URL cannot establish every
 intermediate hop. Configured use trusts the provider's remote redirect and public
@@ -1537,6 +1560,11 @@ primary vendor OpenAPI downloads, embedded through `src/providers/assets.rs`.
 Their runtime consumer is offline relay bootstrap, and ordinary provider imports
 reuse the same complete catalogs. They are not reduced test fixtures. Curl's
 complete vendor schema remains in `curl/openapi.json`.
+
+AGProxy's lifecycle metadata gives no fixed advance-notice period for changing or
+retiring API routes and behavior. This is a notice-policy change, not an announcement
+that a specific route has been removed. Curl's captured JSON contract is unchanged;
+serialization-only differences do not require replacing the committed asset.
 
 Capture complete primary sources through the shared maintenance network path:
 

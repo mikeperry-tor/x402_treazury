@@ -58,7 +58,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | AGProxy | `agproxy.toml` | Complete pinned `agproxy-openapi.json`; residential fetch and proxy packs |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
-| Horizon Pulse | `horizonpulse.toml` | Complete pinned `horizonpulse-openapi.json`; screenshot mapping and atomic-price caveat |
+| Horizon Pulse | `horizonpulse.toml` | Complete pinned `horizonpulse-openapi.json`; SEC/macro/security reads and atomic-price caveat |
 | NetIntel | `netintel.toml` | Canonical POST/body contracts and image data-URI mapping |
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
 | AgentFund | `agentfund.toml` | Vendor OpenAPI; no additional compatibility restriction identified |

@@ -2924,7 +2924,7 @@ async fn straits_public_formats_preserve_routes_tiers_and_historical_meaning() {
 }
 
 #[tokio::test]
-async fn horizonpulse_free_write_exemption_atomic_price_and_screenshot_mapping() {
+async fn horizonpulse_free_write_atomic_price_and_current_company_facts() {
     use serde_json::json;
     use x402_treazury::{catalog, config};
     let cfg =
@@ -2932,62 +2932,47 @@ async fn horizonpulse_free_write_exemption_atomic_price_and_screenshot_mapping()
             .await
             .unwrap()
             .settings;
-    // Minimal contracts for authored scope, price-display and image-mapping quirks.
-    let doc = json!({"openapi":"3.1.0","paths":{
-        "/api/http":{"post":{
-            "description":"HTTP request proxy API for public URLs. Price: $0.01 USDC per call (10000 atomic).",
-            "x-payment-info":{"protocol":"x402","priceUsd":"$0.01","amount":"10000","decimals":6}
-        }},
-        "/api/screenshot":{"get":{"description":"Screenshot as imageBase64 with mimeType."}},
-        "/api/feedback":{"post":{"description":"Stores a message without an x402 payment gate."}},
-        "/api/money-market-rates":{"get":{"description":"Free public market data."}}
+    let mut doc = json!({"openapi":"3.1.0","paths":{
+        "/api/http":{"post":{"description":"HTTP request proxy API for public URLs. Price: $0.01 USDC per call (10000 atomic).","x-payment-info":{"priceUsd":"$0.01","amount":"10000","decimals":6}}},
+        "/api/sec/company-facts":{"get":{"parameters":[{"in":"query","name":"ticker","schema":{"type":"string"}}]},"post":{"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","properties":{"ticker":{"type":"string"},"cik":{"type":"string"}}}}}}}},
+        "/api/feedback":{"post":{}},"/api/money-market-rates":{"get":{}}
     }});
+    let vendor: Value =
+        serde_json::from_str(include_str!("../providers/horizonpulse-openapi.json")).unwrap();
+    doc["paths"]["/api/bls/jobs"] = vendor["paths"]["/api/bls/jobs"].clone();
     let tools = catalog::build_tools(&cfg, &doc, "horizonpulse").unwrap();
     assert!(
         !tools
             .iter()
             .any(|t| t.path == "/api/feedback" && t.method == "POST")
     );
-    assert!(
-        tools
-            .iter()
-            .any(|t| t.path == "/api/money-market-rates" && t.method == "GET")
-    );
+    assert!(tools.iter().any(|t| t.path == "/api/money-market-rates"));
     let http = tools.iter().find(|t| t.path == "/api/http").unwrap();
     assert!(http.description.contains("Price: $0.01 USDC"));
     assert!(http.description.ends_with("Cost: unknown."));
     assert!(!http.description.contains("Cost: ~10000"));
     assert!(http.response_mapping.is_none());
-    let screenshot = tools.iter().find(|t| t.path == "/api/screenshot").unwrap();
-    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
-    let output = x402_treazury::output::HttpOutput {
-        observed_price: None,
-        advisories: vec![],
-        bytes: serde_json::to_vec(&json!({
-            "imageBase64":png,"mimeType":"image/png","finalUrl":"https://example.com/",
-            "pageStatus":200,"width":1,"height":1,"title":"Fixture screenshot"
-        }))
-        .unwrap(),
-        mime_type: Some("application/json".into()),
-        paid_submission: false,
-        relay_payment_may_have_occurred: false,
-    }
-    .render(
-        screenshot.response_mapping.as_ref(),
-        &screenshot.image_limits,
-    )
-    .unwrap();
-    assert_eq!(output.images.len(), 1);
-    assert_eq!(output.images[0].data, png);
-    assert_eq!(output.images[0].mime_type, "image/png");
-    assert!(!output.text.contains(png));
-    let metadata: Value = serde_json::from_str(output.text.split_once('\n').unwrap().1).unwrap();
-    assert_eq!(metadata["finalUrl"], "https://example.com/");
-    assert_eq!(metadata["pageStatus"], 200);
-    assert_eq!(metadata["width"], 1);
-    assert_eq!(metadata["height"], 1);
-    assert_eq!(metadata["title"], "Fixture screenshot");
-    assert_eq!(metadata["imageBase64"]["treazury_attachment"], 1);
+    assert!(!cfg.response_mappings.contains_key("GET /api/screenshot"));
+    let jobs = tools.iter().find(|t| t.path == "/api/bls/jobs").unwrap();
+    assert!(jobs.description.contains("start/end year") && jobs.description.contains("20 years"));
+    assert!(
+        jobs.input_schema["properties"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
+    let facts = tools
+        .iter()
+        .find(|t| t.path == "/api/sec/company-facts")
+        .unwrap();
+    assert_eq!(facts.method, "POST");
+    assert!(facts.description.contains("$0.02/call"));
+    let args = json!({"ticker":"AAPL"});
+    let route = facts
+        .route(cfg.base_url.as_deref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.body, Some(args));
+    assert!(route.query.is_empty());
 }
 
 #[tokio::test]

@@ -53,6 +53,12 @@ observations, not proof of universal outage or the settlement outcome of our
 calls. Reusable provider definitions remain available for deliberate retesting.
 Selections belong here, not in the reusable providers.
 
+Horizon Pulse and 2s company-facts reads are shared by business and finance.
+Both use SEC EDGAR; they add gateway choices rather than independent underlying
+evidence. Compare each fact's actual period: sampled annual values agreed, while
+2s interim flows were fiscal-year-to-date and Horizon supplied three-month flows.
+The narrower latest-facts API complements 2s history/metric controls.
+
 Banking Compliance checks and rule lookup are advisory finance tools; business
 retains authoritative eCFR retrieval. Its sampled summaries had citation errors,
 and drafting invented a website and FDIC membership despite an explicit false
