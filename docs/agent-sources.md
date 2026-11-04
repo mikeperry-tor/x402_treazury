@@ -711,8 +711,12 @@ emits WARN and returns an explicit busy error; static catalog publication emits
 DEBUG with limit 16 and waits for the same shared gate. Publication and collision
 checks are serialized, so concurrent additions cannot publish partial sources.
 
-JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
-64 MiB of expanded string/key content. Import rejects over 10,000 operations,
+Catalog physical structure and actual reference traversal/copy work share bounds
+of depth 64, 500,000 nodes and 64 MiB of string/key bytes. Local pointer bytes and
+repeated targets count for each lookup/expansion. These guards also protect
+authored local, downloaded, cached, relayed and direct-Value catalog conversion;
+unused authored definitions are not hypothetically expanded. Dynamic import keeps
+its stricter whole-document reference-admission policy. Import rejects over 10,000 operations,
 generated schemas above 256 KiB, names above 512 bytes, external/unresolved/cyclic
 references, and per-path/operation server overrides. Accepted live documents total
 at most 128 MiB; serialized registry state is at most 256 MiB. Stored registration

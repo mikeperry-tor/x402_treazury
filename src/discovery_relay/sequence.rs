@@ -129,12 +129,17 @@ impl Contract {
         }
         match self {
             Self::Catalog if !(200..300).contains(&status) => Decision::Next("http_status"),
-            Self::Catalog
-                if serde_json::from_slice::<serde_json::Value>(&response.body).is_err() =>
-            {
-                Decision::Next("catalog_parse")
-            }
-            Self::Catalog => Decision::Accept,
+            Self::Catalog => match crate::catalog::parse_document(&response.body) {
+                Ok(_) => Decision::Accept,
+                Err(error)
+                    if error
+                        .downcast_ref::<crate::catalog::expansion::ComplexityLimit>()
+                        .is_some() =>
+                {
+                    Decision::Next("catalog_complexity")
+                }
+                Err(_) => Decision::Next("catalog_parse"),
+            },
             Self::Document | Self::Api if (200..300).contains(&status) => Decision::Accept,
             Self::Document | Self::Api => Decision::Next("http_status"),
             Self::Search(_) if status != 200 => Decision::Next("http_status"),
@@ -187,7 +192,7 @@ impl SearchRelay {
                     "discovery relay requires a local bootstrap catalog"
                 );
                 let document: serde_json::Value =
-                    serde_json::from_slice(&tokio::fs::read(&cfg.spec).await?)?;
+                    crate::catalog::parse_document(&tokio::fs::read(&cfg.spec).await?)?;
                 local_references(&document)?;
                 let tools = crate::catalog::build_tools(&cfg, &document, "relay")?;
                 ensure!(
@@ -871,6 +876,15 @@ mod tests {
         assert!(matches!(
             Contract::Catalog.decision(&response),
             Decision::Accept
+        ));
+        let mut deep = serde_json::Value::Null;
+        for _ in 0..65 {
+            deep = serde_json::json!([deep]);
+        }
+        response.body = serde_json::to_vec(&deep).unwrap();
+        assert!(matches!(
+            Contract::Catalog.decision(&response),
+            Decision::Next("catalog_complexity")
         ));
         response.body = b"incomplete JSON".to_vec();
         assert!(matches!(

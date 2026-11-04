@@ -132,66 +132,6 @@ pub async fn fixture_fetch(
     crate::discovery_relay::document::read(&crate::payment::PaidClient::unsigned(), &options).await
 }
 
-fn check_complexity(depth: usize, nodes: usize, bytes: usize) -> Result<()> {
-    if depth > 64 || nodes > 500_000 || bytes > 64 * 1024 * 1024 {
-        tracing::warn!(
-            depth,
-            nodes,
-            expanded_bytes = bytes,
-            "import rejected: document_complexity_limit (depth 64, nodes 500000, expanded bytes 67108864)"
-        );
-        anyhow::bail!(
-            "document_complexity_limit: depth <= 64, nodes <= 500000, expanded bytes <= 67108864; document rejected"
-        );
-    }
-    Ok(())
-}
-
-fn inspect(
-    root: &Value,
-    v: &Value,
-    depth: usize,
-    nodes: &mut usize,
-    bytes: &mut usize,
-    seen: &mut std::collections::BTreeSet<String>,
-) -> Result<()> {
-    *nodes += 1;
-    check_complexity(depth, *nodes, *bytes)?;
-    match v {
-        Value::Object(o) => {
-            if let Some(r) = o.get("$ref") {
-                let reference = r
-                    .as_str()
-                    .filter(|r| r.starts_with("#/"))
-                    .ok_or_else(|| rejected("external_reference_unsupported"))?;
-                let target = root
-                    .pointer(&reference[1..])
-                    .ok_or_else(|| rejected("unresolved_reference"))?;
-                require(
-                    seen.insert(reference.to_owned()),
-                    "cyclic_reference_unsupported",
-                )?;
-                inspect(root, target, depth + 1, nodes, bytes, seen)?;
-                seen.remove(reference);
-            }
-            for (key, child) in o {
-                *bytes += key.len();
-                inspect(root, child, depth + 1, nodes, bytes, seen)?;
-            }
-        }
-        Value::Array(a) => {
-            for child in a {
-                inspect(root, child, depth + 1, nodes, bytes, seen)?;
-            }
-        }
-        Value::String(s) => {
-            *bytes += s.len();
-            check_complexity(depth, *nodes, *bytes)?;
-        }
-        _ => (),
-    }
-    Ok(())
-}
 pub fn matches(name: &str, include: &[String], exclude: &[String]) -> Result<bool> {
     let any = |patterns: &[String]| -> Result<bool> {
         for p in patterns {
@@ -307,14 +247,24 @@ pub(super) fn build_visible(
 fn parse_document(bytes: &[u8]) -> Result<Value> {
     let root: Value =
         serde_json::from_slice(bytes).map_err(|_| rejected("invalid OpenAPI JSON"))?;
-    inspect(
-        &root,
-        &root,
-        0,
-        &mut 0,
-        &mut 0,
-        &mut std::collections::BTreeSet::new(),
-    )?;
+    if let Err(error) = catalog::expansion::import(&root) {
+        // This import attempt has no remaining fallback. Never include submitted
+        // reference text, schemas or URLs in diagnostics.
+        if let Some(limit) = error.downcast_ref::<catalog::expansion::ComplexityLimit>() {
+            tracing::warn!(
+                depth = limit.depth,
+                nodes = limit.nodes,
+                traversal_bytes = limit.bytes,
+                "Source import rejected because catalog expansion exceeds structural safety bounds"
+            );
+        } else if let Some(problem) = error.downcast_ref::<catalog::diagnostics::Problem>() {
+            tracing::warn!(
+                reason = problem.0,
+                "Source import rejected because a schema reference violates its local reference contract"
+            );
+        }
+        return Err(error);
+    }
     require(
         root["openapi"]
             .as_str()
@@ -499,7 +449,7 @@ fn validate_tools(
 mod complexity_tests {
     use super::*;
     fn check(value: &Value) -> Result<()> {
-        inspect(value, value, 0, &mut 0, &mut 0, &mut Default::default())
+        catalog::expansion::import(value)
     }
     #[test]
     fn exact_depth_node_and_expanded_byte_limits() {
@@ -514,17 +464,6 @@ mod complexity_tests {
                 .to_string()
                 .contains("complexity")
         );
-        let mut nodes = Value::Array(vec![Value::Null; 499_999]);
-        check(&nodes).unwrap();
-        nodes.as_array_mut().unwrap().push(Value::Null);
-        assert!(check(&nodes).is_err());
-        drop(nodes);
-        let mut bytes = Value::String("x".repeat(64 * 1024 * 1024));
-        check(&bytes).unwrap();
-        if let Value::String(text) = &mut bytes {
-            text.push('x');
-        }
-        assert!(check(&bytes).is_err());
     }
     #[test]
     fn repeated_acyclic_refs_escape_pointers_and_reject_bad_documents() {

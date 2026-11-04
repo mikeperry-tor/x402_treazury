@@ -54,7 +54,16 @@ expansion, while unused stale advice only warns. Operator inventories add
 recommendation markers separately from `ToolSpec` and MCP publication. Explicit
 `catalog tools --all-tools` bypasses only advice after typed configuration resolution,
 retains ordinary filters. Digest metadata copying and
-OpenAPI operation conversion remain separate; conversion retains operation-level
+OpenAPI operation conversion remain separate. Before cloning or projecting input,
+an iterative shared guard bounds physical depth and actual reference expansion to
+depth 64, 500,000 nodes and 64 MiB of string/key traversal and copy work. Repeated
+references and local pointer lookup bytes count each time; unused definitions are
+not hypothetically expanded. Raw-Value operations, naming and tool-building APIs
+use the same guard as local, origin, cached and relay catalog acceptance. Invalid
+candidates cannot enter or refresh caches. Authored unresolved, external and cyclic
+references keep the existing resolver fallback; dynamic imports separately retain
+their stricter reference policy. Sanitization is iterative even for direct callers.
+Conversion retains operation-level
 parameters and the existing reference-resolution rules. Input construction collects
 parameters before merging body properties; renamed body arguments retain their
 original wire keys, and presence-only alternatives follow those renamed arguments.

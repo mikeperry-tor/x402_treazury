@@ -880,6 +880,13 @@ Standalone CLI flags `--max-response-bytes`, `--max-help-bytes` and
 shared defaults. Bundled imports preserve the provider's configured limits.
 Agents cannot change these limits.
 
+Catalog structural safety bounds apply to local files as well as downloaded,
+cached, relayed and directly supplied JSON values: depth 64, 500,000 nodes and
+64 MiB of string/key traversal and copy work, including repeated reference lookup
+and expansion. These protect conversion stack and allocation work, independently
+of download size. Rejections are visible and preserve whole-document semantics;
+no partial catalog is cached. See [catalog architecture](architecture.md#catalog-configuration-and-execution).
+
 A declared Content-Length over the cap is rejected immediately. Streaming reads
 also enforce the cap when Content-Length is absent. An oversized document
 is rejected entirely: the agent gets an error naming the limit and setting, and
