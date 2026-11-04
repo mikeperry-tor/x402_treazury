@@ -104,11 +104,10 @@ async fn serving_preflight_rejects_credentials_and_providers_before_state_or_req
         if missing_token {
             env.remove("TOKEN");
         }
-        let error = match Deployment::load_with_warnings(
+        let error = match Deployment::load_for_serving_with_relay_and_network(
             &path,
-            true,
-            Some((&env, FundingRestriction::Ordinary)),
-            false,
+            &env,
+            FundingRestriction::Ordinary,
             None,
         )
         .await

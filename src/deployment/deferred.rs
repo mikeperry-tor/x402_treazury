@@ -772,7 +772,7 @@ discover_on_demand=true
             &deployment.config,
             &deployment.wallet_resolution.source_bindings,
             &path,
-            true,
+            startup::CatalogPurpose::Serving,
             BTreeMap::from([("a".into(), relay.clone()), ("b".into(), relay)]),
             true,
             false,

@@ -29,8 +29,24 @@ fn operation_filters_precede_collision_counts_and_preserve_payloads() {
         exclude_tags: vec!["Blocked".into()],
         ..Default::default()
     };
+    let (selected, issues) = selected_operations(&cfg, &root, "api").unwrap();
+    assert!(issues.is_empty());
+    let input = &selected[0].2;
     assert_eq!(
-        selected_operations(&cfg, &root, "api").unwrap(),
+        input.routes,
+        BTreeMap::from([("query".into(), "query".into())])
+    );
+    assert!(input.wire_names.is_empty());
+    assert!(input.has_body);
+    let body = input.whole_body.as_ref().expect("optional body argument");
+    assert_eq!(body.name, "body");
+    assert!(!body.required);
+    assert_eq!(input.schema["properties"]["body"], json!({"type":"object"}));
+    assert_eq!(
+        selected
+            .into_iter()
+            .map(|(op, name, _)| (op, name))
+            .collect::<Vec<_>>(),
         vec![(kept, "api_root".into())]
     );
 }
@@ -43,8 +59,13 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
     let suffix = json!({"path":"/a_get", "method":"get"});
     let root_op = json!({"path":"/", "method":"get"});
     let root = json!({"operations":[suffix, post, a, root_op, b]});
+    let (selected, issues) = selected_operations(&Config::default(), &root, "api").unwrap();
+    assert!(issues.is_empty());
     assert_eq!(
-        selected_operations(&Config::default(), &root, "api").unwrap(),
+        selected
+            .into_iter()
+            .map(|(op, name, _)| (op, name))
+            .collect::<Vec<_>>(),
         vec![
             (root_op.clone(), "api_root".into()),
             (post.clone(), "api_a".into()),
@@ -56,8 +77,13 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
         prefer_post: false,
         ..Default::default()
     };
+    let (selected, issues) = selected_operations(&both_methods, &root, "api").unwrap();
+    assert!(issues.is_empty());
     assert_eq!(
-        selected_operations(&both_methods, &root, "api").unwrap(),
+        selected
+            .into_iter()
+            .map(|(op, name, _)| (op, name))
+            .collect::<Vec<_>>(),
         vec![
             (root_op, "api_root".into()),
             (a, "api_a_get".into()),
@@ -70,8 +96,9 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
 
 #[test]
 fn empty_source_filtered_inventory_and_invalid_operations_keep_error_categories() {
-    let empty =
-        selected_operations(&Config::default(), &json!({"operations":[]}), "api").unwrap_err();
+    let empty = selected_operations(&Config::default(), &json!({"operations":[]}), "api")
+        .err()
+        .expect("invalid operation selection must fail");
     assert_eq!(empty.to_string(), "no operations matched");
     assert!(empty.downcast_ref::<ToolConfigurationError>().is_none());
     let cfg = Config {
@@ -83,7 +110,8 @@ fn empty_source_filtered_inventory_and_invalid_operations_keep_error_categories(
         &json!({"operations":[{"path":"/a","method":"get"}]}),
         "api",
     )
-    .unwrap_err();
+    .err()
+    .expect("invalid operation selection must fail");
     assert_eq!(
         filtered.to_string(),
         "invalid provider tool configuration: no operations matched"
@@ -91,7 +119,9 @@ fn empty_source_filtered_inventory_and_invalid_operations_keep_error_categories(
     assert!(filtered.downcast_ref::<ToolConfigurationError>().is_some());
     // Invalid entries must fail even when the allowlist would discard them.
     for invalid in [json!({"path":7,"method":"get"}), json!({"path":"/a"})] {
-        let error = selected_operations(&cfg, &json!({"operations":[invalid]}), "api").unwrap_err();
+        let error = selected_operations(&cfg, &json!({"operations":[invalid]}), "api")
+            .err()
+            .expect("invalid operation selection must fail");
         assert_eq!(error.to_string(), "invalid operation");
         assert!(error.downcast_ref::<ToolConfigurationError>().is_none());
     }
