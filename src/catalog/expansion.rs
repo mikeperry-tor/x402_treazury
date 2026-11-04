@@ -186,7 +186,7 @@ impl Budget {
 }
 
 fn reference_rejected(code: &'static str, message: &'static str) -> anyhow::Error {
-    anyhow::anyhow!(code).context(super::diagnostics::Problem(message))
+    anyhow::anyhow!(message).context(super::diagnostics::Problem(code))
 }
 
 /// Dynamic imports retain their stricter reference-admission contract. The

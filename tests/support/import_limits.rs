@@ -257,36 +257,45 @@ fn import_policy_rejections_warn_without_private_content() {
         return;
     }
     let c: Candidate = serde_json::from_value(candidate("policy", "process", "server")).unwrap();
-    let mut cases = vec![(b"PRIVATE_INVALID_JSON".to_vec(), "invalid OpenAPI JSON")];
-    for (target, field, value, reason) in [
+    let mut cases = vec![(
+        b"PRIVATE_INVALID_JSON".to_vec(),
+        "invalid OpenAPI JSON",
+        "invalid OpenAPI JSON",
+    )];
+    for (target, field, value, reason, cause) in [
         (
             "components",
             "$ref",
             json!("https://private.example/PRIVATE_REFERENCE"),
             "external_reference_unsupported",
+            "Source specification rejected because a reference is not a local JSON pointer",
         ),
         (
             "components",
             "$ref",
             json!("#/PRIVATE_MISSING"),
             "unresolved_reference",
+            "Source specification rejected because a local reference has no target",
         ),
         (
             "components",
             "$ref",
             json!("#/components"),
             "cyclic_reference_unsupported",
+            "Source specification rejected because its references contain a cycle",
         ),
         (
             "path",
             "servers",
             json!([{ "url": "https://private.example/PRIVATE_SERVER" }]),
             "per-path servers unsupported",
+            "per-path servers unsupported",
         ),
         (
             "operation",
             "servers",
             json!([{ "url": "https://private.example/PRIVATE_SERVER" }]),
+            "per-operation servers unsupported",
             "per-operation servers unsupported",
         ),
     ] {
@@ -296,12 +305,13 @@ fn import_policy_rejections_warn_without_private_content() {
             "path" => doc["paths"]["/read"][field] = value,
             _ => doc["paths"]["/read"]["get"][field] = value,
         }
-        cases.push((serde_json::to_vec(&doc).unwrap(), reason));
+        cases.push((serde_json::to_vec(&doc).unwrap(), reason, cause));
     }
-    for (bytes, reason) in cases {
+    for (bytes, reason, cause) in cases {
         let logs = capture_limit_logs(|| {
             let error = import::build(&c, &bytes).unwrap_err();
             assert!(error.to_string().contains(reason), "{error}");
+            assert!(format!("{error:#}").contains(cause), "{error:#}");
         });
         assert!(logs.contains("WARN") && logs.contains(reason), "{logs}");
         assert!(
