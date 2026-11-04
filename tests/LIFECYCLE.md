@@ -2,6 +2,10 @@
 
 These tests use public deterministic keys, localhost fixtures and isolated regtest
 chains. None spends mainnet funds or contacts NEAR's production API.
+The full concurrent worker's local bridge, Base RPC and paid API share a verified
+TLS router, so its actual payment and rotation assertions execute under provider
+HTTPS policy. Infrastructure-only HTTP fixtures remain separate; fixture trust
+does not disable chain or hostname verification.
 
 `treasury::lifecycle_tests::refund_addresses` proves a distant shielded refund
 becomes SDK-spendable after restoring only its mnemonic and early birthday into a

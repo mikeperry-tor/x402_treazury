@@ -636,7 +636,6 @@ mod warm_tests;
 #[cfg(test)]
 mod deferred_tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn cached_json_can_fail_generation_with_a_safe_specific_reason() {
@@ -742,9 +741,11 @@ mod deferred_tests {
 
     #[tokio::test]
     async fn remote_aliases_defer_io_and_share_one_origin_request() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio_util::sync::CancellationToken;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let cfg = catalog::Config {
-            spec: format!("http://{}/spec", listener.local_addr().unwrap()),
+            spec: format!("https://{}/spec", listener.local_addr().unwrap()),
             http_cache_enabled: false,
             ..Default::default()
         };
@@ -764,48 +765,51 @@ mod deferred_tests {
                 .await
                 .is_err()
         );
-        let (accepted, observed) = tokio::sync::oneshot::channel();
-        let (release, wait) = tokio::sync::oneshot::channel();
+        let listener = crate::test_tls::from_tcp(listener);
+        let entered = CancellationToken::new();
+        let release = CancellationToken::new();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let (seen, accepted, wait) = (requests.clone(), entered.clone(), release.clone());
+        let app = axum::Router::new().route(
+            "/spec",
+            axum::routing::get(move || {
+                let (seen, accepted, wait) = (seen.clone(), accepted.clone(), wait.clone());
+                async move {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    accepted.cancel();
+                    wait.cancelled().await;
+                    axum::Json(serde_json::json!({"operations":[]}))
+                }
+            }),
+        );
+        let stop = CancellationToken::new();
+        let stopped = stop.clone();
         let origin = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut bytes = [0; 4096];
-            assert!(stream.read(&mut bytes).await.unwrap() > 0);
-            accepted.send(()).unwrap();
-            wait.await.unwrap();
-            let body = r#"{"operations":[]}"#;
-            stream
-                .write_all(
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        body.len(),
-                        body
-                    )
-                    .as_bytes(),
-                )
+            axum::serve(listener, app)
+                .with_graceful_shutdown(stopped.cancelled_owned())
                 .await
                 .unwrap();
-            listener
         });
         let gate = Arc::new(tokio::sync::Semaphore::new(1));
         let task_gate = gate.clone();
-        let resumes = tokio::spawn(async move {
+        let mut resumes = tokio::spawn(async move {
             tokio::join!(
                 first.resume(task_gate.clone(), true, None),
                 second.resume(task_gate, true, None)
             )
         });
-        observed.await.unwrap();
+        tokio::select! {
+            () = entered.cancelled() => {},
+            result = &mut resumes => panic!("catalog resumed without reaching the fixture: {result:?}"),
+        }
         assert_eq!(gate.available_permits(), 0);
-        release.send(()).unwrap();
+        release.cancel();
         let (a, b) = resumes.await.unwrap();
         assert!(Arc::ptr_eq(&a.unwrap(), &b.unwrap()));
         assert_eq!(gate.available_permits(), 1);
-        let listener = origin.await.unwrap();
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), listener.accept())
-                .await
-                .is_err()
-        );
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        stop.cancel();
+        origin.await.unwrap();
     }
 }
 

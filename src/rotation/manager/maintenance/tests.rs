@@ -206,8 +206,11 @@ async fn fixture_with_credit(blocked: bool, fail: bool, credited: bool) -> Fixtu
         let v=json!({"x402Version":2,"resource":{"url":"https://example.com/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"7","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
         (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(v.to_string()))]).into_response()
     })).with_state(rpc.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let endpoint = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (store, worker) = StoreHandle::spawn(state);
     let pool = Arc::new(
@@ -440,6 +443,8 @@ async fn malformed_advisory_row_does_not_hide_independent_wallet_observations() 
     drop(db);
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(60)).await;
+    // Advance only the owned cooldown; the following TLS I/O needs real time.
+    tokio::time::resume();
     f.pool.reconcile().await.unwrap();
     assert!(!f.status().await.low_balance);
     f.close().await;
