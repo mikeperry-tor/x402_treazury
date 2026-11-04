@@ -993,11 +993,12 @@ async fn persist_catalog_response(
 pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value> {
     let started = std::time::Instant::now();
     let document: Value = serde_json::from_slice(bytes).context(LoadStage::Parse)?;
-    expansion::shape(&document)?;
     // Validate actual conversion before cache publication, preserving the original
     // document and accepting generic JSON used by the shared document loader.
     if document.get("paths").is_some() || document.get("operations").is_some() {
         operations_with_credits(&document, None, None)?;
+    } else {
+        expansion::shape(&document)?;
     }
     tracing::debug!(target: "x402_treazury::startup", parse_ms = started.elapsed().as_millis() as u64,
         bytes = bytes.len(), "Catalog JSON parse complete");
