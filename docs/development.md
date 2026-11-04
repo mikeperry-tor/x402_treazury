@@ -32,7 +32,11 @@ and standard public-runner CI provide a repeatable route for exact pinned builds
 warnings, ordinary tests and synthetic recovery. Their presence is not evidence
 that compilation, ACL/storage or process-lifecycle gaps are resolved. Record the
 exact committed SHA and completed native stages before making a support claim;
-[testing guidance](testing.md#native-windows-evidence) defines the scope. Automated
+[testing guidance](testing.md#native-windows-evidence) defines the scope.
+The explicit qualification connectivity probe classifies native permission denials
+through Rust ErrorKind, keeping refusal and timeout distinct; that
+compilation/classification fix does not implement Windows storage or supervision
+semantics, nor an OS-confinement qualification backend. Automated
 security-advisory scanning and an MSRV/platform matrix remain separately deferred;
 this selected native route does not implement those review recommendations.
 

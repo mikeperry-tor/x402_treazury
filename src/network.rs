@@ -13,6 +13,9 @@ mod http_timeout_tests;
 #[cfg(test)]
 mod listener_tests;
 #[cfg(test)]
+#[path = "../tests/support/qualification_probes.rs"]
+mod qualification_probe_tests;
+#[cfg(test)]
 mod retry_policy_tests;
 mod scope_observation;
 #[cfg(test)]
@@ -1263,9 +1266,7 @@ pub async fn qualification_probe(
     Ok(
         match tokio::time::timeout(Duration::from_secs(2), operation).await {
             Ok(Ok(())) => serde_json::json!({"reached":true,"denied":false}),
-            Ok(Err(error)) => {
-                serde_json::json!({"reached":false,"denied":matches!(error.raw_os_error(),Some(libc::EPERM|libc::EACCES)),"error_kind":format!("{:?}",error.kind())})
-            }
+            Ok(Err(error)) => qualification_probe_failure(error),
             Err(_) => {
                 tracing::warn!(
                     stage = "qualification_probe",
@@ -1918,4 +1919,12 @@ mod retention_tests {
             assert_ne!(&after_restart.scope, prior);
         }
     }
+}
+
+fn qualification_probe_failure(error: std::io::Error) -> serde_json::Value {
+    serde_json::json!({
+        "reached": false,
+        "denied": error.kind() == std::io::ErrorKind::PermissionDenied,
+        "error_kind": format!("{:?}", error.kind()),
+    })
 }
