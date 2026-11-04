@@ -561,10 +561,17 @@ impl Treasury {
             .context("treasury close owner stopped")?
     }
     async fn close_owned(mut self) -> Result<()> {
+        let mut projection_error = None;
         while self.completed.is_some() {
             if let Err(error) = self.publish_completed().await {
-                diagnostics::report_local_retry(&error, "transaction publication");
-                tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)).await;
+                if self.completed.is_some() {
+                    diagnostics::report_local_retry(&error, "transaction publication");
+                    tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)).await;
+                } else {
+                    // Bytes are durable. Finish physical shutdown before returning
+                    // the failed submission view; there is no publication to retry.
+                    projection_error = Some(error);
+                }
             }
         }
         // Serving can keep the serialized store alive for Base admission after
@@ -576,7 +583,11 @@ impl Treasury {
             .await;
         drop(self.store);
         self.worker.await.context("store worker failed")?;
-        result
+        result?;
+        match projection_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 

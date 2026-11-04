@@ -3568,3 +3568,146 @@ async fn submitted_finite_expiry_runs_recovery_without_timeout_or_error_health()
         actor.await.unwrap();
     }
 }
+
+// Model the actual treasury's typed reply after its durable publisher has closed
+// the bound claim. The publisher's own regressions cover the real SDK snapshot.
+struct FulfilledSource {
+    inner: Source,
+    calls: Arc<AtomicUsize>,
+}
+impl FundingBackend for FulfilledSource {
+    type Observations = Reads;
+    fn observations(&self) -> Reads {
+        self.inner.observations()
+    }
+    fn max_attempts(&self, job: &FundingJob) -> u32 {
+        self.inner.max_attempts(job)
+    }
+    async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
+        self.inner.quote_prerequisite(job).await
+    }
+    async fn prepare(&mut self, job: &FundingJob, _: &Quote) -> Result<()> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let job = job.clone();
+        self.inner
+            .store
+            .call(move |s| {
+                s.accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)?;
+                s.record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 2)?;
+                let revision = s.snapshot()?.0;
+                s.prepare_with_facts(
+                    &job.operation_id,
+                    revision,
+                    b"fixture completed snapshot",
+                    &crate::rotation::store::test_support::transaction_raw(100),
+                    Some(TransactionFacts {
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
+                        expiry_height: 100,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: None,
+                    }),
+                )?;
+                Ok(())
+            })
+            .await?;
+        anyhow::bail!(crate::rotation::transaction::PreparationAlreadyFulfilled)
+    }
+    async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+        panic!("fulfilled source must not submit")
+    }
+    async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+        panic!("fulfilled source needs no source observation")
+    }
+}
+
+#[tokio::test]
+async fn fulfilled_publication_reply_is_successful_progress_without_source_retry_or_handoff() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut state,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = state.funding_jobs().unwrap().remove(0);
+    state
+        .save_funding_quote(&job.id, &serde_json::to_vec(&quote(&job)).unwrap())
+        .unwrap();
+    let (store, actor) = StoreHandle::spawn(state);
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let worker = FundingWorker::new(
+        store.clone(),
+        FulfilledSource {
+            inner: Source {
+                store: store.clone(),
+                reads: Reads {
+                    credits: Arc::new(Semaphore::new(0)),
+                    credit_calls: Default::default(),
+                    statuses,
+                    status_gates: Default::default(),
+                    failed_job: Default::default(),
+                    processing: true,
+                    quotes: None,
+                },
+                gate: Arc::new(Semaphore::new(0)),
+                started,
+            },
+            calls: calls.clone(),
+        },
+        60,
+    );
+    let clock = TickClock {
+        epoch: 1000,
+        started: tokio::time::Instant::now(),
+    };
+    assert!(matches!(
+        worker.prepare_quoted(&job, &clock).await.unwrap(),
+        Observation::None
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let id = job.id.clone();
+    let current = store
+        .call(move |s| {
+            let current = s.funding_job(&id)?.unwrap();
+            let facts = s.funding_facts(&id, &current.operation_id)?;
+            assert!(facts.provider_success && facts.credit_needed());
+            assert_eq!(
+                applicable_work(&current, &facts),
+                [true, false, false, false]
+            );
+            assert_eq!(s.operation(&current.operation_id)?.attempts, 0);
+            assert!(
+                s.request_broadcast(&current.operation_id, 1, 1, false)
+                    .is_err()
+            );
+            assert_eq!(s.funding_recovery_count(&id)?, 0);
+            Ok(current)
+        })
+        .await
+        .unwrap();
+    assert_eq!(current.operation_id, job.operation_id);
+    assert!(matches!(
+        worker.source_step(&current, &clock).await.unwrap(),
+        Observation::None
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "settled source cannot re-enter preparation"
+    );
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+}

@@ -655,7 +655,12 @@ async fn refunds_run(cli: bool) -> Result<()> {
         if fail_commit {
             db.execute_batch("DROP TRIGGER reject_shield;")?;
             assert!(treasury.completed.is_some());
-            retained_shield = Some(treasury.publish_completed().await?);
+            retained_shield = Some(
+                treasury
+                    .publish_completed()
+                    .await?
+                    .context("retained shielding unexpectedly fulfilled")?,
+            );
         }
         assert_eq!(
             treasury.status().await?.treasury_operations.len(),

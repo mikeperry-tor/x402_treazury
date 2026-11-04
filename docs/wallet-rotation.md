@@ -170,8 +170,17 @@ queued; an interrupted command is never replayed. Accepted input evidence, fundi
 restrictions and Base handles remain preserved. Successful offline reconstruction
 can close an unpublished calculation whose outgoing and factual transaction journals
 are both absent. Completed bytes take precedence:
-only identical local publication repeats on the existing 60-second cadence, including
-shutdown. SDK reconstruction also retries unavailable snapshots on that cadence.
+only an unacknowledged local publication repeats on the existing 60-second cadence,
+including shutdown. A known durable commit clears that retry owner even if its
+submission view cannot be decoded; that view failure requires SDK reconstruction,
+not another calculation or publication. Shutdown releases the SDK and Store worker
+before returning a terminal view error. A bound initial claim fulfilled during
+calculation still retains exact calculated bytes, accepted inputs and snapshot;
+it finishes preparation without disclosure authority or a deferred-calculation
+failure. Positive credit alone retains the pending source journal while preventing
+its first disclosure. Invalid completed facts remain a validation failure even
+when the claim is fulfilled. SDK reconstruction also retries unavailable snapshots
+on the existing cadence.
 Exited funding and reconciliation tasks reacquire their existing Store/group gates
 on their ordinary polling cadence; retained source work keeps its existing lease
 and backoff state. Explicit shutdown never starts a replacement. An unavailable

@@ -158,11 +158,25 @@ impl Treasury {
                     _=stop.cancelled()=>break,
                     _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{}
                 }
-                if let Err(error) = self.publish_completed().await {
-                    super::diagnostics::report_local_retry(&error, "transaction publication");
-                }
-                if self.completed.is_some() {
-                    continue;
+                let operation = self
+                    .completed
+                    .as_ref()
+                    .expect("completed result")
+                    .operation
+                    .clone();
+                match self.publish_completed().await {
+                    Ok(_) => {}
+                    Err(error) if self.completed.is_some() => {
+                        super::diagnostics::report_local_retry(&error, "transaction publication");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::debug!(
+                            operation,
+                            category = "saved_transaction_projection_failed",
+                            "A completed Zcash transaction was saved but its submission state could not be read; further wallet work requires reloading saved state"
+                        );
+                    }
                 }
             }
             if stop.is_cancelled() {
@@ -1022,5 +1036,152 @@ mod tests {
         );
         drop(pending);
         assert_eq!(commands.receiver.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn committed_projection_failure_is_debug_and_does_not_retry_publication() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::actor::tests::committed_projection_failure_is_debug_and_does_not_retry_publication",
+        ) {
+            return;
+        }
+        // Cancel only on the existing postcommit event. This proves that the
+        // actual publisher finished and prevents the actor's next reconstruction
+        // pass from hiding the unhealthy state this scenario needs to inspect.
+        struct StopAfterProjection {
+            file: std::fs::File,
+            event: Vec<u8>,
+            stop: CancellationToken,
+        }
+        impl std::io::Write for StopAfterProjection {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                std::io::Write::write_all(&mut self.file, bytes)?;
+                self.event.extend_from_slice(bytes);
+                if self
+                    .event
+                    .windows(b"saved_transaction_projection_failed".len())
+                    .any(|part| part == b"saved_transaction_projection_failed")
+                {
+                    self.stop.cancel();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                std::io::Write::flush(&mut self.file)
+            }
+        }
+        let stop = CancellationToken::new();
+        let event_stop = stop.clone();
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let writer = log.reopen().unwrap();
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(move || StopAfterProjection {
+                file: writer.try_clone().unwrap(),
+                event: Vec::new(),
+                stop: event_stop.clone(),
+            })
+            .init();
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        owner
+            .store
+            .call(|s| s.accept_preparation("projection", None, 60, None))
+            .await
+            .unwrap();
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_projection BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture initial publication failure'); END;").unwrap();
+        let facts = crate::rotation::transaction::TransactionFacts {
+            txid: crate::rotation::store::test_support::transaction_txid(100),
+            expiry_height: 100,
+            amount_zatoshis: 50,
+            fee_zatoshis: 10,
+            deadline: None,
+        };
+        assert!(
+            owner
+                .retain_calculation(
+                    "projection".into(),
+                    zeroize::Zeroizing::new(crate::rotation::store::test_support::transaction_raw(
+                        100
+                    )),
+                    Ok(facts.clone())
+                )
+                .await
+                .is_err()
+        );
+        let expected_snapshot = super::super::snapshot(owner.client.as_ref().unwrap())
+            .await
+            .unwrap();
+        db.execute_batch("DROP TRIGGER reject_projection; CREATE TRIGGER corrupt_projection AFTER INSERT ON treasury_operations BEGIN UPDATE treasury_operations SET facts='not-json' WHERE id=NEW.id; END;").unwrap();
+        let store = owner.store.clone();
+        let (_handle, mut commands) = channel();
+        let mut submission = NoSubmission;
+        {
+            tokio::time::pause();
+            let mut actor = Box::pin(owner.command_loop(&mut commands, &mut submission, &stop));
+            // Register the existing maintenance timer before making it eligible.
+            // Its readiness says nothing about publication completion.
+            assert!(futures_util::poll!(actor.as_mut()).is_pending());
+            tokio::time::advance(std::time::Duration::from_secs(
+                super::super::publication::MAINTENANCE_SECONDS,
+            ))
+            .await;
+            tokio::time::resume();
+            // Real time prevents paused auto-advance from racing the blocking
+            // Store worker. Only the actual postcommit event selects shutdown.
+            tokio::time::timeout(std::time::Duration::from_secs(2), actor)
+                .await
+                .expect("actor must acknowledge the committed publication")
+                .unwrap();
+        }
+        assert!(owner.completed.is_none() && !owner.healthy);
+        // The event selects shutdown, while independent durable evidence proves
+        // the original result was saved without disclosure or replay.
+        db.execute_batch("DROP TRIGGER corrupt_projection;")
+            .unwrap();
+        db.execute(
+            "UPDATE treasury_operations SET facts=?1 WHERE id='projection'",
+            [serde_json::to_string(&facts).unwrap()],
+        )
+        .unwrap();
+        store
+            .call(move |s| {
+                assert_eq!(
+                    s.prepared_bytes("projection")?.as_slice(),
+                    crate::rotation::store::test_support::transaction_raw(100)
+                );
+                assert_eq!(
+                    s.prepared_snapshot("projection")?.as_slice(),
+                    expected_snapshot.as_slice()
+                );
+                let original = s.operation("projection")?;
+                assert_eq!(original.facts, facts);
+                assert_eq!(original.attempts, 0);
+                assert_eq!(original.submission, "PREPARED");
+                assert!(s.operation_pending("projection")?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        let event = logs
+            .lines()
+            .find(|line| line.contains("saved_transaction_projection_failed"))
+            .unwrap();
+        assert!(
+            event.contains("DEBUG") && !event.contains("WARN") && !event.contains("ERROR"),
+            "{event}"
+        );
+        assert_eq!(
+            logs.matches("local retry will continue").count(),
+            1,
+            "only the initial actual commit failure owns local publication retry"
+        );
+        drop(store);
+        owner.close().await.unwrap();
     }
 }

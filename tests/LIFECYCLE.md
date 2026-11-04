@@ -223,7 +223,20 @@ Synthetic proving also checks a calculated transaction whose journal publication
 fails. The existing owner retains completed bytes and the durable accepted-input
 claim; local publication retry, proof/facts verification, pending-input
 unspendability and encrypted reopen share that single calculated transaction.
-No second calculation or broadcast occurs. The scan/lookup race lifecycle fixture
+No second calculation or broadcast occurs. Socket-free actual publisher tests in
+`treasury::publication::tests` also cover bound SUCCESS during calculation, with
+and without credit, positive credit alone, invalid facts, and a committed result
+whose acknowledgment was lost. They retain exact raw bytes, selected inputs and
+snapshot with zero submission and recovery attempts. Committed projection failure
+clears only the publication retry owner, remains unhealthy and permits offline
+reconstruction; close releases physical ownership before returning its error.
+`treasury::actor::tests::committed_projection_failure_is_debug_and_does_not_retry_publication`
+checks the real background caller and diagnostic severity. The funding scheduler's
+`fulfilled_publication_reply_is_successful_progress_without_source_retry_or_handoff`
+checks the expected typed completion without a preparation/submission retry.
+These journal/projection fixtures do not establish chain settlement or SDK proof
+validity; the existing proving fixtures retain that separate coverage.
+The scan/lookup race lifecycle fixture
 separately asserts normal preparation returns a healthy owner, clears the completed
 calculation and advances its snapshot revision once. Run proving with:
 
