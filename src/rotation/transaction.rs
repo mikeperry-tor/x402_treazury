@@ -76,6 +76,17 @@ impl std::fmt::Display for PreparationDeferred {
 }
 impl std::error::Error for PreparationDeferred {}
 
+/// The exact calculation is durable, but its already fulfilled claim grants no
+/// disclosure capability. This is not an unstarted/deferred preparation.
+#[derive(Debug)]
+pub struct PreparationAlreadyFulfilled;
+impl std::fmt::Display for PreparationAlreadyFulfilled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("funding claim already fulfilled; calculated transaction retained without submission authority")
+    }
+}
+impl std::error::Error for PreparationAlreadyFulfilled {}
+
 /// Current process configuration passed to the serialized treasury owner.
 /// This cannot replace the durable qualification permit or current job binding.
 #[derive(Clone)]

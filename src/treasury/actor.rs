@@ -158,8 +158,22 @@ impl Treasury {
                     _=stop.cancelled()=>break,
                     _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{}
                 }
+                let operation = self
+                    .completed
+                    .as_ref()
+                    .expect("completed result")
+                    .operation
+                    .clone();
                 if let Err(error) = self.publish_completed().await {
-                    super::diagnostics::report_local_retry(&error, "transaction publication");
+                    if self.completed.is_some() {
+                        super::diagnostics::report_local_retry(&error, "transaction publication");
+                    } else {
+                        tracing::debug!(
+                            operation,
+                            category = "saved_transaction_projection_failed",
+                            "A completed Zcash transaction was saved but its submission state could not be read; further wallet work requires reloading saved state"
+                        );
+                    }
                 }
                 if self.completed.is_some() {
                     continue;
@@ -1022,5 +1036,113 @@ mod tests {
         );
         drop(pending);
         assert_eq!(commands.receiver.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn committed_projection_failure_is_debug_and_does_not_retry_publication() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::actor::tests::committed_projection_failure_is_debug_and_does_not_retry_publication",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .init();
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        owner
+            .store
+            .call(|s| s.accept_preparation("projection", None, 60, None))
+            .await
+            .unwrap();
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_projection BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture initial publication failure'); END;").unwrap();
+        let facts = crate::rotation::transaction::TransactionFacts {
+            txid: crate::rotation::store::test_support::transaction_txid(100),
+            expiry_height: 100,
+            amount_zatoshis: 50,
+            fee_zatoshis: 10,
+            deadline: None,
+        };
+        assert!(
+            owner
+                .retain_calculation(
+                    "projection".into(),
+                    zeroize::Zeroizing::new(crate::rotation::store::test_support::transaction_raw(
+                        100
+                    )),
+                    Ok(facts)
+                )
+                .await
+                .is_err()
+        );
+        db.execute_batch("DROP TRIGGER reject_projection; CREATE TRIGGER corrupt_projection AFTER INSERT ON treasury_operations BEGIN UPDATE treasury_operations SET facts='not-json' WHERE id=NEW.id; END;").unwrap();
+        let store = owner.store.clone();
+        let (entered, blocked) = tokio::sync::oneshot::channel();
+        let (release, held) = tokio::sync::oneshot::channel();
+        let barrier_store = store.clone();
+        let barrier = tokio::spawn(async move {
+            barrier_store
+                .call(move |_| {
+                    let _ = entered.send(());
+                    let _ = held.blocking_recv();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        });
+        blocked.await.unwrap();
+        let (_handle, mut commands) = channel();
+        let stop = CancellationToken::new();
+        tokio::time::pause();
+        {
+            let mut submission = NoSubmission;
+            let mut actor = Box::pin(owner.command_loop(&mut commands, &mut submission, &stop));
+            assert!(futures_util::poll!(actor.as_mut()).is_pending());
+            tokio::time::advance(std::time::Duration::from_secs(
+                super::super::publication::MAINTENANCE_SECONDS,
+            ))
+            .await;
+            // Poll until the actual publisher has enqueued behind the held Store
+            // command; no elapsed-time assumption selects the financial outcome.
+            assert!(futures_util::poll!(actor.as_mut()).is_pending());
+            release.send(()).unwrap();
+            barrier.await.unwrap();
+            // The actor future is not polled while this serialized successor
+            // observes publication completion and requests ordinary shutdown.
+            let stopped = stop.clone();
+            store
+                .call(move |s| {
+                    assert!(s.prepared_bytes("projection").is_ok());
+                    stopped.cancel();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            actor.await.unwrap();
+        }
+        tokio::time::resume();
+        assert!(owner.completed.is_none() && !owner.healthy);
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        let event = logs
+            .lines()
+            .find(|line| line.contains("saved_transaction_projection_failed"))
+            .unwrap();
+        assert!(
+            event.contains("DEBUG") && !event.contains("WARN") && !event.contains("ERROR"),
+            "{event}"
+        );
+        assert_eq!(
+            logs.matches("local retry will continue").count(),
+            1,
+            "only the initial actual commit failure owns local publication retry"
+        );
+        drop(store);
+        owner.close().await.unwrap();
     }
 }

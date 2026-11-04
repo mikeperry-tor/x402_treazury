@@ -198,8 +198,15 @@ preserves its encrypted accepted inputs; the next calculation needs a fresh
 operation and current authority. The persisted `funding_quote_refreshes` table also
 marks these proven never-disclosed resets for recovery-count exclusion; its legacy
 name and existing quote-refresh rows remain compatible. Raw pending originals and
-committed results with lost acknowledgments retain their owner. Calculation
-metadata alone does not create a global source-work fence. Full SDK clear can
+committed results with lost acknowledgments retain their owner. A durable commit
+acknowledgment is separate from loading a pending submission view: verified bound
+fulfillment may intentionally leave no pending view, and decoding failure cannot
+make a known commit uncommitted. The former finishes preparation without a source
+handoff; the latter leaves the SDK unhealthy for reconstruction. Neither repeats
+calculation, discards original bytes or grants disclosure. Invalid calculation
+facts still fail after publication. Background view-repair diagnostics remain
+DEBUG; only a genuine unacknowledged publication retains the local retry cadence.
+Calculation metadata alone does not create a global source-work fence. Full SDK clear can
 discard pending transaction records and their spend links; the application
 therefore retains the fence for actual unfinished signed originals until closure.
 The synthetic `sdk_reorg_rescan_preserves_original_signed_work` regression covers

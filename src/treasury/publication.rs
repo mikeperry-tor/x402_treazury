@@ -5,7 +5,7 @@ use crate::rotation::transaction::{PreparedTransaction, TransactionFacts};
 pub(super) const MAINTENANCE_SECONDS: u64 = 60;
 
 pub(super) struct CompletedPreparation {
-    operation: String,
+    pub(super) operation: String,
     expected_revision: i64,
     raw: Zeroizing<Vec<u8>>,
     snapshot: Option<Zeroizing<Vec<u8>>>,
@@ -33,7 +33,9 @@ impl Treasury {
         let prepared = match self.publish_completed().await {
             Ok(value) => value,
             Err(error) => {
-                diagnostics::report_local_retry(&error, "transaction publication");
+                if self.completed.is_some() {
+                    diagnostics::report_local_retry(&error, "transaction publication");
+                }
                 return Err(error);
             }
         };
@@ -41,12 +43,13 @@ impl Treasury {
             Some(error) => {
                 Err(error.context("completed transaction retained without submission authority"))
             }
-            None => Ok(prepared),
+            None => prepared
+                .ok_or_else(|| crate::rotation::transaction::PreparationAlreadyFulfilled.into()),
         }
     }
 
     /// Only this idempotent local boundary repeats; SDK calculation never does.
-    pub(super) async fn publish_completed(&mut self) -> Result<PreparedTransaction> {
+    pub(super) async fn publish_completed(&mut self) -> Result<Option<PreparedTransaction>> {
         let completed = self
             .completed
             .as_mut()
@@ -69,13 +72,22 @@ impl Treasury {
             .store
             .call(move |store| {
                 let revision = store.prepare_with_facts(&id, expected, &bytes, &raw, facts)?;
-                Ok((revision, PreparedTransaction::load(store, &id)?))
+                // Acknowledging the durable commit is independent from projecting
+                // a still-pending disclosure capability. Only the former repeats.
+                let prepared: Result<Option<PreparedTransaction>> = (|| {
+                    if store.funding_operation_fulfilled(&id)? {
+                        Ok(None)
+                    } else {
+                        PreparedTransaction::load(store, &id).map(Some)
+                    }
+                })();
+                Ok((revision, prepared))
             })
             .await?;
         self.revision = revision;
         self.completed = None;
-        self.healthy = validated;
-        Ok(prepared)
+        self.healthy = validated && prepared.is_ok();
+        prepared
     }
 }
 
@@ -166,7 +178,7 @@ mod tests {
             })
             .await
             .unwrap_err();
-        let saved = treasury.publish_completed().await.unwrap();
+        let saved = treasury.publish_completed().await.unwrap().unwrap();
         assert_eq!(
             saved.bytes(),
             crate::rotation::store::test_support::transaction_raw(100).as_slice()
@@ -186,7 +198,7 @@ mod tests {
     async fn invalid_completed_bytes_are_durable_without_broadcast_authority() {
         let (_dir, mut treasury, db) = fixture(false).await;
         db.execute_batch("DROP TRIGGER reject_completed;").unwrap();
-        let prepared = treasury.publish_completed().await.unwrap();
+        let prepared = treasury.publish_completed().await.unwrap().unwrap();
         assert_eq!(
             prepared.bytes(),
             crate::rotation::store::test_support::transaction_raw(100).as_slice()
@@ -272,5 +284,485 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    struct LateFixture {
+        dir: tempfile::TempDir,
+        owner: Treasury,
+        db: rusqlite::Connection,
+        job: crate::rotation::store::funding::FundingJob,
+        inputs: Vec<crate::rotation::store::preparation::OwnedInput>,
+        snapshot: Vec<u8>,
+    }
+    fn late_facts() -> TransactionFacts {
+        TransactionFacts {
+            txid: crate::rotation::store::test_support::transaction_txid(100),
+            expiry_height: 100,
+            amount_zatoshis: 50,
+            fee_zatoshis: 10,
+            deadline: None,
+        }
+    }
+    fn late_raw() -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(crate::rotation::store::test_support::transaction_raw(100))
+    }
+    async fn late_fixture() -> LateFixture {
+        use crate::rotation::store::preparation::{CalculationInputs, InputPool, OwnedInput};
+        let dir = tempfile::tempdir().unwrap();
+        let owner = Treasury::create(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            2_000_000,
+            Some(Zeroizing::new(SEED.into())),
+        )
+        .await
+        .unwrap();
+        let pool = owner
+            .ensure_capacity_group(
+                "late_publication".into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool, crate::rotation::store::AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let job = owner
+            .store
+            .call(|s| Ok(s.funding_jobs()?.remove(0)))
+            .await
+            .unwrap();
+        let inputs = vec![OwnedInput {
+            pool: InputPool::Orchard,
+            txid: crate::rotation::store::test_support::transaction_txid(90),
+            output_index: 0,
+        }];
+        let saved_job = job.clone();
+        let saved_inputs = inputs.clone();
+        owner
+            .store
+            .call(move |s| {
+                s.save_funding_quote(
+                    &saved_job.id,
+                    &serde_json::to_vec(&serde_json::json!({
+                        "request":{"amount":saved_job.target,"recipient":saved_job.recipient}
+                    }))?,
+                )?;
+                s.accept_preparation(
+                    &saved_job.operation_id,
+                    Some(&saved_job.pool_id),
+                    60,
+                    Some(CalculationInputs {
+                        destination: "fixture deposit".into(),
+                        inputs: saved_inputs,
+                    }),
+                )
+            })
+            .await
+            .unwrap();
+        let snapshot = snapshot(owner.client.as_ref().unwrap())
+            .await
+            .unwrap()
+            .to_vec();
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        LateFixture {
+            dir,
+            owner,
+            db,
+            job,
+            inputs,
+            snapshot,
+        }
+    }
+    async fn observe_delivery(fixture: &LateFixture, success: bool, credit: bool) {
+        let job = fixture.job.clone();
+        fixture
+            .owner
+            .store
+            .call(move |s| {
+                if success {
+                    s.record_provider_outcome(
+                        &job.id,
+                        &job.operation_id,
+                        &crate::rotation::near::SwapStatus::Success,
+                        2,
+                    )?;
+                }
+                if credit {
+                    s.record_funding_balance(
+                        &job.id,
+                        &job.operation_id,
+                        &job.wallet_id,
+                        &job.recipient,
+                        alloy_primitives::U256::ONE,
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    async fn assert_late_evidence(fixture: &LateFixture, pending: bool, valid: bool) {
+        let job = fixture.job.clone();
+        let inputs = fixture.inputs.clone();
+        let expected = fixture.snapshot.clone();
+        fixture
+            .owner
+            .store
+            .call(move |s| {
+                assert!(s.prepared_bytes(&job.operation_id)?.as_slice() == late_raw().as_slice());
+                assert_eq!(s.prepared_inputs(&job.operation_id)?, inputs);
+                assert!(s.prepared_snapshot(&job.operation_id)?.as_slice() == expected);
+                assert_eq!(s.operation_pending(&job.operation_id)?, pending);
+                let refusal = s
+                    .request_broadcast(&job.operation_id, 1, 1, false)
+                    .unwrap_err();
+                assert!(
+                    refusal.to_string().contains(if pending {
+                        "initial funding claim consumed or disabled"
+                    } else {
+                        "transaction is not pending"
+                    }),
+                    "unexpected disclosure refusal: {refusal}"
+                );
+                if valid {
+                    let operation = s.operation(&job.operation_id)?;
+                    assert_eq!(operation.attempts, 0);
+                    assert_eq!(
+                        operation.submission, "PREPARED",
+                        "completion cannot fabricate source confirmation"
+                    );
+                    assert_eq!(operation.facts, late_facts());
+                } else {
+                    assert!(s.status()?.treasury_operations.is_empty());
+                }
+                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert_eq!(
+                    s.funding_job(&job.id)?.unwrap().operation_id,
+                    job.operation_id
+                );
+                assert_eq!(s.funding_jobs()?.len(), 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn late_bound_success_finishes_actual_publication_without_disclosure_or_retry() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::publication::tests::late_bound_success_finishes_actual_publication_without_disclosure_or_retry",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .init();
+
+        use crate::rotation::transaction::{PreparationAlreadyFulfilled, PreparationDeferred};
+        for credit in [false, true] {
+            let mut fixture = late_fixture().await;
+            let revision = fixture.owner.revision;
+            observe_delivery(&fixture, true, credit).await;
+            let error = fixture
+                .owner
+                .retain_calculation(
+                    fixture.job.operation_id.clone(),
+                    late_raw(),
+                    Ok(late_facts()),
+                )
+                .await
+                .err()
+                .unwrap();
+            assert!(error.is::<PreparationAlreadyFulfilled>());
+            assert!(!error.is::<PreparationDeferred>());
+            assert!(fixture.owner.completed.is_none() && fixture.owner.healthy);
+            assert_eq!(fixture.owner.revision, revision + 1);
+            assert_late_evidence(&fixture, false, true).await;
+            let job = fixture.job.clone();
+            fixture
+                .owner
+                .store
+                .call(move |s| {
+                    let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                    assert!(facts.provider_success && !facts.source_pending);
+                    assert_eq!(facts.initial_credit_recorded, credit);
+                    assert_eq!(facts.credit_needed(), !credit);
+                    assert!(PreparedTransaction::load(s, &job.operation_id).is_err());
+                    s.require_preparation_available()
+                })
+                .await
+                .unwrap();
+            fixture
+                .owner
+                .reconstruct_sdk(&CancellationToken::new())
+                .await
+                .unwrap();
+            assert_late_evidence(&fixture, false, true).await;
+            fixture.owner.close().await.unwrap();
+        }
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert!(!logs.contains("WARN") && !logs.contains("ERROR"), "{logs}");
+        assert!(!logs.contains("local retry will continue"), "{logs}");
+    }
+
+    #[tokio::test]
+    async fn positive_credit_only_publishes_pending_bytes_but_cannot_disclose_them() {
+        let mut fixture = late_fixture().await;
+        observe_delivery(&fixture, false, true).await;
+        let prepared = fixture
+            .owner
+            .retain_calculation(
+                fixture.job.operation_id.clone(),
+                late_raw(),
+                Ok(late_facts()),
+            )
+            .await
+            .unwrap();
+        assert!(prepared.bytes() == late_raw().as_slice());
+        assert!(fixture.owner.completed.is_none() && fixture.owner.healthy);
+        assert_late_evidence(&fixture, true, true).await;
+        let job = fixture.job.clone();
+        fixture
+            .owner
+            .store
+            .call(move |s| {
+                let facts = s.funding_facts(&job.id, &job.operation_id)?;
+                assert!(
+                    !facts.provider_success
+                        && facts.initial_credit_recorded
+                        && facts.source_pending
+                );
+                assert!(s.require_preparation_available().is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        fixture.owner.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_completed_facts_are_not_masked_by_fulfilled_publication() {
+        use crate::rotation::transaction::PreparationAlreadyFulfilled;
+        let mut fixture = late_fixture().await;
+        observe_delivery(&fixture, true, false).await;
+        let error = fixture
+            .owner
+            .retain_calculation(
+                fixture.job.operation_id.clone(),
+                late_raw(),
+                Err(anyhow::anyhow!("fixture original validation failure")),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("without submission authority"));
+        assert!(format!("{error:#}").contains("fixture original validation failure"));
+        assert!(!error.is::<PreparationAlreadyFulfilled>());
+        assert!(fixture.owner.completed.is_none() && !fixture.owner.healthy);
+        assert_late_evidence(&fixture, false, false).await;
+        fixture.owner.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn lost_publication_ack_then_success_reuses_original_committed_result() {
+        let mut fixture = late_fixture().await;
+        fixture.db.execute_batch("CREATE TRIGGER reject_late BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture delayed publication'); END;").unwrap();
+        assert!(
+            fixture
+                .owner
+                .retain_calculation(
+                    fixture.job.operation_id.clone(),
+                    late_raw(),
+                    Ok(late_facts())
+                )
+                .await
+                .is_err()
+        );
+        let completion = fixture.owner.completed.as_ref().unwrap();
+        let (id, revision, bytes, raw, facts) = (
+            completion.operation.clone(),
+            completion.expected_revision,
+            completion.snapshot.clone().unwrap(),
+            completion.raw.clone(),
+            completion.facts.clone(),
+        );
+        fixture
+            .db
+            .execute_batch("DROP TRIGGER reject_late;")
+            .unwrap();
+        fixture
+            .owner
+            .store
+            .call(move |s| {
+                s.prepare_with_facts(&id, revision, &bytes, &raw, facts)?;
+                Err::<(), _>(anyhow::anyhow!("fixture lost acknowledgment"))
+            })
+            .await
+            .unwrap_err();
+        observe_delivery(&fixture, true, false).await;
+        assert!(fixture.owner.publish_completed().await.unwrap().is_none());
+        assert_eq!(fixture.owner.revision, revision + 1);
+        assert!(fixture.owner.completed.is_none() && fixture.owner.healthy);
+        assert_late_evidence(&fixture, false, true).await;
+        fixture.owner.close().await.unwrap();
+    }
+
+    fn corrupt_projection(db: &rusqlite::Connection) {
+        db.execute_batch("CREATE TRIGGER corrupt_late_projection AFTER INSERT ON treasury_operations BEGIN UPDATE treasury_operations SET facts='not-json' WHERE id=NEW.id; END;").unwrap();
+    }
+    #[tokio::test]
+    async fn postcommit_projection_error_clears_retry_owner_and_can_reconstruct() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::publication::tests::postcommit_projection_error_clears_retry_owner_and_can_reconstruct",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .init();
+
+        use crate::rotation::transaction::PreparationAlreadyFulfilled;
+        let mut fixture = late_fixture().await;
+        let revision = fixture.owner.revision;
+        corrupt_projection(&fixture.db);
+        let error = fixture
+            .owner
+            .retain_calculation(
+                fixture.job.operation_id.clone(),
+                late_raw(),
+                Ok(late_facts()),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(!error.is::<PreparationAlreadyFulfilled>());
+        assert!(fixture.owner.completed.is_none() && !fixture.owner.healthy);
+        assert_eq!(fixture.owner.revision, revision + 1);
+        fixture
+            .db
+            .execute_batch("DROP TRIGGER corrupt_late_projection;")
+            .unwrap();
+        fixture
+            .db
+            .execute(
+                "UPDATE treasury_operations SET facts=?1 WHERE id=?2",
+                rusqlite::params![
+                    serde_json::to_string(&late_facts()).unwrap(),
+                    fixture.job.operation_id
+                ],
+            )
+            .unwrap();
+        fixture
+            .owner
+            .reconstruct_sdk(&CancellationToken::new())
+            .await
+            .unwrap();
+        let job = fixture.job.clone();
+        fixture
+            .owner
+            .store
+            .call(move |s| {
+                assert!(s.prepared_bytes(&job.operation_id)?.as_slice() == late_raw().as_slice());
+                assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+                assert!(s.operation_pending(&job.operation_id)?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        fixture.owner.close().await.unwrap();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert!(!logs.contains("WARN") && !logs.contains("ERROR"), "{logs}");
+        assert!(!logs.contains("local retry will continue"), "{logs}");
+    }
+
+    #[tokio::test]
+    async fn close_after_committed_projection_error_still_releases_physical_owner() {
+        let mut fixture = late_fixture().await;
+        fixture.db.execute_batch("CREATE TRIGGER reject_late BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture delayed publication'); END;").unwrap();
+        assert!(
+            fixture
+                .owner
+                .retain_calculation(
+                    fixture.job.operation_id.clone(),
+                    late_raw(),
+                    Ok(late_facts())
+                )
+                .await
+                .is_err()
+        );
+        assert!(fixture.owner.completed.is_some());
+        let identity = fixture.owner.status().await.unwrap().treasury_id;
+        fixture
+            .db
+            .execute_batch("DROP TRIGGER reject_late;")
+            .unwrap();
+        corrupt_projection(&fixture.db);
+        // This is the existing local-fixture watchdog, never financial authority.
+        // Actual acceptance is the joined close plus successful exclusive reopen.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), fixture.owner.close())
+                .await
+                .expect("a committed view failure must not enter the publication retry cadence")
+                .is_err()
+        );
+        fixture
+            .db
+            .execute_batch("DROP TRIGGER corrupt_late_projection;")
+            .unwrap();
+        fixture
+            .db
+            .execute(
+                "UPDATE treasury_operations SET facts=?1 WHERE id=?2",
+                rusqlite::params![
+                    serde_json::to_string(&late_facts()).unwrap(),
+                    fixture.job.operation_id
+                ],
+            )
+            .unwrap();
+        let store = Store::open(
+            &fixture.dir.path().join("state"),
+            &fixture.dir.path().join("key"),
+            &identity,
+        )
+        .unwrap();
+        assert!(
+            store
+                .prepared_bytes(&fixture.job.operation_id)
+                .unwrap()
+                .as_slice()
+                == late_raw().as_slice()
+        );
+        assert_eq!(
+            store.prepared_inputs(&fixture.job.operation_id).unwrap(),
+            fixture.inputs
+        );
+        assert!(
+            store
+                .prepared_snapshot(&fixture.job.operation_id)
+                .unwrap()
+                .as_slice()
+                == fixture.snapshot
+        );
+        assert_eq!(
+            store.operation(&fixture.job.operation_id).unwrap().attempts,
+            0
+        );
+        assert!(store.operation_pending(&fixture.job.operation_id).unwrap());
+        assert_eq!(
+            store.treasury_sync_state().unwrap().sync.unwrap().phase,
+            SyncPhase::Offline
+        );
     }
 }

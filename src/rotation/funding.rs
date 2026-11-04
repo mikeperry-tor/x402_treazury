@@ -461,6 +461,9 @@ impl<B: FundingBackend> FundingWorker<B> {
         // after read-only proposal checks and a current-authority recheck.
         let prepared = self.backend.lock().await.prepare(job, &quote).await;
         if let Err(error) = prepared {
+            if error.is::<super::transaction::PreparationAlreadyFulfilled>() {
+                return Ok(Observation::None);
+            }
             if !error.is::<super::error::QuotePolicyMismatch>() {
                 return Err(error);
             }

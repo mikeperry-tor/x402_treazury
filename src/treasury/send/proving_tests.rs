@@ -289,7 +289,7 @@ async fn qualify_preparation(case: PreparationCase) {
     );
     db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
     drop(db);
-    let prepared = treasury.publish_completed().await.unwrap();
+    let prepared = treasury.publish_completed().await.unwrap().unwrap();
     assert!(treasury.healthy && treasury.completed.is_none());
     assert_eq!(treasury.revision, revision + 1);
     assert_eq!(
