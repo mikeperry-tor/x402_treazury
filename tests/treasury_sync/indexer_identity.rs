@@ -166,9 +166,10 @@ async fn regressed_block_identity_preserves_sdk_headers_and_rejects_unbound_resp
         } else {
             "indexer_block_identity_invalid"
         };
+        let error = observation.last_error.unwrap();
         assert!(
-            observation.last_error.unwrap().contains(reason),
-            "mode {mode}"
+            error.contains(reason),
+            "mode {mode}: expected {reason}, got {error}"
         );
         owner.close().await.unwrap();
         assert_eq!(
