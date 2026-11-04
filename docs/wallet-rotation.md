@@ -327,15 +327,15 @@ only a ranking input. Actual challenge amounts and current ownership/caps are
 checked by payment preparation and the authorization journal; balances are not
 spending permission. No additional hint or authority state is maintained.
 
-Runtime hints expire 24 hours after the unsigned response was received and
-retain at most 65,535 fixed-size entries per process. Their lifetime shares the
-API catalog disk-cache default; per-source catalog overrides remain independent.
-See [local resource limits](local-resource-limits.md). Their trusted key includes
-source/revision, method/OpenAPI template, wallet group and transport scope; request
-arguments cannot choose that scope. Receipt order controls updates, including lower
-prices. Restart, expiry and eviction discard the advisory selection estimate and
-restore fallback display pricing. They cause no probe, cached-challenge reuse or
-new payment authority.
+Runtime hints belong to the acquired remote catalog cache entry and its configured
+lifetime (seven days by default). Method and original path template identify the
+operation; wallet groups, listeners, payers and store lifetimes do not partition
+lookup. Receipt order controls in-process updates, including lower prices.
+SQLite storage restores estimates across restart without renewing catalog expiry.
+Catalog replacement, configuration invalidation and eviction discard estimates;
+reads and payment observations do not renew lifetime. These operations cause no
+probe, cached-challenge reuse or new payment authority. See
+[shared cache behavior](architecture.md#wallet-selection-and-network-isolation).
 A valid observed offer can update a hint even when current Store authority refuses
 financial admission; that hint grants no permission to sign.
 

@@ -225,7 +225,8 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if args.all_tools {
         cfg.use_recommended_tools = false;
     }
-    let root = catalog::load_json_discovery(&cfg).await?;
+    let root =
+        catalog::load_json_discovery_bounded(&cfg, x402_treazury::network::global(), None).await?;
     if args.list_tags {
         println!(
             "{}",
@@ -251,7 +252,10 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
     x402_treazury::config::validate(&cfg)?;
-    let tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    for tool in &mut tools {
+        tool.catalog_hints = root.hints.clone();
+    }
     tracing::info!(target: "x402_treazury::startup", tools = tools.len(), "Catalog ready");
     if inspect_standalone(&args, &cfg, &base, &tools).await? {
         return Ok(());

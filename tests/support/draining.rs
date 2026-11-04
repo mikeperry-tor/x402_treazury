@@ -6,6 +6,7 @@ use x402_treazury::{catalog::ToolSpec, catalog_state::BoundTool};
 fn binding(h: &Harness, method: &str) -> BoundTool {
     BoundTool {
         tool: ToolSpec {
+            catalog_hints: None,
             response_mapping: None,
             image_limits: Default::default(),
             name: method.into(),

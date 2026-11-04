@@ -457,10 +457,13 @@ async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
     for (kind, target_offer, body, target_requests, relay_requests) in [
         ("handoff-relay", Some(17u64), "relay result", 2, 2),
         ("handoff-free", Some(17), "target free", 2, 0),
-        ("status403", None, "relay result", 1, 2),
+        ("status403", None, "relay result", 1, 3),
     ] {
         // Zero-price initial selection chooses the first eligible wallet. The
         // actual offer makes the second estimate preferable before any signature.
+        // Relay bootstrap catalogs have no shared price entry. After the first
+        // relay fee consumes wallet one's unit, the final relay call needs its
+        // actual challenge before handing off to the sibling.
         let progress = SubmissionProgress::default();
         let output = client
             .execute_response_observed(route("GET", kind), &progress)
@@ -526,6 +529,33 @@ async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
             .filter(|event| event.provider.is_some() && event.signer.is_some())
             .count();
         assert_eq!(signed, usize::from(relay_requests > 0));
+        let relay_events: Vec<_> = events
+            .iter()
+            .filter(|event| event.provider.is_some())
+            .collect();
+        if relay_requests > 0 {
+            let payer = if kind == "status403" {
+                &wallets[1].2
+            } else {
+                &wallets[0].2
+            };
+            let expected: Vec<_> = (0..relay_requests)
+                .map(|index| (index + 1 == relay_requests).then(|| payer.to_ascii_lowercase()))
+                .collect();
+            assert_eq!(
+                relay_events
+                    .iter()
+                    .map(|event| event.signer.clone())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for event in &relay_events[1..] {
+                assert_eq!(event.provider, relay_events[0].provider);
+                assert_eq!(event.method, relay_events[0].method);
+                assert_eq!(event.uri, relay_events[0].uri);
+                assert_eq!(event.body, relay_events[0].body);
+            }
+        }
         relay_signatures += signed;
     }
     assert_eq!(fixture.rpc_calls.load(Ordering::SeqCst), 0);
@@ -562,6 +592,14 @@ async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
         "only actual relay authorizations are journaled"
     );
     drop(query);
+    let payers = db
+        .prepare("SELECT wallet_id FROM payment_attempts ORDER BY rowid")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(payers, vec![wallets[0].1.clone(), wallets[1].1.clone()]);
     drop(db);
     drop(client);
     drop(store);

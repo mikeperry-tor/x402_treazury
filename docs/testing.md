@@ -652,6 +652,16 @@ They run without listener creation or credentials; deployment and assignment
 integration tests separately cover real local listeners and offline inspection.
 The characterization protects validation orchestration, not all runtime interleavings.
 
+Shared catalog/price regressions live in `src/http_cache/price_tests.rs`, existing
+catalog cache fixtures, `src/payment/hint_tests.rs` and catalog-state description
+and direct-target fixtures. They cover joint persistence/lifetime, revision and
+content invalidation, alias sharing, received-order updates, delayed writes and
+unchanged concise rendering/per-call offers, without live funds or price probes.
+The managed relay fixture retains a depleted first wallet: local bootstrap catalogs
+have no shared hint, so the actual relay offer earns an unsigned sibling handoff.
+It pins the exact unchanged relay requests, signing owners and authorization journal
+while retaining the absence of target signing, RPC, funding and allocation.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency

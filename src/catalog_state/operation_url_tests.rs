@@ -4,7 +4,6 @@ use crate::{
     catalog::{Config, build_tools},
     network::{Mode, NetworkContext, NetworkPolicy},
     payment::SpendPolicy,
-    pricing::runtime::process_hints,
     rotation::{
         base::BaseRpc,
         manager::ManagedPool,
@@ -193,7 +192,8 @@ async fn paid_operation_urls() {
     .unwrap();
     let payer = pool.documentation_address().await.unwrap().to_lowercase();
     let client = PaidClient::managed(Arc::new(pool));
-    let tools: Vec<_> = ["api.example.com", "spec.example.com"]
+    let hints = crate::pricing::runtime::fixture(dir.path()).await;
+    let mut tools: Vec<_> = ["api.example.com", "spec.example.com"]
         .into_iter()
         .map(|host| {
             let document = json!({"paths":{"/gateway/purchase":{"post":{
@@ -221,25 +221,11 @@ async fn paid_operation_urls() {
             }
         })
         .collect();
-    let effective = client
-        .clone()
-        .with_source_identity("same-source")
-        .public_destinations();
-    let keys: Vec<_> = tools
-        .iter()
-        .map(|tool| {
-            effective
-                .operation_key(
-                    Some(("same-source", 1)),
-                    &tool.tool.method,
-                    &tool.tool.path,
-                    tool.tool.request_url.as_deref().unwrap(),
-                )
-                .unwrap()
-        })
-        .collect();
-    assert_ne!(keys[0], keys[1]);
-    assert!(keys.iter().all(|key| process_hints().get(*key).is_none()));
+    for tool in &mut tools {
+        tool.tool.catalog_hints = Some(hints.clone());
+    }
+    let key = hints.operation("POST", "/gateway/purchase");
+    assert!(key.get().is_none());
     let args = json!({"q":"original","X-Region":"north","item":"map"});
     let (first, second) = tokio::join!(
         tools[0].invoke_output(args.as_object().unwrap()),
@@ -257,28 +243,9 @@ async fn paid_operation_urls() {
             U256::from(if host == "api.example.com" { 100 } else { 200 })
         );
     }
-    for (key, amount) in keys.into_iter().zip([100u64, 200]) {
-        assert_eq!(process_hints().get(key), Some(U256::from(amount)));
-    }
-    assert!(
-        tools[0]
-            .description()
-            .contains("Observed cost: ~$0.0001/call.")
-    );
-    assert!(
-        tools[1]
-            .description()
-            .contains("Observed cost: ~$0.0002/call.")
-    );
-    let gateway_key = effective
-        .operation_key(
-            Some(("same-source", 1)),
-            "POST",
-            "/gateway/purchase",
-            &tools[0].base,
-        )
-        .unwrap();
-    assert!(process_hints().get(gateway_key).is_none());
+    let shared = key.get().unwrap();
+    assert!([U256::from(100), U256::from(200)].contains(&shared));
+    assert_eq!(tools[0].description(), tools[1].description());
     let mut requests = seller.requests.lock().unwrap().clone();
     requests.sort();
     assert_eq!(
@@ -305,7 +272,6 @@ async fn paid_operation_urls() {
         2
     );
     drop(tools);
-    drop(effective);
     drop(client);
     drop(store);
     worker.await.unwrap();

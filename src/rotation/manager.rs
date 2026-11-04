@@ -148,9 +148,9 @@ impl ManagedPool {
             hook(stage).await;
         }
     }
-    /// Runtime-only group scope for estimates, never payment authority.
-    pub(crate) fn hint_group_scope(&self) -> (uuid::Uuid, &str) {
-        (self.store.runtime_namespace(), &self.pool)
+    #[cfg(test)]
+    pub(crate) fn group_name(&self) -> &str {
+        &self.pool
     }
     async fn acquire_view(&self, query: super::base::ChainQuery) -> Result<super::base::ChainView> {
         let result = self
@@ -337,7 +337,7 @@ impl ManagedPool {
         // Learning follows complete envelope validation, before financial admission.
         // An insufficient balance does not erase a valid observed price.
         if let Some((key, receipt)) = hint {
-            crate::pricing::runtime::process_hints().learn(key, offer.amount, receipt);
+            key.learn(offer.amount, receipt);
         }
         let requirements_hash =
             keccak256(serde_json::to_vec(&offer.raw).context(facts)?).to_string();

@@ -1411,7 +1411,7 @@ pub(crate) mod tests {
             cfg.spec = "https://other.example.com/spec".into();
             cfg.relay_fallback = None;
             let (a, b) = tokio::join!(pending.resume(), pending.resume());
-            assert_eq!(a.unwrap(), b.unwrap());
+            assert_eq!(a.unwrap().document, b.unwrap().document);
             cfg = original;
             assert!(matches!(
                 crate::catalog::prepare_json_discovery_with(&cfg, &context)

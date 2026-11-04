@@ -25,7 +25,7 @@ type DownloadKey = (
     u64,
     Option<String>,
 );
-type Document = Arc<serde_json::Value>;
+type Document = Arc<catalog::LoadedCatalog>;
 
 #[derive(Clone)]
 struct DeferredDocument(Arc<DeferredLoad>);
@@ -98,6 +98,9 @@ impl PendingSource {
             .document
             .resume(gate, can_allocate, Some(status))
             .await?;
+        if let Some(hints) = &document.hints {
+            hints.slot.record_configuration(&self.config).await;
+        }
         Source::from_document(id, self.config.clone(), document)?
             .with_send_tools(id, self.send_tools.clone())
     }
@@ -151,10 +154,54 @@ struct Downloads {
     gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 impl Downloads {
+    async fn configure(
+        &self,
+        id: &str,
+        source: &SourceConfig,
+        path: &Path,
+        warn: bool,
+    ) -> Result<catalog::Config> {
+        let mut cfg = crate::config::resolve(source.provider.clone(), path)
+            .await
+            .with_context(|| format!("source {id}"))?
+            .settings;
+        cfg.cache_revision = Some(crate::http_cache::configuration_revision(&cfg));
+        if self.all_tools {
+            cfg.use_recommended_tools = false;
+        }
+        cfg.discovery_source = Some(id.to_owned());
+        cfg.relay_fallback = self.relay.get(id).cloned();
+        cfg.http_cache_directory = self.cache_directory.clone();
+        cfg.http_cache_direct_warm_target = self.direct_warm_target.clone();
+        if warn {
+            crate::provider_status::warn(id, &cfg);
+        }
+        if cfg.prefix.is_none() {
+            cfg.prefix = Some(id.to_owned());
+        }
+        if cfg.spec.starts_with("http") {
+            let _ = crate::network::IsolationId::discovery(&cfg.spec)?;
+        }
+        ensure!(
+            cfg.read_timeout_seconds
+                .map(Duration::from_secs_f64)
+                .is_none_or(|t| t >= Duration::from_millis(1)),
+            "HTTP read inactivity timeout must be at least 1ms"
+        );
+        if let Some(slot) =
+            crate::http_cache::Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
+        {
+            slot.check_revision().await;
+        }
+        for slot in crate::discovery_relay::slots(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes) {
+            slot.check_revision().await;
+        }
+        Ok(cfg)
+    }
     async fn load(&self, id: &str, cfg: &catalog::Config) -> Result<Download> {
         if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {
             return Ok(Download::Ready(Arc::new(
-                catalog::load_json_discovery(cfg).await?,
+                catalog::load_json_discovery_bounded(cfg, crate::network::global(), None).await?,
             )));
         }
         // Exact URL (including query), requested timeout and byte limit are deliberately
@@ -295,13 +342,9 @@ pub(super) async fn load(
     let mut loads = Vec::with_capacity(total);
     for (id, source) in &config.sources {
         let used = bindings.0.values().any(|sources| sources.contains_key(id));
+        let cfg = downloads.configure(id, source, path, warn && used).await;
         let downloads = &downloads;
-        loads.push(async move {
-            (
-                id,
-                load_one(id, source, path, warn && used, downloads).await,
-            )
-        });
+        loads.push(async move { (id, load_one(id, source, cfg, downloads).await) });
     }
     // Logical owners may wait for server delays without occupying download slots.
     let mut pending = stream::iter(loads).buffer_unordered(total.max(1));
@@ -367,8 +410,7 @@ pub(super) async fn load(
 async fn load_one(
     id: &str,
     source: &SourceConfig,
-    path: &Path,
-    warn: bool,
+    cfg: Result<catalog::Config>,
     downloads: &Downloads,
 ) -> Result<SourceLoad> {
     let mut progress = Progress {
@@ -378,7 +420,10 @@ async fn load_one(
         finished: false,
     };
     tracing::debug!(target: "x402_treazury::startup", source = id, "Catalog load started");
-    let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
+    let result = match cfg {
+        Ok(cfg) => Source::load(id, source, cfg, &mut progress, downloads).await,
+        Err(error) => Err(error),
+    };
     progress.finished = true;
     if let Err(error) = &result {
         let failure = catalog_failure(error, progress.phase);
@@ -399,37 +444,10 @@ impl Source {
     async fn load(
         id: &str,
         source: &SourceConfig,
-        path: &Path,
-        warn: bool,
+        cfg: catalog::Config,
         progress: &mut Progress<'_>,
         downloads: &Downloads,
     ) -> Result<SourceLoad> {
-        let mut cfg = crate::config::resolve(source.provider.clone(), path)
-            .await
-            .with_context(|| format!("source {id}"))?
-            .settings;
-        if downloads.all_tools {
-            cfg.use_recommended_tools = false;
-        }
-        cfg.discovery_source = Some(id.to_owned());
-        cfg.relay_fallback = downloads.relay.get(id).cloned();
-        cfg.http_cache_directory = downloads.cache_directory.clone();
-        cfg.http_cache_direct_warm_target = downloads.direct_warm_target.clone();
-        if warn {
-            crate::provider_status::warn(id, &cfg);
-        }
-        if cfg.prefix.is_none() {
-            cfg.prefix = Some(id.to_owned());
-        }
-        if cfg.spec.starts_with("http") {
-            let _ = crate::network::IsolationId::discovery(&cfg.spec)?;
-        }
-        ensure!(
-            cfg.read_timeout_seconds
-                .map(Duration::from_secs_f64)
-                .is_none_or(|t| t >= Duration::from_millis(1)),
-            "HTTP read inactivity timeout must be at least 1ms"
-        );
         progress.phase = "fetch_parse";
         let fetch_started = Instant::now();
         tracing::debug!(target: "x402_treazury::startup", source = id, phase = progress.phase,
@@ -462,6 +480,9 @@ impl Source {
         tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
+        if let Some(hints) = &document.hints {
+            hints.slot.record_configuration(&cfg).await;
+        }
         Self::from_document(id, cfg, document)?
             .with_send_tools(id, source.send_tools.clone())
             .map(SourceLoad::Ready)
@@ -469,8 +490,9 @@ impl Source {
     pub(super) fn from_document(
         id: &str,
         mut cfg: catalog::Config,
-        document: Document,
+        document: impl Into<catalog::LoadedCatalog>,
     ) -> Result<Self> {
+        let document = document.into();
         let generation_started = Instant::now();
         let base_url: Result<String> = (|| {
             let base_url = cfg
@@ -505,7 +527,7 @@ impl Source {
             .context(catalog::LoadStage::Configuration)?;
         cfg.resolve_cover(&base_url, crate::network::global().policy.cover_enabled())
             .context(catalog::LoadStage::Configuration)?;
-        let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
+        let mut tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
             .map_err(|e| {
                 if (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
                     && !e.is::<catalog::ToolConfigurationError>()
@@ -519,6 +541,9 @@ impl Source {
             })
             .context(catalog::LoadStage::Generation)
             .with_context(|| format!("source {id}: catalog generation"))?;
+        for tool in &mut tools {
+            tool.catalog_hints = document.hints.clone();
+        }
         tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");
         Ok(Self {
@@ -527,7 +552,7 @@ impl Source {
             base_url,
             instructions: cfg.instructions_text.clone(),
             config: cfg,
-            document,
+            document: document.document,
         })
     }
 }
@@ -579,9 +604,13 @@ pub(super) async fn warm(
     };
     let mut loads = Vec::with_capacity(selected.len());
     for id in selected {
-        loads.push(async {
+        let cfg = downloads
+            .configure(id, &config.sources[id], path, false)
+            .await;
+        let downloads = &downloads;
+        loads.push(async move {
             let SourceLoad::Ready(source) =
-                load_one(id, &config.sources[id], path, false, &downloads).await?
+                load_one(id, &config.sources[id], cfg, downloads).await?
             else {
                 anyhow::bail!("cache warming cannot defer catalog discovery");
             };
@@ -627,6 +656,7 @@ mod deferred_tests {
         let metadata = Metadata::from_headers(&headers, Duration::ZERO, None).unwrap();
         let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
         slot.write(Some(Entry {
+            hints: None,
             metadata,
             data: serde_json::json!({"paths":{"/read":{"get":{
                 "description":"private upstream prose",
@@ -776,5 +806,86 @@ mod deferred_tests {
                 .await
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod price_alias_tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn first_load_records_all_aliases_and_second_alias_update_invalidates_shared_prices() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("deployment.toml");
+        let requests = Arc::new(AtomicUsize::new(0));
+        let calls = requests.clone();
+        let app = axum::Router::new().fallback(move |request: axum::extract::Request| {
+            let calls = calls.clone();
+            async move {
+                assert_eq!(request.method(), "GET");
+                assert_eq!(request.uri().path(), "/spec");
+                assert!(!request.headers().contains_key("payment-signature"));
+                calls.fetch_add(1, Ordering::SeqCst);
+                r#"{"paths":{"/items":{"get":{"summary":"Read items."}}}}"#
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/spec", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let source = |base: &str, prefix: &str| -> SourceConfig {
+            toml::from_str(&format!(
+                "spec='{url}'\nbase_url='{base}'\nprefix='{prefix}'"
+            ))
+            .unwrap()
+        };
+        let first = source("https://first.example", "first");
+        let mut second = source("https://second.example", "second");
+        let mut previous = None;
+        for round in 0..2 {
+            let downloads = Downloads {
+                cache_directory: Some(root.path().join("http-cache")),
+                ..Default::default()
+            };
+            // Preflight both revisions before either alias starts its shared download.
+            let a = downloads.configure("a", &first, &path, false).await;
+            let b = downloads.configure("b", &second, &path, false).await;
+            let (a, b) = tokio::join!(
+                load_one("a", &first, a, &downloads),
+                load_one("b", &second, b, &downloads)
+            );
+            let (SourceLoad::Ready(a), SourceLoad::Ready(b)) = (a.unwrap(), b.unwrap()) else {
+                panic!("expected catalogs");
+            };
+            let hints = a.tools[0].catalog_hints.as_ref().unwrap();
+            assert!(Arc::ptr_eq(
+                hints,
+                b.tools[0].catalog_hints.as_ref().unwrap()
+            ));
+            let key = hints.operation("GET", "/items");
+            assert!(key.get().is_none());
+            if round == 0 {
+                key.learn(U256::from(3), crate::pricing::runtime::received().unwrap());
+                assert_eq!(
+                    b.tools[0]
+                        .catalog_hints
+                        .as_ref()
+                        .unwrap()
+                        .operation("GET", "/items")
+                        .get(),
+                    Some(U256::from(3))
+                );
+                previous = Some(key);
+                second.provider.insert(
+                    "base_url".into(),
+                    toml::Value::String("https://updated.example".into()),
+                );
+            } else {
+                assert!(previous.as_ref().unwrap().get().is_none());
+            }
+            assert_eq!(requests.load(Ordering::SeqCst), round + 1);
+        }
+        server.abort();
     }
 }

@@ -1492,10 +1492,10 @@ estimates. Missing structured prices remain unknown. Startup, inspection and war
 never send endpoint requests to discover prices. Actual calls still acquire a fresh
 unsigned x402 challenge and enforce the selected payer's payment authority.
 
-Validated challenges from actual managed calls can teach the passive runtime price
-hint cache. Hints advise existing wallet selection and fresh MCP descriptions; they never
-authorize signing, initiate HTTP or refresh catalogs. Receipt age, identity
-partitioning and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
+Validated challenges from actual managed calls update estimates attached to the
+remote catalog cache entry. Compatible aliases, listeners and wallet groups share
+these estimates. Hints advise existing wallet selection and fresh MCP descriptions;
+they never authorize signing or initiate HTTP. Cache identity and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
 and [resource limits](local-resource-limits.md).
 
 Managed API results also carry their own latest validated offer in a separate MCP
@@ -1514,20 +1514,25 @@ for block order and body-only convenience methods.
 Deployments with an **existing** `treasury.state_dir` automatically use its
 `http-cache/discovery-v1.sqlite` for remote API catalogs.
 No wallet is opened and no state directory is created for caching. Standalone
-providers and deployments without existing treasury state retain their in-memory
-behavior. `config show` remains offline. A provider or source can opt out with
+providers and deployments without existing treasury state load catalogs without
+disk caching. Local catalogs and dynamic imports do not gain disk caching for prices.
+Calls without a catalog entry retain their own validated-offer results.
+`config show` remains offline. A provider or source can opt out with
 `http_cache_enabled = false`; this also prevents sharing a disk-enabled alias's
 catalog load.
 
 Catalogs are local snapshots, using a provider/source setting:
 
 ```toml
-catalog_cache_ttl_seconds = 86400 # default: 24 hours; 0 disables catalog disk caching
+catalog_cache_ttl_seconds = 604800 # default: seven days; 0 disables catalog disk caching
 ```
 
-This default shares a constant with the runtime API price-hint lifetime. A catalog
-override does not change that process-wide hint lifetime; see
-[local resource limits](local-resource-limits.md).
+Catalogs and their operation estimates have one lifetime. Reads, restart and price
+observations do not renew it. Successful revalidation, including HTTP 304 or an
+unchanged download, renews the catalog and retains its estimates. Changed catalog
+bytes or a previously loaded source's configuration update discard both together.
+Alias selection and listener publication preserve prices; configuration revisions
+are recorded per source alongside the shared entry, without partitioning lookup.
 
 A deployment source can override its provider's value. Any positive integer sets
 local retention regardless of upstream `Cache-Control` or `Expires`, including

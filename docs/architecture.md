@@ -30,9 +30,9 @@ permissions and wallet bindings without loading specs or reading keys.
 `src/catalog.rs` loads OpenAPI JSON and builds tool schemas, names, descriptions
 and path/query/body routing. Canonical descriptions retain complete fallback pricing
 for indexing, inspection and persistence. Runtime-only rendering metadata retains
-the pricing-free base and configured character limit. `BoundTool` derives the same
-source identity, direct-target public policy and operation key for description
-lookup as invocation. Fresh get/list/search results render the applicable hint
+the pricing-free base and configured character limit. `BoundTool` uses the acquired catalog cache handle and original method/path
+template for both description lookup and invocation. Relay and explicit direct-warm
+provenance travel with the raw document through binding. Fresh get/list/search results render the applicable hint
 without mutating catalogs, ranking or generation-bound cursors. Curated rebinding
 updates both the canonical text and retained base; serialized registrations rebuild
 metadata on import. Provider files in `providers/` carry selections,
@@ -518,9 +518,27 @@ does not sweep idle managed USDC wallets. Shared scalar acquisition ownership is
 separate from payment authorization and canonical qualification.
 Qualification retains its existing run permits and charges every attempt.
 
-Keep catalog/help caching and coalescing separate from passive runtime hints.
-Hints learn from actual invocation challenges and guide selection and fresh MCP
-description rendering. Every
+Remote catalog entries own passive operation estimates. Their existing cache
+identity also shares prices across compatible aliases, wallet groups, listeners,
+API destination overrides and authentication settings. It never shares a signer
+or payer-bound transport. Catalog retention defaults to seven days and
+`catalog_cache_ttl_seconds` controls both catalog and hints; there is no price-age
+gate. Reads, restart and observations do not renew expiry. Successful unchanged
+loads/revalidation preserve prices; HTTP 304 renews the joint entry. Changed bytes
+and source configuration updates invalidate both. Per-source revision bookkeeping
+runs before shared acquisition and records every alias after acquisition, including
+the first cache creation. Revision records disappear with their catalog.
+
+The SQLite cache keeps raw bytes intact, with generation-bound operation amounts
+alongside them. Live bindings share in-memory learning immediately; detached,
+best-effort writes never delay responses or recreate missing generations. Receipt
+order controls in-process updates and conditional versions prevent older writes
+from replacing newer ones. Expiry and eviction discard only metadata. No new
+background refresh, price probes or financial recovery obligations follow. Local
+catalogs, dynamic imports, opted-out sources and deployments without an existing
+state directory keep per-call pricing without a shared hint cache. Help retains
+its separate authority-bound cache. Hints learn from actual invocation challenges
+and guide selection and fresh MCP description rendering. Every
 invocation still makes its ordinary unsigned request; authored display prices do
 not replace the live challenge. The selected design also creates new identities over time; its reuse objective depends
 on the HTTP and cover retention fixes in the [network retention contract](network-egress.md).

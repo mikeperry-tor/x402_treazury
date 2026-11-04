@@ -22,6 +22,12 @@ source remains pending. Successful supervisor shutdown and Store reopen retain
 the exact source bytes, attempt and claim identities. This needs no transaction
 proving or synthetic chain; separate worker-drain tests cover blocked accepted work.
 
+`deployment::startup::price_alias_tests` verifies first-startup revision capture for
+all compatible aliases, shared acquisition despite API destination/prefix changes,
+and invalidation when the second alias changes on the next load. Catalog cache
+fixtures cover direct-warm/relay provenance, joint price renewal on HTTP 304,
+expiry, replacement and stale writes; no API probes or wallet creation are needed.
+
 Run the focused regression suites sequentially:
 
 ```sh

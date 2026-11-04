@@ -230,7 +230,7 @@ sources=["local"]
         let unlimited = Arc::new(
             ManagedPool::new(
                 store.clone(),
-                pools[0].hint_group_scope().1.to_owned(),
+                pools[0].group_name().to_owned(),
                 crate::rotation::base::BaseRpc::new("https://rpc.example", 3).unwrap(),
                 SpendPolicy { max_atomic: None },
             )

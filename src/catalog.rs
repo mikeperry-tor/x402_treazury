@@ -102,6 +102,8 @@ pub struct Config {
     #[serde(skip)]
     pub discovery_source: Option<String>,
     #[serde(skip)]
+    pub cache_revision: Option<String>,
+    #[serde(skip)]
     pub relay_fallback: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
     /// Only deferred serving discovery waits for its local SOCKS prerequisite.
     #[serde(skip)]
@@ -198,6 +200,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             discovery_source: None,
+            cache_revision: None,
             relay_fallback: None,
             wait_for_startup_socks: false,
             http_cache_enabled: true,
@@ -270,6 +273,8 @@ pub struct DescriptionRendering {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
+    #[serde(skip)]
+    pub catalog_hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_mapping: Option<crate::output::ResponseMapping>,
     #[serde(
@@ -478,8 +483,41 @@ pub async fn load_json_with_limit(
 }
 /// An unsigned load can retain its exact relay continuation without repeating
 /// origin I/O. The continuation owns its configuration and shared relay state.
+#[derive(Clone, Debug)]
+pub struct LoadedCatalog {
+    pub document: std::sync::Arc<Value>,
+    pub hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
+}
+impl std::ops::Deref for LoadedCatalog {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        &self.document
+    }
+}
+impl From<std::sync::Arc<LoadedCatalog>> for LoadedCatalog {
+    fn from(value: std::sync::Arc<LoadedCatalog>) -> Self {
+        (*value).clone()
+    }
+}
+impl From<std::sync::Arc<Value>> for LoadedCatalog {
+    fn from(document: std::sync::Arc<Value>) -> Self {
+        Self {
+            document,
+            hints: None,
+        }
+    }
+}
+fn loaded(
+    document: Value,
+    hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
+) -> LoadedCatalog {
+    LoadedCatalog {
+        document: std::sync::Arc::new(document),
+        hints,
+    }
+}
 pub(crate) enum CatalogLoad {
-    Ready(Value),
+    Ready(LoadedCatalog),
     RelayPending(Box<RelayContinuation>),
 }
 pub(crate) struct RelayContinuation {
@@ -488,17 +526,20 @@ pub(crate) struct RelayContinuation {
     retry_after: Option<crate::network::RetryAfter>,
 }
 impl RelayContinuation {
-    pub(crate) async fn resume(&self) -> Result<Value> {
+    pub(crate) async fn resume(&self) -> Result<LoadedCatalog> {
         self.resume_mode(None, None, false).await
     }
-    async fn resume_bounded(&self, gate: std::sync::Arc<tokio::sync::Semaphore>) -> Result<Value> {
+    async fn resume_bounded(
+        &self,
+        gate: std::sync::Arc<tokio::sync::Semaphore>,
+    ) -> Result<LoadedCatalog> {
         self.resume_mode(Some(gate), None, false).await
     }
     pub(crate) async fn resume_when_ready(
         &self,
         gate: std::sync::Arc<tokio::sync::Semaphore>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
-    ) -> Result<Value> {
+    ) -> Result<LoadedCatalog> {
         self.resume_mode(Some(gate), operator_status, true).await
     }
     #[tracing::instrument(name = "catalog_relay", skip_all, fields(
@@ -509,7 +550,7 @@ impl RelayContinuation {
         gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
         wait_for_ready: bool,
-    ) -> Result<Value> {
+    ) -> Result<LoadedCatalog> {
         let cfg = &self.config;
         let error = &self.origin_error;
         let http_error = error.downcast_ref::<reqwest::Error>();
@@ -565,7 +606,7 @@ impl RelayContinuation {
         })?;
         // The relay has already validated complete JSON before caching the response.
         let document = parse_document(&response.body)?;
-        if let Some(slot) = crate::discovery_relay::slot_for(
+        let hints = if let Some(slot) = crate::discovery_relay::slot_for(
             cfg,
             &cfg.spec,
             "catalog",
@@ -588,13 +629,16 @@ impl RelayContinuation {
                 metadata
                     .filter(|m| m.fresh())
                     .map(|metadata| crate::http_cache::Entry {
+                        hints: None,
                         metadata,
                         data: response.body.clone(),
                     }),
             )
-            .await;
-        }
-        Ok(document)
+            .await
+        } else {
+            None
+        };
+        Ok(loaded(document, hints))
     }
 }
 
@@ -606,14 +650,17 @@ pub(crate) async fn load_json_discovery_with(
     cfg: &Config,
     network: &crate::network::NetworkContext,
 ) -> Result<Value> {
-    load_json_discovery_bounded(cfg, network, None).await
+    Ok((*load_json_discovery_bounded(cfg, network, None)
+        .await?
+        .document)
+        .clone())
 }
 
-pub(crate) async fn load_json_discovery_bounded(
+pub async fn load_json_discovery_bounded(
     cfg: &Config,
     network: &crate::network::NetworkContext,
     gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
-) -> Result<Value> {
+) -> Result<LoadedCatalog> {
     match prepare_json_discovery_bounded(cfg, network, gate.clone()).await? {
         CatalogLoad::Ready(document) => Ok(document),
         CatalogLoad::RelayPending(pending) => match gate {
@@ -642,6 +689,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
         "Catalog disk cache configuration"
     );
     for slot in crate::discovery_relay::slots(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes) {
+        slot.check_revision().await;
         let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) else {
             continue;
         };
@@ -650,7 +698,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
                 cache = "relay_disk_hit",
                 "Catalog JSON read from fresh relay cache; content supplied by configured relay; tool generation and validation still required"
             );
-            return Ok(CatalogLoad::Ready(document));
+            return Ok(CatalogLoad::Ready(loaded(document, entry.hints)));
         }
         slot.write(None).await;
     }
@@ -688,7 +736,7 @@ async fn load_json_discovery_origin(
     network: &crate::network::NetworkContext,
     slot: Option<crate::http_cache::Slot>,
     gate: Option<&tokio::sync::Semaphore>,
-) -> std::result::Result<Value, crate::network::acquisition::Failure> {
+) -> std::result::Result<LoadedCatalog, crate::network::acquisition::Failure> {
     let source = &cfg.spec;
     if !source.starts_with("https://") && !source.starts_with("http://") {
         tracing::debug!(cache = "local_file", "Catalog loading local file");
@@ -696,9 +744,15 @@ async fn load_json_discovery_origin(
             .await
             .context(LoadStage::LocalRead)
             .map_err(crate::network::acquisition::Failure::local)?;
-        return parse_document(&bytes).map_err(crate::network::acquisition::Failure::validation);
+        return Ok(loaded(
+            parse_document(&bytes).map_err(crate::network::acquisition::Failure::validation)?,
+            None,
+        ));
     }
 
+    if let Some(slot) = &slot {
+        slot.check_revision().await;
+    }
     let cached = read_cached_catalog(slot.as_ref()).await;
     if cached
         .as_ref()
@@ -708,7 +762,10 @@ async fn load_json_discovery_origin(
             cache = "disk_hit",
             "Catalog JSON read from fresh HTTP disk cache; tool generation and validation still required"
         );
-        return Ok(cached.expect("fresh cached document").1);
+        return Ok({
+            let (entry, document) = cached.expect("fresh cached document");
+            loaded(document, entry.hints)
+        });
     }
 
     if cfg.wait_for_startup_socks {
@@ -734,8 +791,7 @@ async fn load_json_discovery_origin(
     );
 
     match fetch_catalog_origin(cfg, network, conditional, slot.as_ref(), gate).await {
-        Ok(Some(document)) => Ok(document),
-        Ok(None) => Ok(cached.expect("validated cached document").1),
+        Ok(document) => Ok(document),
         Err(err) => {
             if let Some(slot) = &slot {
                 slot.write(None).await;
@@ -751,7 +807,7 @@ async fn fetch_catalog_origin(
     conditional: Option<&crate::http_cache::Entry>,
     slot: Option<&crate::http_cache::Slot>,
     gate: Option<&tokio::sync::Semaphore>,
-) -> std::result::Result<Option<Value>, crate::network::acquisition::Failure> {
+) -> std::result::Result<LoadedCatalog, crate::network::acquisition::Failure> {
     use crate::network::acquisition::{self, Failure, FallbackPolicy};
     let policy = FallbackPolicy::RemoteFailures;
     let source = &cfg.spec;
@@ -804,10 +860,14 @@ async fn fetch_catalog_origin(
                         anyhow::Error::new(IncompleteCatalog).context(LoadStage::Body),
                     ));
                 }
-                revalidate_cached_catalog(response.headers(), conditional, slot)
+                let hints = revalidate_cached_catalog(response.headers(), conditional, slot)
                     .await
                     .map_err(Failure::validation)?;
-                return Ok(None);
+                return Ok(loaded(
+                    serde_json::from_slice(&conditional.expect("validated cached entry").data)
+                        .map_err(|error| Failure::validation(error.into()))?,
+                    hints,
+                ));
             }
             // An unfollowed redirect may still carry a valid legacy catalog body.
             if status.is_client_error() || status.is_server_error() {
@@ -836,8 +896,8 @@ async fn fetch_catalog_origin(
                 })?;
             let document =
                 parse_document(&bytes).map_err(|error| Failure::remote_content(error, policy))?;
-            persist_catalog_response(status, &headers, bytes, slot).await;
-            Ok(Some(document))
+            let hints = persist_catalog_response(status, &headers, bytes, slot).await;
+            Ok(loaded(document, hints))
         },
     )
     .await?;
@@ -904,7 +964,7 @@ async fn revalidate_cached_catalog(
     headers: &reqwest::header::HeaderMap,
     conditional: Option<&crate::http_cache::Entry>,
     slot: Option<&crate::http_cache::Slot>,
-) -> Result<()> {
+) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
     let Some(entry) = conditional else {
         return Err(anyhow::anyhow!("unsolicited catalog HTTP 304"))
             .context(diagnostics::Problem(
@@ -931,19 +991,22 @@ async fn revalidate_cached_catalog(
         cache_policy = crate::http_cache::Metadata::policy_label(headers, metadata.as_ref()),
         "Catalog revalidation response cache policy"
     );
-    if let Some(slot) = slot {
+    let hints = if let Some(slot) = slot {
         slot.write(metadata.map(|metadata| crate::http_cache::Entry {
+            hints: None,
             metadata,
             data: entry.data.clone(),
         }))
-        .await;
-    }
+        .await
+    } else {
+        None
+    };
     tracing::debug!(
         cache = "revalidated",
         http_status = 304,
         "Catalog HTTP disk cache revalidated by origin"
     );
-    Ok(())
+    Ok(hints)
 }
 
 async fn persist_catalog_response(
@@ -951,7 +1014,7 @@ async fn persist_catalog_response(
     headers: &reqwest::header::HeaderMap,
     bytes: Vec<u8>,
     slot: Option<&crate::http_cache::Slot>,
-) {
+) -> Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>> {
     let metadata = if status == reqwest::StatusCode::OK {
         crate::http_cache::Metadata::from_catalog_headers(
             headers,
@@ -974,10 +1037,13 @@ async fn persist_catalog_response(
     );
     if let Some(slot) = slot {
         slot.write(metadata.map(|metadata| crate::http_cache::Entry {
+            hints: None,
             metadata,
             data: bytes,
         }))
-        .await;
+        .await
+    } else {
+        None
     }
 }
 fn parse_document(bytes: &[u8]) -> Result<Value> {
@@ -1334,7 +1400,7 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
         .map(|(op, name)| operation_tool(cfg, root, &op, name, &mut credit_diagnostics))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
+        tools.push(ToolSpec { catalog_hints: None, response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
             method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
             param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
@@ -1754,6 +1820,7 @@ fn operation_tool(
     });
     let (description, description_rendering) = operation_description(cfg, op, credit_estimate);
     Ok(ToolSpec {
+        catalog_hints: None,
         response_mapping: cfg
             .response_mappings
             .get(&format!(

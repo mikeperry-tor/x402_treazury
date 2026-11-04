@@ -189,24 +189,23 @@ impl BoundTool {
         } else {
             client
         };
-        let operation = client.operation_key(
-            self.source
-                .as_ref()
-                .map(|(id, revision)| (id.as_str(), *revision)),
-            &self.tool.method,
-            &self.tool.path,
-            self.tool.request_url.as_deref().unwrap_or(&self.base),
-        );
-        (client, operation)
+        (client, self.operation_key())
+    }
+
+    fn operation_key(&self) -> Option<crate::pricing::runtime::OperationKey> {
+        self.tool
+            .catalog_hints
+            .as_ref()
+            .map(|hints| hints.operation(&self.tool.method, &self.tool.path))
     }
 
     pub(crate) fn description(&self) -> String {
         if self.tool.help_url.is_some() {
             return self.tool.description.clone();
         }
-        let (_, operation) = self.execution_scope();
-        let price = operation
-            .and_then(|key| crate::pricing::runtime::process_hints().get(key))
+        let price = self
+            .operation_key()
+            .and_then(|key| key.get())
             .map(|amount| crate::output::ObservedPrice { amount });
         self.tool.render_description(price)
     }

@@ -1,7 +1,7 @@
 //! Learn only from normal unsigned HTTP challenges, after full SDK validation.
 use super::*;
 use crate::{
-    pricing::runtime::{OperationKey, process_hints},
+    pricing::runtime::OperationKey,
     rotation::{
         base::BaseRpc,
         manager::ManagedPool,
@@ -33,6 +33,7 @@ enum Reply {
 struct Fixture {
     _dir: tempfile::TempDir,
     client: PaidClient,
+    hints: Arc<crate::pricing::runtime::CatalogHints>,
     store: StoreHandle,
     worker: tokio::task::JoinHandle<()>,
     server: tokio::task::JoinHandle<()>,
@@ -147,6 +148,7 @@ async fn fixture() -> Fixture {
     rpc.store(0, Ordering::SeqCst);
     let client = PaidClient::managed(Arc::new(manager)).with_source_identity("hint-fixture");
     Fixture {
+        hints: crate::pricing::runtime::fixture(dir.path()).await,
         _dir: dir,
         client,
         store,
@@ -162,9 +164,7 @@ async fn fixture() -> Fixture {
 }
 impl Fixture {
     fn key(&self, template: &str) -> OperationKey {
-        self.client
-            .operation_key(None, "GET", template, &self.base)
-            .unwrap()
+        self.hints.operation("GET", template)
     }
     fn route(&self) -> RoutedRequest {
         RoutedRequest {
@@ -178,7 +178,11 @@ impl Fixture {
     async fn call(&self, key: OperationKey, reply: Reply) -> Result<crate::output::HttpOutput> {
         self.replies.lock().unwrap().push_back(reply);
         self.client
-            .execute_response_scoped(self.route(), &SubmissionProgress::default(), Some(key))
+            .execute_response_scoped(
+                self.route(),
+                &SubmissionProgress::default(),
+                Some(key.clone()),
+            )
             .await
     }
     async fn close(self) {
@@ -203,7 +207,7 @@ async fn valid_selected_lowest_price_learns_before_financial_failure_and_updates
     let f = fixture().await;
     let key = f.key("/items/{id}");
     let error = f
-        .call(key, Reply::Challenge(challenge(&[9000, 7000])))
+        .call(key.clone(), Reply::Challenge(challenge(&[9000, 7000])))
         .await
         .unwrap_err();
     assert!(
@@ -218,21 +222,21 @@ async fn valid_selected_lowest_price_learns_before_financial_failure_and_updates
             .amount,
         U256::from(7000)
     );
-    assert_eq!(process_hints().get(key), Some(U256::from(7000)));
+    assert_eq!(key.get(), Some(U256::from(7000)));
     assert_eq!(
         f.rpc.load(Ordering::SeqCst),
         0,
         "advisory insufficiency cannot require a balance RPC"
     );
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-    let original = process_hints().saved_receipt(key).unwrap();
+    let original = key.saved_receipt().unwrap();
     assert!(
-        f.call(key, Reply::Challenge(challenge(&[3000])))
+        f.call(key.clone(), Reply::Challenge(challenge(&[3000])))
             .await
             .is_err()
     );
-    assert_eq!(process_hints().get(key), Some(U256::from(3000)));
-    assert!(process_hints().saved_receipt(key).unwrap() != original);
+    assert_eq!(key.get(), Some(U256::from(3000)));
+    assert!(key.saved_receipt().unwrap() != original);
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
     f.close().await;
 }
@@ -243,14 +247,14 @@ async fn invalid_unsupported_overcap_incomplete_and_free_responses_never_teach_o
     let learned = f.key("/learned");
     let absent = f.key("/absent");
     assert!(
-        f.call(learned, Reply::Challenge(challenge(&[7000])))
+        f.call(learned.clone(), Reply::Challenge(challenge(&[7000])))
             .await
             .is_err()
     );
-    let receipt = process_hints().saved_receipt(learned).unwrap();
+    let receipt = learned.saved_receipt().unwrap();
     let rpc = f.rpc.load(Ordering::SeqCst);
     for mode in 0..5 {
-        for key in [learned, absent] {
+        for key in [learned.clone(), absent.clone()] {
             let reply = match mode {
                 0 => Reply::Malformed,
                 1 => {
@@ -266,15 +270,15 @@ async fn invalid_unsupported_overcap_incomplete_and_free_responses_never_teach_o
                 }
                 _ => Reply::Free,
             };
-            let result = f.call(key, reply).await;
+            let result = f.call(key.clone(), reply).await;
             assert_eq!(result.is_ok(), mode == 4);
             assert!(match &result {
                 Ok(output) => output.observed_price.is_none(),
                 Err(error) => crate::output::ObservedPrice::from_error(error).is_none(),
             });
-            assert_eq!(process_hints().get(learned), Some(U256::from(7000)));
-            assert!(process_hints().saved_receipt(learned) == Some(receipt));
-            assert!(process_hints().get(absent).is_none());
+            assert_eq!(learned.get(), Some(U256::from(7000)));
+            assert!(learned.saved_receipt() == Some(receipt));
+            assert!(absent.get().is_none());
         }
     }
     assert_eq!(
@@ -291,11 +295,11 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
     let f = fixture().await;
     let key = f.key("/items/{id}");
     assert!(
-        f.call(key, Reply::Challenge(challenge(&[7000])))
+        f.call(key.clone(), Reply::Challenge(challenge(&[7000])))
             .await
             .is_err()
     );
-    assert_eq!(process_hints().get(key), Some(U256::from(7000)));
+    assert_eq!(key.get(), Some(U256::from(7000)));
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     f.store
         .call(|s| {
@@ -318,7 +322,7 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
     // A valid observed offer teaches a hint even when current Store authority
     // refuses it. The hint cannot authorize signing or create a journal entry.
     let error = f
-        .call(key, Reply::Challenge(challenge(&[6000])))
+        .call(key.clone(), Reply::Challenge(challenge(&[6000])))
         .await
         .unwrap_err();
     assert!(
@@ -336,7 +340,7 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
             .amount,
         U256::from(6000)
     );
-    assert_eq!(process_hints().get(key), Some(U256::from(6000)));
+    assert_eq!(key.get(), Some(U256::from(6000)));
     let db = rusqlite::Connection::open(f._dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
         db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
@@ -346,7 +350,7 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
     );
     drop(db);
     let error = f
-        .call(key, Reply::Challenge(challenge(&[3000])))
+        .call(key.clone(), Reply::Challenge(challenge(&[3000])))
         .await
         .unwrap_err();
     assert!(
@@ -357,7 +361,7 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
     );
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 3);
     assert_eq!(f.signed.load(Ordering::SeqCst), 2);
-    assert_eq!(process_hints().get(key), Some(U256::from(3000)));
+    assert_eq!(key.get(), Some(U256::from(3000)));
     assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
     f.close().await;
 }
@@ -374,20 +378,21 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
         release.clone(),
     ));
     let (client, route) = (f.client.clone(), f.route());
+    let first_key = key.clone();
     let first = tokio::spawn(async move {
         client
-            .execute_response_scoped(route, &SubmissionProgress::default(), Some(key))
+            .execute_response_scoped(route, &SubmissionProgress::default(), Some(first_key))
             .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
         .await
         .unwrap();
     assert!(
-        process_hints().get(key).is_none(),
+        key.get().is_none(),
         "unvalidated envelope cannot teach from headers alone"
     );
     let second = f
-        .call(key, Reply::Challenge(challenge(&[3000])))
+        .call(key.clone(), Reply::Challenge(challenge(&[3000])))
         .await
         .unwrap_err();
     assert_eq!(
@@ -396,7 +401,7 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
             .amount,
         U256::from(3000)
     );
-    let newer = process_hints().saved_receipt(key).unwrap();
+    let newer = key.saved_receipt().unwrap();
     release.add_permits(1);
     let first = first.await.unwrap().unwrap_err();
     assert_eq!(
@@ -405,11 +410,14 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
             .amount,
         U256::from(9000)
     );
-    assert_eq!(process_hints().get(key), Some(U256::from(3000)));
-    assert!(process_hints().saved_receipt(key) == Some(newer));
-    let tools = crate::catalog::build_tools(&Default::default(), &json!({"paths":{
+    assert_eq!(key.get(), Some(U256::from(3000)));
+    assert!(key.saved_receipt() == Some(newer));
+    let mut tools = crate::catalog::build_tools(&Default::default(), &json!({"paths":{
         "/items/{id}":{"get":{"summary":"Read item.","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}]}}
     }}), "priced").unwrap();
+    for tool in &mut tools {
+        tool.catalog_hints = Some(f.hints.clone());
+    }
     let name = tools[0].name.clone();
     let server = crate::server::Server::new(tools, f.client.clone(), f.base.clone(), None);
     use rmcp::ServerHandler;
@@ -426,12 +434,15 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
 async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() {
     use crate::mcp_wire::McpResponse;
     let f = fixture().await;
-    let tools = crate::catalog::build_tools(
+    let mut tools = crate::catalog::build_tools(
         &Default::default(),
         &json!({"paths":{"/items":{"get":{}}}}),
         "priced",
     )
     .unwrap();
+    for tool in &mut tools {
+        tool.catalog_hints = Some(f.hints.clone());
+    }
     let mut calls = 0;
     let mut signatures = 0;
     for discovered in [false, true] {
@@ -627,7 +638,7 @@ async fn raw_calls_capture_without_a_hint_key_and_zero_is_not_synthesized_free()
             price.map(|price| price.amount),
             (amount > 0).then(|| U256::from(amount))
         );
-        assert!(process_hints().get(f.key("/items")).is_none());
+        assert!(f.key("/items").get().is_none());
     }
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
@@ -677,13 +688,12 @@ async fn manual_authorization_keeps_captured_managed_payer_after_active_rotation
         .await
         .unwrap();
     let key = f.key("/rotation/sibling");
-    process_hints().learn(
-        key,
+    key.learn(
         U256::from(9000),
         crate::pricing::runtime::received().unwrap(),
     );
     assert!(
-        f.call(key, Reply::Challenge(challenge(&[9000])))
+        f.call(key.clone(), Reply::Challenge(challenge(&[9000])))
             .await
             .is_err()
     );

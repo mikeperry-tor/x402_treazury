@@ -167,6 +167,7 @@ async fn fresh_catalog_disk_hit_does_not_wait_for_absent_socks() {
     crate::http_cache::Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
         .unwrap()
         .write(Some(crate::http_cache::Entry {
+            hints: None,
             metadata,
             data: serde_json::to_vec(&document).unwrap(),
         }))

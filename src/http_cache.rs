@@ -1,4 +1,4 @@
-//! Private, disposable discovery cache. Never used by payment or dynamic imports.
+//! Private, disposable catalog storage and advisory prices; never payment authority.
 use anyhow::{Result, ensure};
 use reqwest::header::HeaderMap;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -26,6 +26,7 @@ pub(crate) struct Metadata {
 }
 #[derive(Clone)]
 pub(crate) struct Entry {
+    pub hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
     pub metadata: Metadata,
     pub data: Vec<u8>,
 }
@@ -388,6 +389,7 @@ pub(crate) struct Slot {
     source: String,
     limit: usize,
     pub catalog_ttl: u64,
+    revision: Option<(String, String)>,
 }
 impl Slot {
     pub fn availability(cfg: &crate::catalog::Config, kind: &str) -> &'static str {
@@ -473,6 +475,16 @@ impl Slot {
                 .unwrap_or_else(|| "standalone".into()),
             limit,
             catalog_ttl: cfg.catalog_cache_ttl_seconds,
+            revision: (kind == "catalog").then(|| {
+                (
+                    cfg.discovery_source
+                        .clone()
+                        .unwrap_or_else(|| "standalone".into()),
+                    cfg.cache_revision
+                        .clone()
+                        .unwrap_or_else(|| configuration_revision(cfg)),
+                )
+            }),
         })
     }
     pub(crate) fn relay(mut self, identity: &str) -> Self {
@@ -482,6 +494,32 @@ impl Slot {
         );
         self.direct_key = None;
         self
+    }
+    pub(crate) async fn check_revision(&self) {
+        self.check_primary_revision().await;
+        if let Some(key) = &self.direct_key {
+            let mut direct = self.clone();
+            direct.key = key.clone();
+            direct.check_primary_revision().await;
+        }
+    }
+    async fn check_primary_revision(&self) {
+        let slot = self.clone();
+        let _ = blocking(move || {
+            if !slot.directory.exists() { return Ok(()); }
+            let mut db = open(&slot.directory)?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some((source, revision)) = &slot.revision {
+                let old: Option<String> = tx.query_row("SELECT revision FROM catalog_revisions WHERE key=?1 AND source=?2", params![slot.key, source], |r| r.get(0)).optional()?;
+                if old.as_ref().is_some_and(|old| old != revision) {
+                    tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
+                    retire(&slot);
+                }
+                tx.execute("INSERT INTO catalog_revisions SELECT key,?2,?3 FROM entries WHERE key=?1 ON CONFLICT(key,source) DO UPDATE SET revision=excluded.revision", params![slot.key, source, revision])?;
+            }
+            tx.commit()?;
+            Ok(())
+        }).await;
     }
     pub async fn read(&self) -> Option<Entry> {
         let ordinary = self.read_primary().await;
@@ -520,7 +558,8 @@ impl Slot {
                 return Ok(None);
             }
             let mut connection = open(&slot.directory)?;
-            let db = connection.transaction()?;
+            let db =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let size: Option<(i64, i64)> = db
                 .query_row(
                     "SELECT length(CAST(metadata AS BLOB)), length(data) FROM entries WHERE key=?1",
@@ -538,6 +577,7 @@ impl Slot {
                     "HTTP cache entry exceeds resource limit; discarded, fetching origin"
                 );
                 db.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
+                retire(&slot);
                 db.commit()?;
                 return Ok(None);
             }
@@ -546,14 +586,23 @@ impl Slot {
                 [&slot.key],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            let metadata = match serde_json::from_str(&metadata) {
+            let metadata: Metadata = match serde_json::from_str(&metadata) {
                 Ok(metadata) => metadata,
                 Err(_) => {
                     tracing::debug!("HTTP cache metadata is incompatible; fetching origin");
                     return Ok(None);
                 }
             };
-            Ok(Some(Entry { metadata, data }))
+            let hints = if slot.resource == "catalog" {
+                hydrate(&slot, &db, &metadata)?
+            } else {
+                None
+            };
+            Ok(Some(Entry {
+                metadata,
+                data,
+                hints,
+            }))
         })
         .await;
         match result {
@@ -569,36 +618,55 @@ impl Slot {
             }
         }
     }
-    pub async fn write(&self, entry: Option<Entry>) {
+    pub async fn write(
+        &self,
+        entry: Option<Entry>,
+    ) -> Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>> {
         let slot = self.clone();
-        let result = blocking(move || -> Result<bool> {
-            let mut stored = false;
+        let result = blocking(move || -> Result<(bool, Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>)> {
             // Never create a treasury state directory, including after concurrent removal.
+            if entry.is_none() && !slot.directory.exists() { retire(&slot); return Ok((false,None)); }
             ensure!(slot.directory.parent().is_some_and(Path::is_dir), "cache parent missing");
-            if entry.is_none() && !slot.directory.exists() { return Ok(false); }
             let mut db = open(&slot.directory)?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
-            if let Some(entry) = entry {
-                let metadata = serde_json::to_string(&entry.metadata)?;
-                let size = metadata.len().saturating_add(entry.data.len());
-                if entry.data.len() > slot.limit || metadata.len() > METADATA_LIMIT || size > CAPACITY {
-                    tracing::warn!(limit_bytes = slot.limit.min(CAPACITY), limit_metadata_bytes = METADATA_LIMIT, "HTTP cache entry exceeds resource limit; complete response used without persistence");
-                } else {
-                    loop {
-                        let (bytes, count): (i64, i64) = tx.query_row("SELECT coalesce(sum(length(CAST(metadata AS BLOB))+length(data)),0),count(*) FROM entries", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
-                        if bytes + size as i64 <= CAPACITY as i64 && count < ENTRIES as i64 { break; }
-                        tx.execute("DELETE FROM entries WHERE key=(SELECT key FROM entries ORDER BY stored,key LIMIT 1)", [])?;
-                        tracing::debug!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
-                    }
-                    tx.execute("INSERT INTO entries VALUES(?1,?2,?3,?4)", params![slot.key, metadata, entry.data, i64::try_from(entry.metadata.stored)?])?;
-                    stored = true;
-                }
+            let Some(entry) = entry else {
+                tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
+                retire(&slot);
+                tx.commit()?;
+                return Ok((false,None));
+            };
+            let metadata = serde_json::to_string(&entry.metadata)?;
+            let size = metadata.len().saturating_add(entry.data.len());
+            if entry.data.len() > slot.limit || metadata.len() > METADATA_LIMIT || size > CAPACITY {
+                tx.execute("DELETE FROM entries WHERE key=?1",[&slot.key])?;
+                retire(&slot);
+                tx.commit()?;
+                tracing::warn!(limit_bytes = slot.limit.min(CAPACITY), limit_metadata_bytes = METADATA_LIMIT, "HTTP cache entry exceeds resource limit; complete response used without persistence");
+                return Ok((false,None));
             }
+            let unchanged = tx.query_row("SELECT data=?2 FROM entries WHERE key=?1",params![slot.key,entry.data],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false);
+            if !unchanged {
+                tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
+                retire(&slot);
+            }
+            loop {
+                let (bytes, count): (i64, i64) = tx.query_row("SELECT coalesce(sum(length(CAST(metadata AS BLOB))+length(data)),0),count(*) FROM entries WHERE key!=?1", [&slot.key], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                if bytes + size as i64 <= CAPACITY as i64 && count < ENTRIES as i64 { break; }
+                let key: String = tx.query_row("DELETE FROM entries WHERE key=(SELECT key FROM entries WHERE key!=?1 ORDER BY stored,key LIMIT 1) RETURNING key", [&slot.key], |r| r.get(0))?;
+                let mut evicted = slot.clone(); evicted.key = key; retire(&evicted);
+                tracing::debug!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
+            }
+            tx.execute("INSERT INTO entries VALUES(?1,?2,?3,?4) ON CONFLICT(key) DO UPDATE SET metadata=excluded.metadata,data=excluded.data,stored=excluded.stored", params![slot.key, metadata, entry.data, i64::try_from(entry.metadata.stored)?])?;
+            let hints = if slot.resource == "catalog" {
+                tx.execute("INSERT INTO catalogs VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET expires=excluded.expires", params![slot.key, uuid::Uuid::new_v4().to_string(), i64::try_from(entry.metadata.expires)?])?;
+                if let Some(hints) = existing(&slot) { hints.state.lock().expect("catalog hints poisoned").metadata = entry.metadata.clone(); }
+                hydrate(&slot,&tx,&entry.metadata)?
+            } else { None };
+            if let Some((source,revision)) = &slot.revision { tx.execute("INSERT OR IGNORE INTO catalog_revisions VALUES(?1,?2,?3)",params![slot.key,source,revision])?; }
             tx.commit()?;
-            Ok(stored)
+            Ok((true,hints))
         }).await;
-        if matches!(result, Ok(Ok(true))) {
+        if matches!(result, Ok(Ok((true, _)))) {
             tracing::debug!(
                 source = self.source,
                 resource = self.resource,
@@ -614,6 +682,10 @@ impl Slot {
                 "HTTP cache update failed; response remains usable without persistence"
             );
         }
+        result
+            .ok()
+            .and_then(Result::ok)
+            .and_then(|(_, hints)| hints)
     }
 }
 fn blocking<T: Send + 'static>(
@@ -677,7 +749,8 @@ fn open(directory: &Path) -> Result<Connection> {
         page_size == 4096 && page_count <= 36864,
         "cache database exceeds storage limit"
     );
-    db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA max_page_count=36864; CREATE TABLE IF NOT EXISTS entries(key TEXT PRIMARY KEY,metadata TEXT NOT NULL,data BLOB NOT NULL,stored INTEGER NOT NULL);")?;
+    db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA max_page_count=36864; CREATE TABLE IF NOT EXISTS entries(key TEXT PRIMARY KEY,metadata TEXT NOT NULL,data BLOB NOT NULL,stored INTEGER NOT NULL);")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS catalogs(key TEXT PRIMARY KEY REFERENCES entries(key) ON DELETE CASCADE,generation TEXT NOT NULL,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS prices(key TEXT NOT NULL REFERENCES catalogs(key) ON DELETE CASCADE,operation TEXT NOT NULL,amount TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(key,operation)); CREATE TABLE IF NOT EXISTS catalog_revisions(key TEXT NOT NULL REFERENCES entries(key) ON DELETE CASCADE,source TEXT NOT NULL,revision TEXT NOT NULL,PRIMARY KEY(key,source));")?;
     Ok(db)
 }
 
@@ -686,3 +759,139 @@ mod tests;
 
 #[cfg(test)]
 mod retry_after_tests;
+
+// Weak ownership follows published catalogs; aliases reuse the same live entry.
+type Registry = std::collections::HashMap<
+    (PathBuf, String),
+    std::sync::Weak<crate::pricing::runtime::CatalogHints>,
+>;
+fn registry() -> &'static std::sync::Mutex<Registry> {
+    static REGISTRY: std::sync::OnceLock<std::sync::Mutex<Registry>> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(Default::default)
+}
+fn existing(slot: &Slot) -> Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>> {
+    registry()
+        .lock()
+        .expect("catalog registry poisoned")
+        .get(&(slot.directory.clone(), slot.key.clone()))
+        .and_then(std::sync::Weak::upgrade)
+}
+fn retire(slot: &Slot) {
+    if let Some(hints) = registry()
+        .lock()
+        .expect("catalog registry poisoned")
+        .remove(&(slot.directory.clone(), slot.key.clone()))
+        .and_then(|h| h.upgrade())
+    {
+        hints.invalidate();
+    }
+}
+impl Slot {
+    pub(crate) async fn persist_price(
+        &self,
+        generation: &str,
+        operation: &str,
+        amount: alloy_primitives::U256,
+        version: i64,
+    ) {
+        let (slot, generation, operation) =
+            (self.clone(), generation.to_owned(), operation.to_owned());
+        let result = blocking(move || {
+            if !slot.directory.exists() { return Ok(()); }
+            let db = open(&slot.directory)?;
+            db.execute("INSERT INTO prices(key,operation,amount,version) SELECT key,?3,?4,?5 FROM catalogs WHERE key=?1 AND generation=?2 AND expires>?6 ON CONFLICT(key,operation) DO UPDATE SET amount=excluded.amount,version=excluded.version WHERE excluded.version>prices.version", params![slot.key,generation,operation,amount.to_string(),version,i64::try_from(now())?])?;
+            Ok(())
+        }).await;
+        if !matches!(result, Ok(Ok(()))) {
+            tracing::debug!(
+                "Catalog price estimate could not be saved; in-memory estimate remains usable"
+            );
+        }
+    }
+}
+
+fn hydrate(
+    slot: &Slot,
+    db: &Connection,
+    metadata: &Metadata,
+) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
+    use crate::pricing::runtime::{CatalogHints, Hint, State};
+    let row: Option<(String, i64)> = db
+        .query_row(
+            "SELECT generation,expires FROM catalogs WHERE key=?1",
+            [&slot.key],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((generation, _expires)) = row else {
+        return Ok(None);
+    };
+    if !metadata.fresh() {
+        return Ok(None);
+    }
+    let mut registry = registry().lock().expect("catalog registry poisoned");
+    registry.retain(|_, value| value.strong_count() != 0);
+    let identity = (slot.directory.clone(), slot.key.clone());
+    if let Some(hints) = registry.get(&identity).and_then(std::sync::Weak::upgrade) {
+        if hints.generation == generation {
+            return Ok(Some(hints));
+        }
+        hints.invalidate();
+    }
+    let mut prices = std::collections::BTreeMap::new();
+    let mut statement = db.prepare("SELECT operation,amount,version FROM prices WHERE key=?1")?;
+    for row in statement.query_map([&slot.key], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })? {
+        let (operation, amount, version) = row?;
+        if let Ok(amount) = amount.parse() {
+            prices.insert(
+                operation,
+                Hint {
+                    amount,
+                    version,
+                    receipt: None,
+                },
+            );
+        }
+    }
+    let hints = std::sync::Arc::new(CatalogHints {
+        slot: slot.clone(),
+        generation,
+        state: std::sync::Mutex::new(State {
+            metadata: metadata.clone(),
+            valid: true,
+            prices,
+        }),
+    });
+    registry.insert(identity, std::sync::Arc::downgrade(&hints));
+    Ok(Some(hints))
+}
+
+pub(crate) fn configuration_revision(cfg: &crate::catalog::Config) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(cfg).expect("serializable catalog configuration"))
+    )
+}
+impl Slot {
+    pub(crate) async fn record_configuration(&self, cfg: &crate::catalog::Config) {
+        let mut slot = self.clone();
+        slot.revision = Some((
+            cfg.discovery_source
+                .clone()
+                .unwrap_or_else(|| "standalone".into()),
+            cfg.cache_revision
+                .clone()
+                .unwrap_or_else(|| configuration_revision(cfg)),
+        ));
+        slot.check_primary_revision().await;
+    }
+}
+
+#[cfg(test)]
+mod price_tests;

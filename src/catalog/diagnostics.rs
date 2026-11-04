@@ -148,6 +148,7 @@ mod tests {
             (ETAG, "\"original\"".parse().unwrap()),
         ]);
         let entry = Entry {
+            hints: None,
             metadata: Metadata::from_headers(&headers, std::time::Duration::ZERO, None).unwrap(),
             data: b"{}".to_vec(),
         };

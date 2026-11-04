@@ -389,6 +389,11 @@ sources=["api"]
 
 #[tokio::test]
 async fn cache_bounds_evict_and_report_without_losing_complete_catalog() {
+    if crate::test_log_capture::run_in_child(
+        "http_cache::tests::cache_bounds_evict_and_report_without_losing_complete_catalog",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -468,6 +473,7 @@ async fn explicit_direct_entries_have_separate_provenance_and_require_freshness(
     )
     .unwrap();
     let mut entry = Entry {
+        hints: None,
         metadata,
         data: b"{}".to_vec(),
     };
@@ -1624,4 +1630,52 @@ async fn static_catalog_proven_local_proxy_refusal_never_schedules_paid_fallback
     assert_eq!(observed.calls.load(Ordering::SeqCst), 0);
     assert_eq!(observed.signed.load(Ordering::SeqCst), 0);
     relay_task.abort();
+}
+
+#[tokio::test]
+async fn catalog_304_renews_prices_and_changed_body_discards_them_without_api_calls() {
+    use alloy_primitives::U256;
+    let root = tempfile::tempdir().unwrap();
+    let (url, origin, task) = fixture().await;
+    let mut cfg = config(root.path());
+    cfg.spec = url;
+    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    let hints = loaded.hints.unwrap();
+    let key = hints.operation("GET", "/items");
+    key.learn(U256::from(3), crate::pricing::runtime::received().unwrap());
+    let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+    slot.persist_price(&hints.generation, &key.operation, U256::from(3), 1)
+        .await;
+    let mut expired = slot.read().await.unwrap();
+    expired.metadata.expires = 0;
+    slot.write(Some(expired)).await;
+    assert!(key.get().is_none());
+    origin.lock().unwrap().mode = 1;
+    let validated = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&hints, validated.hints.as_ref().unwrap()));
+    assert_eq!(key.get(), Some(U256::from(3)));
+    assert_eq!(origin.lock().unwrap().calls.len(), 2);
+    let mut expired = slot.read().await.unwrap();
+    expired.metadata.expires = 0;
+    slot.write(Some(expired)).await;
+    origin.lock().unwrap().mode = 2;
+    let replaced = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert_eq!(replaced["value"], 2);
+    assert!(key.get().is_none());
+    assert!(
+        replaced
+            .hints
+            .unwrap()
+            .operation("GET", "/items")
+            .get()
+            .is_none()
+    );
+    assert_eq!(origin.lock().unwrap().calls.len(), 3);
+    task.abort();
 }

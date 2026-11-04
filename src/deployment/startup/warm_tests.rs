@@ -43,6 +43,7 @@ sources=['api']
     )]);
     let metadata = Metadata::from_headers(&headers, Duration::ZERO, None).unwrap();
     let catalog = Entry {
+        hints: None,
         metadata: metadata.clone(),
         data:
             br#"{"operations":[{"method":"GET","path":"/read"},{"method":"GET","path":"/read"}]}"#

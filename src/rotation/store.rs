@@ -1136,7 +1136,6 @@ struct GroupOwners {
 type GroupGates = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, GroupOwners>>>;
 #[derive(Clone)]
 pub struct StoreHandle {
-    evidence_namespace: Uuid,
     sender: tokio::sync::mpsc::Sender<Work>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
@@ -1145,7 +1144,6 @@ pub struct StoreHandle {
 }
 impl StoreHandle {
     pub fn spawn(store: Store) -> (Self, tokio::task::JoinHandle<()>) {
-        let evidence_namespace = store.evidence_namespace;
         let group_gates = store.group_gates.clone();
         let treasury_changes = store.treasury_changes.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Work>(32);
@@ -1157,7 +1155,6 @@ impl StoreHandle {
         });
         (
             Self {
-                evidence_namespace,
                 sender,
                 group_gates,
                 treasury_changes,
@@ -1171,9 +1168,6 @@ impl StoreHandle {
         &self,
     ) -> std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>> {
         self.funding_owner.clone()
-    }
-    pub(crate) fn runtime_namespace(&self) -> Uuid {
-        self.evidence_namespace
     }
     /// All independently constructed payment owners for this store/group share
     /// the same gate, including while an accepted SQL job outlives its waiter.

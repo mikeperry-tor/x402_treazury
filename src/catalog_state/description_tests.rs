@@ -3,7 +3,7 @@ use super::*;
 use crate::{
     catalog::{Config, build_tools},
     payment::SpendPolicy,
-    pricing::runtime::{TTL, process_hints, received},
+    pricing::runtime::received,
     rotation::{
         base::BaseRpc,
         manager::ManagedPool,
@@ -44,7 +44,8 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             )
             .unwrap(),
         ));
-        let definitions = build_tools(
+        let hints = crate::pricing::runtime::fixture(dir.path()).await;
+        let mut definitions = build_tools(
             &Config::default(),
             &json!({"paths":{
                 "/alpha":{"get":{"summary":"Read alpha records."}},
@@ -53,6 +54,9 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             "display",
         )
         .unwrap();
+        for tool in &mut definitions {
+            tool.catalog_hints = Some(hints.clone());
+        }
         let mut tools = bind(
             definitions
                 .into_iter()
@@ -62,19 +66,10 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
         for tool in &mut tools {
             tool.source = Some(("registered".into(), 7));
         }
-        let key = client
-            .clone()
-            .with_source_identity("registered")
-            .operation_key(
-                Some(("registered", 7)),
-                "GET",
-                "/alpha",
-                "https://api.example.com",
-            )
-            .unwrap();
+        let key = hints.operation("GET", "/alpha");
         let fallback = tools[0].tool.description.clone();
         assert_eq!(tools[0].description(), fallback);
-        process_hints().learn(key, U256::from(5000), received().unwrap());
+        key.learn(U256::from(5000), received().unwrap());
         let expected = "Read alpha records. Observed cost: ~$0.005/call.";
         assert_eq!(tools[0].description(), expected);
         assert_eq!(tools[0].tool.description, fallback);
@@ -82,24 +77,31 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             serde_json::to_value(&tools[0].tool).unwrap()["description"],
             fallback
         );
-        for mutation in 0..8 {
+        for mutation in 0..5 {
             let mut other = tools[0].clone();
             match mutation {
-                0 => other.source = Some(("registered".into(), 8)),
-                1 => other.source = Some(("other".into(), 7)),
-                2 => other.tool.method = "POST".into(),
-                3 => other.tool.path = "/other".into(),
-                4 => other.base = "https://other.example.com".into(),
-                5 => other.client = PaidClient::unsigned(),
-                6 => other.tool.help_url = Some("https://api.example.com/help".into()),
-                _ => {
+                0 => other.source = Some(("other".into(), 8)),
+                1 => other.base = "https://other.example.com".into(),
+                2 => other.client = PaidClient::unsigned(),
+                3 => {
                     other.client = other.client.with_transport(crate::network::HttpPolicy {
                         allow_http1: true,
                         allow_tls12: true,
                     })
                 }
+                _ => other.tool.name = "alias".into(),
             }
-            assert_eq!(other.description(), fallback, "scope mutation {mutation}");
+            assert_eq!(other.description(), expected);
+        }
+        for mutation in 0..4 {
+            let mut other = tools[0].clone();
+            match mutation {
+                0 => other.tool.method = "POST".into(),
+                1 => other.tool.path = "/other".into(),
+                2 => other.tool.catalog_hints = None,
+                _ => other.tool.help_url = Some("https://api.example.com/help".into()),
+            }
+            assert_eq!(other.description(), fallback);
         }
         let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
             generation: 11,
@@ -132,7 +134,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
         assert_eq!(first["total"], 2);
         assert_eq!(search(json!({"query":"observed"}))["total"], 0);
         let cursor = first["next_cursor"].clone();
-        process_hints().learn(key, U256::from(7000), received().unwrap());
+        key.learn(U256::from(7000), received().unwrap());
         let second = search(json!({"limit":1,"cursor":cursor}));
         assert_eq!(second["items"][0]["tool_id"], tools[1].tool.name);
         assert_eq!(second["catalog_generation"], 11);
@@ -141,7 +143,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             "Read alpha records. Observed cost: ~$0.007/call."
         );
         let mut refreshed = tools.clone();
-        refreshed[0].source = Some(("registered".into(), 8));
+        refreshed[0].tool.catalog_hints = None;
         catalog.publish(CatalogSnapshot {
             generation: 12,
             views: BTreeMap::from([("default".into(), refreshed)]),
@@ -164,7 +166,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             )
             .is_err()
         );
-        tokio::time::advance(TTL).await;
+        hints.invalidate();
         assert_eq!(tools[0].description(), fallback);
         assert!(
             store

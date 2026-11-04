@@ -609,7 +609,7 @@ impl Entry {
                     body: Some(body),
                 },
                 &progress,
-                scoped.operation_key(None, "POST", operation(self.format), &self.endpoint),
+                None,
             )
             .await;
         let possible = progress.possible();

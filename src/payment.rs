@@ -77,116 +77,6 @@ mod tor_cover_tests;
 mod tor_wait_tests;
 
 pub const USDC: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-#[cfg(test)]
-mod hint_binding_tests {
-    use super::*;
-    use crate::rotation::{
-        base::BaseRpc,
-        manager::ManagedPool,
-        store::{Store, StoreHandle},
-    };
-
-    #[tokio::test]
-    async fn trusted_binding_distinguishes_sources_revisions_groups_and_store_lifetimes() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture",
-        )
-        .unwrap();
-        let identity = state.id().to_owned();
-        let first = crate::rotation::test_capacity::declare_and_allocate!(
-            state,
-            "first",
-            crate::rotation::test_capacity::two_reserves("5"),
-            Some(crate::rotation::config::positive_usdc("5").unwrap()),
-            0
-        )
-        .unwrap();
-        let second = crate::rotation::test_capacity::declare_and_allocate!(
-            state,
-            "second",
-            crate::rotation::test_capacity::two_reserves("5"),
-            Some(crate::rotation::config::positive_usdc("5").unwrap()),
-            0
-        )
-        .unwrap();
-        let (store, worker) = StoreHandle::spawn(state);
-        let client = |group: String| {
-            PaidClient::managed(Arc::new(
-                ManagedPool::new(
-                    store.clone(),
-                    group,
-                    BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
-                    SpendPolicy::dollars("5").unwrap(),
-                )
-                .unwrap(),
-            ))
-            .with_source_identity("source-a")
-        };
-        let a = client(first.clone());
-        let same = client(first.clone());
-        let other_group = client(second);
-        let key = |client: &PaidClient, source| {
-            client
-                .operation_key(source, "GET", "/items/{id}", "https://example.com")
-                .unwrap()
-        };
-        let original = key(&a, None);
-        assert_eq!(original, key(&same, None));
-        assert_ne!(original, key(&other_group, None));
-        assert_ne!(
-            original,
-            key(&a.clone().with_source_identity("source-b"), None)
-        );
-        assert_eq!(
-            key(&a, Some(("dynamic", 1))),
-            key(&same, Some(("dynamic", 1)))
-        );
-        assert_ne!(key(&a, Some(("dynamic", 1))), key(&a, Some(("dynamic", 2))));
-        assert_ne!(original, key(&a.clone().public_destinations(), None));
-        assert_ne!(
-            original,
-            a.operation_key(None, "GET", "/items/{id}", "https://other.example.com")
-                .unwrap()
-        );
-        assert!(
-            PaidClient::unsigned()
-                .operation_key(None, "GET", "/items/{id}", "https://example.com")
-                .is_none()
-        );
-        drop(a);
-        drop(same);
-        drop(other_group);
-        drop(store);
-        worker.await.unwrap();
-        // Reopening the exact same group must not acquire the previous runtime's hints.
-        let independent = Store::open(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            &identity,
-        )
-        .unwrap();
-        let group = first;
-        let (independent, independent_worker) = StoreHandle::spawn(independent);
-        let separate = PaidClient::managed(Arc::new(
-            ManagedPool::new(
-                independent.clone(),
-                group,
-                BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
-                SpendPolicy::dollars("5").unwrap(),
-            )
-            .unwrap(),
-        ))
-        .with_source_identity("source-a");
-        assert_ne!(original, key(&separate, None));
-        drop(separate);
-        drop(independent);
-        independent_worker.await.unwrap();
-    }
-}
 #[derive(Clone)]
 pub struct SpendPolicy {
     pub max_atomic: Option<U256>,
@@ -434,43 +324,6 @@ impl PaidClient {
         self.selection = selection;
         self
     }
-    pub(crate) fn operation_key(
-        &self,
-        source: Option<(&str, u64)>,
-        method: &str,
-        template: &str,
-        base: &str,
-    ) -> Option<crate::pricing::runtime::OperationKey> {
-        use sha2::{Digest, Sha256};
-        let (namespace, group) = self.managed.as_ref()?.hint_group_scope();
-        let (source, revision) = source.unwrap_or((&self.source_identity, 0));
-        // The fixed digest separates store lifetimes, configured network policy,
-        // destination binding and provider transport choices. No URL or network
-        // credential is retained in the cache, and arguments never enter this key.
-        let mut transport = Sha256::new();
-        let policy = serde_json::to_vec(&crate::network::global().policy).ok()?;
-        for field in [
-            namespace.as_bytes().as_slice(),
-            policy.as_slice(),
-            base.as_bytes(),
-        ] {
-            transport.update((field.len() as u64).to_be_bytes());
-            transport.update(field);
-        }
-        transport.update([
-            u8::from(self.transport.allow_http1),
-            u8::from(self.transport.allow_tls12),
-            u8::from(self.public_only),
-        ]);
-        Some(crate::pricing::runtime::OperationKey::new(
-            source,
-            revision,
-            method,
-            template,
-            group,
-            &transport.finalize(),
-        ))
-    }
     pub fn with_transport(mut self, transport: crate::network::HttpPolicy) -> Self {
         self.transport = transport;
         self
@@ -662,7 +515,7 @@ impl PaidClient {
                         route,
                         headers,
                         &progress,
-                        operation,
+                        operation.clone(),
                         &mut observed_price,
                     )
                     .await
@@ -741,7 +594,8 @@ impl PaidClient {
             Some(pool) if !unsigned_only => Some(
                 pool.next_candidate(
                     operation
-                        .and_then(|key| crate::pricing::runtime::process_hints().get(key))
+                        .as_ref()
+                        .and_then(|key| key.get())
                         .unwrap_or_default(),
                     through,
                     &[],
@@ -834,7 +688,7 @@ impl PaidClient {
                             crate::rotation::manager::AdmissionObservation {
                                 observed_price: Some(&mut *observed_price),
                                 progress,
-                                hint: operation.zip(receipt),
+                                hint: operation.clone().zip(receipt),
                                 promotion: Some((&selected, &transport)),
                                 through,
                                 attempted: &attempted,
