@@ -34,11 +34,12 @@ leaves its slot vacant; the previous active becomes retained. Ordinary authorize
 funding fills each vacancy independently of payment and retirement.
 Funding, confirmation and payment uncertainty are persisted across restarts.
 
-Configure each reserve's target explicitly. A group with a $2 small reserve and
-no large reserve starts with one $2 wallet, plus
-swap and network fees. An optional large reserve adds its configured target.
-Bridge-minimum increases require explicit per-slot headroom. Actual spendable
-Zcash treasury funds govern enabled funding; the API payment cap is separate.
+A managed group's small slot defaults to a randomized $2-5 nominal range; an
+explicit empty large slot opts into $10-25. Set `funding_amount_usdc` for a fixed
+target, or `min_funding_amount_usdc` plus `max_funding_amount_usdc` for a custom
+inclusive range. Bridge-minimum redraws stay within the slot maximum. Actual
+spendable Zcash treasury funds govern enabled funding; the API payment cap is
+separate.
 
 Payment requests, wallet-specific balance checks and swap jobs use the current
 payer wallet address as the Tor circuit isolation identity. Switching payers
@@ -107,9 +108,11 @@ existing payers. Actual API fallback requires explicit `api_requests = true`. Wi
 For treasury initialization over Tor, pass the same option to `wallet init`, or
 initialize using the deployment with the embedded policy.
 
-Send ~$5 ZEC to the shielded receive address printed by initialization. The pool
-requests a $2 USDC reserve, accepting bridge-minimum increases up to $3 before
-fees; allow funds for fees and future replacements. Each payment is capped at
+Send enough ZEC to the shielded receive address printed by initialization to cover
+the $5 upper nominal USDC bound plus source fees and bridge costs. The pool draws a
+randomized $2-5 USDC nominal reserve; NEAR bridge minimums can raise the
+operation's local floor within that range. Keep additional funds for fees and
+future replacements. Each payment is capped at
 $0.50. Funding starts after the listener binds, so tools remain visible while
 funding is pending. Connect your MCP client with
 `Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
@@ -254,7 +257,7 @@ export X402_TREAZURY_CONFIG="examples/deployments/comprehensive.local.toml"
 target/release/x402_treazury wallet status
 ```
 
-Send ZEC to that **shielded receive address**. The example's two wallet groups each request a $2 USDC reserve: **$4 USDC total before fees and accepted bridge-minimum increases**. Allow additional ZEC for those costs and future wallet replacements.
+Send ZEC to that **shielded receive address**. The example's two wallet groups each draw a $2-$5 nominal USDC reserve: **$4-$10 combined nominal bounds, including any accepted bridge-minimum redraw within each slot maximum**. Fees and future wallet replacements are additional.
 
 > **NOTE: All declared managed wallets are auto-funded**
 >
@@ -268,7 +271,7 @@ wallets when the SDK can spend them. Available tools remain accessible during
 funding; paid calls use existing eligible payers under their payment authority.
 Saved balance estimates do not prevent an otherwise permitted signature. A
 wallet's first positive USDC observation consumes its initial claim, even below
-its target, and never authorizes a top-up.
+its nominal minimum, and never authorizes a top-up.
 
 Startup performs finite balance discovery behind bound listeners. Fully funded
 idle serving does not watch for incoming transfers. `wallet status` reads saved
@@ -309,14 +312,14 @@ adding a large reserve wallet to that wallet group.
 >
 > We provide a separate large wallet option for expensive APIs (rather than simply increasing the small wallet `funding_amount_usdc`), because this uses fewer API calls per rotation of both wallets, which reduces usage tracking and linkability.
 
-To enable a large reserve wallet for a wallet group, add a reserve block for that group name under a new stanza `[wallets.NAME.reserves.large]`, and configure the target amount as `funding_amount_usdc`.
+To enable a large reserve wallet for a wallet group, add an empty `[wallets.NAME.reserves.large]` stanza. It opts into the randomized $10-25 nominal default; set `min_funding_amount_usdc` and `max_funding_amount_usdc` to choose a custom range. Reserve ranges authorize nominal USDC sizing only; actual spendable treasury funds and the accepted operation's network-fee cap govern each swap.
 
-When sizing the large wallet, aim for a **4x multiple your largest expected API payment**. For example, a $2.50 maximum API payment suggests a **$10 large reserve**:
+When sizing the large wallet, aim for a **4x multiple of your largest expected API payment**. For example, a $2.50 maximum API payment suggests at least **$10**, which is the lower end of the default $10-25 large range:
 
 ```toml
 # Add a large wallet to the company group in examples/deployments/comprehensive.toml
 [wallets.company.reserves.large]
-funding_amount_usdc = "10.00"
+# Default randomized nominal funding: $10-25.
 ```
 
 > **NOTE: Why 4X Sizing?**
@@ -352,23 +355,22 @@ using those template settings: per deployment, MCP server, source or server/sour
 Each generated group has its own wallets and payment identity; using the same
 template does not make the groups share funds or addresses.
 
-For example, this `research` template gives each listener its own group with a $2
-small reserve and a $10 large reserve. It permits payments up to $2.50, following
-the 4x large-wallet sizing guidance above:
+For example, this `research` template gives each listener its own group with the
+default $2-5 small and $10-25 large nominal ranges. It permits payments up to
+$2.50, following the 4x large-wallet sizing guidance above:
 
 ```toml
 [wallet_templates.research]
 mode = "zcash_rotation"
 max_api_payment_usdc = "2.50"
 max_retirement_remainder_usdc = "0.001"
-max_funding_spend_zec = "0.006" # adjust for the intended USDC target and ZEC price
 max_conversion_overhead_percent = 5
 
 [wallet_templates.research.reserves.small]
-funding_amount_usdc = "2.00"
+# Default randomized nominal funding: $2-5.
 
 [wallet_templates.research.reserves.large]
-funding_amount_usdc = "10.00"
+# Default randomized nominal funding: $10-25.
 
 [wallet_assignment]
 scope = "server" # deployment, server, source, or binding
@@ -383,10 +385,13 @@ The retirement tolerance defaults to $0.001 independently per group; explicit
 `"0"` requires exact zero. Retired funds remain owned at their addresses. Positive
 tolerance has no cumulative stranded-funds cap.
 
-Each generated group in this example starts with $12 of requested
-USDC inventory, so three automatically assigned listeners would request $36 in total.
-`config show` displays the resolved bindings and combined initial-inventory target
-before allocating anything. That target excludes fees and bridge-minimum increases.
+Each generated group in this example has a $12-$30 nominal USDC inventory range, so
+three automatically assigned listeners would have $36-$90 in combined nominal
+bounds. `config show` displays the resolved bindings and combined initial-inventory
+minimum and maximum before allocating anything. These bounds include any accepted
+bridge-minimum redraw within each slot maximum; fees and later replacements are
+additional. A successful credit below the nominal minimum still consumes that
+wallet's initial claim.
 
 See the [automatic assignment reference](docs/configuration.md#multiple-mcp-ports-from-one-configuration)
 and [comprehensive deployment](examples/deployments/comprehensive.toml) for

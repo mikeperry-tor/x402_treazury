@@ -287,16 +287,20 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
         shown["wallet_summary"]["initial_inventory_target_atomic"],
         "4000000"
     );
+    assert_eq!(
+        shown["wallet_summary"]["initial_inventory_maximum_atomic"],
+        "10000000"
+    );
     assert_eq!(shown["wallets"]["web"]["max_api_payment_usdc"], "0.10");
     assert_eq!(shown["wallets"]["company"]["max_api_payment_usdc"], "0.50");
     for name in ["web", "company"] {
         assert_eq!(
-            shown["wallets"][name]["reserves"]["small"]["funding_amount_usdc"],
+            shown["wallets"][name]["reserves"]["small"]["min_funding_amount_usdc"],
             "2.00"
         );
         assert_eq!(
             shown["wallets"][name]["reserves"]["small"]["max_funding_amount_usdc"],
-            "3.00"
+            "5.00"
         );
         assert_eq!(
             shown["wallets"][name]["max_retirement_remainder_usdc"],

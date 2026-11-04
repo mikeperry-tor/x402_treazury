@@ -308,9 +308,12 @@ Funding-enabled launches additionally require `auto_fund=true`. Treasury-only
 starts wait for production bootstrap before dispatch, with progress logs and the
 phase/run deadline. An adopted bootstrapped pool may have a partly spent active
 wallet; the runner does not refill it artificially. Positive funding remains
-bounded by the registry and ordinary production limits on every allocation and
-preparation. Zero job authority retains the deny-all restriction even when the
-flag is supplied. Single-rotation/refill-service and two-round lifecycle dispatch are available;
+bounded by the registry, actual spendable treasury funds and the accepted
+operation's network-fee cap on every allocation and preparation. Reserve ranges
+are nominal: preparation estimates must cover each enabled slot's configured
+upper bound, and a provider bridge minimum above that bound stops unsigned
+acquisition without a deposit. Zero job authority retains the
+deny-all restriction even when the flag is supplied. Single-rotation/refill-service and two-round lifecycle dispatch are available;
 funded acceptance remains an explicit live qualification step.
 The owned-Tor backend selected by `run` supports unsigned discovery and registry-bound
 managed payments, combining confinement, Tor identity/destination evidence and the

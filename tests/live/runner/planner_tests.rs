@@ -131,7 +131,7 @@ fn planner_expected(
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
             "reviewed startup inventory required; treasury-only bootstrap waits for active and configured reserves, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
-            "source fees and floating swap minimum must fit funding permits; offline targets are not quotes",
+            "funding permits must cover source fees, the full configured nominal range up to each enabled slot maximum, and the floating swap minimum at quote/preparation time; offline targets are not quotes and no offline preflight proves the range fits",
             "all declared pools must be preserved; unused pools receive no new allocation authority"],
         "case_bindings":bindings,"expanded_phases":phases,"declared_managed_pools":if unsigned {json!([])}else{json!(["pool","unused"])},
         "network_disclosures":{"policy":cfg["network"],"base_rpc_policy":cfg["base_rpc_policy"],"tor":m.network,"external_requests_performed":0,"provider_origins":"resolve during prepare; no catalog downloads during plan"},"manifest":m})

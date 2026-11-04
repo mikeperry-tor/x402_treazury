@@ -17,8 +17,7 @@ max_api_payment_usdc = "0.50" # Per authorization, independently of reserve size
 max_conversion_overhead_percent = 5
 
 [wallets.research.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00" # Explicit headroom for bridge minimums.
+# Default randomized nominal funding: $2-5.
 
 [sources.exa]
 extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.

@@ -1,7 +1,7 @@
 # Reserve sizes are funding preferences; the explicit group cap governs every wallet.
 # Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
-# First positive USDC credit consumes the initial claim, even below target; accepted source work stays owned.
+# First positive USDC credit consumes the initial claim, even below its nominal minimum; accepted source work stays owned.
 # One pool, one listener, one cheap tool. Follow ../../../docs/public-swap-demo.md.
 # Copy beside this file as public-swap-demo.local.toml before editing.
 version = 1
@@ -27,12 +27,11 @@ quote_deadline_seconds = 1800
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.05"
-max_funding_spend_zec = "0.006"
 max_conversion_overhead_percent = 5
 max_attempts = 3
 
 [wallets.demo.reserves.small]
-funding_amount_usdc = "5.00"
+# Default randomized nominal funding: $2-5.
 
 [sources.socialfetch]
 extends = "../../../providers/socialfetch.toml"

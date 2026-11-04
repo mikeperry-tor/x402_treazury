@@ -14,7 +14,7 @@ are separate from this single-call demonstration.
 | Funds supplied | What the test establishes |
 | --- | --- |
 | A test EVM key holding USDC on Base | Real seller acceptance of the Rust x402 handshake. It does not exercise Zcash, NEAR or managed rotation. |
-| ZEC sent to the treasury's shielded receive address | Public NEAR ZEC → Base USDC funding of both managed wallet slots, then a real x402 payment. Promotion/refill can be qualified separately after approving additional paid calls. |
+| ZEC sent to the treasury's shielded receive address | Public NEAR ZEC → Base USDC funding of its configured small slot, then a real x402 payment. Promotion/refill can be qualified separately after approving additional paid calls. |
 
 Put keys, bearer tokens and credential-bearing RPC URLs in the launching process's
 environment. Do not paste a spending key or mnemonic into chat, TOML, logs or CLI
@@ -103,14 +103,14 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    The backup directory must not exist. Store it securely; it contains spending
    material. Never run the original and restored copy concurrently.
 4. Provide the printed **shielded** receive address to the operator. Agree on the
-   ZEC amount using a fresh quote for two $5 USDC deposits, including source fees.
-   The example permits at most **0.006 ZEC per transfer including its fee**,
-   **5% quoted conversion overhead**, and **0.0003 ZEC per shielding fee**.
-   These are per-operation ceilings, not a price estimate or a promise that a
-   route fits. Actual spendable treasury funds govern production funding. The
-   separate reviewed qualification manifest/registry controls this run's cumulative
-   authority; retain `auto_fund=false` unless that explicit run authorization permits
-   funding. Do not increase per-operation safeguards automatically after quote failure.
+   ZEC amount using a fresh quote for one $2-$5 nominal USDC deposit, including
+   source fees and any later replacement permitted by the run authority.
+   There is no separate per-transfer ZEC spending budget. Actual spendable treasury
+   funds, the **5% quoted conversion overhead** limit, and the **0.0003 ZEC per
+   shielding fee** cap govern the transfer. These are safeguards, not a price
+   estimate or a promise that a route fits. The separate reviewed qualification
+   manifest/registry controls this run's cumulative source exposure; retain
+   `auto_fund=false` unless that explicit run authorization permits funding.
 5. After the operator transfers ZEC, sync and inspect the treasury:
 
    ```sh
@@ -131,12 +131,13 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
      --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
-   Start with no MCP clients issuing tool calls. Observe the two funding jobs,
-   source confirmations and independent Base credit through `wallet status`.
-   For this demo, wait for complete configured inventory: one ACTIVE and one READY
-   wallet, each satisfying its 5,000,000 atomic USDC target. Ordinary serving can
-   begin with one eligible funded payer; that does not satisfy this stronger demo
-   inventory gate. NEAR SUCCESS alone is insufficient.
+   Start with no MCP clients issuing tool calls. Observe the configured small-slot
+   funding job, source confirmations and independent Base credit through
+   `wallet status`. For this demo, wait for complete configured inventory: one
+   READY wallet with a first positive USDC credit after its selected $2-$5 nominal
+   size. Readiness does not require the nominal amount or a particular midpoint.
+   Ordinary serving can begin with one eligible funded payer; that does not satisfy
+   this stronger demo inventory gate. NEAR SUCCESS alone is insufficient.
 7. Connect an MCP client to `http://127.0.0.1:8000/mcp` using the bearer token.
    Initialize and list tools first. Make **one** approved profile lookup with
    `socialfetch_twitter_profiles_handle` and a `handle` argument. The per-payment
@@ -146,8 +147,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    within its separately reviewed run authority; UTC rollover grants no new authority.
    Do not leave automated clients or unattended funding running after the test.
 
-The first test funds two slots and proves one paid call. It does not deliberately
-burn the active wallet's $5 to demonstrate rotation. The offline lifecycle test
+The first test funds the configured small slot and proves one paid call. It does
+not deliberately spend the active wallet's selected nominal amount to demonstrate
+rotation. The offline lifecycle test
 covers promotion and refill. To qualify that on mainnet, separately agree on useful
 paid calls and their aggregate cost; observe confirmed depletion, promotion to the
 existing READY address, and exactly one new replacement address/funding job. Never

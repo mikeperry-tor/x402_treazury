@@ -12,7 +12,7 @@
 # Size optional large to at least 2x expected maximum payment (prefer 4x); this is not a payment cap.
 # Eligible payers use advisory estimates; permitted signatures do not require a target balance.
 # Serving binds listeners before funding; explicit bootstrap waits its captured slot jobs.
-# First positive USDC credit consumes the initial claim, even below target; accepted source work stays owned.
+# First positive USDC credit consumes the initial claim, even below its nominal minimum; accepted source work stays owned.
 # Three research contexts and a toolbox share one Zcash treasury and two rotating wallet pools.
 # Social, company and toolbox share a payer wallet and Tor identity; web stays separate.
 # Copy this file to comprehensive.local.toml before editing.
@@ -60,21 +60,19 @@ confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 
 # Each pool starts with one small reserve and no separate active wallet.
-# Two groups with $2 small reserves request $4 before fees and accepted bridge minimum increases.
+# Two groups with default $2-$5 small reserves have $4-$10 nominal bounds including any accepted bridge-minimum redraw; fees and replacements are additional.
 # Allow additional treasury funds for those costs and replacements after the first payment.
-# Actual deposits may rise with swap minimums. All declared pools initialize, even
+# Actual deposits reflect each operation's selected nominal amount and bridge minimums. All declared pools initialize, even
 # unused ones: remove unused wallet definitions and update bindings to save funding.
 # max_api_payment_usdc caps one payment, not the total research budget.
 [wallets.web]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.10"
-max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
 
 [wallets.web.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
+# Default randomized nominal funding: $2-5.
 
 # Social, company and toolbox share this pool, reserve and Tor payer identities.
 # The shared $0.50 per-payment cap covers the selected RelayShield tools.
@@ -83,12 +81,10 @@ max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.50"
-max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
 
 [wallets.company.reserves.small]
-funding_amount_usdc = "2.00"
-max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
+# Default randomized nominal funding: $2-5.
 
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's

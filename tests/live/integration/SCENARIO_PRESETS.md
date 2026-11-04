@@ -47,7 +47,7 @@ qualify independently. A provider failure remains a failure; no automatic paid
 retry is purchased.
 
 Twelve attempts are a finite candidate list, not a promise to rotate every wallet.
-The configured deposit target is $2; the accepted bridge minimum can raise it.
+The configured nominal range is $2-$5. The operation's selected draw and any accepted bridge minimum can raise its local floor; the upper bound remains $5. Preparation estimates must account for that upper authority without assuming a midpoint is sufficient. The operator-supplied spendable ZEC balance is the ZEC capital limit; only the reviewed qualification source exposure can add a separate run authority. Per-job permits are `source_exposure_zec / new_funding_jobs`, so review the run exposure against the largest enabled slot draw before use.
 A larger starting balance, different live fee, incomplete chain evidence, fast
 refill or missed checkpoint can leave qualification incomplete. Review and expand
 the explicit cases and reservations **before preparation** if the observed balance

@@ -19,7 +19,11 @@ async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
             assert_eq!(shown["funding"]["auto_fund"], false);
             assert_eq!(shown["funding"]["confidentiality"], "public");
             assert_eq!(
-                shown["wallets"]["demo"]["reserves"]["small"]["funding_amount_usdc"],
+                shown["wallets"]["demo"]["reserves"]["small"]["min_funding_amount_usdc"],
+                "2.00"
+            );
+            assert_eq!(
+                shown["wallets"]["demo"]["reserves"]["small"]["max_funding_amount_usdc"],
                 "5.00"
             );
             assert!(

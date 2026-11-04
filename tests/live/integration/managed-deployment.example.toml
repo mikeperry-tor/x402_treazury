@@ -1,7 +1,7 @@
 # Reserve sizes are funding preferences; the explicit group cap governs every wallet.
-# Initial active funding uses small; refill vacant slots small-first. Retained balances stay usable.
+# Initial funding fills enabled slots small-first; these templates enable only the small slot. Refill vacant slots small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
-# First positive USDC credit consumes the initial claim, even below target; accepted source work stays owned.
+# First positive USDC credit consumes the initial claim, even below its nominal minimum; accepted source work stays owned.
 # Copy with the matching manifest to a private directory, make paths absolute,
 # and supply the initialized treasury UUID/state/key and owned Tor endpoint.
 version = 1
@@ -28,21 +28,19 @@ base_confirmations = 12
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
-max_funding_spend_zec = "0.002"
 max_conversion_overhead_percent = 5
 
 [wallets.test_pool.reserves.small]
-funding_amount_usdc = "2.00"
+# Default randomized nominal funding: $2-5.
 
 [wallets.independent_pool]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
-max_funding_spend_zec = "0.002"
 max_conversion_overhead_percent = 5
 
 [wallets.independent_pool.reserves.small]
-funding_amount_usdc = "2.00"
+# Default randomized nominal funding: $2-5.
 
 [sources.depletion]
 extends = "../../../providers/arkham.toml"
