@@ -31,8 +31,9 @@ discarding retired keys.
 The [code-review orchestration plan](plans/review_orchestration.md) coordinates
 implementation lanes, integration order and shared review gates. The
 [original review and maintainer disposition](plans/x402_treazury_review.md) are
-working reference material for those gates. The child plans cover
-[replacement funding authority](plans/funding_replacement_authority.md),
+working reference material for those gates. Completed replacement-authority work
+is maintained in the [funding/source contract](wallet-rotation.md#funding-and-source-safety).
+The remaining child plans cover
 [indexer regression and chain recovery](plans/indexer_regression_recovery.md),
 [catalog expansion and schema correctness](plans/catalog_safety_and_schema.md),
 [registry efficiency](plans/registry_efficiency.md),

@@ -4,11 +4,19 @@
 
 Coordinate the review fixes through small independently reviewed changes, with
 financial correctness first and independent catalog work alongside it. This
-request authorizes this document and its commit, not implementation, live-funded
-qualification, upstream submission or spending. Starting baseline:
+plan alone grants no implementation, live-funded qualification, upstream
+submission or spending authority. Starting baseline:
 `d557d82a70c6ef9bbe8a9936f696d12bf2cd2404`, including randomized funding and
 qualification changes from `main` at `a626b99898d21c91552813a8b2413f48d3a1fede`.
 Reconfirm the actual integration baseline before each implementation milestone.
+
+O0 and the selected replacement-authority milestone started from
+`d220eb95f766f98afe95dd8c2551778d993f5e6b`. Their implementation and child gates
+are complete; other lanes and the whole-branch GR/GI gates remain unfinished.
+The completed child plan has yielded the maintained
+[funding/source contract](../wallet-rotation.md#funding-and-source-safety) and
+[lifecycle coverage](../../tests/LIFECYCLE.md). Validation limitations below
+remain required follow-up, not completed application checks.
 
 The child plans own implementation commits, tests and permanent documentation;
 this document owns ordering, shared ownership and integration. It introduces no
@@ -54,8 +62,8 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 
 | Milestone / lane | Child commits and default order | Integration acceptance |
 | --- | --- | --- |
-| O0 / coordination | Capture clean tracked baseline, local changes, assigned worktrees/file owners and existing validation provenance. Independently challenge the selected child design before implementation. | Material design findings resolved; selected scope and overlap owners explicit. O0 is preparation, not another application feature commit. |
-| F1 / financial | [Replacement authority](funding_replacement_authority.md), F1 then F2. Highest financial priority. | Child gates pass; confirmed deposit plus FAILED/REFUNDED grants no replacement; fixed/ranged redraw and late SUCCESS/credit races retain original liabilities. |
+| O0 / coordination | Complete for the selected replacement scope: tracked baseline, preserved local changes, shared-worktree ownership, serialized builds and independent design review recorded in private evidence. | Material design findings resolved before implementation. O0 is preparation, not another application feature commit. |
+| F1 / financial | Complete: funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`. Contracts now live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 accepted the combined authority, archive/reconfirmation and race chains with scoped offline evidence. Confirmed deposit plus FAILED/REFUNDED grants no replacement; fixed/ranged redraw and late SUCCESS/credit races retain original liabilities. Full-suite fixture limitations remain below. |
 | C1 / catalog | [Expansion/schema safety](catalog_safety_and_schema.md), C1 then C2; can start alongside financial F1. | All ingestion/direct-Value paths protected; generated schemas and outbound serialization remain faithful; child gates pass. |
 | F2 / financial | [Indexer regression/recovery](indexer_regression_recovery.md), I1 through I3, integrated after financial F1. | Stale tip cannot destructively reset valid state; genuine deep-reorg recovery and accepted randomized work survive. Complete GF below. |
 | C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, integrated after catalog C1 settles construction contracts. | Correct invalidation, atomic durable publication and progressing readers; no caching around expansion safety. Child gates pass. |
@@ -96,6 +104,41 @@ Carry unchanged valid evidence explicitly; after a localized fix, revalidate its
 consumers and resume unfinished stages rather than repeat all passed checks.
 No baseline result substitutes for checks invalidated by integration. Use temporary
 state/public unfunded keys; offline results establish no live or Tor qualification.
+
+### Unfinished validation fixtures
+
+The replacement milestone exposed unchanged fixture failures in the default,
+managed and synthetic worker suites. Those stages are not green; scoped financial
+acceptance does not close these gaps. Repair the fixtures before claiming a full
+application check, preserving settled HTTPS, immutable network policy, public
+destination enforcement, exclusive storage ownership and uncertain-payment rules.
+Exact diagnostics and baseline source comparisons remain in private review evidence;
+the baseline executable was not independently rebuilt.
+
+- Reconcile local verified-TLS directory fixtures with public-destination checks,
+  install explicit fixture CA trust in independent clients, and prevent managed
+  harness initialization from replacing an already installed Tor policy. Inspect
+  `src/discovery/`, `tests/support/dynamic_scope.rs`, `tests/managed.rs` and
+  `tests/support/concurrency.rs`; later signature/drain assertions remain unvalidated.
+- Correct the untrusted certificate/key pair and isolate the Base negative TLS
+  control from globally trusted fixture roots. Preserve certificate and hostname
+  verification in `src/network/tls_retry_tests.rs` and
+  `src/rotation/base/transport/tests.rs`.
+- Move provider HTTP fixtures to verified TLS in qualification help, managed
+  maintenance, deferred catalog startup and the full treasury worker. Infrastructure
+  HTTP remains distinct. The startup fixture currently waits for an origin request
+  rejected before I/O; the worker/maintenance payment and rotation assertions remain
+  unvalidated. Fix fixture synchronization rather than add a production deadline.
+- Make captured HTTPS URI assertions check path/query and authority faithfully,
+  inspect safe error causes through the execution wrapper, and prove registry
+  connection/service ownership has drained before reopening. Keep full output,
+  signature, uncertainty and exclusive-lock assertions; do not accept absent I/O
+  or missing metadata to make fixtures pass.
+
+These are focused validation prerequisites, not authorization for a new transport
+bypass or broad discovery/privacy redesign. Resume orchestration/F2 (indexer
+regression/recovery) after the affected validation foundation is repaired, or
+record an independently reviewed scoped continuation and its remaining limits.
 
 ## Independent review gates and completion
 

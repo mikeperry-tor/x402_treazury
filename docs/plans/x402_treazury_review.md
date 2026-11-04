@@ -36,7 +36,7 @@ maintainer decisions here and the owning guides govern the selected work.
    ownership. No new ordinary ZEC spending budgets, credited-output floor, top-ups,
    whole-work deadlines or abandonment of accepted work. Randomized reserve bounds
    authorize nominal sizing only. Qualification's API budget is separate authority.
-6. **Scope:** The five focused plans plus portability own the selected implementation.
+6. **Scope:** Orchestration's remaining focused plans plus portability own unfinished implementation.
    R9 receives a separate scoped plan under orchestration R0/R1. Broad cover shaping
    and discovery/indexer privacy changes are excluded, except tangible direct fixes.
    Other deferred observations are not silently resolved or authorized by this table.
@@ -54,7 +54,7 @@ selected here; historical details not freshly checked are explicitly identified.
 | S1 | Addressed / policy | Retain empty-as-unlimited with WARN and explicit `none`/`off` advice; defaults unchanged. [Parser](../../src/payment.rs), finite-budget guard and [warning regression](../../src/server/security_tests.rs). Implemented in `83dd3ab2` and its fixups. |
 | S2 | Policy | Try each existing eligible wallet once only after recognized structured insufficient funds, with each authorization potentially chargeable. Do not add a traversal cap, on-chain precondition, allocation or funding wait. Advisory low-balance information cannot reopen a consumed initial funding claim. [Unsigned retry contract](../architecture.md#unsigned-x402-requests-and-post-retries), [best-effort tests](../../src/payment/best_effort_tests.rs). |
 | S3 | Addressed | All registered static v1/v2 exact/upto and managed exact signing use the shorter lifetime or 300 seconds, preserving opaque accepted data and original liability. [Signing boundary](../../src/payment/lifetime.rs), [lifetime tests](../../src/payment/lifetime_tests.rs), managed offer tests and payment compatibility evidence. |
-| S4 | Planned; valid with narrower trigger | Reauthorization already requires source closure. The real gap is CONFIRMED/resolved source plus FAILED/REFUNDED: deposit confirmation does not close possible bridge delivery liability. Existing `negative_terminal_confirmed_source_can_reauthorize_under_current_claim` demonstrates the behavior, not its safety. [Replacement-authority plan](funding_replacement_authority.md) covers fixed/ranged draws, old SUCCESS/credit races and independent original liabilities. |
+| S4 | Addressed in accepted scope | `47b30aa8` removes FAILED/REFUNDED-only replacement authority; fixups `fdb71bba` and `625d6d6b` cover treasury recovery and explicit SDK reconfirmation through cancellation/restart. Canonical confirmation moves active expiry to historical evidence, which cannot grant another deposit. `ba368fe6` plus documentation fixup `88213cab` cover fixed/ranged redraw, late archived SUCCESS/credit and two disclosed originals. Independent exact-SHA and combined G1/G2 reviews accepted the scoped offline evidence; full-suite fixture limits remain below. See [funding authority](../wallet-rotation.md#funding-and-source-safety), [Store regressions](../../src/rotation/store/funding.rs) and [lifecycle contracts](../../tests/LIFECYCLE.md). |
 | S5 | Policy; trust assumption remains | Do not introduce or restore a configurable per-transfer ZEC cap or derive one from nominal USDC bounds. Merged `main` deliberately removed that setting and qualification ZEC budgets. Actual spendable treasury capital, accepted principal and network-fee safeguards govern. Provider USD valuation remains a trust assumption, not an independent price oracle or a newly fixed issue. [Financial policy](../../AGENTS.md#financial-and-execution-boundaries), [funding guide](../wallet-rotation.md#funding-and-source-safety). |
 | S6 | Documentation addressed / policy | Documented compounded overhead/slippage (about 10.53% at 5%/5%). Do not impose a credited-output floor: nominal sizing is not guaranteed settlement output; first positive credit consumes the claim. [Funding guidance](../wallet-rotation.md#funding-and-source-safety). No claim that favorable/adverse market outcomes were eliminated. |
 | S7 | Addressed | Reject provider HTTP before acquisition/signing; retain full TLS validation and immutable additional trust for private PKI. Infrastructure transports remain separately governed. [Network policy](../network-egress.md), [factory](../../src/network.rs), TLS success/wrong-host/untrusted controls. No certificate/hostname bypass. |
@@ -86,7 +86,7 @@ selected here; historical details not freshly checked are explicitly identified.
 | B1 | Deferred | CI and automated advisory coverage were not implemented here; existing vendor verifiers and maintained advisory notes are not equivalent to CI. Recheck current versions/advisories and intended native/MSRV scope before selecting pipeline work. Do not infer vulnerability resolution or authorize a compiler/platform matrix from this report. [Development](../development.md), [vendor provenance](../../vendor/README.md). |
 | B2 | Planned with A2 | Independent full-patch/recovery review belongs to the [indexer/recovery plan](indexer_regression_recovery.md). Upstream submission is separate authority; retain vendor provenance and genuine reorg coverage. Existing application review is not a claim of upstream approval. |
 | B3 | Policy plus plan review work | Mandatory complexity review and simplification at child architecture gates remain; no numerical complexity budget or automatic helper extraction. Review unchanged high-risk financial chains as well as changed functions. [Complexity discipline](../../tests/COMPLEXITY.md#review-discipline), [orchestration gates](review_orchestration.md). No blanket refactor completed. |
-| B4 | Deferred broader cleanup | Review archive semantics in S4 before any deduplication; superficially similar SQL can carry distinct ownership/history behavior. No general SQL-format/archive-helper rewrite completed, and historical counts are not newly verified. [Replacement-authority plan](funding_replacement_authority.md), [Store funding](../../src/rotation/store/funding.rs). |
+| B4 | Deferred broader cleanup | S4 reviewed archive/reconfirmation consumers and distinguished active expiry authority from retained historical evidence. Superficially similar SQL can carry distinct ownership/history behavior. No general SQL-format/archive-helper rewrite completed, and historical counts are not newly verified. [Recovery policy](../wallet-rotation.md#recovery-and-reconciliation-policy), [Store funding](../../src/rotation/store/funding.rs). |
 | B5 | Partial | Known obsolete diagnostic arms removed and new owner diagnostics use typed safe context. Broader string-based classification remains; no repository-wide conversion claimed. Prefer typed causes when changing owning paths without logging raw upstream prose. [Funding diagnostics](../../src/rotation/funding.rs), [logging contract](../development.md#logging-and-diagnostics). |
 | B6 | Deferred assessment / policy | Attribute counts alone do not establish a production defect. No blanket test-hook-to-trait rewrite selected; inspect changed financial boundaries and their production/test equivalence through owning reviews and production compiler evidence. Original hook inventory is not newly verified. [Testing policy](../testing.md). |
 | B7 | Deferred | Public-surface pruning was not implemented here. Re-audit actual library, integration-test and tooling consumers before narrowing visibility; historical counts are not current acceptance evidence. [Library surface](../../src/lib.rs), [development](../development.md). |
@@ -116,6 +116,27 @@ Before completion, transfer enduring rules to owning guides and retain concrete
 unfinished work in focused plans, then remove this completed working material and
 its links under the [documentation policy](../README.md). Independently review the
 cleanup SHA and final combined branch; never remove financial evidence.
+
+Replacement-authority acceptance through `625d6d6b` includes 51 Store funding,
+11 treasury recovery, 30 compatibility, 25 funding integration, 17 rotation and
+2 treasury integration tests; four proving tests and 35 lifecycle tests passed
+using a focused continuation, as did the address-codec test.
+Production and all-target compiler/Clippy warning gates passed; source-matched
+complexity had no exclusions or production regression warnings. The large macOS
+test harness still emits its known compact-unwind linker size warning.
+
+This is **not** a green full default, managed or lifecycle stage. Twenty unrelated
+failures and a stalled deferred-startup fixture were attributed to unchanged O0
+test/consumer sources (33 compared files), including TLS trust/key setup, HTTP
+provider fixtures, URI/error assertions and retained registry ownership. The
+baseline executable was not rebuilt. Managed passed 43 tests but failed three;
+lifecycle carried 34 passes plus the corrected reconfirmation test, while its
+unchanged HTTP worker fixture failed before payment/rotation assertions. Two
+milestone-invalidated permissive recovery tests were corrected in the F1 fixups;
+they are not part of the unrelated-failure count. The
+[orchestration validation follow-up](review_orchestration.md#unfinished-validation-fixtures)
+retains the unfinished work and unvalidated assertions. No live-funded, consensus
+or Tor qualification was run.
 
 ---
 
