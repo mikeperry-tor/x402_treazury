@@ -33,3 +33,69 @@ sources = [{ url = "https://api.newsgurus.ai/x402/catalog", purpose = "registry"
 intent = "authored"
 guidance = "providers/CAVEATS.md#daedalus-daedalusprovidertoml"
 sources = [{ url = "https://agents.daedalusdevelopmentgroup.com/openapi.json", purpose = "schema" }]
+
+[apexfaucet]
+intent = "authored"
+guidance = "providers/CAVEATS.md#apexfaucettoml--apex-faucet"
+sources = [{ url = "https://apexfaucet.xyz/openapi.json", purpose = "schema" }]
+
+[ax1]
+intent = "authored"
+guidance = "providers/CAVEATS.md#ax1-verdict"
+sources = [
+    { url = "https://www.ax1.vc/openapi.json", purpose = "schema" },
+    { url = "https://www.ax1.vc/agents.md", purpose = "guide" },
+]
+
+[banking-compliance]
+intent = "authored"
+guidance = "providers/CAVEATS.md#banking-compliance"
+# Public tools/list is POST; this GET-only collector leaves its manual capture
+# unresolved. Root discovery alone does not establish paid request contracts.
+sources = [{ url = "https://banking-compliance-production.up.railway.app/", purpose = "discovery" }]
+
+[coinmarketcap]
+intent = "authored"
+guidance = "providers/CAVEATS.md#coinmarketcap"
+sources = [
+    { url = "https://coinmarketcap.com/api/documentation/openapi-keyless.json", purpose = "schema" },
+    { url = "https://coinmarketcap.com/api/documentation/openapi.json", purpose = "schema" },
+    { url = "https://coinmarketcap.com/api/documentation/ai-agent-hub/x402.md", purpose = "guide" },
+]
+
+[concordance]
+intent = "authored"
+guidance = "providers/CAVEATS.md#concordancetoml--concordance-concordancehqduckdnsorg"
+sources = [{ url = "https://concordancehq.duckdns.org/openapi.json", purpose = "schema" }]
+
+[glassnode]
+intent = "authored"
+guidance = "providers/CAVEATS.md#glassnode--glassnode-x402-gateway-x402glassnodecom"
+# No vendor OpenAPI. The configured help is the published gateway authority.
+
+[locus]
+intent = "authored"
+guidance = "providers/CAVEATS.md#locustoml--locus-us-property--public-records-context-apilocusreport"
+sources = [
+    { url = "https://api.locus.report/openapi.json", purpose = "schema" },
+    { url = "https://api.locus.report/.well-known/locus-tools.json", purpose = "discovery" },
+    { url = "https://api.locus.report/.well-known/locus-agent-endpoints.json", purpose = "discovery" },
+]
+
+[relayshield-phone-reputation]
+intent = "authored"
+guidance = "providers/CAVEATS.md#relayshieldtoml--relayshield"
+sources = [
+    { url = "https://api.relayshield.net/", purpose = "discovery" },
+    { url = "https://api.relayshield.net/llms.txt", purpose = "guide" },
+]
+
+[stabletravel]
+intent = "authored"
+guidance = "providers/CAVEATS.md#stabletravel"
+sources = [{ url = "https://stabletravel.dev/openapi.json", purpose = "schema" }]
+
+[straits]
+intent = "authored"
+guidance = "providers/CAVEATS.md#straitstoml--straitslive-hormuz-monitor-straitslive"
+# Authored free/premium projection; configured help supplies current guide evidence.

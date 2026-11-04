@@ -74,7 +74,10 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
     plain_cfg.include_tools.clear();
     plain_cfg.exclude_tools.clear();
     plain_cfg.use_recommended_tools = false;
-    let diagnostic = catalog::build_tools(&plain_cfg, root, &prefix);
+    let diagnostic = match &plain {
+        Ok(items) => Ok(items.clone()),
+        Err(_) => catalog::build_tools(&plain_cfg, root, &prefix),
+    };
     let diagnostics = cfg.overrides.as_object().into_iter().flatten().map(|(name,patch)| {
         let inventory = plain.as_ref().ok().or_else(||diagnostic.as_ref().ok());
         let tool = inventory.and_then(|items|items.iter().find(|t|&t.name==name));
@@ -225,6 +228,12 @@ pub(super) fn review(run: &Path, prior: Option<&Path>) -> Result<()> {
             .zip(prior)
             .map(|(provider, path)| (path, provider));
         let reviewed = (|| -> Result<Value> {
+            // Numbered candidates are regenerated outputs, never capture evidence.
+            match std::fs::remove_file(run.join(format!("candidate-{index}.json"))) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
             for (root, p) in std::iter::once((run, provider)).chain(old) {
                 for read in p
                     .inputs
@@ -235,9 +244,14 @@ pub(super) fn review(run: &Path, prior: Option<&Path>) -> Result<()> {
                     bytes(root, read)?;
                 }
             }
-            compare_provider(run, provider, old)
+            let mut packet = compare_provider(run, provider, old)?;
+            packet["candidate"] = candidates::stage(run, provider, index)?;
+            if packet["candidate"]["file"].is_string() {
+                packet["outcome"] = json!("candidate ready; human review pending");
+            }
+            Ok(packet)
         })();
-        let packet=reviewed.unwrap_or_else(|_|json!({"provider":provider.id,"outcome":"review unavailable: frozen input invalid","accepted":false}));
+        let packet=reviewed.unwrap_or_else(|_|json!({"provider":provider.id,"outcome":"review unavailable: input validation or candidate staging failed","accepted":false}));
         let filename = format!("review-{index}.json");
         std::fs::write(run.join(&filename), serde_json::to_vec_pretty(&packet)?)?;
         packets.push(json!({"provider":provider.id,"outcome":packet["outcome"],"packet":filename}));
@@ -557,10 +571,15 @@ mod tests {
         );
     }
     #[test]
-    fn missing_or_corrupt_provider_blob_does_not_block_healthy_review() {
+    fn missing_or_corrupt_provider_blob_does_not_block_healthy_candidate() {
         for missing in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let run = dir.path();
+            std::fs::write(
+                run.join("unrelated-evidence.txt"),
+                b"preserve unrelated evidence",
+            )
+            .unwrap();
             let raw = serde_json::to_vec(&spec()).unwrap();
             let mut healthy = provider(run, &raw);
             healthy.asset = Some(captured(run, "asset.json", "committed asset", &raw));
@@ -604,12 +623,18 @@ mod tests {
             assert_eq!(summary["attempted"], 2);
             assert_eq!(
                 summary["providers"][0]["outcome"],
-                "review unavailable: frozen input invalid"
+                "review unavailable: input validation or candidate staging failed"
             );
             assert_eq!(
                 summary["providers"][1]["outcome"],
-                "authored review needed"
+                "candidate ready; human review pending"
             );
+            assert!(!run.join("candidate-0.json").exists());
+            assert_eq!(
+                std::fs::read(run.join("unrelated-evidence.txt")).unwrap(),
+                b"preserve unrelated evidence"
+            );
+            assert_eq!(std::fs::read(run.join("candidate-1.json")).unwrap(), raw);
             // A corrupt old sibling must remain inside the same provider boundary.
             let prior = run.join("prior");
             std::fs::create_dir(&prior).unwrap();
@@ -628,12 +653,18 @@ mod tests {
                 serde_json::from_slice(&std::fs::read(run.join("review.json")).unwrap()).unwrap();
             assert_eq!(
                 prior_summary["providers"][0]["outcome"],
-                "review unavailable: frozen input invalid"
+                "review unavailable: input validation or candidate staging failed"
             );
             assert_eq!(
                 prior_summary["providers"][1]["outcome"],
-                "authored review needed"
+                "candidate ready; human review pending"
             );
+            assert!(!run.join("candidate-0.json").exists());
+            assert_eq!(
+                std::fs::read(run.join("unrelated-evidence.txt")).unwrap(),
+                b"preserve unrelated evidence"
+            );
+            assert_eq!(std::fs::read(run.join("candidate-1.json")).unwrap(), raw);
         }
     }
 }

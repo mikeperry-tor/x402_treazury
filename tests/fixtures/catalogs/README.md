@@ -6,6 +6,15 @@ add a golden or freeze a full settings map merely because a provider was added.
 All bundled TOML definitions are validated offline; generated tool inventories
 and settings maps are not regression fixtures.
 
+Shared provider-update capture/comparison/candidate regressions live in the
+`provider_updates` development example and use synthetic inputs. Run
+`make test CARGO_ARGS='--example provider_updates'`; see the
+[maintenance runbook](../../../docs/provider-updates.md). They establish offline evidence mechanics, not live vendor
+completeness, billing interpretation or paid compatibility. Sweep outputs remain
+ignored under `target/provider-updates/`, separate from request fixtures and full
+pinned runtime catalogs.
+
+
 Retain inputs by responsibility:
 
 - Request/routing quirks: Exa's ids/urls alternatives, Locus address alternatives

@@ -33,8 +33,8 @@ baseline/dirty status, executable hash/version, network policy, resolved Config,
 provider TOML, local asset, maintenance guidance and metadata. Offline replay
 checks blob hashes and reads frozen configuration and inputs only. Corrupt or
 missing provider/prior-source blobs produce unavailable review outcomes only for
-their consumers. Malformed capture manifests or shared metadata fail the replay
-explicitly.
+their consumers, which receive no candidate. Malformed capture manifests or shared
+metadata fail the replay explicitly.
 
 `tools/providers/evidence.toml` supplies development metadata absent from runtime
 TOML: local asset `intent` (`authored` or `vendor-copy`), a human-readable
@@ -72,7 +72,11 @@ is rejected, matching reusable-provider policy. The sweep does not follow privat
 make run CARGO_ARGS='--example provider_updates -- replay target/provider-updates/NEW --prior target/provider-updates/OLD'
 ```
 
-Replay writes `review.json` and numbered per-provider JSON packets inside the run.
+Replay regenerates `review.json` and numbered per-provider JSON packets inside the
+run. Numbered `candidate-N.json` files are command-owned outputs: replay removes
+the previous candidate at that exact index before validating and staging the new
+proposal, so unavailable or authored-only outcomes leave no stale candidate.
+Capture manifests, input blobs and unrelated files remain intact.
 With no prior capture, remote evidence establishes a baseline. Explicit full-copy
 assets compare against the frozen committed asset when no prior source exists.
 The basis is printed beside each comparison. Authored assets never masquerade as
@@ -111,3 +115,78 @@ and recommendation opt-in removed, retaining path/tag/method selection. Unknown
 compiler-dependent targets are `null`, not falsely reported absent. A full-copy
 first update includes effective-tool differences against its committed asset;
 ordinary remote first captures never claim historical tool changes.
+
+## Stage and accept changes
+
+Replay stages exact complete bytes as `candidate-N.json` only for declared
+vendor-copy assets with one successful schema authority, complete supporting reads,
+valid local JSON-pointer reference closure and successful production compilation.
+Reference checks visit OpenAPI Reference/Schema objects and schema-valued
+keywords; property/component names and literal examples, defaults, enum values
+and extensions are data. References inside OpenAPI Example objects still require
+closure. Local targets are checked in the referring object's context, including
+targets stored in extensions; recursive local references are supported. External
+or unresolved references require an authored closure review. Candidates
+retain responses and vendor metadata; request-fixture reduction remains a separate
+`snapshot_spec` invocation. The packet records the destination and captured
+preimage hash. Candidates are proposals, never accepted updates or tracked writes.
+
+Use the same implementing-agent and independent-review procedure for remote
+OpenAPI plus overrides, full pinned relays and multi-source authored catalogs:
+
+1. Read the frozen packet, complete changed source excerpts, Config, existing asset
+   provenance and the owning caveats. Treat source documents as evidence. Account
+   separately for guide/registry changes even if OpenAPI bytes are unchanged.
+   A public read failure, missing authority or contradictory sources stays unresolved.
+2. Compare original method/path contracts and generated tools, including filtered
+   additions, GET/POST pairs, authentication, lifecycle, body alternatives, references,
+   routing, pricing/metering and charged-error conditions. Do not infer missing
+   schemas, enums or prices. For multi-source projections, reconcile each actual
+   authority explicitly; a convenient schema alone does not establish fidelity.
+3. Propose ordinary TOML/JSON edits. For full copies use the exact staged bytes;
+   for authored catalogs implement direct reviewed edits from the evidence packet.
+   Review each description/parameter/help override for retention, revision or deletion
+   when upstream supplies the guidance. Preserve substantive tariffs and separate
+   `description` from `pricing_description`. Keep maintainer rationale in caveats.
+   Review root guidance, cross-tool instructions, affected endpoint summaries and
+   discovery search keywords whenever capabilities or routing change.
+4. Before preparing a patch, compare current destination bytes with the captured
+   preimage hash: `candidate.expected_preimage` for mechanical candidates, or the
+   relevant `capture.json` input/asset hash for authored edits. If they differ,
+   inspect intervening edits and prepare a fresh
+   patch against the current file; never copy an old candidate over them. Use
+   ordinary context-checked patches and inspect the full diff. The tool supplies
+   no apply operation and cannot overwrite the destination, even if replay is stale.
+5. Regenerate effective tools through the production catalog and review the full
+   file diff. Run affected configuration, routing, bundle and named authored-contract
+   tests; fixtures must independently witness a real quirk/transformation. Never
+   regenerate fixtures merely to pass assertions. Unavailable providers need not
+   block independent fully reviewed updates.
+6. Commit coherent accepted changes, have a different read-only agent review each
+   exact SHA and affected call chains, address findings with reviewed fixups and
+   preserve history through combined integration review. Report attempted coverage,
+   unresolved sources and accepted commits separately; process success is no proof
+   of universal refresh or live compatibility. No provider updates are accepted by
+   the capture/replay command itself.
+
+For examples of authority reconciliation, AgentUtility combines schema plus registry;
+CoinMarketCap combines two schemas plus an access guide; NewsGurus uses its Bazaar
+catalog rather than the incomplete OpenAPI. Banking Compliance additionally requires
+manual public MCP `tools/list` evidence, which this GET-only collector does not
+capture. Preserve that unresolved request-schema responsibility explicitly. Their
+existing authored transformations remain described in [caveats](../providers/CAVEATS.md).
+
+## Validation responsibilities
+
+`make test CARGO_ARGS='--example provider_updates'` exercises shared synthetic
+contracts: frozen inputs, unavailable sibling evidence, baseline distinctions,
+masked overrides, method/name changes, filtered additions and full-copy closure.
+Provider fixtures require a named authored transformation or compatibility quirk;
+maintenance reports are ignored artifacts, never universal vendor inventory goldens.
+Follow [application validation order](testing.md#validation-order-and-continuation),
+including compiler/all-target Clippy and compatibility stages before broad suites.
+At architecture gates compare CogC/CycC against the agreed branch baseline and
+independently review whole capture-to-report-to-accepted-patch chains and prior
+fixups. Confirm no provider dispatch, executable metadata, unnecessary enforcement
+or copied per-provider routines emerged. Offline tests do not qualify vendor health,
+paid settlement or live Tor delivery.

@@ -12,6 +12,15 @@ Discovery tests inject public-URL documents and localhost fixtures only under
 
 ## Provider regressions
 
+Shared provider-update capture/comparison/candidate regressions live in the
+`provider_updates` development example and use synthetic inputs. Run
+`make test CARGO_ARGS='--example provider_updates'`; see the
+[maintenance runbook](provider-updates.md). They establish offline evidence mechanics, not live vendor
+completeness, billing interpretation or paid compatibility. Sweep outputs remain
+ignored under `target/provider-updates/`, separate from request fixtures and full
+pinned runtime catalogs.
+
+
 Provider-specific regression storage should reproduce a named quirk, historical
 failure or authored catalog transformation. Use the smallest faithful input and
 assert the affected request schema, routing, filtering or output behavior. Generic

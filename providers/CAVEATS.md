@@ -1538,12 +1538,16 @@ Their runtime consumer is offline relay bootstrap, and ordinary provider imports
 reuse the same complete catalogs. They are not reduced test fixtures. Curl's
 complete vendor schema remains in `curl/openapi.json`.
 
-Update from the primary sources deliberately:
+Capture complete primary sources through the shared maintenance network path:
 
 ```sh
-curl --fail --location https://agproxy.shveik.dev/openapi.json -o providers/agproxy-openapi.json
-curl --fail --location https://horizonpulse.dev/openapi.json -o providers/horizonpulse-openapi.json
+make run CARGO_ARGS='--example provider_updates -- capture --provider agproxy --provider horizonpulse'
+make run CARGO_ARGS='--example provider_updates -- replay target/provider-updates/RUN'
 ```
+
+Review the staged full-copy candidates and preimage hashes using the
+[shared acceptance procedure](../docs/provider-updates.md#stage-and-accept-changes).
+The sweep never overwrites the tracked assets or dispatches a provider-specific updater.
 
 Review the corresponding primary guides at
 <https://agproxy.shveik.dev/llms.txt> and <https://horizonpulse.dev/llms.txt> alongside

@@ -11,6 +11,8 @@ use std::{
 use x402_treazury::{catalog::Config, network};
 
 include!("../../src/providers/assets.rs");
+#[path = "update_candidates.rs"]
+mod candidates;
 #[path = "update_compare.rs"]
 mod compare;
 
