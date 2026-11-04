@@ -77,8 +77,9 @@ quirks, workarounds, and compatibility exemptions are documented in
   limit. Do not reintroduce daily/cumulative allocation, per-transfer ZEC spending
   budgets, or mirror a USDC reserve target into a ZEC cap. Reserve ranges authorize
   nominal USDC sizing only. Per-payment authority, actual network-fee caps,
-  accepted-work ownership and separately authorized qualification source exposure
-  protect distinct things.
+  accepted-work ownership and separately authorized qualification API budgets
+  protect distinct things. Qualification funding has no separate ZEC spending budget;
+  reviewed job counts, reserve sizing and actual treasury funds govern new allocations.
 - Ordinary USDC payment selection treats balances and price hints as advisory;
   current payer ownership and amount authority govern signing.
 - After recognized structured insufficient funds, try each existing eligible wallet

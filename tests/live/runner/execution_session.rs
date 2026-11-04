@@ -198,7 +198,7 @@ impl Launcher<'_> {
             "funding_execution",
             &json!({"session":binding.session,
             "enabled":self.new_funding,"new_job_limit":manifest.limits.new_funding_jobs,
-            "source_limit_zec":manifest.limits.source_exposure_zec}),
+            "total_test_budget_usdc":manifest.limits.total_test_budget_usdc}),
             now()?,
         )?;
         let process = Process::launch_confined(

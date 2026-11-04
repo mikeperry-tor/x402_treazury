@@ -1,7 +1,7 @@
 //! No network or signing. Reservations survive errors, cancellations and restarts.
 use super::{
     files,
-    manifest::{Manifest, identifier, usdc as atomic_usdc, zec as atomic_zec},
+    manifest::{Manifest, identifier, usdc as atomic_usdc},
     planner::Plan,
 };
 use anyhow::{Context, Result, ensure};
@@ -38,8 +38,7 @@ pub struct Authorization {
     pub version: u32,
     pub id: String,
     pub treasury_id: String,
-    pub cumulative_api_usdc: String,
-    pub cumulative_source_zec: String,
+    pub cumulative_test_budget_usdc: String,
     pub cumulative_new_jobs: u32,
 }
 impl Authorization {
@@ -52,15 +51,10 @@ impl Authorization {
             !uuid::Uuid::parse_str(&self.treasury_id)?.is_nil(),
             "nil treasury UUID"
         );
-        usdc(&self.cumulative_api_usdc)?;
-        zec(&self.cumulative_source_zec)?;
+        usdc(&self.cumulative_test_budget_usdc)?;
         ensure!(
             self.cumulative_new_jobs <= 10000,
             "registry funding-job limit exceeds 10000"
-        );
-        ensure!(
-            (self.cumulative_new_jobs == 0) == (zec(&self.cumulative_source_zec)? == 0),
-            "job and source limits must both be zero or positive"
         );
         Ok(())
     }
@@ -99,9 +93,9 @@ pub struct Registry {
     root: PathBuf,
 }
 const SCHEMA:&str = "
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 CREATE TABLE identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),treasury TEXT NOT NULL,baseline TEXT NOT NULL,baseline_hash TEXT NOT NULL);
-CREATE TABLE authorizations(seq INTEGER PRIMARY KEY,id TEXT UNIQUE NOT NULL,api INTEGER NOT NULL CHECK(api>=0),source INTEGER NOT NULL CHECK(source>=0),jobs INTEGER NOT NULL CHECK(jobs>=0),at INTEGER NOT NULL);
+CREATE TABLE authorizations(seq INTEGER PRIMARY KEY,id TEXT UNIQUE NOT NULL,budget INTEGER NOT NULL CHECK(budget>=0),jobs INTEGER NOT NULL CHECK(jobs>=0),at INTEGER NOT NULL);
 CREATE TABLE runs(id TEXT PRIMARY KEY,manifest TEXT NOT NULL,plan TEXT NOT NULL,authorization TEXT NOT NULL REFERENCES authorizations(id),at INTEGER NOT NULL);
 CREATE TABLE pins(run TEXT NOT NULL REFERENCES runs(id),revision INTEGER NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(run,revision));
 CREATE TABLE cases(run TEXT NOT NULL REFERENCES runs(id),id TEXT NOT NULL,reservation INTEGER NOT NULL CHECK(reservation>=0),window_start INTEGER NOT NULL,window_end INTEGER NOT NULL,phase TEXT NOT NULL,execution TEXT NOT NULL DEFAULT 'UNATTEMPTED',semantic TEXT NOT NULL DEFAULT 'UNOBSERVED',settlement TEXT NOT NULL DEFAULT 'UNOBSERVED',result_hash TEXT,PRIMARY KEY(run,id));
@@ -186,8 +180,8 @@ impl Registry {
         )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            version == 1,
-            "unsupported/incomplete integration registry schema"
+            version == 2 || (read_only && version == 1),
+            "unsupported integration registry schema: historical ZEC-budget registries are read-only; preserve their evidence and use a separately authorized registry for new USDC-budget execution"
         );
         db.execute_batch("PRAGMA foreign_keys=ON;")?;
         if !read_only {
@@ -208,28 +202,21 @@ impl Registry {
         let tx = self.db.transaction()?;
         let treasury: String = tx.query_row("SELECT treasury FROM identity", [], |r| r.get(0))?;
         ensure!(treasury == a.treasury_id, "registry treasury mismatch");
-        let consumed: i64 = tx.query_row(
-            "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",
-            [],
-            |r| r.get(0),
-        )?;
+        let consumed = x402_treazury::qualification::budget::used(&tx, None)?;
         ensure!(
-            usdc(&a.cumulative_api_usdc)? >= consumed,
-            "authorization cannot erase consumed reservations"
+            u64::try_from(usdc(&a.cumulative_test_budget_usdc)?)? >= consumed,
+            "authorization cannot erase accepted test-budget charges"
         );
-        let (funding_jobs, source_reserved) = funding_usage(&tx)?;
+        let funding_jobs = funding_usage(&tx)?;
         ensure!(
-            i64::from(a.cumulative_new_jobs) >= funding_jobs
-                && zec(&a.cumulative_source_zec)? >= source_reserved,
+            i64::from(a.cumulative_new_jobs) >= funding_jobs,
             "authorization cannot erase funding permits or orphan reservations"
         );
-        // Positive execution remains disabled until production permit hooks land.
         tx.execute(
-            "INSERT INTO authorizations(id,api,source,jobs,at) VALUES(?1,?2,?3,?4,?5)",
+            "INSERT INTO authorizations(id,budget,jobs,at) VALUES(?1,?2,?3,?4)",
             params![
                 a.id,
-                usdc(&a.cumulative_api_usdc)?,
-                zec(&a.cumulative_source_zec)?,
+                usdc(&a.cumulative_test_budget_usdc)?,
                 a.cumulative_new_jobs,
                 now
             ],
@@ -262,18 +249,17 @@ impl Registry {
         let tx = self.db.transaction()?;
         let treasury: String = tx.query_row("SELECT treasury FROM identity", [], |r| r.get(0))?;
         ensure!(treasury == m.treasury_id, "prepared run treasury mismatch");
-        let (id, api, source, jobs): (String, i64, i64, u32) = tx.query_row(
-            "SELECT id,api,source,jobs FROM authorizations ORDER BY seq DESC LIMIT 1",
+        let (id, budget, jobs): (String, i64, u32) = tx.query_row(
+            "SELECT id,budget,jobs FROM authorizations ORDER BY seq DESC LIMIT 1",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         ensure!(
             id == m.registry_authorization,
             "run must reference current explicit authorization"
         );
         ensure!(
-            usdc(&m.limits.api_reservation_usdc)? <= api
-                && zec(&m.limits.source_exposure_zec)? <= source
+            usdc(&m.limits.total_test_budget_usdc)? <= budget
                 && m.limits.new_funding_jobs <= jobs,
             "run limits exceed cumulative authority"
         );
@@ -435,19 +421,26 @@ impl Registry {
         Ok(serde_json::from_value(value)?)
     }
     pub fn report(&self, run: Option<&str>, now: i64) -> Result<Value> {
+        let version: i64 = self.db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version == 1 {
+            let (authorization, api, source, jobs): (String, i64, i64, i64) = self.db.query_row(
+                "SELECT id,api,source,jobs FROM authorizations ORDER BY seq DESC LIMIT 1",
+                [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            let cases: i64 = self.db.query_row("SELECT COUNT(*) FROM cases WHERE ?1 IS NULL OR run=?1", [run], |r| r.get(0))?;
+            return Ok(json!({"version":1,"historical_registry":true,"execution_available":false,
+                "authorization":authorization,"historical_api_ceiling_atomic":api,
+                "historical_source_ceiling_zatoshis":source,"new_job_ceiling":jobs,"case_count":cases,
+                "next_step":"Historical ZEC-budget evidence remains unchanged and read-only; its monetary values are not USDC test-budget authority. Use a separately authorized registry for new execution."}));
+        }
         self.check_report_bounds(run)?;
         let rows = self.report_case_rows(run, now)?;
         let consumed: i64 = self.db.query_row(
             "SELECT COALESCE(SUM(reservation),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",
-            [],
-            |r| r.get(0),
-        )?;
-        let (auth, ceiling, source_ceiling, job_ceiling): (String, i64, i64, i64) =
-            self.db.query_row(
-                "SELECT id,api,source,jobs FROM authorizations ORDER BY seq DESC LIMIT 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )?;
+            [], |r| r.get(0))?;
+        let used = x402_treazury::qualification::budget::used(&self.db, None)?;
+        let (auth, ceiling, job_ceiling): (String, i64, i64) = self.db.query_row(
+            "SELECT id,budget,jobs FROM authorizations ORDER BY seq DESC LIMIT 1",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
         let revisions = self.report_pin_revisions(run)?;
         if let Some(id) = run {
             self.validated_skips(id)?;
@@ -472,13 +465,28 @@ impl Registry {
             })
             .transpose()?
             .unwrap_or(false);
-        let (funding_jobs_reserved, source_reserved_zatoshis) = funding_usage(&self.db)?;
-        let report = json!({"funding_jobs_reserved":funding_jobs_reserved,"source_reserved_zatoshis":source_reserved_zatoshis,"version":1,"authorization":auth,"api_reserved_atomic":consumed,"api_ceiling_atomic":ceiling,"source_ceiling_zatoshis":source_ceiling,"new_job_ceiling":job_ceiling,"api_headroom_atomic":ceiling.checked_sub(consumed).context("registry reservation integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"application_evidence":application_evidence,"qualification_scope":if execution_available && managed { "managed_mcp_with_authorization_evidence" } else if execution_available { "unsigned_mcp_only" } else { "offline_configuration" },"tor_isolation":"not_qualified","funding_permits_available":execution_available && managed,"baseline":"immutable private evidence; live reconciliation required","next_step":if execution_available && managed { "positive funding requires --allow-funding and registry authority; unresolved authorizations or missing debit proofs remain incomplete" } else if execution_available { "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification" } else { "prepare is required before execution" }});
-        let mut report = report;
+        let (qualification_scope, funding_permits_available, next_step) =
+            match (execution_available, managed) {
+                (true, true) => (
+                    "managed_mcp_with_authorization_evidence",
+                    true,
+                    "positive funding requires --allow-funding and registry authority; unresolved authorizations or missing debit proofs remain incomplete",
+                ),
+                (true, false) => (
+                    "unsigned_mcp_only",
+                    false,
+                    "run dispatches only unattempted unsigned cases; no payment or Tor isolation qualification",
+                ),
+                (false, _) => (
+                    "offline_configuration",
+                    false,
+                    "prepare is required before execution",
+                ),
+            };
+        let funding_jobs_reserved = funding_usage(&self.db)?;
+        let mut report = json!({"funding_jobs_reserved":funding_jobs_reserved,"version":2,"authorization":auth,"api_reserved_atomic":consumed,"total_test_budget_atomic":ceiling,"test_budget_used_atomic":used,"new_job_ceiling":job_ceiling,"test_budget_remaining_atomic":u64::try_from(ceiling)?.checked_sub(used).context("registry test-budget integrity failure")?,"cases":rows,"pin_revisions":revisions,"execution_available":execution_available,"runtime_events":runtime_events,"application_evidence":application_evidence,"qualification_scope":qualification_scope,"tor_isolation":"not_qualified","funding_permits_available":funding_permits_available,"baseline":"immutable private evidence; live reconciliation required","next_step":next_step});
         if let Some(run) = run {
             self.append_run_report_sections(run, &mut report)?;
-        }
-        if let Some(run) = run {
             report["summary"] = serde_json::to_value(crate::report_model::build(
                 &self.observed_manifest(run)?,
                 &self.pins(run)?.resolved_config,
@@ -609,22 +617,7 @@ fn insert_pins(db: &Connection, run: &str, revision: i64, pins: &Pins, now: i64)
 fn usdc(s: &str) -> Result<i64> {
     Ok(atomic_usdc(s)?.try_into()?)
 }
-fn zec(s: &str) -> Result<i64> {
-    Ok(atomic_zec(s)?.try_into()?)
-}
 
-fn funding_usage(db: &Connection) -> Result<(i64, i64)> {
-    let exists: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='funding_permits')",
-        [],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Ok((0, 0));
-    }
-    Ok(db.query_row(
-        "SELECT COUNT(*),COALESCE(SUM(source_bound),0) FROM funding_permits",
-        [],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?)
+fn funding_usage(db: &Connection) -> Result<i64> {
+    Ok(db.query_row("SELECT COUNT(*) FROM funding_permits", [], |r| r.get(0))?)
 }

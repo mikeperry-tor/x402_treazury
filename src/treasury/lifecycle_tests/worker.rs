@@ -515,7 +515,6 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
 
 #[tokio::test]
 async fn production_preparation_scans_new_deposit_without_a_readiness_balance_gate() {
-    use crate::rotation::funding::FundingBackend;
     let (_dir, net, mut owner, endpoint) = funded_fixture_amount(2, 10_000).await;
     let address = owner
         .client
@@ -555,22 +554,6 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
     // shared observation due; scheduling floors are covered independently.
     owner.observation = Default::default();
     let (handle, commands) = actor::channel();
-    let mut backend = Backend {
-        treasury: handle.clone(), store: store.clone(),
-        near: NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
-        base: BaseRpc::new("http://127.0.0.1:1", 2).unwrap(),
-        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())]),
-        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
-        max_network_fee: 30_000,
-    };
-    let quote = Quote {
-        sizing_preview: None,
-        request: json!({}),
-        response: json!({}),
-        input: 50_000,
-        deadline: now().unwrap() + 7200,
-        deposit: None,
-    };
     let stop = CancellationToken::new();
     let sends = Arc::new(AtomicUsize::new(0));
     let sender = CountedSender {
@@ -583,30 +566,12 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         sends: sends.clone(),
         lookups: Arc::new(AtomicUsize::new(0)),
     };
-    // Readiness has no balance/scan gate and creates no financial work.
-    backend.ready(&job, &quote).await.unwrap();
-    assert!(commands.test_is_empty());
-    assert_eq!(
-        store
-            .call(|s| Ok(s.status()?.sync.unwrap().spendable_shielded_zatoshis))
-            .await
-            .unwrap(),
-        10_000
-    );
-    assert!(
-        store
-            .call(|s| Ok(
-                s.status()?.treasury_operations.is_empty() && !s.status()?.outgoing_pending
-            ))
-            .await
-            .unwrap()
-    );
-    let deadline = quote.deadline;
+    let deadline = now().unwrap() + 7200;
     save_quotes(&store, vec![job.clone()], deadline).await;
     // Actual preparation owns SDK synchronization. Queue it before the actor's
     // maintenance tick so an incidental background scan cannot satisfy the test.
     let prepare_handle = handle.clone();
-    let base = backend.base.clone();
+    let base = BaseRpc::new("http://127.0.0.1:1", 2).unwrap();
     // An unavailable advisory destination endpoint cannot prohibit a valid
     // SDK-funded preparation. Actual Store publication failures are different.
     let prepare = tokio::spawn(async move {
@@ -638,7 +603,6 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         .unwrap();
     assert_eq!(sends.load(Ordering::SeqCst), 0);
     stop.cancel();
-    drop(backend);
     drop(store);
     drop(handle);
     task.await.unwrap().unwrap();

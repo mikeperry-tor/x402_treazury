@@ -27,9 +27,7 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
     let mut tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let manifest = guard.authority(&tx, name(status, "treasury_id")?)?;
     let (run_limits, _) = guard.limits(&tx, &manifest)?;
-    let existing_funds_only = manifest["start"]["mode"] == "funded_pools"
-        && run_limits.jobs == 0
-        && run_limits.source_zatoshis == 0;
+    let existing_funds_only = manifest["start"]["mode"] == "funded_pools" && run_limits.jobs == 0;
     let baseline = verified_baseline(&tx, status)?;
     let raw: String = tx.query_row(
         "SELECT payload FROM pins WHERE run=?1 ORDER BY revision DESC LIMIT 1",
@@ -45,7 +43,7 @@ pub(super) fn validate(guard: &RegistryPermits, current: &Value) -> Result<()> {
     let jobs = index(array(status, "funding_jobs")?, "id")?;
     validate_job_continuity(&jobs, &baseline)?;
     validate_allocations(&tx, &pools, profiles, &old_wallets, &jobs)?;
-    validate_incomplete_jobs(&tx, guard, &manifest, &jobs, status, existing_funds_only)?;
+    validate_incomplete_jobs(&tx, guard, &manifest, &jobs, current, existing_funds_only)?;
     validate_pending_sources(&tx, &guard.binding.run, current)?;
     validate_source(&tx, &baseline, current)?;
     validate_payments(&tx, &guard.binding.run, &baseline, current)?;
@@ -171,7 +169,7 @@ fn validate_incomplete_jobs(
     guard: &RegistryPermits,
     manifest: &Value,
     jobs: &BTreeMap<&str, &Value>,
-    status: &Value,
+    current: &Value,
     existing_funds_only: bool,
 ) -> Result<()> {
     // A fresh run cannot adopt another run's funding authority. A known, wholly
@@ -191,7 +189,7 @@ fn validate_incomplete_jobs(
             .any(|pool| pool == &job["pool_name"]);
         let retained = !owned
             && (existing_funds_only || outside_scope)
-            && retained_unprepared_job(db, job, status)?;
+            && retained_unprepared_job(db, job, current)?;
         ensure!(
             owned || retained,
             "incomplete funding job requires its original run or explicit reconciliation before a fresh run"
@@ -269,27 +267,43 @@ fn bootstrap_claims<'a>(
     Ok(bootstrap)
 }
 
-fn retained_unprepared_job(db: &Connection, job: &Value, status: &Value) -> Result<bool> {
+fn retained_unprepared_job(db: &Connection, job: &Value, current: &Value) -> Result<bool> {
     if !matches!(job["phase"].as_str(), Some("ALLOCATED" | "QUOTED")) {
         return Ok(false);
     }
     let known: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM funding_permits p JOIN runs r ON r.id=p.run WHERE p.job=?1 AND p.pool=?2 AND NOT EXISTS(SELECT 1 FROM funding_source_attempts s WHERE s.job=p.job AND s.released=0))",
+        "SELECT EXISTS(SELECT 1 FROM funding_permits p JOIN runs r ON r.id=p.run WHERE p.job=?1 AND p.pool=?2)",
         params![name(job, "id")?, name(job, "pool_name")?],
         |r| r.get(0),
     )?;
-    let bound = array(status, "pools")?.iter().any(|pool| {
-        pool["id"] == job["pool_id"]
-            && pool["name"] == job["pool_name"]
-            && pool["addresses"].as_array().is_some_and(|wallets| {
-                wallets.iter().any(|wallet| {
-                    wallet["id"] == job["wallet_id"]
-                        && wallet["address"] == job["recipient"]
-                        && wallet["role"] == "ALLOCATED"
+    let unprepared = if current.get("source_preparations").is_some() {
+        let archived = array(current, "unprepared_archives")?;
+        !array(current, "source_preparations")?.iter().any(|source| {
+            source["job_id"] == job["id"] && !archived.contains(&source["operation_id"])
+        })
+    } else {
+        // Legacy snapshots lack current Store preparation evidence. Preserve
+        // their conservative original-run boundary rather than infer absence.
+        !db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_source_attempts WHERE job=?1 AND released=0)",
+            [name(job, "id")?],
+            |r| r.get::<_, bool>(0),
+        )?
+    };
+    let bound = array(&current["treasury_status"], "pools")?
+        .iter()
+        .any(|pool| {
+            pool["id"] == job["pool_id"]
+                && pool["name"] == job["pool_name"]
+                && pool["addresses"].as_array().is_some_and(|wallets| {
+                    wallets.iter().any(|wallet| {
+                        wallet["id"] == job["wallet_id"]
+                            && wallet["address"] == job["recipient"]
+                            && wallet["role"] == "ALLOCATED"
+                    })
                 })
-            })
-    });
-    Ok(known && bound)
+        });
+    Ok(known && bound && unprepared)
 }
 fn validate_source(db: &Connection, old: &Value, current: &Value) -> Result<()> {
     if current.get("source_preparations").is_some() || old.get("source_preparations").is_some() {
@@ -321,22 +335,16 @@ fn validate_source(db: &Connection, old: &Value, current: &Value) -> Result<()> 
             );
         }
     }
-    for (id, entry) in after {
+    for id in after.keys() {
         if before.contains_key(id) {
             continue;
         }
-        let (bound, job, pool): (i64,String,String) = db.query_row("SELECT s.source_bound,s.job,p.pool FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE s.operation=?1 AND s.released=0", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).context("source exposure outside registry baseline/permits")?;
+        let (job, pool): (String,String) = db.query_row("SELECT s.job,p.pool FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE s.operation=?1 AND s.released=0", [*id], |r| Ok((r.get(0)?,r.get(1)?))).context("source exposure outside registry baseline/permits")?;
         ensure!(
             array(&current["treasury_status"], "funding_jobs")?
                 .iter()
                 .any(|j| j["id"] == job && j["pool_name"] == pool),
             "reserved source operation lacks its allocated funding job"
-        );
-        ensure!(
-            entry["requested"]
-                .as_i64()
-                .is_some_and(|v| v > 0 && v <= bound),
-            "source reservation exceeds permit"
         );
     }
     Ok(())
@@ -383,7 +391,7 @@ fn validate_preparations(db: &Connection, old: &Value, current: &Value) -> Resul
         if before.contains_key(id) {
             continue;
         }
-        let (bound, job, pool): (i64,String,String) = db.query_row("SELECT s.source_bound,s.job,p.pool FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE s.operation=?1 AND s.released=0", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).context("source preparation outside registry baseline/permits")?;
+        let (job, pool): (String,String) = db.query_row("SELECT s.job,p.pool FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE s.operation=?1 AND s.released=0", [id], |r| Ok((r.get(0)?,r.get(1)?))).context("source preparation outside registry baseline/permits")?;
         ensure!(
             array(&current["treasury_status"], "funding_jobs")?
                 .iter()
@@ -393,20 +401,6 @@ fn validate_preparations(db: &Connection, old: &Value, current: &Value) -> Resul
                     && entry["pool_name"] == pool),
             "accepted source operation lacks its allocated funding job"
         );
-        if let Some(op) = operations.get(id) {
-            let principal = op["facts"]["amount_zatoshis"]
-                .as_u64()
-                .context("source principal missing")?;
-            let fee = op["facts"]["fee_zatoshis"]
-                .as_u64()
-                .context("source fee missing")?;
-            ensure!(
-                principal
-                    .checked_add(fee)
-                    .is_some_and(|cost| bound > 0 && cost <= bound as u64),
-                "actual source cost exceeds permit"
-            );
-        }
     }
     ensure!(
         operations.keys().all(|id| current["source_preparations"]
@@ -595,7 +589,9 @@ mod tests {
             .unwrap()
             .push(json!({"id":job,"pool_name":"pool","operation_id":"replacement"}));
         current["source_preparations"] = json!([{"operation_id":"expired","job_id":job,"pool_name":"pool","preparation_sha256":"a".repeat(64)}, {"operation_id":"replacement","job_id":job,"pool_name":"pool","preparation_sha256":"b".repeat(64)}]);
-        current["lifecycle"]["source_operations"] = json!([{"operation_id":"expired","submission":"EXPIRED","facts":{"amount_zatoshis":20,"fee_zatoshis":10},"prepared_record_sha256":"c".repeat(64)}]);
+        current["lifecycle"]["source_operations"] = json!([{"operation_id":"expired","submission":"EXPIRED","facts":{"amount_zatoshis":20,"fee_zatoshis":11},"prepared_record_sha256":"c".repeat(64)}]);
+        // Actual accepted costs come from Store facts, independently of the
+        // first proposal (30) recorded before a failed acceptance/retry.
         validate_source(&db, &before, &current).unwrap();
         let accepted = current.clone();
         validate_source(&db, &accepted, &current).unwrap();
@@ -612,7 +608,7 @@ mod tests {
         assert!(validate_source(&db, &before, &current).is_err());
         current = accepted.clone();
         current["lifecycle"]["source_operations"][0]["facts"]["amount_zatoshis"] = json!(21);
-        assert!(validate_source(&db, &before, &current).is_err());
+        assert!(validate_source(&db, &accepted, &current).is_err());
         current = accepted;
         current["source_preparations"][1]["operation_id"] = json!("unknown");
         assert!(validate_source(&db, &before, &current).is_err());
@@ -640,12 +636,15 @@ mod tests {
     #[test]
     fn zero_funding_run_can_use_active_wallet_while_prior_unprepared_refill_stays_owned() {
         let (_dir, guard, db, mut state) = fixture();
+        state["source_preparations"] = json!([]);
+        state["lifecycle"] = json!({"source_operations":[]});
+        baseline(&db, &state);
         db.execute(
             "INSERT INTO runs(id,manifest) SELECT 'previous',manifest FROM runs LIMIT 1",
             [],
         )
         .unwrap();
-        db.execute("INSERT INTO funding_permits(intent,run,pool,source_bound,job,at) VALUES('prior_intent','previous','pool',100,'jc',0)", []).unwrap();
+        db.execute("INSERT INTO funding_permits(intent,run,pool,job,at) VALUES('prior_intent','previous','pool','jc',0)", []).unwrap();
         state["treasury_status"]["pools"][0]["addresses"][1]["role"] = json!("RETIRED");
         state["treasury_status"]["pools"][0]["addresses"]
             .as_array_mut()
@@ -657,11 +656,11 @@ mod tests {
             guard.validate_state(&state).is_err(),
             "positive funding cannot adopt another run's job"
         );
-        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',0,'$.limits.source_exposure_zec','0') WHERE id!='previous'", []).unwrap();
+        db.execute("UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',0,'$.limits.total_test_budget_usdc','0') WHERE id!='previous'", []).unwrap();
         guard.validate_state(&state).unwrap();
         assert!(
             guard
-                .check_preparation("treasury", "jc", 1)
+                .check_preparation("treasury", "jc")
                 .unwrap_err()
                 .to_string()
                 .contains("funding permit missing for preparation")
@@ -676,14 +675,14 @@ mod tests {
                 .reserve_allocations("treasury", "pool", &[99])
                 .is_err()
         );
-        let permit: (String, i64) = db
+        let permit: (String, String) = db
             .query_row(
-                "SELECT run,source_bound FROM funding_permits WHERE job='jc'",
+                "SELECT run,pool FROM funding_permits WHERE job='jc'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(permit, ("previous".into(), 100));
+        assert_eq!(permit, ("previous".into(), "pool".into()));
         for phase in [
             "PREPARING",
             "PREPARED",
@@ -708,14 +707,35 @@ mod tests {
         changed["pending_source_operations"] = json!(["unexplained"]);
         assert!(guard.validate_state(&changed).is_err());
         db.execute(
-            "INSERT INTO funding_source_attempts(operation,job,source_bound) VALUES('op','jc',100)",
+            "INSERT INTO funding_source_attempts(operation,job,input_zatoshis) VALUES('op','jc',100)",
             [],
         )
         .unwrap();
+        let original_permits = permit_rows(&db);
+        guard.validate_state(&state).unwrap();
+        assert_eq!(permit_rows(&db), original_permits);
         assert!(
-            guard.validate_state(&state).is_err(),
-            "an accepted preparation reservation remains a liability even without bytes"
+            guard
+                .reserve_preparation("treasury", "jc", "op", 101)
+                .is_err()
         );
+        // A proposal-only observation does not own Store work. A real accepted
+        // calculation does, even if its display phase still says QUOTED.
+        state["source_preparations"] = json!([{"operation_id":"op","job_id":"jc","pool_name":"pool","preparation_sha256":"a".repeat(64)}]);
+        assert!(guard.validate_state(&state).is_err());
+        // The same boundary covers an archived signed/resolved predecessor.
+        state["treasury_status"]["funding_jobs"][2]["operation_id"] = json!("replacement");
+        state["lifecycle"]["source_operations"] = json!([{"operation_id":"op","submission":"RESOLVED","facts":{"amount_zatoshis":90,"fee_zatoshis":11},"prepared_record_sha256":"b".repeat(64)}]);
+        assert!(guard.validate_state(&state).is_err());
+        // Exclusive reconstruction can positively close an unpublished intent;
+        // the surviving digest then supplies history, not a source liability.
+        state["lifecycle"]["source_operations"] = json!([]);
+        state["unprepared_archives"] = json!(["op"]);
+        guard.validate_state(&state).unwrap();
+        assert_eq!(permit_rows(&db), original_permits);
+        assert!(guard.check_preparation("treasury", "jc").is_err());
+        state["source_preparations"] = json!([]);
+        state["unprepared_archives"] = json!([]);
         db.execute("DELETE FROM funding_source_attempts", [])
             .unwrap();
         db.execute("DELETE FROM funding_permits", []).unwrap();
@@ -728,6 +748,8 @@ mod tests {
     #[test]
     fn selected_pool_can_rotate_without_adopting_another_pools_unprepared_job() {
         let (_dir, mut guard, db, mut state) = fixture();
+        state["source_preparations"] = json!([]);
+        state["lifecycle"] = json!({"source_operations":[]});
         state["treasury_status"]["pools"]
             .as_array_mut()
             .unwrap()
@@ -760,7 +782,7 @@ mod tests {
             [serde_json::to_string(&guard.binding).unwrap()],
         )
         .unwrap();
-        db.execute("INSERT INTO funding_permits(intent,run,pool,source_bound,job,at) VALUES('prior_intent','previous','pool',100,'jc',0)", []).unwrap();
+        db.execute("INSERT INTO funding_permits(intent,run,pool,job,at) VALUES('prior_intent','previous','pool','jc',0)", []).unwrap();
         state["treasury_status"]["pools"][0]["addresses"][1]["role"] = json!("RETIRED");
         state["treasury_status"]["pools"][0]["addresses"]
             .as_array_mut()
@@ -771,7 +793,7 @@ mod tests {
         assert!(guard.reserve_allocations("treasury", "pool", &[2]).is_err());
         assert!(
             guard
-                .check_preparation("treasury", "jc", 1)
+                .check_preparation("treasury", "jc")
                 .unwrap_err()
                 .to_string()
                 .contains("funding permit missing for preparation")
@@ -786,18 +808,21 @@ mod tests {
             .unwrap();
         assert_eq!(jobs.len(), 1);
         assert_ne!(jobs[0], "jc");
-        let retained: (String, i64) = db
+        let retained: (String, String) = db
             .query_row(
-                "SELECT run,source_bound FROM funding_permits WHERE job='jc'",
+                "SELECT run,pool FROM funding_permits WHERE job='jc'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(retained, ("previous".into(), 100));
+        assert_eq!(retained, ("previous".into(), "pool".into()));
         state["treasury_status"]["funding_jobs"][2]["phase"] = json!("PREPARED");
         assert!(guard.validate_state(&state).is_err());
         state["treasury_status"]["funding_jobs"][2]["phase"] = json!("QUOTED");
-        db.execute("INSERT INTO funding_source_attempts(operation,job,source_bound) VALUES('old_operation','jc',100)", []).unwrap();
+        db.execute("INSERT INTO funding_source_attempts(operation,job,input_zatoshis) VALUES('old_operation','jc',100)", []).unwrap();
+        guard.validate_state(&state).unwrap();
+        assert!(guard.check_preparation("treasury", "jc").is_err());
+        state["source_preparations"] = json!([{"operation_id":"old_operation","job_id":"jc","pool_name":"pool","preparation_sha256":"a".repeat(64)}]);
         assert!(guard.validate_state(&state).is_err());
     }
 
@@ -840,12 +865,11 @@ mod tests {
             0,
             "first pool must not consume authority when the second cannot fit"
         );
-        db.execute("UPDATE authorizations SET jobs=3,source=300", [])
-            .unwrap();
-        // Per-job source bounds are derived from the reviewed run exposure, so
-        // the three reviewed allocations fit the cumulative authority exactly.
+        db.execute("UPDATE authorizations SET jobs=3", []).unwrap();
+        // Allocation authority counts jobs; funding input amounts are facts,
+        // not an additional test budget.
         db.execute(
-            "UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',3,'$.limits.source_exposure_zec','0.000003')",
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.new_funding_jobs',3)",
             [],
         )
         .unwrap();
@@ -942,7 +966,11 @@ mod tests {
         state["source_budget_entries"] = json!([{"id":"operation","requested":100,"original_day":1,"reserved":100,"consumed":0}]);
         state["pending_source_operations"] = json!(["operation"]);
         guard.validate_state(&state).unwrap();
+        // The first proposal can differ from the Store-accepted cost after a
+        // proven unstarted retry. Identity, not that observation, supplies scope.
         state["source_budget_entries"][0]["requested"] = json!(101);
+        guard.validate_state(&state).unwrap();
+        state["source_budget_entries"][0]["id"] = json!("unowned");
         assert!(guard.validate_state(&state).is_err());
     }
     #[test]

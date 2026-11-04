@@ -33,8 +33,7 @@ impl Fixture {
             version: 1,
             id: m.registry_authorization.clone(),
             treasury_id: id,
-            cumulative_api_usdc: "0.04".into(),
-            cumulative_source_zec: "0".into(),
+            cumulative_test_budget_usdc: "0.04".into(),
             cumulative_new_jobs: 0,
         };
         let pins = Pins {
@@ -202,11 +201,10 @@ fn reservations_survive_errors_and_new_runs_do_not_reset_authority() {
         .unwrap();
     f.manifest.run_id = "third".into();
     f.prepare(&mut r);
-    assert!(
-        r.reserve_batch("third", "one", &["call".into()], 10)
-            .is_err()
-    );
-    assert_eq!(reserved(&r), 40000);
+    r.reserve_batch("third", "one", &["call".into()], 10).unwrap();
+    assert_eq!(reserved(&r), 60000);
+    assert_eq!(r.report(None, 10).unwrap()["test_budget_used_atomic"], 0,
+        "dispatch reserves identities; only actual payment authorizations consume the running budget");
     assert!(
         r.report(None, 10)
             .unwrap()
@@ -270,13 +268,14 @@ fn authorization_revisions_preserve_baseline_and_charged_reservations() {
     );
     r.reserve_batch("test_run", "one", &["call".into()], 10)
         .unwrap();
+    r.event("test_run", "application_payment", &json!({"attempt_id":"held_authorization","amount":"20000"}), 10).unwrap();
     drop(r);
     // An explicit new authorization cannot erase consumption; duplicate authorization IDs fail.
     assert!(Registry::authorize(&f.state, &f.auth, 10).is_err());
     f.auth.id = "review_2".into();
-    f.auth.cumulative_api_usdc = "0.01".into();
+    f.auth.cumulative_test_budget_usdc = "0.01".into();
     assert!(Registry::authorize(&f.state, &f.auth, 10).is_err());
-    f.auth.cumulative_api_usdc = "0.05".into();
+    f.auth.cumulative_test_budget_usdc = "0.05".into();
     let r = Registry::authorize(&f.state, &f.auth, 10).unwrap();
     assert_eq!(reserved(&r), 20000);
 }
@@ -597,7 +596,6 @@ fn execution_is_single_use_even_at_the_same_timestamp() {
 fn funding_reservations_survive_reopen_and_authority_cannot_erase_them() {
     use x402_treazury::qualification::funding::{self, Limits, Request};
     let mut f = Fixture::new();
-    f.auth.cumulative_source_zec = "0.001".into();
     f.auth.cumulative_new_jobs = 2;
     let mut registry = f.open();
     f.prepare(&mut registry);
@@ -613,15 +611,15 @@ fn funding_reservations_survive_reopen_and_authority_cannot_erase_them() {
         &[Request {
             intent: "bootstrap_a".into(),
             pool: "pool".into(),
-            source_bound: 100,
+
         }],
         Limits {
             jobs: 2,
-            source_zatoshis: 100_000,
+
         },
         Limits {
             jobs: 2,
-            source_zatoshis: 100_000,
+
         },
         3,
     )
@@ -632,11 +630,10 @@ fn funding_reservations_survive_reopen_and_authority_cannot_erase_them() {
     let registry = Registry::open(&f.state, true).unwrap();
     let report = registry.report(None, 10).unwrap();
     assert_eq!(report["funding_jobs_reserved"], 1);
-    assert_eq!(report["source_reserved_zatoshis"], 100);
+    assert_eq!(report["test_budget_used_atomic"], 0);
     assert_eq!(report["funding_permits_available"], false);
     drop(registry);
     f.auth.id = "revoke".into();
-    f.auth.cumulative_source_zec = "0".into();
     f.auth.cumulative_new_jobs = 0;
     assert!(Registry::authorize(&f.state, &f.auth, 11).is_err());
 }
@@ -895,12 +892,10 @@ fn rotation_fixture() -> Fixture {
         f.manifest.cases.push(c);
         f.manifest.phases[0].cases.push(id.into());
     }
-    f.manifest.limits.api_reservation_usdc = "0.06".into();
+    f.manifest.limits.total_test_budget_usdc = "0.06".into();
     f.manifest.limits.new_funding_jobs = 1;
-    f.manifest.limits.source_exposure_zec = "0.1".into();
-    f.auth.cumulative_api_usdc = "0.06".into();
+    f.auth.cumulative_test_budget_usdc = "0.06".into();
     f.auth.cumulative_new_jobs = 1;
-    f.auth.cumulative_source_zec = "0.1".into();
     f.manifest.phases[0].scenario = crate::manifest::Scenario::Rotation {
         refill_slots: 1,
         rounds: vec![crate::manifest::RotationRound {
@@ -1059,9 +1054,9 @@ fn rotation_boundaries_require_new_jobs_and_consecutive_reserve_claims() {
         restart: crate::manifest::Restart::QueuedRefill,
         rounds: vec![first, second],
     };
-    f.auth.cumulative_api_usdc = "0.1".into();
+    f.auth.cumulative_test_budget_usdc = "0.1".into();
     f.auth.cumulative_new_jobs = 2;
-    f.manifest.limits.api_reservation_usdc = "0.1".into();
+    f.manifest.limits.total_test_budget_usdc = "0.1".into();
     f.manifest.limits.new_funding_jobs = 2;
     let mut r = f.open();
     f.prepare(&mut r);
@@ -1245,9 +1240,9 @@ fn source_attribution_is_bound_to_run_and_frozen_at_capture() {
     f.prepare(&mut r);
     let db = rusqlite::Connection::open(f.state.join("live-integration/registry.sqlite")).unwrap();
     for (id, owner) in [("mine", run.as_str()), ("theirs", "other_run")] {
-        db.execute("INSERT INTO funding_permits(intent,run,pool,source_bound,job,at) VALUES(?1,?2,'pool',110,?1,3)", rusqlite::params![id,owner]).unwrap();
+        db.execute("INSERT INTO funding_permits(intent,run,pool,job,at) VALUES(?1,?2,'pool',?1,3)", rusqlite::params![id,owner]).unwrap();
         db.execute(
-            "INSERT INTO funding_source_attempts(operation,job,source_bound) VALUES(?1,?1,110)",
+            "INSERT INTO funding_source_attempts(operation,job,input_zatoshis) VALUES(?1,?1,110)",
             [id],
         )
         .unwrap();
@@ -1270,7 +1265,7 @@ fn source_attribution_is_bound_to_run_and_frozen_at_capture() {
     let report = r.report(Some(&run), 6).unwrap();
     let attributed = &report["treasury_accounting"]["observations"][0]["run_source_accounting"];
     assert_eq!(attributed["operation_count"], 1);
-    assert_eq!(attributed["registry_unreleased_bounds_zatoshis"], 110);
+    assert_eq!(attributed["registry_unreleased_input_zatoshis"], 110);
     assert_eq!(attributed["attempts_without_transaction_facts"], 1);
     db.execute("UPDATE events SET detail=json_remove(detail,'$.source_attempts') WHERE kind='accounting_observed'",[]).unwrap();
     let snapshot = || {
@@ -1297,3 +1292,27 @@ fn accounting_report_rejects_changed_authorization_baseline() {
 }
 
 include!("registry_report_tests.rs");
+
+#[test]
+fn historical_zec_budget_registry_is_read_only_without_reinterpreting_evidence() {
+    let f = Fixture::new();
+    let r = f.open();
+    drop(r);
+    let path = f.state.join("live-integration/registry.sqlite");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("ALTER TABLE authorizations RENAME COLUMN budget TO api; ALTER TABLE authorizations ADD COLUMN source INTEGER NOT NULL DEFAULT 17; PRAGMA user_version=1;").unwrap();
+    drop(db);
+    let before = std::fs::read(&path).unwrap();
+    let error = Registry::open(&f.state, false).err().unwrap().to_string();
+    assert!(error.contains("read-only"));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let r = Registry::open(&f.state, true).unwrap();
+    let report = r.report(None, 10).unwrap();
+    assert_eq!(report["historical_registry"], true);
+    assert_eq!(report["historical_source_ceiling_zatoshis"], 17);
+    assert_eq!(report["execution_available"], false);
+    assert!(report.get("total_test_budget_atomic").is_none());
+    assert!(crate::reporting::markdown(&report).unwrap().contains("historical source ceiling: 17 zatoshis"));
+    drop(r);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}

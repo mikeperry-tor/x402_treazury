@@ -94,7 +94,14 @@ fn semantic_category(value: &Value) -> &'static str {
     }
 }
 pub fn markdown(report: &Value) -> Result<String> {
-    ensure!(report["version"] == 1, "unsupported report version");
+    if report["historical_registry"] == true {
+        ensure!(report["version"] == 1, "unsupported historical report version");
+        return Ok(format!("# Historical live integration registry\n\nRead-only ZEC-budget evidence; no new execution or USDC budget authority is granted.\n\nHistorical API ceiling: {}; historical source ceiling: {} zatoshis; reviewed job ceiling: {}; cases: {}.\n\nThe original private registry retains the detailed evidence unchanged.\n",
+            dollars(atomics(&report["historical_api_ceiling_atomic"])?),
+            atomics(&report["historical_source_ceiling_zatoshis"])?,
+            atomics(&report["new_job_ceiling"])?, atomics(&report["case_count"])?));
+    }
+    ensure!(report["version"] == 2, "unsupported report version");
     let cases = report["cases"].as_array().context("report cases missing")?;
     ensure!(
         cases.len() <= 10000,
@@ -130,7 +137,7 @@ pub fn markdown(report: &Value) -> Result<String> {
 fn render_provider_stages(out: &mut String, report: &Value) -> Result<()> {
     if let Some(summary) = report.get("summary") {
         let view: crate::report_model::Report = serde_json::from_value(summary.clone())?;
-        ensure!(view.version == 1, "unsupported summary version");
+        ensure!(view.version == 2, "unsupported summary version");
         ensure!(
             view.providers.len() <= 10000,
             "provider summary exceeds 10000 rows; no partial report"
@@ -215,7 +222,7 @@ fn render_api_accounting(
     );
     writeln!(
         out,
-        "\nSelected-run charged API reservations: **{}**. These remain charged after failed calls.",
+        "\nSelected-run committed case reservations: **{}**. These mark non-replayable calls; only payment authorizations consume the monetary test budget.",
         dollars(charged)
     )?;
     if valid {
@@ -231,9 +238,9 @@ fn render_api_accounting(
     }
     writeln!(
         out,
-        "\nRegistry-wide charged API reservations: **{}**; source reservations: **{} zatoshis**; reserved funding jobs: **{}**. Source reservations are limits, not measured Zcash fees.",
-        dollars(atomics(&report["api_reserved_atomic"])?),
-        atomics(&report["source_reserved_zatoshis"])?,
+        "\nRegistry-wide API authorization budget: **{} used of {}**; reserved funding jobs: **{}**. Funding has no separate monetary test budget.",
+        dollars(atomics(&report["test_budget_used_atomic"])?),
+        dollars(atomics(&report["total_test_budget_atomic"])?),
         atomics(&report["funding_jobs_reserved"])?
     )?;
     Ok(())
@@ -259,13 +266,13 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
     if attributed["scope"] == "run_funding_permits" {
         writeln!(
             out,
-            "Run-attributed source costs: principal **{} zatoshis**, fees **{} zatoshis**, consumed **{} zatoshis**; treasury reservations **{} zatoshis**. Registry unreleased bounds: **{} zatoshis**; released bounds: **{} zatoshis**; attempts without transaction facts: **{}**. Refund outputs: **{} zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.",
+            "Run-attributed source costs: principal **{} zatoshis**, fees **{} zatoshis**, consumed **{} zatoshis**; treasury reservations **{} zatoshis**. Registry first-proposal input observations: unreleased **{} zatoshis**, released **{} zatoshis**; attempts without transaction facts: **{}**. Refund outputs: **{} zatoshis**, reported separately. Proposal observations do not establish accepted costs, spending or financial liabilities and grant no authority.",
             atomics(&attributed["recorded_principal_zatoshis"])?,
             atomics(&attributed["recorded_fees_zatoshis"])?,
             atomics(&attributed["recorded_consumed_zatoshis"])?,
             optional_atomics(&attributed["source_reserved_zatoshis"])?,
-            atomics(&attributed["registry_unreleased_bounds_zatoshis"])?,
-            atomics(&attributed["registry_released_bounds_zatoshis"])?,
+            atomics(&attributed["registry_unreleased_input_zatoshis"])?,
+            atomics(&attributed["registry_released_input_zatoshis"])?,
             atomics(&attributed["attempts_without_transaction_facts"])?,
             optional_atomics(&attributed["recorded_refund_outputs_zatoshis"])?
         )?;
@@ -379,7 +386,7 @@ fn render_fee_observations(out: &mut String, report: &Value, cases: &[Value]) ->
             rows.len() == cases.len(),
             "fee rows differ from report cases"
         );
-        out.push_str("\n## Observed fee samples\n\nAdmission is a pre-signing amount, not a debit. These samples do not establish a provider-wide maximum or minimum wallet size. Observed challenge offers may be rejected or unselected; they grant no payment authority.\n\n| Case | Admitted amount | Above $0.01 | Verified debit above $0.01 |\n| --- | ---: | --- | --- |\n");
+        out.push_str("\n## Observed fee samples\n\nAdmission records an authorization intent, not a debit. These samples do not establish a provider-wide maximum or minimum wallet size. Observed challenge offers may be rejected or unselected; they grant no payment authority.\n\n| Case | Admitted amount | Above $0.01 | Verified debit above $0.01 |\n| --- | ---: | --- | --- |\n");
         for (index, (row, case)) in rows.iter().zip(cases).enumerate() {
             ensure!(
                 row["case"] == case["case"],
@@ -648,7 +655,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     fn report() -> Value {
-        json!({"version":1,"api_reserved_atomic":60000,"source_reserved_zatoshis":200000,"funding_jobs_reserved":1,
+        json!({"version":2,"api_reserved_atomic":60000,"test_budget_used_atomic":60000,"total_test_budget_atomic":100000,"funding_jobs_reserved":1,
             "canonical_api_debits":{"status":"validated","cases":{"secret-case":"14000"}},
             "cases":[{"case":"secret-case","execution":"COMPLETED","semantic":"PASSED","settlement":"USED","charged_reservation_atomic":20000,"wallet":"secret-wallet"},
                 {"case":"failed-case","execution":"COMPLETED","semantic":"FAILED","settlement":"NOT_SIGNED","charged_reservation_atomic":20000},
@@ -656,13 +663,22 @@ mod tests {
             "concurrency":[{"status":"incomplete","reason":"secret-error","mcp_overlap":true,"signed_request_future_overlap":false}],
             "rotation":[{"status":"incomplete","wallet":"secret-wallet"}],"runtime_events":[{"password":"secret-token","body":"secret-response"}]})
     }
+    #[test]
+    fn current_report_contract_rejects_the_superseded_version() {
+        let mut value = report();
+        value["version"] = json!(1);
+        assert_eq!(markdown(&value).unwrap_err().to_string(), "unsupported report version");
+        let mut value = complete_report();
+        value["summary"]["version"] = json!(1);
+        assert_eq!(markdown(&value).unwrap_err().to_string(), "unsupported summary version");
+    }
     // Synthetic evidence only: exercise composition across every optional section.
     fn complete_report() -> Value {
         let mut value = report();
-        value["summary"] = json!({"version":1,"source_inventory_complete":false,
+        value["summary"] = json!({"version":2,"source_inventory_complete":false,
             "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429}],
                 "help":[],"cases":[]}],
-            "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_zatoshis":200000,"reserved_jobs":1},
+            "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_jobs":1},
             "lifecycle":[],"network":"owned_control_audit_required"});
         let data = crate::accounting::fixture();
         let mut historical = data.clone();
@@ -673,7 +689,7 @@ mod tests {
             "baseline_comparison":crate::accounting_baseline::compare(
                 &crate::accounting_baseline::snapshot(&historical), &data).unwrap(),
             "run_source_accounting":crate::accounting_attribution::source(
-                &data, &[json!({"operation":"deposit","source_bound":110,"released":false})]).unwrap()
+                &data, &[json!({"operation":"deposit","input_zatoshis":110,"released":false})]).unwrap()
         }]});
         value["application_evidence"] = json!({"payment_attempts_correlated":1});
         value["runtime_events"] = json!([{"kind":"application_payment","detail":{"case":"secret-case","amount":"14000"}}]);
@@ -759,7 +775,8 @@ mod tests {
             "$0.040000",
             "$0.014000",
             "$0.060000",
-            "200000 zatoshis",
+            "$0.060000 used of $0.100000",
+            "Funding has no separate monetary test budget",
             "not established",
             "skipped: target reached",
             "not observed",
@@ -772,10 +789,10 @@ mod tests {
     #[test]
     fn joined_provider_table_redacts_identities_and_marks_partial_inventory() {
         let mut value = report();
-        value["summary"] = json!({"version":1,"source_inventory_complete":false,
+        value["summary"] = json!({"version":2,"source_inventory_complete":false,
             "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429}],
                 "help":[],"cases":[]}],
-            "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_zatoshis":200000,"reserved_jobs":1},
+            "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_jobs":1},
             "lifecycle":[],"network":"owned_control_audit_required"});
         let text = markdown(&value).unwrap();
         assert!(!text.contains("secret"));
@@ -816,12 +833,14 @@ mod tests {
         let data = crate::accounting::fixture();
         let attributed = crate::accounting_attribution::source(
             &data,
-            &[json!({"operation":"deposit","source_bound":110,"released":false})],
+            &[json!({"operation":"deposit","input_zatoshis":104,"released":false})],
         )
         .unwrap();
         value["treasury_accounting"] = json!({"observations":[{"summary":crate::accounting::summarize(&data).unwrap(),"run_source_accounting":attributed}]});
         let text = markdown(&value).unwrap();
         assert!(text.contains("Run-attributed source costs: principal **100 zatoshis**, fees **5 zatoshis**, consumed **105 zatoshis**"));
+        assert!(text.contains("Registry first-proposal input observations: unreleased **104 zatoshis**"));
+        assert!(text.contains("Proposal observations do not establish accepted costs, spending or financial liabilities and grant no authority."));
         assert!(text.contains("recorded fees **8 zatoshis**"));
         assert!(!text.contains("private-"));
     }

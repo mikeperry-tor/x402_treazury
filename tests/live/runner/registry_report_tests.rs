@@ -42,10 +42,10 @@ fn report_install_catalogs(f: &mut Fixture) {
 // Complete expectations are authored here, independently of report generators.
 // Only pin digests derive from the exact synthetic bytes installed by the fixture.
 fn report_expected_base() -> Value {
-    json!({"version":1,"authorization":"review_1","api_reserved_atomic":0,
-        "api_ceiling_atomic":40000,"api_headroom_atomic":40000,
-        "source_ceiling_zatoshis":0,"new_job_ceiling":0,
-        "funding_jobs_reserved":0,"source_reserved_zatoshis":0,
+    json!({"version":2,"authorization":"review_1","api_reserved_atomic":0,
+        "total_test_budget_atomic":40000,"test_budget_used_atomic":0,"test_budget_remaining_atomic":40000,
+        "new_job_ceiling":0,
+        "funding_jobs_reserved":0,
         "cases":[],"pin_revisions":[],"runtime_events":[],
         "execution_available":false,"application_evidence":null,
         "qualification_scope":"offline_configuration","tor_isolation":"not_qualified",
@@ -77,8 +77,8 @@ fn report_expected_selected(pins: &Pins) -> Value {
     report["reliability"] = json!([]);
     report["rotation"] = json!([]);
     report["concurrency"] = json!([]);
-    report["summary"] = json!({"version":1,"network":"direct","lifecycle":[],"source_inventory_complete":false,
-        "source_funding":{"observations":0,"reserved_jobs":0,"reserved_zatoshis":0,"saved_accounting":"unobserved"},
+    report["summary"] = json!({"version":2,"network":"direct","lifecycle":[],"source_inventory_complete":false,
+        "source_funding":{"observations":0,"reserved_jobs":0,"saved_accounting":"unobserved"},
         "providers":[{"source":"api","cases":[{"case":"call","execution":"not_attempted","mcp":"unobserved","payment":"not_attempted","semantics":"unobserved","verified_atomic":null}],
         "catalog":[{"http_status":null,"scope":"no_observation","state":"unobserved"}],
         "help":[{"http_status":null,"scope":"no_observation","state":"not_attempted"}]}]});
@@ -157,7 +157,6 @@ fn report_composition_empty_configuration_and_prepared_modes_are_complete() {
 fn report_composition_selected_rows_retain_global_charges_latest_authority_and_funding() {
     use x402_treazury::qualification::funding::{self, Limits, Request};
     let mut f = Fixture::new();
-    f.auth.cumulative_source_zec = "0.001".into();
     f.auth.cumulative_new_jobs = 2;
     let mut r = f.open();
     f.prepare(&mut r);
@@ -171,15 +170,15 @@ fn report_composition_selected_rows_retain_global_charges_latest_authority_and_f
         &[Request {
             intent: "bootstrap_a".into(),
             pool: "pool".into(),
-            source_bound: 100,
+
         }],
         Limits {
             jobs: 2,
-            source_zatoshis: 100000,
+
         },
         Limits {
             jobs: 2,
-            source_zatoshis: 100000,
+
         },
         11,
     )
@@ -201,17 +200,15 @@ fn report_composition_selected_rows_retain_global_charges_latest_authority_and_f
     db.execute("INSERT INTO events(run,kind,detail,at) VALUES('another','not_a_runtime_kind','not JSON',14)",[]).unwrap();
     drop(r);
     f.auth.id = "review_2".into();
-    f.auth.cumulative_api_usdc = "0.08".into();
+    f.auth.cumulative_test_budget_usdc = "0.08".into();
     let r = Registry::authorize(&f.state, &f.auth, 30).unwrap();
     let mut expected = report_expected_base();
     expected["authorization"] = json!("review_2");
-    expected["api_ceiling_atomic"] = json!(80000);
+    expected["total_test_budget_atomic"] = json!(80000);
     expected["api_reserved_atomic"] = json!(20000);
-    expected["api_headroom_atomic"] = json!(60000);
-    expected["source_ceiling_zatoshis"] = json!(100000);
+    expected["test_budget_remaining_atomic"] = json!(80000);
     expected["new_job_ceiling"] = json!(2);
     expected["funding_jobs_reserved"] = json!(1);
-    expected["source_reserved_zatoshis"] = json!(100);
     let mut reserved = report_expected_case("test_run", 20000);
     reserved["execution"] = json!("RESERVED");
     reserved["charged_reservation_atomic"] = json!(20000);
@@ -228,13 +225,12 @@ fn report_composition_selected_rows_retain_global_charges_latest_authority_and_f
     let mut selected = report_expected_selected(&f.pins);
     for key in [
         "authorization",
-        "api_ceiling_atomic",
+        "total_test_budget_atomic",
         "api_reserved_atomic",
-        "api_headroom_atomic",
-        "source_ceiling_zatoshis",
+        "test_budget_used_atomic",
+        "test_budget_remaining_atomic",
         "new_job_ceiling",
         "funding_jobs_reserved",
-        "source_reserved_zatoshis",
     ] {
         selected[key] = expected[key].clone();
     }
@@ -243,7 +239,6 @@ fn report_composition_selected_rows_retain_global_charges_latest_authority_and_f
     selected["runtime_events"] =
         json!([{"run":"another","kind":"cover_observed","detail":{"marker":"second"},"at":15}]);
     selected["summary"]["source_funding"]["reserved_jobs"] = json!(1);
-    selected["summary"]["source_funding"]["reserved_zatoshis"] = json!(100);
     assert_eq!(r.report(Some("another"), 40).unwrap(), selected);
 }
 

@@ -292,6 +292,7 @@ impl PaymentContext {
             params![self.guard.binding.run, Value::Object(event).to_string(), at],
         )
         .context("qualification payment already recorded or evidence journal unavailable")?;
+        super::budget::check(&tx, &self.guard.binding.run)?;
         tx.commit()?;
         Ok(end.min(self.guard.binding.expires_at))
     }
@@ -456,6 +457,166 @@ mod tests {
         );
     }
     #[tokio::test]
+    async fn concurrent_api_admissions_share_a_durable_running_budget() {
+        let (_dir, guard, db) = fixture(true);
+        db.execute(
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.total_test_budget_usdc','0.01')",
+            [],
+        )
+        .unwrap();
+        let claim = claim(guard).await;
+        claim
+            .invoke(async {
+                let context = payment_context().unwrap().unwrap();
+                let gate = Arc::new(std::sync::Barrier::new(2));
+                let mut workers = Vec::new();
+                for id in ["first", "second"] {
+                    let (context, gate) = (context.clone(), gate.clone());
+                    workers.push(tokio::task::spawn_blocking(move || {
+                        let mut event = attempt("6000");
+                        event["attempt_id"] = json!(id);
+                        gate.wait();
+                        context.record(&event)
+                    }));
+                }
+                let mut accepted = 0;
+                for worker in workers {
+                    match worker.await.unwrap() {
+                        Ok(_) => accepted += 1,
+                        Err(error) => assert!(
+                            error
+                                .to_string()
+                                .contains("qualification_test_budget_exceeded")
+                        ),
+                    }
+                }
+                assert_eq!(accepted, 1);
+                assert_eq!(super::super::budget::used(&db, Some("run")).unwrap(), 6000);
+                // Each admission opens the registry again: earlier accepted work
+                // remains charged, without a mutable in-memory counter.
+                let mut final_attempt = attempt("4000");
+                final_attempt["attempt_id"] = json!("remaining");
+                context.record(&final_attempt).unwrap();
+                context
+                    .save_receipt("remaining", json!({"classification":"seller_failure"}))
+                    .unwrap();
+                assert_eq!(super::super::budget::used(&db, Some("run")).unwrap(), 10000);
+                let mut over = attempt("1");
+                over["attempt_id"] = json!("over");
+                assert!(
+                    context
+                        .record(&over)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("qualification_test_budget_exceeded")
+                );
+                assert_eq!(super::super::budget::used(&db, Some("run")).unwrap(), 10000);
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_runs_share_registry_budget_after_reopening() {
+        let (_dir, first, db) = fixture(true);
+        db.execute("UPDATE authorizations SET budget=10000", [])
+            .unwrap();
+        db.execute(
+            "UPDATE runs SET manifest=json_set(manifest,'$.limits.total_test_budget_usdc','0.01')",
+            [],
+        )
+        .unwrap();
+        db.execute_batch("INSERT INTO runs SELECT 'other',manifest,authorization FROM runs WHERE id='run';
+            INSERT INTO pins SELECT 'other',payload,digest,revision FROM pins WHERE run='run';
+            INSERT INTO cases SELECT 'other',id,execution,window_start,window_end,reservation FROM cases WHERE run='run';").unwrap();
+        let mut binding = first.binding.clone();
+        binding.run = "other".into();
+        binding.session = "other_session".into();
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES('other','application_session',?1,0)",
+            [serde_json::to_string(&binding).unwrap()],
+        )
+        .unwrap();
+        let second = Arc::new(Guard {
+            binding,
+            managed: true,
+            origin: Instant::now(),
+            slots: Arc::new(tokio::sync::Semaphore::new(64)),
+        });
+        let (first, second) = tokio::join!(claim(first), claim(second));
+        let first = first
+            .invoke(async { payment_context().unwrap().unwrap() })
+            .await;
+        let second = second
+            .invoke(async { payment_context().unwrap().unwrap() })
+            .await;
+        let contexts = [first, second];
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let mut workers = Vec::new();
+        for (index, context) in contexts.iter().cloned().enumerate() {
+            let gate = gate.clone();
+            workers.push(tokio::task::spawn_blocking(move || {
+                // The same attempt ID is independent in each run. Each run fits
+                // alone, while the shared registry can accept only one.
+                gate.wait();
+                (index, context.record(&attempt("6000")))
+            }));
+        }
+        let mut accepted = 0;
+        let mut refused = None;
+        for worker in workers {
+            let (index, result) = worker.await.unwrap();
+            match result {
+                Ok(_) => accepted += 1,
+                Err(error) => {
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("qualification_test_budget_exceeded: registry")
+                    );
+                    refused = Some(index);
+                }
+            }
+        }
+        assert_eq!(accepted, 1);
+        let refused = refused.unwrap();
+        drop(db);
+        let db = connection(&contexts[0].guard.binding).unwrap();
+        assert_eq!(super::super::budget::used(&db, None).unwrap(), 6000);
+        for (index, context) in contexts.iter().enumerate() {
+            assert_eq!(
+                super::super::budget::used(&db, Some(&context.guard.binding.run)).unwrap(),
+                if index == refused { 0 } else { 6000 },
+                "a refused admission leaves no charge in its run"
+            );
+        }
+        // Reuse the refused attempt ID: its rolled-back admission was never
+        // disclosed. Missing receipts for accepted work do not free any budget.
+        contexts[refused].record(&attempt("4000")).unwrap();
+        assert_eq!(super::super::budget::used(&db, None).unwrap(), 10000);
+        for context in contexts {
+            let mut over = attempt("1");
+            over["attempt_id"] = json!("over");
+            assert!(
+                context
+                    .record(&over)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("qualification_test_budget_exceeded: registry")
+            );
+        }
+        assert_eq!(super::super::budget::used(&db, None).unwrap(), 10000);
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM events WHERE kind='application_payment'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap(),
+            2
+        );
+    }
+
+    #[tokio::test]
     async fn accepted_store_work_retains_case_context_and_journals_once_before_commit() {
         let (_dir, guard, db) = fixture(true);
         let claim = claim(guard).await;
@@ -502,7 +663,7 @@ mod tests {
                 assert!(context.save_receipt("attempt", receipt.clone()).is_err());
                 context.record(&attempt("1")).unwrap();
                 assert!(context.save_receipt("wrong", receipt.clone()).is_err());
-                db.execute("INSERT INTO authorizations VALUES('revoked',2)", [])
+                db.execute("INSERT INTO authorizations(id,seq,budget) VALUES('revoked',2,100000000)", [])
                     .unwrap();
                 let started = context.elapsed_micros();
                 context
@@ -642,8 +803,11 @@ mod tests {
     async fn revocation_between_claim_and_admission_refuses_payment_correlation() {
         let (_dir, guard, db) = fixture(true);
         let claim = claim(guard).await;
-        db.execute("INSERT INTO authorizations VALUES('revoked',2)", [])
-            .unwrap();
+        db.execute(
+            "INSERT INTO authorizations(id,seq,budget) VALUES('revoked',2,100000000)",
+            [],
+        )
+        .unwrap();
         claim
             .invoke(async {
                 assert!(

@@ -221,9 +221,8 @@ impl Fixture {
         m.binary = binary;
         m.treasury_id = treasury.clone();
         m.evidence_dir = dir.path().join("evidence");
-        m.limits.api_reservation_usdc = "0.10".into();
+        m.limits.total_test_budget_usdc = "0.10".into();
         m.limits.new_funding_jobs = 2;
-        m.limits.source_exposure_zec = "0.01".into();
         m.limits.run_seconds = 30;
         m.limits.phase_seconds = 20;
         m.limits.call_seconds = 5;
@@ -319,8 +318,7 @@ impl Fixture {
             version: 1,
             id: m.registry_authorization.clone(),
             treasury_id: treasury,
-            cumulative_api_usdc: "0.10".into(),
-            cumulative_source_zec: "0.01".into(),
+            cumulative_test_budget_usdc: "0.10".into(),
             cumulative_new_jobs: 2,
         };
         let mut registry = Registry::authorize(&state, &auth, now().unwrap()).unwrap();

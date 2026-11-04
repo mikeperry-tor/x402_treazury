@@ -37,6 +37,7 @@ pub(super) async fn wait(
     )?;
     let mut ticks = tokio::time::interval(Duration::from_secs(1));
     let mut progress = Instant::now();
+    let mut funding_reason = "funding or destination confirmation has not completed";
     loop {
         ensure!(
             !child.exited()? && !child.fault.is_cancelled(),
@@ -44,7 +45,7 @@ pub(super) async fn wait(
         );
         tokio::select! {
             _ = stop.cancelled() => anyhow::bail!("bootstrap cancelled; accepted funding work remains durable"),
-            _ = tokio::time::sleep_until(deadline) => anyhow::bail!("bootstrap deadline reached; inspect funding warnings/status; no API calls dispatched"),
+            _ = tokio::time::sleep_until(deadline) => anyhow::bail!("bootstrap deadline reached: {funding_reason}; inspect funding warnings/status; no API calls dispatched"),
             _ = ticks.tick() => {},
         }
         let state = state.to_owned();
@@ -56,6 +57,12 @@ pub(super) async fn wait(
             snapshot["treasury_status"]["treasury_id"] == manifest.treasury_id,
             "bootstrap treasury mismatch"
         );
+        funding_reason = if snapshot["treasury_status"]["funding_jobs"].as_array().is_some_and(|jobs| jobs.iter().any(|job|
+            job["last_error"].as_str().is_some_and(|error| error.starts_with("treasury_insufficient_spendable_funds")))) {
+            "the treasury has insufficient spendable ZEC for funding or its funds could not yet be assessed"
+        } else {
+            "funding or destination confirmation has not completed"
+        };
         if ready(&snapshot, &manifest.start.pools)? {
             registry.event(
                 &manifest.run_id,

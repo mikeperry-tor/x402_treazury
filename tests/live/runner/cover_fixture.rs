@@ -199,15 +199,14 @@ pub fn write(options: Options) -> Result<Value> {
     }
     let now = x402_treazury::rotation::base::now()?;
     let manifest: manifest::Manifest = serde_json::from_value(
-        json!({"version":1,"run_id":"cover_unsigned","treasury_id":id,"deployment":root.join("deployment.toml"),"binary":binary,"evidence_dir":root.join("evidence"),"registry_authorization":"zero_spend","start":{"mode":"funded_pools","pools":[]},"network":{"tor_mode":"owned","tor_binary":tor_binary,"confinement":"macos_sandbox","require_isolation_evidence":true},"limits":{"api_reservation_usdc":"0","source_exposure_zec":"0","new_funding_jobs":0,"max_in_flight":1,"run_seconds":600,"phase_seconds":300,"call_seconds":240,"cleanup_seconds":20,"result_bytes":1048576,"post_batch_wait_ms":10000},"catalog":{"execution":"frozen","record_live_discovery":true},"windows":[{"id":"now","not_before":now,"not_after":now+86400}],"cases":cases,"phases":[{"id":"connected","window":"now","cases":connected,"pools":[],"required":true,"scenario":{"kind":"unsigned"}},{"id":"outage","window":"now","cases":["cached","uncached"],"pools":[],"required":true,"depends_on":["connected"],"scenario":{"kind":"tor_outage","warm_case":"warm","cached_case":"cached","uncached_case":"uncached"}}]}),
+        json!({"version":1,"run_id":"cover_unsigned","treasury_id":id,"deployment":root.join("deployment.toml"),"binary":binary,"evidence_dir":root.join("evidence"),"registry_authorization":"zero_spend","start":{"mode":"funded_pools","pools":[]},"network":{"tor_mode":"owned","tor_binary":tor_binary,"confinement":"macos_sandbox","require_isolation_evidence":true},"limits":{"total_test_budget_usdc":"0","new_funding_jobs":0,"max_in_flight":1,"run_seconds":600,"phase_seconds":300,"call_seconds":240,"cleanup_seconds":20,"result_bytes":1048576,"post_batch_wait_ms":10000},"catalog":{"execution":"frozen","record_live_discovery":true},"windows":[{"id":"now","not_before":now,"not_after":now+86400}],"cases":cases,"phases":[{"id":"connected","window":"now","cases":connected,"pools":[],"required":true,"scenario":{"kind":"unsigned"}},{"id":"outage","window":"now","cases":["cached","uncached"],"pools":[],"required":true,"depends_on":["connected"],"scenario":{"kind":"tor_outage","warm_case":"warm","cached_case":"cached","uncached_case":"uncached"}}]}),
     )?;
     manifest.validate()?;
     let auth = registry::Authorization {
         version: 1,
         id: "zero_spend".into(),
         treasury_id: id,
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     drop(registry::Registry::authorize(&state, &auth, now as i64)?);

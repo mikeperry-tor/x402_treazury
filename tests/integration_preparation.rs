@@ -50,7 +50,7 @@ bearer_token_env="TOKEN"
         "binary":env!("CARGO_BIN_EXE_x402_treazury"),"evidence_dir":dir.join("evidence"),"registry_authorization":"reviewed",
         "start":{"mode":"funded_pools","pools":[]},
         "network":{"tor_mode":"direct","confinement":"none","require_isolation_evidence":false},
-        "limits":{"api_reservation_usdc":"0","new_funding_jobs":0,"source_exposure_zec":"0","max_in_flight":1,"run_seconds":60,"phase_seconds":30,"call_seconds":10,"cleanup_seconds":10,"result_bytes":10000},
+        "limits":{"total_test_budget_usdc":"0","new_funding_jobs":0,"max_in_flight":1,"run_seconds":60,"phase_seconds":30,"call_seconds":10,"cleanup_seconds":10,"result_bytes":10000},
         "catalog":{"execution":"frozen","record_live_discovery":true},
         "windows":[{"id":"now","not_before":1,"not_after":4102444800u64}],
         "cases":[{"id":"read","server":"main","source":"api","tool":"api_read","arguments":{"n":1},"reserve_usdc":"0","reviewed_read_only":true,"unsigned":true}],
@@ -120,8 +120,7 @@ async fn production_startup_preserves_inventory_without_endpoint_pricing_probes(
             version: 1,
             id: "reviewed".into(),
             treasury_id: m.treasury_id.clone(),
-            cumulative_api_usdc: "0".into(),
-            cumulative_source_zec: "0".into(),
+            cumulative_test_budget_usdc: "0".into(),
             cumulative_new_jobs: 0,
         };
         let mut r = registry::Registry::authorize(&state, &auth, 2).unwrap();
@@ -165,8 +164,7 @@ async fn production_catalogs_are_frozen_validated_and_bound_to_registry() {
         version: 1,
         id: "reviewed".into(),
         treasury_id: m.treasury_id.clone(),
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     let mut r = registry::Registry::authorize(&state, &auth, 2).unwrap();
@@ -312,8 +310,7 @@ async fn runner_executes_concurrent_keyless_cases_once_and_retains_failures() {
         version: 1,
         id: "reviewed".into(),
         treasury_id: m.treasury_id.clone(),
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     let mut r = registry::Registry::authorize(&state, &auth, 2).unwrap();
@@ -426,8 +423,7 @@ async fn runner_response_limit_and_timeout_are_visible_and_never_replayed() {
         version: 1,
         id: "reviewed".into(),
         treasury_id: m.treasury_id.clone(),
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     let mut r = registry::Registry::authorize(&state, &auth, 2).unwrap();
@@ -571,8 +567,7 @@ bearer_token_env="TOKEN"
         version: 1,
         id: "reviewed".into(),
         treasury_id: m.treasury_id.clone(),
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     drop(
@@ -1160,8 +1155,7 @@ async fn runner_skips_closed_windows_and_failed_dependencies_but_runs_independen
         version: 1,
         id: "reviewed".into(),
         treasury_id: m.treasury_id.clone(),
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     let mut registry = registry::Registry::authorize(&state, &auth, 2).unwrap();
@@ -1286,8 +1280,7 @@ async fn runner_cancellation_retains_completed_peer_and_pending_claim_while_drai
         version: 1,
         id: "reviewed".into(),
         treasury_id: m.treasury_id.clone(),
-        cumulative_api_usdc: "0".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0".into(),
         cumulative_new_jobs: 0,
     };
     let mut registry = registry::Registry::authorize(&state, &auth, 2).unwrap();

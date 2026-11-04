@@ -104,11 +104,8 @@ fn planner_scenario(kind: &str) -> (Manifest, Value, u64, u32) {
     } else {
         m.cases.len() as u64 * 20000
     };
-    m.limits.api_reservation_usdc = if total > 40000 { "0.1" } else { "0.04" }.into();
+    m.limits.total_test_budget_usdc = if total > 40000 { "0.1" } else { "0.04" }.into();
     m.limits.new_funding_jobs = jobs;
-    if jobs > 0 {
-        m.limits.source_exposure_zec = "0.1".into();
-    }
     (m, cfg, total, jobs)
 }
 fn planner_expected(
@@ -122,16 +119,15 @@ fn planner_expected(
     let unsigned = m.cases[0].unsigned;
     let bindings:serde_json::Map<String,Value>=m.cases.iter().map(|c|(c.id.clone(),json!({"server":c.server,"source":c.source,"tool":c.tool,"wallet":"pool","unsigned":unsigned,"reservation_atomic":if unsigned {0}else{20000},"catalog_validation":"pending_prepare"}))).collect();
     let phases:Vec<_>=m.phases.iter().map(|p|json!({"id":p.id,"scenario":p.scenario,"depends_on":p.depends_on,"window":m.windows.iter().find(|w|w.id==p.window).unwrap(),"cases":p.cases,"pools":p.pools,"required":p.required,"call_count":p.cases.len()})).collect();
-    json!({"version":1,"run_id":m.run_id,"offline":true,"execution_authorized":false,
-        "api_reservation_atomic":total,"api_headroom_atomic":ceiling-total,
+    json!({"version":2,"run_id":m.run_id,"offline":true,"execution_authorized":false,
+        "api_reservation_atomic":total,"total_test_budget_atomic":ceiling,
         "planned_new_funding_jobs":jobs,"funding_job_headroom":allowance-jobs,
-        "source_exposure_limit_zatoshis":if allowance==0 {0}else{10000000},
         "funding_feasibility":"unverified: no live balance, quote, fee or baseline reads",
         "prerequisites":[
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
             "reviewed startup inventory required; treasury-only bootstrap waits for enabled reserve claims, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
-            "funding permits must cover source fees, the full configured nominal range up to each enabled slot maximum, and the floating swap minimum at quote/preparation time; offline targets are not quotes and no offline preflight proves the range fits",
+            "the running total test budget bounds API payment authorizations; funding uses reviewed job counts and reserve sizes, current spendable ZEC and actual network-fee caps",
             "all declared pools must be preserved; unused pools receive no new allocation authority"],
         "case_bindings":bindings,"expanded_phases":phases,"declared_managed_pools":if unsigned {json!([])}else{json!(["pool","unused"])},
         "network_disclosures":{"policy":cfg["network"],"base_rpc_policy":cfg["base_rpc_policy"],"tor":m.network,"external_requests_performed":0,"provider_origins":"resolve during prepare; no catalog downloads during plan"},"manifest":m})
@@ -164,9 +160,6 @@ fn planner_complete_scenario_and_start_mode_contracts() {
             let jobs = refills + if treasury_only { 1 } else { 0 };
             let allowance = if jobs > 0 { jobs + 1 } else { 0 };
             m.limits.new_funding_jobs = allowance;
-            if allowance > 0 {
-                m.limits.source_exposure_zec = "0.1".into();
-            }
             if kind == "provider_sweep" {
                 m.network.tor_mode = TorMode::External;
                 cfg["network"] = json!({"mode":"tor","annotation":"kept"});
@@ -254,7 +247,7 @@ fn planner_case_bindings_cap_fallback_and_reservation_boundaries() {
         .remove("max_api_payment_usdc");
     cfg["resolved_wallets"]["pool"]["max_price_usd"] = json!("0.02");
     let mut equality = m.clone();
-    equality.limits.api_reservation_usdc = "0.02".into();
+    equality.limits.total_test_budget_usdc = "0.02".into();
     assert_eq!(
         serde_json::to_value(planner::build(&equality, &cfg).unwrap()).unwrap(),
         planner_expected(&equality, &cfg, 20000, 20000, 0, 0)
@@ -340,7 +333,6 @@ fn planner_phase_state_and_scenario_errors_keep_order() {
     } {
         // A later invalid allowance must not mask the phase error.
         m.limits.new_funding_jobs = 1;
-        m.limits.source_exposure_zec = "0.1".into();
         assert_eq!(planner_error(&m, &cfg), error);
     }
     let (base, cfg, _, _) = planner_scenario("concurrency");
@@ -387,25 +379,22 @@ fn planner_phase_state_and_scenario_errors_keep_order() {
 fn planner_allocation_final_guards_and_sum_overflow_remain_distinct() {
     let cfg = config();
     let mut m = manifest();
-    m.limits.api_reservation_usdc = "0.019999".into();
-    m.phases[0].cases.clear();
-    assert_eq!(
-        planner_error(&m, &cfg),
-        "expanded API reservations exceed run ceiling"
-    );
+    m.limits.total_test_budget_usdc = "0.019999".into();
+    let plan = planner::build(&m, &cfg).unwrap();
+    assert_eq!(plan.total_test_budget_atomic, 19_999);
+    assert_eq!(plan.api_reservation_atomic, 20_000, "declared reservations need not fit a running budget before execution");
     let mut m = manifest();
     planner_add_case(&mut m, "second");
     planner_add_case(&mut m, "third");
     for c in &mut m.cases {
         c.reserve_usdc = "9223372036854.775807".into();
     }
-    m.limits.api_reservation_usdc = "9223372036854.775807".into();
+    m.limits.total_test_budget_usdc = "9223372036854.775807".into();
     assert_eq!(planner_error(&m, &cfg), "reservation sum overflow");
     let mut m = manifest();
     planner_add_case(&mut m, "unused");
     m.phases[0].cases.pop();
     m.limits.new_funding_jobs = 1;
-    m.limits.source_exposure_zec = "0.1".into();
     assert_eq!(
         planner_error(&m, &cfg),
         "unused cases: every reviewed case must appear in exactly one phase"
@@ -420,7 +409,6 @@ fn planner_allocation_final_guards_and_sum_overflow_remain_distinct() {
     );
     let mut m = manifest();
     m.limits.new_funding_jobs = 1;
-    m.limits.source_exposure_zec = "0.1".into();
     assert_eq!(
         planner_error(&m, &cfg),
         "funding allowance without a planned allocation is forbidden"
@@ -497,7 +485,7 @@ fn planner_scenario_specific_guards_preserve_ordered_rejections() {
     );
     let (mut m, cfg, _, _) = planner_scenario("concurrency");
     planner_add_case(&mut m, "third");
-    m.limits.api_reservation_usdc = "0.06".into();
+    m.limits.total_test_budget_usdc = "0.06".into();
     assert_eq!(
         planner_error(&m, &cfg),
         "batches must cover phase cases exactly once"

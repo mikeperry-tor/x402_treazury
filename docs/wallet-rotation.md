@@ -150,12 +150,18 @@ corrections. No full historical source/refund traversal gates publication.
 The bridge's USD valuation is not an independent exchange-rate oracle. Actual
 spendable treasury funds, outstanding liabilities, the conversion-overhead limit
 and the accepted operation's network-fee cap govern a swap; there is no separate
-per-operation ZEC spending budget. Qualification runs additionally enforce per-job
-and cumulative source exposure derived from the reviewed manifest. The per-job
-permit is `source_exposure_zec / new_funding_jobs`; a job whose actual source need
-exceeds that average is denied even when the cumulative run exposure would cover
-it, so review the manifest against the largest enabled slot draw. No configuration
-value authorizes replay or bypasses a zero-new-funding restriction.
+per-operation ZEC spending budget. Qualification runs limit API authorization amounts with a
+running `total_test_budget_usdc` and a cumulative registry authorization. Each
+potentially chargeable API authorization consumes that budget before disclosure,
+including retries; an unsuccessful response does not restore it. Funding transfers
+do not consume the API budget and have no separate ZEC spending limit or equal
+per-job allowance. Reviewed job counts, reserve sizes, current treasury spendability,
+conversion overhead and actual network-fee caps govern funding. Registry records
+retain run/job/operation ownership across interruption. Their input amount is the
+first proposal observation, which can precede a failed Store commit; it grants no
+monetary authority and cannot veto a different cost on a proven unstarted retry.
+The Store alone owns exact accepted costs, selected inputs and signed bytes.
+A zero-new-funding restriction remains independent of API payment authority.
 
 Treasury command and sync drivers retain their cleanup owner when callers disconnect.
 After an unhealthy SDK mutation, they discard that SDK and reconstruct it from the

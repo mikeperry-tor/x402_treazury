@@ -92,7 +92,7 @@ Single-run reports include `fee_observations`: observed challenge offers, sample
 admitted Base USDC amounts and independently verified canonical debits, with
 separate strict `> 10000` atomic ($0.01) flags. Challenge observations precede
 selection and therefore include rejected or unselected offers; they grant no
-payment authority. Historical admission events describe validation before signing.
+payment authority. Historical admission events describe validation before financial admission commits or disclosure.
 Version 2 admission evidence uses `signed_admission_pending`: local signing and
 validation occurred, but the separate financial transaction may not have committed.
 Neither event proves submission or spending; missing correlation or canonical
@@ -203,7 +203,9 @@ are visibly unclassified, and size/row bounds refuse the report without truncati
 Tor/cover qualification and actual treasury fees/balances still require their own
 evidence; this projection does not assert overall suite success.
 
-Single-run JSON includes a versioned `summary` built from the same validated facts
+Current plan JSON, report JSON and its nested `summary` use version 2. The report
+exposes the running API authorization budget and removes obsolete ZEC budget
+projections. Single-run JSON includes a `summary` built from the same validated facts
 used by the detailed report. Its provider rows keep catalog, help, execution, MCP
 success, provider semantics and canonical payment separate. Missing proof amounts
 are null, never zero. Empty or unavailable observations stay explicitly
@@ -212,8 +214,8 @@ not-attempted, unobserved or incomplete.
 Markdown leads with the corresponding numbered provider-stage table and then the
 detailed accounting. Private identifiers and provider prose remain omitted. Older
 archives without full source inventories are labelled incomplete and show known
-case sources only. Source accounting is a saved observation; source/job reservations
-are budget bounds, not fees. Lifecycle evaluation accepts the current schema-2 reserve model.
+case sources only. Source accounting is a saved observation; funding-job reservations
+bind allocation identity and count, not monetary exposure or fees. Lifecycle evaluation accepts the current schema-2 reserve model.
 The network field states direct, external proxy-only or owned-control-audit-required;
 use `audit-tor` for authenticated control evidence. Tor-only failures cannot establish
 Tor causation. Reporting makes no requests and grants no execution authority.
@@ -226,7 +228,7 @@ a pinned executable. Static deployments are strictly unsigned. Managed public-sw
 deployments may use existing funded wallets with zero new funding authority, or
 bootstrap from the treasury with explicit positive authority and `run --allow-funding`;
 the child installs registry checks before pool setup and records payment admission
-before signing. MCP results alone leave settlement PENDING. The runner observes
+before financial admission commits or disclosure. MCP results alone leave settlement PENDING. The runner observes
 durable canonical authorization outcomes (USED or EXPIRED_UNUSED) after batches
 and shutdown. A generic historical RESOLVED row is insufficient. NOT_SIGNED
 requires application completion and drained store ownership, so in-flight
@@ -250,14 +252,20 @@ To run untouched work after a stopped session:
    dispatching, uncertain or completed cases into a retry manifest.
 2. Make a new reviewed manifest with a new run ID and case IDs, retaining the same
    treasury, registry and all configured pools. Use `start.mode = "funded_pools"`
-   and zero new-job/source authority unless separately reviewing new funding.
+   and zero new funding-job authority unless separately reviewing new funding.
 3. Select only genuinely untouched requests, with fresh explicit windows. Prepare
    and run it normally. Old API charges and source permits remain charged to their
    original run. New-run IDs do not restore budget or transfer funding authority.
 
 Production startup rejects unresolved payments, unknown jobs, lost baseline
 history and pending source work owned by another run. A known unprepared refill
-may remain paused during a zero-funding run; its original permit is not adopted.
+may remain paused during a zero-funding run or outside the new run's selected
+pools; its original permit is not adopted. A registry-only first proposal does
+not establish accepted source work. Current Store preparation and safe
+never-disclosed closure facts distinguish these cases: actual current or archived
+accepted work retains its original-run boundary, while a positively closed
+unpublished intent can remain paused. Legacy snapshots without current preparation
+evidence retain their conservative original-run boundary.
 Otherwise reconcile existing work through production/read-only utilities before
 starting a new run. This is explicit use of existing pools, not crash recovery.
 
@@ -278,7 +286,7 @@ runs and compare their dated results; historical multi-window reports stay reada
 
 ## Funding and pool adoption
 
-A fresh `funded_pools` run with zero job/source limits can keep using active
+A fresh `funded_pools` run with zero new-job authority can keep using active
 wallets after an earlier refill paused before preparation. A ready standby is
 not required for this mode. Only known ALLOCATED/QUOTED jobs with their original
 registry permits and pool/wallet bindings are retained; unreleased source
@@ -309,10 +317,9 @@ starts wait for production bootstrap before dispatch, with progress logs and the
 phase/run deadline. An adopted bootstrapped pool may have a partly spent active
 wallet; the runner does not refill it artificially. Positive funding remains
 bounded by the registry, actual spendable treasury funds and the accepted
-operation's network-fee cap on every allocation and preparation. Reserve ranges
-are nominal: preparation estimates must cover each enabled slot's configured
-upper bound, and a provider bridge minimum above that bound stops unsigned
-acquisition without a deposit. Zero job authority retains the
+operation's network-fee cap on preparation. Reserve ranges are nominal; a provider
+bridge minimum above the configured upper bound stops unsigned acquisition
+without a deposit. Funding is not charged to the API authorization budget. Zero job authority retains the
 deny-all restriction even when the flag is supplied. Single-rotation/refill-service and two-round lifecycle dispatch are available;
 funded acceptance remains an explicit live qualification step.
 The owned-Tor backend selected by `run` supports unsigned discovery and registry-bound
@@ -340,7 +347,7 @@ make test CARGO_ARGS='--example live_integration'
 Planning resolves the normal deployment TOML with `Deployment::show_config`, so
 it does not fetch catalogs, inspect wallet state, read signing secrets, execute
 the supplied binary or contact Tor. JSON output contains exact expanded cases,
-resolved wallet assignments, API reservation sum/headroom, bootstrap/refill slots,
+resolved wallet assignments, declared case-reservation sum and running USDC test budget, bootstrap/refill slots,
 network policy and explicit unverified prerequisites. It never grants execution
 authority. Catalog selection/schema/argument validation belongs to preparation;
 current balance, swap-minimum and fee feasibility require subsequent live evidence.
@@ -458,7 +465,7 @@ or override caps, and the controller must authenticate and consume observations
 promptly.
 
 Amounts are decimal strings (USDC six decimal places, ZEC eight), with checked
-integer sums. Zero job/source budgets mean no funding. A paid case must reserve
+integer sums. Zero new-job authority means no funding. A paid case must reserve
 at least its effective wallet cap. No hidden retry/depletion iterations or automatic
 repair allocations exist. The extended example declares twelve depletion attempts
 and two service calls per round, with an independent wallet participating in
@@ -497,8 +504,9 @@ Tor's SOCKS listener must already be running for these standalone commands. A
 successful sync reports confirmed funds; a failed sync exits nonzero and must not
 be interpreted as a zero balance. Setup and backup grant no spending authority.
 
-Review the source input-plus-fee bound per allocation and number of allocations
-before funding. Their product is an upper-bound estimate, not a live quote. During
+Review the number of allocations and nominal reserve sizing before funding.
+Actual treasury spendability, conversion overhead and transaction-fee caps govern
+funding; there is no separate ZEC allocation budget or fixed ZEC estimate. During
 a treasury-only run, the existing production application synchronizes and funds
 pools under explicit authority; the runner waits for bootstrap within its original
 run/phase deadline. It logs progress and recorded funding errors, refuses dispatch
@@ -514,10 +522,38 @@ loading wallet state or fetching catalogs.
 
 ### Ownership and authority
 
+`total_test_budget_usdc` is a running sum of API payment authorizations for the run;
+`cumulative_test_budget_usdc` authorizes their combined total across registry runs.
+Both use exact micro-USDC units. Each potentially payable authorization is charged
+atomically before financial admission commits or disclosure; missing responses, retries and concurrent cases cannot
+reuse its budget. Per-case `reserve_usdc` still bounds one case's authorizations.
+The total budget need not cover every declared case reservation in advance; an
+actual authorization that exceeds it fails visibly without financial admission or disclosure. Funding does
+not consume this budget and has no `source_exposure_zec` setting.
+
+New registries use schema 2. Schema-1 ZEC-budget registries remain read-only;
+`report` shows their historical authorization units and counts without interpreting
+ZEC as USDC or enabling execution. Preserve the original private registry for its
+detailed evidence. New execution needs separately reviewed USDC-budget authority;
+never delete historical evidence or reuse it as permission to replay work.
+Registry source-input amounts retain the first proposal observation for historical
+reporting. A failed treasury Store commit can leave that observation without an
+accepted calculation; a proven unstarted retry may have a different actual fee.
+Operation/job ownership and retirement tombstones remain binding. Exact accepted
+costs and inputs come from the Store's immutable preparation and transaction facts,
+and reports derive actual principal and fees from those facts. Registry proposal
+totals do not establish accepted costs, spending, liabilities or authority.
+With serving and all qualification processes stopped, retain the complete old
+`<state>/live-integration` directory under a distinct private directory inside
+that same state directory before authorizing the new registry at its fixed path.
+The new baseline captures and hashes that retained evidence alongside existing
+wallets, transactions and liabilities. New authority does not authorize replay of
+previously attempted cases or replace reconciliation of accepted work.
+
 `authorize-registry` requires an existing stopped treasury and exclusive ownership.
 It captures public pools, jobs, operations, payment/source liabilities and hashes of
 historical SQLite/JSON/TOML evidence, locking legacy ledgers during capture. It does
-not decrypt the wallet or mutate those ledgers. Review cumulative API/source/job
+not decrypt the wallet or mutate those ledgers. Review cumulative USDC test-budget and new-job
 ceilings in `integration/authorization.example.toml`. Zero grants no authority;
 new authorization IDs retain consumed reservations and the original baseline.
 
@@ -533,8 +569,10 @@ catalogs need a new reviewed run ID under the same cumulative authority; they
 cannot overwrite pins, reset budgets or replay a reserved case. Historical records
 remain readable without enabling execution.
 
-Funding permits bind immutable input-plus-fee bounds to stable job IDs before
-bootstrap, promotion and preparation. Unlinked reservations remain charged. The
+Funding permits bind stable allocation intent, pool and job IDs before bootstrap
+and preparation. They limit job counts, without a per-job or run-wide ZEC budget.
+Unlinked allocations remain counted. Actual input and fee authority remains bound
+to each accepted operation, independently of qualification budgeting. The
 guard rechecks session authority, pins, windows and selected pools at each operation.
 It validates the baseline, retained identities, source reservations and correlated
 liabilities under treasury ownership. All configured pools remain declared. Known
@@ -588,8 +626,8 @@ settings are not inherited. Before provider I/O, the handler verifies the regist
 session, pins, treasury, current authority/window, exact listener/tool/arguments
 and durable DISPATCHING state. A unique SQLite claim commits once per run/case.
 Case IDs stay on the authenticated MCP side, never in provider/payment material.
-Managed admission correlates to the case before signing and independently checks
-its cap. Unsigned cases refuse every 402 before signing, even a zero-price offer.
+Managed admission correlates to the case before financial admission commits or disclosure and independently checks
+its cap. Unsigned cases refuse every 402 before financial admission commits or disclosure, even a zero-price offer.
 
 Completion after expiry/revocation only records previously accepted work; it cannot
 start another call. Cancelled waiters do not undo accepted blocking journal work.
@@ -856,7 +894,7 @@ are independent requirements.
 
 A reproducible free test fixture fetches Exa's public OpenAPI catalog and uses
 Cloudflare's trace document and the Tor Project homepage (explicitly allowing HTTP/1 for that site's ALPN behavior). It creates an empty **synthetic treasury, never a wallet to
-fund**, with zero API/source/job authority. The fixture writer is explicitly
+fund**, with zero API-budget/new-job authority. The fixture writer is explicitly
 ignored in normal test runs and itself performs no network requests:
 
 ```sh

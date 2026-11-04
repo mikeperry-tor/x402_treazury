@@ -24,10 +24,10 @@ Historical source inventory is incomplete; this table includes known case source
 | 2 | completed | failed | not signed | $0.020000 | not established |
 | 3 | skipped: target reached | not executed | not signed | $0.000000 | not established |
 
-Selected-run charged API reservations: **$0.040000**. These remain charged after failed calls.
+Selected-run committed case reservations: **$0.040000**. These mark non-replayable calls; only payment authorizations consume the monetary test budget.
 Verified API debits: **$0.014000** across **1** cases. Missing proofs are not zero-cost claims.
 
-Registry-wide charged API reservations: **$0.060000**; source reservations: **200000 zatoshis**; reserved funding jobs: **1**. Source reservations are limits, not measured Zcash fees.
+Registry-wide API authorization budget: **$0.060000 used of $0.100000**; reserved funding jobs: **1**. Funding has no separate monetary test budget.
 
 ## Persisted treasury accounting
 
@@ -44,7 +44,7 @@ Changes since registry authorization (may span multiple runs; not payment or fre
 | Refund outputs | unavailable | unavailable | unavailable |
 Aggregate USDC balance change: unobserved (missing wallet estimates).
 Saved shielded ZEC changes: confirmed **0 zatoshis**, spendable **-10 zatoshis**; funding, change confirmation and external transfers may affect these values.
-Run-attributed source costs: principal **100 zatoshis**, fees **5 zatoshis**, consumed **105 zatoshis**; treasury reservations **unavailable zatoshis**. Registry unreleased bounds: **110 zatoshis**; released bounds: **0 zatoshis**; attempts without transaction facts: **0**. Refund outputs: **unavailable zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.
+Run-attributed source costs: principal **100 zatoshis**, fees **5 zatoshis**, consumed **105 zatoshis**; treasury reservations **unavailable zatoshis**. Registry first-proposal input observations: unreleased **110 zatoshis**, released **0 zatoshis**; attempts without transaction facts: **0**. Refund outputs: **unavailable zatoshis**, reported separately. Proposal observations do not establish accepted costs, spending or financial liabilities and grant no authority.
 
 Snapshot 1: recorded principal **100 zatoshis**, recorded fees **8 zatoshis**, consumed cost **108 zatoshis**, pending source reservations **unavailable zatoshis**, refund outputs **unavailable zatoshis**.
 Saved unresolved payment exposure: **5 USDC atomic**; not a verified debit or available balance.
@@ -58,7 +58,7 @@ Saved shielded ZEC: confirmed **60 zatoshis**, spendable **50 zatoshis** (freshn
 
 ## Observed fee samples
 
-Admission is a pre-signing amount, not a debit. These samples do not establish a provider-wide maximum or minimum wallet size. Observed challenge offers may be rejected or unselected; they grant no payment authority.
+Admission records an authorization intent, not a debit. These samples do not establish a provider-wide maximum or minimum wallet size. Observed challenge offers may be rejected or unselected; they grant no payment authority.
 
 | Case | Admitted amount | Above $0.01 | Verified debit above $0.01 |
 | --- | ---: | --- | --- |

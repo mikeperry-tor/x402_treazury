@@ -655,10 +655,10 @@ impl Store {
         self.funding_permits = Some(permits);
         Ok(())
     }
-    pub fn check_job_permit(&self, job: &str, input_with_fee: u64) -> Result<()> {
+    pub fn check_job_permit(&self, job: &str) -> Result<()> {
         if let Some(permits) = &self.funding_permits {
             super::restriction::permit_result(
-                permits.check_preparation(&self.id, job, input_with_fee),
+                permits.check_preparation(&self.id, job),
                 "preparation",
             )?;
         }
@@ -674,7 +674,6 @@ impl Store {
                     |r| r.get(0),
                 )
                 .context("qualification_funding_denied: operation lacks a current funding job")?;
-            self.check_job_permit(&job, input_with_fee)?;
             // Recovery may have committed before the registry acknowledgement.
             // Only durable archived operations with no bytes or consumed funds
             // can release an old source reservation. Current operations cannot.
@@ -1819,14 +1818,7 @@ impl Store {
                 )
                 .optional()?;
             if let Some(job) = job {
-                self.check_job_permit(
-                    &job,
-                    operation
-                        .facts
-                        .amount_zatoshis
-                        .checked_add(operation.facts.fee_zatoshis)
-                        .context("source cost overflow")?,
-                )?;
+                self.check_job_permit(&job)?;
                 ensure!(
                     capacity::funding_claim_present(&self.db, &job)?,
                     "initial funding claim consumed or disabled"

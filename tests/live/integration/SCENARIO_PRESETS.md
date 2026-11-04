@@ -5,22 +5,24 @@ are templates, not executable authorizations: fill the treasury/run/authority ID
 paths, Tor binary and future UTC windows before planning. No command expands a
 hidden repeat count. All mainnet work remains an explicit invocation.
 
-| Manifest | Deployment | Calls | API reservation ceiling | New funding jobs / source ceiling |
+| Manifest | Deployment | Calls | Total test budget (USDC) | New funding jobs |
 | --- | --- | ---: | ---: | --- |
-| `short.example.toml` | `single-deployment.example.toml` | 1 | $0.20 | 0 / 0 ZEC |
-| `standard.example.toml` | `managed-deployment.example.toml` | 4 | $0.80 | 0 / 0 ZEC |
-| `rotation.example.toml` | `managed-deployment.example.toml` | 14 | $2.80 | 1 / 0.002 ZEC |
-| `extended.example.toml` | `managed-deployment.example.toml` | 28 | $5.60 | 2 / 0.004 ZEC |
-| `treasury-only.example.toml` | `managed-deployment.example.toml` | 28 | $5.60 | 6 / 0.012 ZEC |
-| `catalog.example.toml` | `unsigned-deployment.example.toml` | 3 unsigned | $0 | 0 / 0 ZEC |
-| `reliability.example.toml` | `single-deployment.example.toml` | 2 | $0.40 | 0 / 0 ZEC |
+| `short.example.toml` | `single-deployment.example.toml` | 1 | $0.20 | 0 |
+| `standard.example.toml` | `managed-deployment.example.toml` | 4 | $0.80 | 0 |
+| `rotation.example.toml` | `managed-deployment.example.toml` | 14 | $2.80 | 1 |
+| `extended.example.toml` | `managed-deployment.example.toml` | 28 | $5.60 | 2 |
+| `treasury-only.example.toml` | `managed-deployment.example.toml` | 28 | $5.60 | 4 |
+| `catalog.example.toml` | `unsigned-deployment.example.toml` | 3 unsigned | $0 | 0 |
+| `reliability.example.toml` | `single-deployment.example.toml` | 2 | $0.40 | 0 |
 
 The broader [23-provider sweep](PROVIDER_PRESETS.md) is a separate breadth preset.
-The table's API amounts reserve the effective $0.20 per-payment cap, not the
-historical SocialFetch fee of $0.014. Source ceilings are upper bounds in ZEC, not
-fee forecasts. Swaps allocate USDC to active/standby wallets; those allocations
-are not API consumption. Use the planner and actual starting-state observations
-to review both kinds of exposure.
+The table's USDC budgets bound a running total of potentially chargeable API
+authorizations, not a fee forecast or a sum that must be allocated before execution.
+Each paid case retains its explicit per-case reservation. Every authorization
+consumes the test budget even when its result is missing or another wallet is tried.
+New funding has no monetary qualification budget: reviewed job counts and reserve
+sizes, current SDK-spendable ZEC, conversion overhead and actual network-fee caps
+supply its boundaries. A funded wallet's API payments are charged only when authorized.
 
 ## Wallet and listener scope
 
@@ -47,7 +49,11 @@ qualify independently. A provider failure remains a failure; no automatic paid
 retry is purchased.
 
 Twelve attempts are a finite candidate list, not a promise to rotate every wallet.
-The configured nominal range is $2-$5. The operation's selected draw and any accepted bridge minimum can raise its local floor; the upper bound remains $5. Preparation estimates must account for that upper authority without assuming a midpoint is sufficient. The operator-supplied spendable ZEC balance is the ZEC capital limit; only the reviewed qualification source exposure can add a separate run authority. Per-job permits are `source_exposure_zec / new_funding_jobs`, so review the run exposure against the largest enabled slot draw before use.
+The configured nominal range is $2-$5. The operation's selected draw and any
+accepted bridge minimum can raise its local floor; the upper bound remains $5.
+ZEC input follows the current quote; no fixed ZEC exposure ceiling or equal-share
+per-job budget is imposed. A minimum above the configured USDC maximum stops new
+unsigned acquisition without a deposit.
 A larger starting balance, different live fee, incomplete chain evidence, fast
 refill or missed checkpoint can leave qualification incomplete. Review and expand
 the explicit cases and reservations **before preparation** if the observed balance

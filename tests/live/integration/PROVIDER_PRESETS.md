@@ -20,7 +20,7 @@ operator reviews the deployment, state, run ID, deadlines and authority. Copy th
 referenced `tests/live/deployments/live-tor-providers.toml` to a private deployment, configure
 the already-funded treasury/pools and owned Tor endpoint, then update the manifest
 paths. Relative paths in the committed template are relative to its committed
-location; use absolute paths when relocating a copy. The API reservation ceiling
+location; use absolute paths when relocating a copy. The running API authorization budget
 is $4.40, not a fee estimate. All new funding/job authority is zero, auto-funding
 is disabled in the deployment, and paid cases select pool `coverage_b`. Other
 declared pools remain configured; the preset does not remove or fund them.

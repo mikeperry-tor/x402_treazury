@@ -53,8 +53,8 @@ paths, installed Tor binary, listener ports and finite UTC windows. Use absolute
 paths when moving templates and owner-only evidence directories. Review exact tools,
 arguments, response assertions and source/listener/wallet assignments.
 
-The baseline reserves **$4.40 across 22 paid cases**, not a fee forecast. It
-permits zero new funding jobs/source exposure and disables automatic funding.
+The baseline has a **$4.40 running API authorization budget across 22 paid cases**, not a fee forecast. It
+permits zero new funding jobs and disables automatic funding.
 Startup does not probe endpoint prices. Retain all declared pools, including those not used by the sweep.
 Extra routes/providers, funding and repeated calls need separate reviewed bounds.
 
@@ -78,7 +78,7 @@ sync is an error, not a zero balance. Keep seeds, keys and backups private.
 Existing-wallet qualification records starting observations separately from
 payment authority. Saved estimates do not prove affordability; permitted attempts
 can fail for insufficient funds and traverse existing eligible wallets. Arrange
-any necessary funding separately under reviewed source/job limits; do not enable funding or force rotation merely to make
+any necessary funding separately under reviewed job counts and reserve sizes; do not enable funding or force rotation merely to make
 the provider sweep run. The preset does not substitute a static EVM private key.
 
 With serving stopped, authorize the reviewed cumulative ceilings against the
@@ -97,7 +97,13 @@ permission to spend.
 Funding validation checks the saved baseline, wallet/job bindings, outstanding
 liabilities and start readiness in one registry transaction. It validates every
 missing-pool claim before reserving the batch; any failure rolls back new permits.
-Retained jobs keep their original run ownership and charges.
+Retained jobs keep their original run ownership.
+
+`total_test_budget_usdc` replaces the old aggregate API and ZEC exposure settings.
+It charges each potentially payable API authorization before financial admission commits or disclosure, with one
+running total for the run and the registry's `cumulative_test_budget_usdc` authority
+across runs. It does not charge wallet funding. Budget exhaustion fails the affected
+case with a clear warning; missing results and retries do not erase earlier charges.
 
 ## 3. Prepare complete catalogs
 

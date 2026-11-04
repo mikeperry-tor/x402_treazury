@@ -372,7 +372,6 @@ mod tests {
         );
         m.phases[0].scenario = Scenario::Unsigned {};
         m.limits.new_funding_jobs = 1;
-        m.limits.source_exposure_zec = "0.01".into();
         assert!(qualification_policy(&m, false).is_err());
         assert_eq!(qualification_policy(&m, true).unwrap(), (true, false));
     }

@@ -18,9 +18,8 @@ tor_binary = "/replace/with/installed/tor"
 confinement = "macos_sandbox"
 require_isolation_evidence = true
 [limits]
-api_reservation_usdc = "4.40"
+total_test_budget_usdc = "4.40"
 new_funding_jobs = 0
-source_exposure_zec = "0"
 max_in_flight = 2
 run_seconds = 14400
 phase_seconds = 1800

@@ -124,11 +124,6 @@ impl Registry {
             authority == m.registry_authorization,
             "run authority has changed; no new dispatch allowed"
         );
-        let ceiling: i64 = tx.query_row(
-            "SELECT api FROM authorizations ORDER BY seq DESC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )?;
         check_dependencies(&tx, run, &p.depends_on)?;
         let mut sum = 0i64;
         let mut unique = BTreeSet::new();
@@ -147,14 +142,6 @@ impl Registry {
                 .checked_add(cost)
                 .context("batch reservation overflow")?;
         }
-        let (global,local):(i64,i64)=tx.query_row("SELECT COALESCE(SUM(reservation),0),COALESCE(SUM(CASE WHEN run=?1 THEN reservation ELSE 0 END),0) FROM cases WHERE execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED')",[run],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        ensure!(
-            global.checked_add(sum).is_some_and(|n| n <= ceiling)
-                && local
-                    .checked_add(sum)
-                    .is_some_and(|n| n <= usdc(&m.limits.api_reservation_usdc).unwrap_or(0)),
-            "cumulative/run API reservation ceiling exceeded"
-        );
         tx.execute(
             "INSERT INTO batches VALUES(?1,?2,?3,?4)",
             params![run, batch, bounded_json(&ids)?, now],

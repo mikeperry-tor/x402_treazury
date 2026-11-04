@@ -161,7 +161,7 @@ mod tests {
         "deployment":"deploy.toml","binary":"x402_treazury","evidence_dir":"evidence","registry_authorization":"review_1",
         "start":{"mode":"funded_pools","pools":["pool"]},
         "network":{"tor_mode":"direct","confinement":"none","require_isolation_evidence":false},
-        "limits":{"api_reservation_usdc":"0.04","new_funding_jobs":0,"source_exposure_zec":"0","max_in_flight":2,"run_seconds":900,"phase_seconds":600,"call_seconds":300,"cleanup_seconds":900,"result_bytes":1000},
+        "limits":{"total_test_budget_usdc":"0.04","new_funding_jobs":0,"max_in_flight":2,"run_seconds":900,"phase_seconds":600,"call_seconds":300,"cleanup_seconds":900,"result_bytes":1000},
         "catalog":{"execution":"frozen","record_live_discovery":true},
         "windows":[{"id":"now","not_before":1,"not_after":1000}],
         "cases":[{"id":"call","server":"main","source":"api","tool":"api_read","arguments":{},"reserve_usdc":"0.02","reviewed_read_only":true}],

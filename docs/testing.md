@@ -26,6 +26,19 @@ including production local catalogs, discovery, media, payments and qualificatio
 Preserve financial evidence. Provider existence neither requires paid qualification
 nor establishes support or current upstream health. Qualification must explicitly
 identify its selected requests, caps, authority and unobserved outcomes.
+`total_test_budget_usdc` bounds the running sum of potentially chargeable API
+authorizations, not prefunded case reservations or wallet funding. Concurrent
+admissions check and record that total atomically before disclosure, including
+concurrent admissions from distinct runs sharing a registry. Reopening retains
+accepted charges and rolls back refused admissions; uncertain and failed attempts
+remain charged across restart. Per-case limits bound each case,
+and cumulative registry authority spans runs. Budget refusal emits WARN and a
+clear test error. A PaidClient regression covers run and registry budget refusals
+before signed dispatch: payment journals and admission evidence remain absent,
+balance estimates and reserve ownership remain unchanged, and sufficient authority
+allows the same case to proceed. Funding has no ZEC spending budget; reviewed
+allocation counts, reserve sizes, actual treasury spendability and fee/overhead
+safeguards apply.
 
 ## Testing efficiency
 
@@ -744,7 +757,7 @@ remaining lifecycle and cover gates.
 | Complete frozen inventories, typed loading failures and exact snapshot byte boundary including newline | `tests/startup.rs`, `tests/integration_preparation.rs`, `tests/snapshot_boundary.rs` |
 | Identity/origin scope and confined egress | Managed/unsigned identity-map tests, `tests/network_audit.rs`, optional `tests/TOR.md` procedure |
 | Rotation output, missing evidence, settlement precedence and original replacement-job bindings | `tests/live/runner/rotation_report.rs` tests; fixtures certify report logic only |
-| Parent death, malformed-control drain and unsigned refusal before signing | `tests/supervision.rs` |
+| Parent death, malformed-control drain and unsigned refusal before disclosure | `tests/supervision.rs` |
 
 MCP success, useful provider content, seller receipts, consumed nonces and verified
 canonical debits are different facts. Missing proof is not a zero fee. Financial

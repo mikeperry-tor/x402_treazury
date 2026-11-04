@@ -60,9 +60,8 @@ pub enum Confinement {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
-    pub api_reservation_usdc: String,
+    pub total_test_budget_usdc: String,
     pub new_funding_jobs: u32,
-    pub source_exposure_zec: String,
     pub max_in_flight: usize,
     pub run_seconds: u64,
     pub phase_seconds: u64,
@@ -206,18 +205,6 @@ pub fn usdc(s: &str) -> Result<u64> {
     ensure!(n <= i64::MAX as u64, "USDC amount exceeds registry range");
     Ok(n)
 }
-pub fn zec(s: &str) -> Result<u64> {
-    // Preserve the production decimal grammar while allowing zero as deny-all.
-    let (whole, fraction) = s.split_once('.').unwrap_or((s, ""));
-    if !whole.is_empty()
-        && whole.bytes().all(|b| b == b'0')
-        && fraction.len() <= 8
-        && fraction.bytes().all(|b| b == b'0')
-    {
-        return Ok(0);
-    }
-    Ok(x402_treazury::rotation::config::zatoshis(s)?.try_into()?)
-}
 impl Manifest {
     pub async fn load(path: &Path) -> Result<Self> {
         use tokio::io::AsyncReadExt;
@@ -306,8 +293,7 @@ impl Manifest {
             );
         }
         let l = &self.limits;
-        usdc(&l.api_reservation_usdc)?;
-        zec(&l.source_exposure_zec)?;
+        usdc(&l.total_test_budget_usdc)?;
         ensure!(
             (1..=64).contains(&l.max_in_flight) && l.new_funding_jobs <= 1000,
             "invalid concurrency/funding-job limits"
@@ -333,10 +319,6 @@ impl Manifest {
         ensure!(
             (1..=64 * 1024 * 1024).contains(&l.result_bytes),
             "result_bytes must be 1..67108864"
-        );
-        ensure!(
-            (l.new_funding_jobs == 0) == (zec(&l.source_exposure_zec)? == 0),
-            "funding jobs and source exposure must both be zero or positive"
         );
         match self.network.tor_mode {
             TorMode::Owned => ensure!(

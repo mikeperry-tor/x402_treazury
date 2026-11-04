@@ -9,6 +9,7 @@ pub mod lifecycle;
 mod lifecycle_estimate;
 pub use balance::validate_admission_balance;
 pub use lifecycle_estimate::depletion_estimate;
+pub mod budget;
 mod debit;
 pub mod funding;
 pub use debit::{receipt_expectation, reconcile_debit};
@@ -127,6 +128,11 @@ fn connection(binding: &Binding) -> Result<Connection> {
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )?;
     db.busy_timeout(Duration::from_secs(5))?;
+    let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    ensure!(
+        version == 2,
+        "historical qualification registries are read-only; preserve their evidence and prepare new USDC-budget authority"
+    );
     db.execute_batch("PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;")?;
     Ok(db)
 }
@@ -487,15 +493,15 @@ mod tests {
         let file = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
         file.persist(&path).unwrap();
         let db = Connection::open(&path).unwrap();
-        db.execute_batch("PRAGMA user_version=1; CREATE TABLE pins(run TEXT,payload TEXT,digest TEXT,revision INTEGER);
+        db.execute_batch("PRAGMA user_version=2; CREATE TABLE pins(run TEXT,payload TEXT,digest TEXT,revision INTEGER);
         CREATE TABLE identity(singleton INTEGER,treasury TEXT);
         INSERT INTO identity VALUES(1,'treasury');
         CREATE TABLE runs(id TEXT,manifest TEXT,authorization TEXT);
-        CREATE TABLE authorizations(id TEXT,seq INTEGER);
+        CREATE TABLE authorizations(id TEXT,seq INTEGER,budget INTEGER);
         CREATE TABLE cases(run TEXT,id TEXT,execution TEXT,window_start INTEGER,window_end INTEGER);
         CREATE TABLE events(seq INTEGER PRIMARY KEY,run TEXT,kind TEXT,detail TEXT,at INTEGER);
         CREATE UNIQUE INDEX application_claim_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_claim';
-        INSERT INTO authorizations VALUES('review',1);").unwrap();
+        INSERT INTO authorizations VALUES('review',1,100000000);").unwrap();
         let pins = json!({"catalogs":{"build":crate::build_identity::current()}}).to_string();
         let digest = format!("{:x}", Sha256::digest(pins.as_bytes()));
         db.execute(
@@ -503,7 +509,7 @@ mod tests {
             params![pins, digest],
         )
         .unwrap();
-        let manifest=json!({"treasury_id":"treasury","cases":[{"id":"case","server":"listener","source":"api","tool":"read","arguments":{"n":1},"unsigned":true}]}).to_string();
+        let manifest=json!({"treasury_id":"treasury","limits":{"total_test_budget_usdc":"100"},"cases":[{"id":"case","server":"listener","source":"api","tool":"read","arguments":{"n":1},"unsigned":true}]}).to_string();
         db.execute("INSERT INTO runs VALUES('run',?1,'review')", [manifest])
             .unwrap();
         db.execute(
@@ -580,8 +586,11 @@ mod tests {
                 .is_err()
         );
         // Revocation stops starts, but must not discard completion of accepted work.
-        db.execute("INSERT INTO authorizations VALUES('revoked',2)", [])
-            .unwrap();
+        db.execute(
+            "INSERT INTO authorizations(id,seq,budget) VALUES('revoked',2,100000000)",
+            [],
+        )
+        .unwrap();
         claim.finish(false, None).await.unwrap();
         let count: i64 = db
             .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
@@ -595,8 +604,11 @@ mod tests {
             match mode {
                 0 => Arc::get_mut(&mut guard).unwrap().binding.expires_at = 0,
                 1 => {
-                    db.execute("INSERT INTO authorizations VALUES('revoked',2)", [])
-                        .unwrap();
+                    db.execute(
+                        "INSERT INTO authorizations(id,seq,budget) VALUES('revoked',2,100000000)",
+                        [],
+                    )
+                    .unwrap();
                 }
                 2 => {
                     db.execute("UPDATE pins SET digest='changed'", []).unwrap();

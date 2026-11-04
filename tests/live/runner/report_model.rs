@@ -82,7 +82,6 @@ pub struct Provider {
 pub struct SourceFunding {
     pub saved_accounting: State,
     pub observations: usize,
-    pub reserved_zatoshis: u64,
     pub reserved_jobs: u64,
 }
 #[derive(Serialize, Deserialize)]
@@ -280,7 +279,7 @@ pub fn build(m: &Manifest, config: &Value, r: &Value) -> Result<Report> {
         .collect::<Result<_>>()?;
     let accounting = &r["treasury_accounting"];
     Ok(Report {
-        version: 1,
+        version: 2,
         source_inventory_complete,
         providers,
         source_funding: SourceFunding {
@@ -290,7 +289,6 @@ pub fn build(m: &Manifest, config: &Value, r: &Value) -> Result<Report> {
                 state(&accounting["status"])
             },
             observations: accounting["observations"].as_array().map_or(0, Vec::len),
-            reserved_zatoshis: numeric(r, "source_reserved_zatoshis")?,
             reserved_jobs: numeric(r, "funding_jobs_reserved")?,
         },
         lifecycle,
@@ -364,13 +362,13 @@ mod tests {
             assert_eq!(
                 report,
                 json!({
-                    "version":1,"source_inventory_complete":false,
+                    "version":2,"source_inventory_complete":false,
                     "providers":[{"source":"api","catalog":unobserved("unobserved"),
                         "help":unobserved("unobserved"),
                         "cases":[{"case":"call","execution":"completed","mcp":"completed",
                             "semantics":"failed","payment":"not_requested","verified_atomic":null}]}],
                     "source_funding":{"saved_accounting":"completed","observations":1,
-                        "reserved_zatoshis":20,"reserved_jobs":1},
+                        "reserved_jobs":1},
                     "lifecycle":[],"network":expected
                 })
             );
@@ -442,8 +440,8 @@ mod tests {
         r["canonical_api_debits"] = json!({"status":"validated","cases":{"call":-1}});
         assert_eq!(error(&r), "invalid canonical debit amount");
         r["canonical_api_debits"] = json!({"status":"incomplete"});
-        r["source_reserved_zatoshis"] = json!("20");
-        assert_eq!(error(&r), "invalid report amount source_reserved_zatoshis");
+        r["funding_jobs_reserved"] = json!("20");
+        assert_eq!(error(&r), "invalid report amount funding_jobs_reserved");
         r["cases"] = json!([{ "case":"different" }]);
         assert_eq!(error(&r), "manifest case missing from report");
         r["cases"] = json!([]);

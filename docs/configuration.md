@@ -583,7 +583,9 @@ keep discovering later ZEC deposits and confirmations through the shared treasur
 owner; fully funded idle serving does not watch for incoming funds. Retirement
 continues only while its own unresolved candidate work remains. Keep group
 payment caps, output/conversion-overhead and accepted-operation fee safeguards,
-explicit funding controls and separately authorized qualification-run limits.
+explicit funding controls and separately authorized qualification allocation counts.
+Qualification has no separate ZEC spending budget. Its `total_test_budget_usdc`
+limits API authorizations using a running durable total, independently of funding.
 
 `funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
 local funding inventory/owner scheduling and existing per-job jitter. Each

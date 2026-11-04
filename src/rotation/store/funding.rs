@@ -390,7 +390,7 @@ impl Store {
     pub fn require_funding_attempt(&self, job: &str, max_attempts: u32) -> Result<()> {
         self.funding_restriction
             .require_new_funding("funding_attempt_start")?;
-        self.check_job_permit(job, 1)?;
+        self.check_job_permit(job)?;
         self.require_funding_recovery_allowance(job, max_attempts)
     }
     pub(crate) fn require_funding_recovery_allowance(
@@ -627,7 +627,7 @@ impl Store {
     ) -> Result<(U256, U256, U256)> {
         self.funding_restriction
             .require_new_funding("funding_quote_start")?;
-        self.check_job_permit(job, 1)?;
+        self.check_job_permit(job)?;
         let floor = amount(floor)?;
         let preferred = amount(preferred)?;
         let ceiling = claim.maximum_output;
@@ -1214,7 +1214,7 @@ impl Store {
     ) -> Result<()> {
         self.funding_restriction
             .require_new_funding("funding_attempt_start")?;
-        self.check_job_permit(job, 1)?;
+        self.check_job_permit(job)?;
         ensure!(
             self.funding_retry_allowed(job, expected_operation)?,
             "swap_outcome_pending"
@@ -1260,7 +1260,7 @@ impl Store {
     ) -> Result<()> {
         self.funding_restriction
             .require_new_funding("funding_attempt_reset")?;
-        self.check_job_permit(job, 1)?;
+        self.check_job_permit(job)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1540,7 +1540,7 @@ impl Store {
         if next == FundingPhase::Preparing {
             self.funding_restriction
                 .require_new_funding("funding_preparation_start")?;
-            self.check_job_permit(id, 1)?;
+            self.check_job_permit(id)?;
         }
         let changed = self.db.execute(
             "UPDATE funding_progress SET phase=?3,last_error=CASE WHEN ?4 THEN last_error ELSE NULL END WHERE job_id=?1 AND phase=?2 AND operation_id=?5 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE' AND (?6=0 OR f.readiness_requirement IS NULL))",

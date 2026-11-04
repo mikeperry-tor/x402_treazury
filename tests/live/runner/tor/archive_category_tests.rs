@@ -147,8 +147,7 @@ fn old_relay_config_preserves_offline_managed_identity_audit_without_live_author
         version: 1,
         id: manifest.registry_authorization.clone(),
         treasury_id: treasury_id.clone(),
-        cumulative_api_usdc: "0.04".into(),
-        cumulative_source_zec: "0".into(),
+        cumulative_test_budget_usdc: "0.04".into(),
         cumulative_new_jobs: 0,
     };
     let mut registry = Registry::authorize(&state, &authorization, 2).unwrap();

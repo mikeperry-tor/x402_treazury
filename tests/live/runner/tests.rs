@@ -6,7 +6,7 @@ pub(super) fn manifest() -> Manifest {
         "deployment":"deploy.toml","binary":"x402_treazury","evidence_dir":"evidence","registry_authorization":"review_1",
         "start":{"mode":"funded_pools","pools":["pool"]},
         "network":{"tor_mode":"direct","confinement":"none","require_isolation_evidence":false},
-        "limits":{"api_reservation_usdc":"0.04","new_funding_jobs":0,"source_exposure_zec":"0","max_in_flight":2,"run_seconds":900,"phase_seconds":600,"call_seconds":300,"cleanup_seconds":900,"result_bytes":1000},
+        "limits":{"total_test_budget_usdc":"0.04","new_funding_jobs":0,"max_in_flight":2,"run_seconds":900,"phase_seconds":600,"call_seconds":300,"cleanup_seconds":900,"result_bytes":1000},
         "catalog":{"execution":"frozen","record_live_discovery":true},
         "windows":[{"id":"now","not_before":1,"not_after":1000}],
         "cases":[{"id":"call","server":"main","source":"api","tool":"api_read","arguments":{},"reserve_usdc":"0.02","reviewed_read_only":true}],
@@ -24,13 +24,9 @@ fn qualification_rejects_explicitly_unauthenticated_listeners() {
 }
 #[test]
 fn zero_amounts_and_exact_decimal_boundaries() {
-    for zero in ["0", "0.0", "00.00000000"] {
-        assert_eq!(zec(zero).unwrap(), 0);
+    for zero in ["0", "0.0", "00.000000"] {
+        assert_eq!(usdc(zero).unwrap(), 0);
     }
-    for invalid in ["", ".", "-0", "0.000000000", "0e0", "NaN"] {
-        assert!(zec(invalid).is_err(), "{invalid}");
-    }
-    assert_eq!(zec("0.00000001").unwrap(), 1);
     assert_eq!(usdc("0.000001").unwrap(), 1);
     for invalid in ["off", "none", "", "0.0000001", "9223372036854775808"] {
         assert!(usdc(invalid).is_err());
@@ -41,7 +37,7 @@ fn smoke_has_no_execution_authority_or_hidden_allocation() {
     let p = planner::build(&manifest(), &config()).unwrap();
     assert!(p.offline && !p.execution_authorized);
     assert_eq!(p.api_reservation_atomic, 20000);
-    assert_eq!(p.api_headroom_atomic, 20000);
+    assert_eq!(p.total_test_budget_atomic, 40000);
     assert_eq!(p.planned_new_funding_jobs, 0);
     assert_eq!(p.declared_managed_pools, vec!["pool", "unused"]);
     assert_eq!(p.expanded_phases[0]["call_count"], 1);
@@ -73,7 +69,7 @@ fn cases_dependencies_budgets_and_bindings_fail_closed() {
         let mut m = manifest();
         match mode {
             0 => m.cases[0].reserve_usdc = "0.01".into(),
-            1 => m.limits.api_reservation_usdc = "0.01".into(),
+            1 => m.limits.total_test_budget_usdc = "invalid".into(),
             2 => m.phases[0].depends_on = vec!["smoke".into()],
             3 => m.phases[0].cases.push("call".into()),
             4 => m.cases[0].source = "missing".into(),
@@ -85,7 +81,6 @@ fn cases_dependencies_budgets_and_bindings_fail_closed() {
             6 => m.phases[0].pools = vec!["unused".into()],
             _ => {
                 m.limits.new_funding_jobs = 1;
-                m.limits.source_exposure_zec = "0.01".into();
             }
         }
         assert!(planner::build(&m, &config()).is_err(), "mode {mode}");
@@ -115,7 +110,7 @@ fn explicit_concurrency_and_bootstrap_refill_slots() {
         m.cases.push(case);
         m.phases[0].cases.push(id.into());
     }
-    m.limits.api_reservation_usdc = "0.08".into();
+    m.limits.total_test_budget_usdc = "0.08".into();
     m.phases[0].scenario = Scenario::Lifecycle {
         refill_slots: 2,
         restart: Restart::QueuedRefill,
@@ -123,7 +118,6 @@ fn explicit_concurrency_and_bootstrap_refill_slots() {
     };
     m.start.mode = StartMode::TreasuryOnly;
     m.limits.new_funding_jobs = 2;
-    m.limits.source_exposure_zec = "0.1".into();
     assert!(planner::build(&m, &config()).is_err());
     m.limits.new_funding_jobs = 3;
     assert_eq!(
@@ -377,9 +371,8 @@ fn rotation_rounds_require_distinct_ordered_paid_calls_and_exact_wallet_scope() 
     m.cases[3].source = "peer".into();
     let mut cfg = config();
     cfg["wallet_bindings"]["main"]["peer"] = json!({"wallet":"unused"});
-    m.limits.api_reservation_usdc = "0.08".into();
+    m.limits.total_test_budget_usdc = "0.08".into();
     m.limits.new_funding_jobs = 1;
-    m.limits.source_exposure_zec = "0.1".into();
     let mut r = round("call", "service");
     r.depletion_cases.push("deplete_more".into());
     r.service_cases.push("peer_service".into());
@@ -389,7 +382,7 @@ fn rotation_rounds_require_distinct_ordered_paid_calls_and_exact_wallet_scope() 
     };
     planner::build(&m, &cfg).unwrap();
     let mut high_reservation = m.clone();
-    high_reservation.limits.api_reservation_usdc = "0.4".into();
+    high_reservation.limits.total_test_budget_usdc = "0.4".into();
     for case in &mut high_reservation.cases {
         case.reserve_usdc = "0.1".into();
     }

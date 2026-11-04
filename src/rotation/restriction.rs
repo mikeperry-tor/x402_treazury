@@ -45,7 +45,10 @@ pub trait FundingPermits: Send + Sync {
         pool_name: &str,
         sequences: &[i64],
     ) -> Result<Vec<String>>;
-    fn check_preparation(&self, treasury: &str, job: &str, input_with_fee: u64) -> Result<()>;
+    fn check_preparation(&self, treasury: &str, job: &str) -> Result<()>;
+    /// Called only before the Store has accepted an immutable preparation intent.
+    /// Bind operation/job ownership; input_with_fee is a first proposal observation,
+    /// which may differ on a proven unstarted retry and grants no monetary authority.
     fn reserve_preparation(
         &self,
         treasury: &str,

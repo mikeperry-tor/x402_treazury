@@ -61,13 +61,6 @@ pub trait FundingBackend: Send + 'static {
     fn swap_timeout_seconds(&self) -> u64 {
         1800
     }
-    fn ready(
-        &mut self,
-        _job: &FundingJob,
-        _quote: &Quote,
-    ) -> impl Future<Output = Result<()>> + Send {
-        async { Ok(()) }
-    }
     fn quote_prerequisite(
         &mut self,
         job: &FundingJob,
@@ -400,7 +393,6 @@ impl<B: FundingBackend> FundingWorker<B> {
                 "Further wallet funding is waiting for an existing ZEC transaction to resolve; checks continue automatically");
             return Ok(Observation::None);
         }
-        self.backend.lock().await.ready(job, &quote).await?;
         if quote.deadline <= clock.now() {
             let id = job.id.clone();
             let operation = job.operation_id.clone();
@@ -557,17 +549,6 @@ impl FundingBackend for Backend {
 
     fn swap_timeout_seconds(&self) -> u64 {
         self.funding.swap_timeout_seconds
-    }
-    async fn ready(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
-        self.require_auto_funding()?;
-        let job_id = job.id.clone();
-        let principal = quote.input;
-        // Actual spendable funds bound the accepted quote's principal. SDK
-        // selection checks the actual fee; the owner journals its exact inputs
-        // before calculation, without reserving a capital amount.
-        self.store
-            .call(move |s| s.check_job_permit(&job_id, principal))
-            .await
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {
         self.require_auto_funding()?;

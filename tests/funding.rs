@@ -120,13 +120,6 @@ impl FundingBackend for Fake {
     fn swap_timeout_seconds(&self) -> u64 {
         self.timeout
     }
-    async fn ready(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
-        anyhow::ensure!(
-            self.funds_available,
-            x402_treazury::rotation::error::FundingCondition::InsufficientFunds
-        );
-        Ok(())
-    }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<(Quote, bool)> {
         anyhow::ensure!(job.id == self.focus_job, "fixture_job_disabled");
         let id = job.id.clone();
@@ -148,6 +141,10 @@ impl FundingBackend for Fake {
         ))
     }
     async fn prepare(&mut self, j: &FundingJob, quote: &Quote) -> Result<()> {
+        anyhow::ensure!(
+            self.funds_available,
+            x402_treazury::rotation::error::FundingCondition::InsufficientFunds
+        );
         if self.defer_prepare {
             return Err(x402_treazury::rotation::transaction::PreparationDeferred.into());
         }
@@ -638,7 +635,9 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
         .await
         .unwrap();
     worker.backend.lock().await.funds_available = false;
-    worker.tick(now + 1000).await.unwrap();
+    // Exercise SDK funding eligibility while the quote is still valid. Expired
+    // quotes refresh before preparation, independently of available capital.
+    worker.tick(now + 100).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
         status.funding_jobs[0].phase,

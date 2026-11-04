@@ -236,12 +236,10 @@ impl super::super::restriction::FundingPermits for TestPermits {
             .map(|seq| Request {
                 intent: format!("{pool}_{seq}"),
                 pool: pool.into(),
-                source_bound: 100,
             })
             .collect();
         let limit = Limits {
             jobs: self.jobs.load(std::sync::atomic::Ordering::SeqCst),
-            source_zatoshis: 1000,
         };
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -256,14 +254,9 @@ impl super::super::restriction::FundingPermits for TestPermits {
         }
         Ok(jobs)
     }
-    fn check_preparation(&self, treasury: &str, job: &str, input: u64) -> Result<()> {
+    fn check_preparation(&self, treasury: &str, job: &str) -> Result<()> {
         self.validate_treasury(treasury)?;
-        crate::qualification::funding::check_preparation(
-            &self.db.lock().unwrap(),
-            "run",
-            job,
-            input,
-        )
+        crate::qualification::funding::check_preparation(&self.db.lock().unwrap(), "run", job)
     }
     fn reserve_preparation(
         &self,
@@ -290,7 +283,7 @@ impl super::super::restriction::FundingPermits for TestPermits {
     }
 }
 #[test]
-fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
+fn permit_hooks_bound_allocation_counts_and_preserve_source_identity() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = Store::create(
         &dir.path().join("state"),
@@ -350,7 +343,6 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
     let jobs = s.funding_jobs().unwrap();
     assert_eq!(jobs.len(), 2);
     let job = &jobs[0];
-    denied(s.accept_preparation(&job.operation_id, Some(&pool), 101, None));
     assert!(
         s.accept_preparation("unbound", Some(&pool), 1, None)
             .is_err()
@@ -360,8 +352,90 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
         &quote_fixture::bound(&job.target, &job.recipient, "fixture quote"),
     )
     .unwrap();
-    s.accept_preparation(&job.operation_id, Some(&pool), 100, None)
+    use crate::rotation::store::preparation::{CalculationInputs, InputPool, OwnedInput};
+    let calculation = CalculationInputs {
+        destination: "original-deposit".into(),
+        inputs: vec![OwnedInput {
+            pool: InputPool::Orchard,
+            txid: format!("{:064x}", 1),
+            output_index: 2,
+        }],
+    };
+    // The registry commits first. A failed Store commit proves no calculation
+    // started, so a changed SDK fee may be accepted after reopening the Store.
+    s.db.execute_batch("CREATE TRIGGER fail_preparation BEFORE INSERT ON operation_network BEGIN SELECT RAISE(ABORT,'fixture preparation crash'); END;").unwrap();
+    assert!(
+        s.accept_preparation(
+            &job.operation_id,
+            Some(&pool),
+            100,
+            Some(calculation.clone())
+        )
+        .is_err()
+    );
+    s.require_unstarted_preparation(&job.operation_id).unwrap();
+    assert!(s.status().unwrap().treasury_operations.is_empty());
+    assert!(!s.status().unwrap().outgoing_pending);
+    assert_eq!(
+        s.funding_job(&job.id).unwrap().unwrap().phase,
+        funding::FundingPhase::Quoted
+    );
+    let treasury = s.id().to_owned();
+    drop(s);
+    s = Store::open(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        &treasury,
+    )
+    .unwrap();
+    s.install_funding_permits(permits.clone()).unwrap();
+    s.require_unstarted_preparation(&job.operation_id).unwrap();
+    s.db.execute_batch("DROP TRIGGER fail_preparation").unwrap();
+    s.accept_preparation(
+        &job.operation_id,
+        Some(&pool),
+        101,
+        Some(calculation.clone()),
+    )
+    .unwrap();
+    // Real Store acceptance makes both the cost and selected inputs immutable.
+    assert!(
+        s.accept_preparation(
+            &job.operation_id,
+            Some(&pool),
+            100,
+            Some(calculation.clone())
+        )
+        .is_err()
+    );
+    let mut different_inputs = calculation.clone();
+    different_inputs.inputs[0].output_index += 1;
+    assert!(
+        s.accept_preparation(&job.operation_id, Some(&pool), 101, Some(different_inputs))
+            .is_err()
+    );
+    s.accept_preparation(&job.operation_id, Some(&pool), 101, Some(calculation))
         .unwrap();
+    assert_eq!(
+        s.preparation_intent(&job.operation_id)
+            .unwrap()
+            .cost_zatoshis,
+        101
+    );
+    assert_eq!(
+        permits
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT input_zatoshis FROM funding_source_attempts WHERE operation=?1",
+                [&job.operation_id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        100,
+        "preserve the first proposal observation without enforcing it as authority"
+    );
     assert_eq!(
         s.funding_job(&job.id).unwrap().unwrap().phase,
         funding::FundingPhase::Preparing
@@ -445,7 +519,7 @@ fn uncertain_preparation_keeps_the_same_operation_and_permit_after_restart() {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT SUM(source_bound) FROM funding_source_attempts WHERE released=0",
+                "SELECT SUM(input_zatoshis) FROM funding_source_attempts WHERE released=0",
                 [],
                 |r| r.get::<_, i64>(0)
             )
@@ -480,7 +554,7 @@ fn uncertain_preparation_keeps_the_same_operation_and_permit_after_restart() {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT SUM(source_bound) FROM funding_source_attempts WHERE released=0",
+                "SELECT SUM(input_zatoshis) FROM funding_source_attempts WHERE released=0",
                 [],
                 |r| r.get::<_, i64>(0)
             )

@@ -25,8 +25,8 @@ impl Registry {
         )
     }
     fn source_attribution_rows(&self, run: &str) -> Result<Vec<Value>> {
-        let mut statement=self.db.prepare("SELECT s.operation,s.source_bound,s.released FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE p.run=?1 ORDER BY s.operation LIMIT 10001")?;
-        let rows=statement.query_map([run],|r| Ok(json!({"operation":r.get::<_,String>(0)?,"source_bound":r.get::<_,i64>(1)?,"released":r.get::<_,bool>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut statement=self.db.prepare("SELECT s.operation,s.input_zatoshis,s.released FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE p.run=?1 ORDER BY s.operation LIMIT 10001")?;
+        let rows=statement.query_map([run],|r| Ok(json!({"operation":r.get::<_,String>(0)?,"input_zatoshis":r.get::<_,i64>(1)?,"released":r.get::<_,bool>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
         if rows.len() > 10000 {
             eprintln!(
                 "source attribution exceeds 10000 operations; export/review support required"

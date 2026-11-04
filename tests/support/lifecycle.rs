@@ -103,13 +103,6 @@ impl FundingBackend for Funding {
     fn max_attempts(&self, _: &FundingJob) -> u32 {
         3
     }
-    async fn ready(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
-        anyhow::ensure!(
-            self.available.load(Ordering::SeqCst),
-            "treasury_insufficient_spendable_funds"
-        );
-        self.store.call(|s| s.require_preparation_available()).await
-    }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         let id = job.id.clone();
         let operation = job.operation_id.clone();
@@ -127,6 +120,13 @@ impl FundingBackend for Funding {
         })
     }
     async fn prepare(&mut self, job: &FundingJob, _: &Quote) -> Result<()> {
+        anyhow::ensure!(
+            self.available.load(Ordering::SeqCst),
+            "treasury_insufficient_spendable_funds"
+        );
+        self.store
+            .call(|s| s.require_preparation_available())
+            .await?;
         let job = job.clone();
         self.store
             .call(move |s| {

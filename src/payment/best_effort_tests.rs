@@ -639,6 +639,145 @@ fn legacy_challenge() -> Value {
 }
 
 #[tokio::test]
+async fn qualification_budget_refusal_rolls_back_admission_before_signed_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        state,
+        "pool",
+        crate::rotation::test_capacity::two_reserves("5"),
+        Some(U256::from(20_000)),
+        0
+    )
+    .unwrap();
+    for job in state.funding_jobs().unwrap() {
+        state
+            .record_credit(&job.wallet_id, "5000000", "fixture", 100)
+            .unwrap();
+    }
+    let before = serde_json::to_value(state.status().unwrap().pools).unwrap();
+    let (_qualification_dir, claim, registry) = crate::qualification::managed_claim_fixture().await;
+    let authority = rusqlite::Connection::open(&registry).unwrap();
+    let f = Fixture {
+        signed: Arc::default(),
+        requests: Arc::default(),
+        rejects: 0,
+        wire: Wire::Verification,
+        db: dir.path().join("state/state.sqlite"),
+        rpc: Arc::default(),
+        second_started: Arc::default(),
+        release: Arc::default(),
+        authority: Some(registry),
+    };
+    let app = Router::new()
+        .route("/pay", any(seller))
+        .with_state(f.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let (store, worker) = StoreHandle::spawn(state);
+    let client = PaidClient::managed(Arc::new(
+        ManagedPool::new(
+            store.clone(),
+            pool,
+            BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap(),
+            SpendPolicy::dollars("0.02").unwrap(),
+        )
+        .unwrap(),
+    ));
+    let route = || RoutedRequest {
+        headers: BTreeMap::from([
+            ("idempotency-key".into(), "same-logical-call-key".into()),
+            ("x-quote-id".into(), "same-quote".into()),
+        ]),
+        method: "GET".into(),
+        url: format!("{origin}/pay"),
+        query: Default::default(),
+        body: None,
+    };
+    let db = rusqlite::Connection::open(&f.db).unwrap();
+    for (scope, run_budget, registry_budget) in [("run", "0", 100), ("registry", "0.000100", 0)] {
+        authority
+            .execute(
+                "UPDATE runs SET manifest=json_set(manifest,'$.limits.total_test_budget_usdc',?1)",
+                [run_budget],
+            )
+            .unwrap();
+        authority
+            .execute("UPDATE authorizations SET budget=?1", [registry_budget])
+            .unwrap();
+        let error = claim.invoke(client.execute(route())).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains(&format!("qualification_test_budget_exceeded: {scope}")),
+            "{error:#}"
+        );
+        assert!(f.signed.lock().unwrap().is_empty());
+        assert_eq!(
+            store
+                .call(|s| Ok(serde_json::to_value(s.status()?.pools)?))
+                .await
+                .unwrap(),
+            before,
+            "refusal must preserve estimates, wallet roles and reserve claims"
+        );
+        for table in ["payment_attempts", "payment_admission_evidence"] {
+            assert_eq!(
+                db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(
+            crate::qualification::budget::used(&authority, None).unwrap(),
+            0
+        );
+    }
+    assert_eq!(
+        f.requests.lock().unwrap().len(),
+        2,
+        "only unsigned challenges"
+    );
+    // The same eligible inventory and case can proceed when sufficient budget
+    // exists: the refusals must not consume reserve ownership or authority.
+    authority
+        .execute("UPDATE authorizations SET budget=100", [])
+        .unwrap();
+    assert_eq!(claim.invoke(client.execute(route())).await.unwrap(), "paid");
+    client.drain().await;
+    assert_eq!(f.signed.lock().unwrap().len(), 1);
+    assert_eq!(f.requests.lock().unwrap().len(), 4);
+    assert_eq!(
+        crate::qualification::budget::used(&authority, None).unwrap(),
+        100
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM payment_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(client);
+    drop(store);
+    worker.await.unwrap();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
 async fn v1_receipts_govern_traversal_and_preserve_each_authorization() {
     for kind in [
         LegacyReceipt::Verification,

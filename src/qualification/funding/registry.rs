@@ -15,17 +15,6 @@ use sha2::{Digest, Sha256};
 pub struct RegistryPermits {
     binding: Binding,
 }
-fn source_limit(value: &str) -> Result<u64> {
-    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
-    if !whole.is_empty()
-        && whole.bytes().all(|b| b == b'0')
-        && fraction.len() <= 8
-        && fraction.bytes().all(|b| b == b'0')
-    {
-        return Ok(0);
-    }
-    Ok(crate::rotation::config::zatoshis(value)?.try_into()?)
-}
 impl RegistryPermits {
     pub fn new(binding: Binding) -> Self {
         Self { binding }
@@ -84,51 +73,19 @@ impl RegistryPermits {
         Ok(())
     }
 
-    fn pool_bound(&self, db: &Connection, manifest: &Value, pool: &str) -> Result<u64> {
-        self.validate_pool_scope(db, manifest, pool)?;
-        // The reviewed run-wide source exposure is the qualification authority.
-        // Derive each job's immutable permit from it instead of a separate wallet
-        // spending budget; the cumulative reservation check still bounds the run.
-        let jobs = manifest["limits"]["new_funding_jobs"]
-            .as_u64()
-            .context("run job limit missing")?;
-        ensure!(jobs > 0, "qualification funding job limit must be positive");
-        let source = source_limit(
-            manifest["limits"]["source_exposure_zec"]
-                .as_str()
-                .context("run source limit missing")?,
-        )?;
-        let bound = source / jobs;
-        ensure!(
-            bound > 0,
-            "reviewed source exposure does not cover every new funding job"
-        );
-        Ok(bound)
-    }
     fn limits(&self, db: &Connection, manifest: &Value) -> Result<(Limits, Limits)> {
         let run = Limits {
             jobs: manifest["limits"]["new_funding_jobs"]
                 .as_u64()
                 .context("run job limit missing")?
                 .try_into()?,
-            source_zatoshis: source_limit(
-                manifest["limits"]["source_exposure_zec"]
-                    .as_str()
-                    .context("run source limit missing")?,
-            )?,
         };
-        let (jobs, source): (u32, i64) = db.query_row(
-            "SELECT jobs,source FROM authorizations ORDER BY seq DESC LIMIT 1",
+        let jobs = db.query_row(
+            "SELECT jobs FROM authorizations ORDER BY seq DESC LIMIT 1",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
         )?;
-        Ok((
-            run,
-            Limits {
-                jobs,
-                source_zatoshis: source.try_into()?,
-            },
-        ))
+        Ok((run, Limits { jobs }))
     }
     /// Reserve all bootstrap pools under one registry transaction before the
     /// first production allocation. Later per-pool calls reuse these job IDs.
@@ -143,7 +100,7 @@ impl RegistryPermits {
         let mut requests = Vec::new();
         let mut jobs = Vec::new();
         for (pool, sequence) in allocations {
-            let bound = self.pool_bound(tx, manifest, pool)?;
+            self.validate_pool_scope(tx, manifest, pool)?;
             ensure!(*sequence >= 0, "invalid allocation sequence");
             // Length-delimited JSON input, domain separated from all payment and
             // network identities. Session/process/quote changes do not change it.
@@ -153,7 +110,6 @@ impl RegistryPermits {
             requests.push(Request {
                 intent: format!("{:x}", hash),
                 pool: (*pool).into(),
-                source_bound: bound,
             });
             jobs.push(uuid::Uuid::from_bytes(hash[..16].try_into()?).to_string());
         }
@@ -208,13 +164,12 @@ impl FundingPermits for RegistryPermits {
         tx.commit()?;
         Ok(jobs)
     }
-    fn check_preparation(&self, treasury: &str, job: &str, input_with_fee: u64) -> Result<()> {
+    fn check_preparation(&self, treasury: &str, job: &str) -> Result<()> {
         let mut db = qualification::connection(&self.binding)?;
         let tx = db.transaction()?;
         let manifest = self.authority(&tx, treasury)?;
         let pool = self.permit_pool(&tx, job)?;
         self.validate_pool_scope(&tx, &manifest, &pool)?;
-        super::check_preparation(&tx, &self.binding.run, job, input_with_fee)?;
         tx.commit()?;
         Ok(())
     }
@@ -248,59 +203,41 @@ impl FundingPermits for RegistryPermits {
 mod tests {
     use super::*;
     #[test]
-    fn source_authority_accepts_explicit_zero_without_weakening_decimal_grammar() {
-        for value in ["0", "0.00000000", "00.0"] {
-            assert_eq!(source_limit(value).unwrap(), 0);
-        }
-        assert_eq!(source_limit("0.00000001").unwrap(), 1);
-        for value in ["", ".0", "-0", "0.000000000", "0e0", "0.0.0", " 0"] {
-            assert!(source_limit(value).is_err(), "{value}");
-        }
-    }
-    #[test]
-    fn pool_bound_uses_floor_division_and_rejects_zero() {
-        let (_dir, permits, db) = fixture();
-        let raw: String = db
-            .query_row("SELECT manifest FROM runs", [], |r| r.get(0))
-            .unwrap();
-        let mut manifest: Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(permits.pool_bound(&db, &manifest, "pool").unwrap(), 100);
-        manifest["limits"]["source_exposure_zec"] = serde_json::json!("0.0000025");
-        assert_eq!(permits.pool_bound(&db, &manifest, "pool").unwrap(), 125);
-        manifest["limits"]["source_exposure_zec"] = serde_json::json!("0.00000001");
-        assert!(permits.pool_bound(&db, &manifest, "pool").is_err());
-        assert!(permits.pool_bound(&db, &manifest, "other").is_err());
-    }
-
-    #[test]
-    fn preparation_uses_the_immutable_permit_bound_after_manifest_revision() {
+    fn source_ownership_has_no_zec_budget_and_survives_restart() {
         let (_dir, permits, db) = fixture();
         let jobs = permits
             .reserve_allocations("treasury", "pool", &[0, 1])
             .unwrap();
-        db.execute("UPDATE authorizations SET source=300", [])
-            .unwrap();
-        db.execute(
-            "UPDATE runs SET manifest=json_set(manifest,'$.limits.source_exposure_zec','0.000003')",
-            [],
-        )
-        .unwrap();
+        // Source input can vary independently of the API-only USDC budget.
         permits
-            .check_preparation("treasury", &jobs[0], 100)
+            .reserve_preparation("treasury", &jobs[0], "large", 9_000_000)
             .unwrap();
-        assert!(
-            permits
-                .check_preparation("treasury", &jobs[0], 101)
-                .is_err()
-        );
         permits
-            .reserve_preparation("treasury", &jobs[0], "operation", 100)
+            .reserve_preparation("treasury", &jobs[1], "small", 100)
             .unwrap();
-        assert!(
-            permits
-                .reserve_preparation("treasury", &jobs[0], "second_operation", 101)
-                .is_err()
+        let restarted = RegistryPermits::new(permits.binding.clone());
+        restarted
+            .reserve_preparation("treasury", &jobs[0], "large", 9_000_000)
+            .unwrap();
+        restarted
+            .reserve_preparation("treasury", &jobs[0], "large", 9_000_001)
+            .unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT input_zatoshis FROM funding_source_attempts WHERE operation='large'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap(),
+            9_000_000,
+            "preserve the first proposal observation"
         );
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM funding_source_attempts", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
         let raw: String = db
             .query_row("SELECT manifest FROM runs", [], |r| r.get(0))
             .unwrap();
@@ -308,16 +245,12 @@ mod tests {
         manifest["start"]["pools"] = serde_json::json!([]);
         db.execute("UPDATE runs SET manifest=?1", [manifest.to_string()])
             .unwrap();
-        assert!(
-            permits
-                .check_preparation("treasury", &jobs[0], 100)
-                .is_err()
-        );
+        assert!(permits.check_preparation("treasury", &jobs[0]).is_err());
     }
 
     pub(super) fn fixture() -> (tempfile::TempDir, RegistryPermits, Connection) {
         let (dir, guard, db) = qualification::tests::fixture();
-        db.execute_batch("CREATE UNIQUE INDEX runs_id ON runs(id); ALTER TABLE authorizations ADD COLUMN jobs INTEGER; ALTER TABLE authorizations ADD COLUMN source INTEGER; UPDATE authorizations SET jobs=2,source=200;").unwrap();
+        db.execute_batch("CREATE UNIQUE INDEX runs_id ON runs(id); ALTER TABLE authorizations ADD COLUMN jobs INTEGER; UPDATE authorizations SET jobs=2,budget=200;").unwrap();
         db.execute_batch(super::super::SCHEMA).unwrap();
         let mut binding = guard.binding.clone();
         let raw: String = db
@@ -326,7 +259,7 @@ mod tests {
         let mut manifest: Value = serde_json::from_str(&raw).unwrap();
         manifest["start"] = serde_json::json!({"pools":["pool"]});
         manifest["limits"] =
-            serde_json::json!({"new_funding_jobs":2,"source_exposure_zec":"0.000002"});
+            serde_json::json!({"new_funding_jobs":2,"total_test_budget_usdc":"0.000200"});
         manifest["windows"] =
             serde_json::json!([{"not_before":0,"not_after":qualification::now().unwrap()+600}]);
         db.execute("UPDATE runs SET manifest=?1", [manifest.to_string()])
@@ -375,14 +308,7 @@ mod tests {
                 .reserve_allocations("treasury", "pool", &[2])
                 .is_err()
         );
-        permits
-            .check_preparation("treasury", &jobs[0], 100)
-            .unwrap();
-        assert!(
-            permits
-                .check_preparation("treasury", &jobs[0], 101)
-                .is_err()
-        );
+        permits.check_preparation("treasury", &jobs[0]).unwrap();
         permits
             .reserve_preparation("treasury", &jobs[0], "operation", 100)
             .unwrap();
@@ -391,7 +317,7 @@ mod tests {
             .unwrap();
         assert!(
             permits
-                .reserve_preparation("treasury", &jobs[0], "new_operation", 100)
+                .reserve_preparation("treasury", &jobs[1], "operation", 100)
                 .is_err()
         );
         permits
@@ -406,11 +332,11 @@ mod tests {
                 .is_err()
         );
         db.execute(
-            "INSERT INTO authorizations(id,seq,jobs,source) VALUES('new',2,100,100000)",
+            "INSERT INTO authorizations(id,seq,jobs,budget) VALUES('new',2,100,100000)",
             [],
         )
         .unwrap();
-        assert!(permits.check_preparation("treasury", &jobs[0], 1).is_err());
+        assert!(permits.check_preparation("treasury", &jobs[0]).is_err());
         assert!(
             permits
                 .reserve_allocations("treasury", "pool", &[2])
@@ -428,13 +354,13 @@ mod tests {
             [],
         )
         .unwrap();
-        assert!(permits.check_preparation("treasury", &jobs[0], 1).is_err());
+        assert!(permits.check_preparation("treasury", &jobs[0]).is_err());
         db.execute(
             "UPDATE runs SET manifest=json_set(manifest,'$.windows[0].not_after',?1)",
             [qualification::now().unwrap() + 600],
         )
         .unwrap();
         db.execute("UPDATE pins SET payload='{}'", []).unwrap();
-        assert!(permits.check_preparation("treasury", &jobs[0], 1).is_err());
+        assert!(permits.check_preparation("treasury", &jobs[0]).is_err());
     }
 }

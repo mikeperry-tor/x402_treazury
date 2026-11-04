@@ -168,7 +168,7 @@ x402_treazury wallet bootstrap --config examples/deployments/managed.local.toml
 This declares configured groups, runs the production treasury/funding workers,
 and waits for the first positive credit on its captured enabled
 reserve generations. It closes treasury ownership before exiting, requires
-`funding.auto_fund=true`, and respects source, fee, attempt and qualification limits. Static wallets are
+`funding.auto_fund=true`, and respects actual source spendability, fee caps, recovery attempts and qualification allocation counts. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
 signing keys or MCP listeners are needed. Network traffic follows the deployment
 policy, including Tor.
@@ -454,9 +454,10 @@ exclusive offline SDK reconstruction. Unclassified historical records still coun
 Reaching that bound requires
 operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
 source capacity, output/conversion-overhead limits and the accepted operation fee
-cap apply to every new preparation. Qualification runs separately enforce source
-exposure derived from the reviewed manifest and require separately authorized
-recovery; this path does not grant new qualification authority. Unpublished work
+cap apply to every new preparation. Qualification runs enforce reviewed funding-job
+counts and reserve sizing, with actual treasury spendability and operation-specific
+fee/input safeguards governing funding. Recovery still requires its separate
+qualification authority. Unpublished work
 can use a fresh operation only after successful offline reconstruction establishes
 that neither outgoing bytes nor factual transaction metadata was committed. A
 committed transaction with a lost acknowledgment remains owned. Confirmed deposits with unresolved swap outcomes remain

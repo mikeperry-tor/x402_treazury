@@ -109,8 +109,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    funds, the **5% quoted conversion overhead** limit, and the **0.0003 ZEC per
    shielding fee** cap govern the transfer. These are safeguards, not a price
    estimate or a promise that a route fits. The separate reviewed qualification
-   manifest/registry controls this run's cumulative source exposure; retain
-   `auto_fund=false` unless that explicit run authorization permits funding.
+   manifest/registry limits new funding jobs and API payment authorizations, not
+   ZEC spending. `total_test_budget_usdc` counts API authorizations only; retain
+   `auto_fund=false` unless the explicit run authorization permits funding.
 5. After the operator transfers ZEC, sync and inspect the treasury:
 
    ```sh

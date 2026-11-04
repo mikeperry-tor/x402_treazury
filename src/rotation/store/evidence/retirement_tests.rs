@@ -20,7 +20,7 @@ impl crate::rotation::restriction::FundingPermits for FundingOnlyPermits {
     fn reserve_allocations(&self, _: &str, _: &str, _: &[i64]) -> anyhow::Result<Vec<String>> {
         panic!("retirement must not allocate")
     }
-    fn check_preparation(&self, _: &str, _: &str, _: u64) -> anyhow::Result<()> {
+    fn check_preparation(&self, _: &str, _: &str) -> anyhow::Result<()> {
         panic!("retirement must not prepare")
     }
     fn reserve_preparation(&self, _: &str, _: &str, _: &str, _: u64) -> anyhow::Result<()> {

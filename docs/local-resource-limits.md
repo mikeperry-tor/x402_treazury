@@ -9,8 +9,10 @@ correctness invariant before enforcing a limit; prefer removing redundant policy
 
 Funding reserve ranges and wallet payment caps are not resource limits and do not
 authorize a second per-transfer ZEC budget. The operator's actual spendable ZEC
-balance is the ZEC capital limit; only actual network-fee caps and separately
-authorized qualification source exposure may reject a transfer.
+balance is the ZEC capital limit. Qualification adds reviewed allocation counts,
+not a ZEC monetary budget. Its `total_test_budget_usdc` bounds API authorizations
+only; each potentially chargeable attempt is charged durably before disclosure.
+Budget rejection emits WARN and a clear operation error; accepted work stays owned.
 
 This guide covers foreground ownership, API caches, response transport and treasury
 maintenance. The [network inventory](network-egress.md#remaining-timers-and-budgets)

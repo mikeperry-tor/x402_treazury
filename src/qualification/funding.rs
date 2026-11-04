@@ -1,5 +1,5 @@
-//! Durable allocation reservations for supervised funding. This ledger is an
-//! accounting restriction, not permission to allocate, sign, or broadcast.
+//! Durable allocation identities and accepted source ownership for supervised
+//! funding. These records never authorize allocation, signing or broadcast.
 pub mod registry;
 
 use anyhow::{Context, Result, ensure};
@@ -10,14 +10,13 @@ CREATE TABLE IF NOT EXISTS funding_permits(
  intent TEXT PRIMARY KEY,
  run TEXT NOT NULL REFERENCES runs(id),
  pool TEXT NOT NULL,
- source_bound INTEGER NOT NULL CHECK(source_bound>0),
  job TEXT UNIQUE,
  at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS funding_source_attempts(
  operation TEXT PRIMARY KEY,
  job TEXT NOT NULL REFERENCES funding_permits(job),
- source_bound INTEGER NOT NULL CHECK(source_bound>0),
+ input_zatoshis INTEGER NOT NULL CHECK(input_zatoshis>0),
  released INTEGER NOT NULL DEFAULT 0 CHECK(released IN (0,1))
 );
 ";
@@ -27,13 +26,10 @@ pub struct Request {
     /// Stable before allocation; retries must reuse it, including after a crash.
     pub intent: String,
     pub pool: String,
-    /// Maximum source input INCLUDING fee, in zatoshis.
-    pub source_bound: u64,
 }
 #[derive(Clone, Copy)]
 pub struct Limits {
     pub jobs: u32,
-    pub source_zatoshis: u64,
 }
 
 /// Caller must validate the session, current registry authority, run/pool binding,
@@ -75,37 +71,34 @@ fn reserve_inner(
             intents.insert(&request.intent),
             "duplicate funding allocation intent in batch"
         );
-        let bound = i64::try_from(request.source_bound)?;
-        ensure!(
-            bound > 0,
-            "funding permit must include positive input-plus-fee exposure"
-        );
-        let prior: Option<(String, String, i64)> = tx
+        let prior: Option<(String, String)> = tx
             .query_row(
-                "SELECT run,pool,source_bound FROM funding_permits WHERE intent=?1",
+                "SELECT run,pool FROM funding_permits WHERE intent=?1",
                 [&request.intent],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
         if let Some(prior) = prior {
             ensure!(
-                prior == (run.to_owned(), request.pool.clone(), bound),
+                prior == (run.to_owned(), request.pool.clone()),
                 "funding allocation intent binding changed"
             );
         } else {
-            tx.execute("INSERT INTO funding_permits(intent,run,pool,source_bound,at) VALUES(?1,?2,?3,?4,?5)", params![request.intent,run,request.pool,bound,at])?;
+            tx.execute(
+                "INSERT INTO funding_permits(intent,run,pool,at) VALUES(?1,?2,?3,?4)",
+                params![request.intent, run, request.pool, at],
+            )?;
         }
     }
     for (scope, limit) in [(Some(run), run_limit), (None, cumulative_limit)] {
-        let (jobs, source): (i64, i64) = tx.query_row(
-            "SELECT COUNT(*),COALESCE(SUM(source_bound),0) FROM funding_permits WHERE ?1 IS NULL OR run=?1",
-            [scope], |r| Ok((r.get(0)?, r.get(1)?)),
+        let jobs: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM funding_permits WHERE ?1 IS NULL OR run=?1",
+            [scope],
+            |r| r.get(0),
         )?;
         ensure!(
-            jobs >= 0
-                && jobs <= i64::from(limit.jobs)
-                && u64::try_from(source)? <= limit.source_zatoshis,
-            "qualification_funding_denied: allocation or input-plus-fee reservation exceeds funding limit; orphan reservations remain charged"
+            jobs >= 0 && jobs <= i64::from(limit.jobs),
+            "qualification_funding_denied: allocation count exceeds funding-job limit; orphan allocations remain counted"
         );
     }
     Ok(())
@@ -136,26 +129,22 @@ pub fn link(db: &mut Connection, run: &str, intent: &str, job: &str) -> Result<(
     Ok(())
 }
 
-/// Check the immutable permit immediately before preparing source bytes. This
-/// does not replace treasury budget, quote validity, or spend-readiness checks.
-pub fn check_preparation(db: &Connection, run: &str, job: &str, input_with_fee: u64) -> Result<()> {
-    let bound: i64 = db
-        .query_row(
-            "SELECT source_bound FROM funding_permits WHERE run=?1 AND job=?2",
-            params![run, job],
-            |r| r.get(0),
-        )
-        .context("funding permit missing for preparation")?;
-    ensure!(
-        input_with_fee > 0 && input_with_fee <= u64::try_from(bound)?,
-        "qualification_funding_denied: preparation input plus fee exceeds immutable permit"
-    );
+/// Check the immutable allocation identity before preparing source bytes.
+/// Funding capital is governed by SDK spendability, not a ZEC test budget.
+pub fn check_preparation(db: &Connection, run: &str, job: &str) -> Result<()> {
+    let present: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM funding_permits WHERE run=?1 AND job=?2)",
+        params![run, job],
+        |r| r.get(0),
+    )?;
+    ensure!(present, "funding permit missing for preparation");
     Ok(())
 }
 
-/// Reserve before transaction calculation. The same operation is idempotent;
-/// another operation must fit the job's remaining source exposure. A crash
-/// after this commit remains charged even without treasury-side evidence.
+/// Bind source identity before Store acceptance and calculation. The input amount
+/// records the first proposal for compatible historical reporting, not authority
+/// or proof of acceptance. A failed Store commit may leave only this observation;
+/// the Store owns exact accepted amounts and inputs, including on retries.
 pub fn reserve_source(
     tx: &mut rusqlite::Transaction<'_>,
     run: &str,
@@ -168,40 +157,33 @@ pub fn reserve_source(
         "invalid source operation identity"
     );
     let savepoint = tx.savepoint()?;
-    check_preparation(&savepoint, run, job, input_with_fee)?;
-    let bound = i64::try_from(input_with_fee)?;
-    let existing: Option<(String, i64, bool)> = savepoint
+    check_preparation(&savepoint, run, job)?;
+    let input = i64::try_from(input_with_fee)?;
+    ensure!(input > 0, "funding input must be positive");
+    let existing: Option<(String, bool)> = savepoint
         .query_row(
-            "SELECT job,source_bound,released FROM funding_source_attempts WHERE operation=?1",
+            "SELECT job,released FROM funding_source_attempts WHERE operation=?1",
             [operation],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
     if let Some(existing) = existing {
         ensure!(
-            existing == (job.to_owned(), bound, false),
+            existing == (job.to_owned(), false),
             "qualification source operation binding changed or retired"
         );
     } else {
         savepoint.execute(
-            "INSERT INTO funding_source_attempts(operation,job,source_bound) VALUES(?1,?2,?3)",
-            params![operation, job, bound],
+            "INSERT INTO funding_source_attempts(operation,job,input_zatoshis) VALUES(?1,?2,?3)",
+            params![operation, job, input],
         )?;
     }
-    let (used, limit): (i64, i64) = savepoint.query_row(
-        "SELECT COALESCE(SUM(s.source_bound),0),p.source_bound FROM funding_permits p LEFT JOIN funding_source_attempts s ON s.job=p.job AND s.released=0 WHERE p.job=?1 GROUP BY p.intent",
-        [job], |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
-    ensure!(
-        used <= limit,
-        "qualification_funding_denied: source attempts exceed job input-plus-fee permit"
-    );
     savepoint.commit()?;
     Ok(())
 }
 /// Only the exclusive treasury owner may supply this proof, after committing
 /// archival of the old operation and verifying no signed bytes or consumed funds.
-/// The tombstone prevents the old operation from claiming that allowance again.
+/// The tombstone prevents the old operation from being accepted again.
 pub fn retire_unprepared(db: &Connection, run: &str, job: &str, operation: &str) -> Result<()> {
     let owned: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM funding_permits WHERE run=?1 AND job=?2)",
@@ -235,11 +217,10 @@ mod tests {
         db.execute_batch(SCHEMA).unwrap();
         db
     }
-    fn request(intent: &str, bound: u64) -> Request {
+    fn request(intent: &str) -> Request {
         Request {
             intent: intent.into(),
             pool: "pool".into(),
-            source_bound: bound,
         }
     }
     fn reserve_commit(
@@ -254,58 +235,41 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn bootstrap_batch_is_atomic_orphans_persist_and_fee_bounds_are_immutable() {
+    fn bootstrap_batch_is_atomic_orphans_persist_and_job_bindings_are_immutable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("registry");
         let mut conn = db(&path);
-        let limit = Limits {
-            jobs: 2,
-            source_zatoshis: 100,
-        };
+        let limit = Limits { jobs: 2 };
         assert!(
             reserve_commit(
                 &mut conn,
                 "run",
-                &[request("a", 50), request("b", 51)],
+                &[request("a"), request("b"), request("c")],
                 limit
             )
             .is_err()
         );
-        reserve_commit(
-            &mut conn,
-            "run",
-            &[request("a", 50), request("b", 50)],
-            limit,
-        )
-        .unwrap();
+        reserve_commit(&mut conn, "run", &[request("a"), request("b")], limit).unwrap();
         drop(conn);
         let mut conn = db(&path);
-        reserve_commit(
-            &mut conn,
-            "run",
-            &[request("a", 50), request("b", 50)],
-            limit,
-        )
-        .unwrap();
-        assert!(reserve_commit(&mut conn, "next", &[request("c", 1)], limit).is_err());
-        assert!(reserve_commit(&mut conn, "run", &[request("a", 49)], limit).is_err());
-        assert!(check_preparation(&conn, "run", "job", 50).is_err());
+        reserve_commit(&mut conn, "run", &[request("a"), request("b")], limit).unwrap();
+        assert!(reserve_commit(&mut conn, "next", &[request("c")], limit).is_err());
+        let mut changed = request("a");
+        changed.pool = "other".into();
+        assert!(reserve_commit(&mut conn, "run", &[changed], limit).is_err());
+        assert!(check_preparation(&conn, "run", "job").is_err());
         link(&mut conn, "run", "a", "job").unwrap();
         link(&mut conn, "run", "a", "job").unwrap();
         assert!(link(&mut conn, "run", "a", "other").is_err());
         assert!(link(&mut conn, "run", "b", "job").is_err());
-        check_preparation(&conn, "run", "job", 50).unwrap();
-        assert!(check_preparation(&conn, "run", "job", 51).is_err());
-        assert!(check_preparation(&conn, "next", "job", 1).is_err());
+        check_preparation(&conn, "run", "job").unwrap();
+        assert!(check_preparation(&conn, "next", "job").is_err());
     }
     #[test]
     fn rejected_batch_cannot_leak_reservations_when_caller_commits() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = db(&dir.path().join("registry"));
-        let limit = Limits {
-            jobs: 1,
-            source_zatoshis: 50,
-        };
+        let limit = Limits { jobs: 1 };
         let mut tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .unwrap();
@@ -313,7 +277,7 @@ mod tests {
             reserve(
                 &mut tx,
                 "run",
-                &[request("a", 50), request("b", 1)],
+                &[request("a"), request("b")],
                 limit,
                 limit,
                 1
@@ -321,7 +285,7 @@ mod tests {
             .is_err()
         );
         tx.commit().unwrap();
-        reserve_commit(&mut conn, "run", &[request("c", 50)], limit).unwrap();
+        reserve_commit(&mut conn, "run", &[request("c")], limit).unwrap();
     }
     #[test]
     fn competing_connections_cannot_both_take_final_permit() {
@@ -337,16 +301,7 @@ mod tests {
                 std::thread::spawn(move || {
                     let mut conn = db(&path);
                     barrier.wait();
-                    reserve_commit(
-                        &mut conn,
-                        "run",
-                        &[request(intent, 50)],
-                        Limits {
-                            jobs: 1,
-                            source_zatoshis: 50,
-                        },
-                    )
-                    .is_ok()
+                    reserve_commit(&mut conn, "run", &[request(intent)], Limits { jobs: 1 }).is_ok()
                 })
             })
             .collect();

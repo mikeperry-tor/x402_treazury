@@ -12,10 +12,9 @@ pub struct Plan {
     pub offline: bool,
     pub execution_authorized: bool,
     pub api_reservation_atomic: u64,
-    pub api_headroom_atomic: u64,
+    pub total_test_budget_atomic: u64,
     pub planned_new_funding_jobs: u32,
     pub funding_job_headroom: u32,
-    pub source_exposure_limit_zatoshis: u64,
     pub funding_feasibility: &'static str,
     pub prerequisites: Vec<&'static str>,
     pub case_bindings: BTreeMap<String, Value>,
@@ -77,11 +76,7 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
             .iter()
             .map(|c| usdc(&c.reserve_usdc).expect("validated")),
     )?;
-    let ceiling = usdc(&m.limits.api_reservation_usdc)?;
-    ensure!(
-        total <= ceiling,
-        "expanded API reservations exceed run ceiling"
-    );
+    let ceiling = usdc(&m.limits.total_test_budget_usdc)?;
     let expansion = expand_phases(m, config, &declared, &cases, &bindings)?;
     let jobs = expansion.new_jobs;
     crate::reliability::validate(m)?;
@@ -104,21 +99,20 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
         "unsigned suite must not initialize or select managed pools"
     );
     Ok(Plan {
-        version: 1,
+        version: 2,
         run_id: m.run_id.clone(),
         offline: true,
         execution_authorized: false,
         api_reservation_atomic: total,
-        api_headroom_atomic: ceiling - total,
+        total_test_budget_atomic: ceiling,
         planned_new_funding_jobs: jobs,
         funding_job_headroom: m.limits.new_funding_jobs - jobs,
-        source_exposure_limit_zatoshis: zec(&m.limits.source_exposure_zec)?,
         funding_feasibility: "unverified: no live balance, quote, fee or baseline reads",
         prerequisites: vec![
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
             "reviewed startup inventory required; treasury-only bootstrap waits for enabled reserve claims, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
-            "funding permits must cover source fees, the full configured nominal range up to each enabled slot maximum, and the floating swap minimum at quote/preparation time; offline targets are not quotes and no offline preflight proves the range fits",
+            "the running total test budget bounds API payment authorizations; funding uses reviewed job counts and reserve sizes, current spendable ZEC and actual network-fee caps",
             "all declared pools must be preserved; unused pools receive no new allocation authority",
         ],
         case_bindings: bindings,
