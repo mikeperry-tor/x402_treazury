@@ -1045,12 +1045,44 @@ mod tests {
         ) {
             return;
         }
+        // Cancel only on the existing postcommit event. This proves that the
+        // actual publisher finished and prevents the actor's next reconstruction
+        // pass from hiding the unhealthy state this scenario needs to inspect.
+        struct StopAfterProjection {
+            file: std::fs::File,
+            event: Vec<u8>,
+            stop: CancellationToken,
+        }
+        impl std::io::Write for StopAfterProjection {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                std::io::Write::write_all(&mut self.file, bytes)?;
+                self.event.extend_from_slice(bytes);
+                if self
+                    .event
+                    .windows(b"saved_transaction_projection_failed".len())
+                    .any(|part| part == b"saved_transaction_projection_failed")
+                {
+                    self.stop.cancel();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                std::io::Write::flush(&mut self.file)
+            }
+        }
+        let stop = CancellationToken::new();
+        let event_stop = stop.clone();
         let log = tempfile::NamedTempFile::new().unwrap();
+        let writer = log.reopen().unwrap();
         tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
             .with_max_level(tracing::Level::DEBUG)
-            .with_writer(log.reopen().unwrap())
+            .with_writer(move || StopAfterProjection {
+                file: writer.try_clone().unwrap(),
+                event: Vec::new(),
+                stop: event_stop.clone(),
+            })
             .init();
         let dir = tempfile::tempdir().unwrap();
         let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000,
@@ -1076,58 +1108,65 @@ mod tests {
                     zeroize::Zeroizing::new(crate::rotation::store::test_support::transaction_raw(
                         100
                     )),
-                    Ok(facts)
+                    Ok(facts.clone())
                 )
                 .await
                 .is_err()
         );
+        let expected_snapshot = super::super::snapshot(owner.client.as_ref().unwrap())
+            .await
+            .unwrap();
         db.execute_batch("DROP TRIGGER reject_projection; CREATE TRIGGER corrupt_projection AFTER INSERT ON treasury_operations BEGIN UPDATE treasury_operations SET facts='not-json' WHERE id=NEW.id; END;").unwrap();
         let store = owner.store.clone();
-        let (entered, blocked) = tokio::sync::oneshot::channel();
-        let (release, held) = tokio::sync::oneshot::channel();
-        let barrier_store = store.clone();
-        let barrier = tokio::spawn(async move {
-            barrier_store
-                .call(move |_| {
-                    let _ = entered.send(());
-                    let _ = held.blocking_recv();
-                    Ok(())
-                })
-                .await
-                .unwrap();
-        });
-        blocked.await.unwrap();
         let (_handle, mut commands) = channel();
-        let stop = CancellationToken::new();
-        tokio::time::pause();
+        let mut submission = NoSubmission;
         {
-            let mut submission = NoSubmission;
+            tokio::time::pause();
             let mut actor = Box::pin(owner.command_loop(&mut commands, &mut submission, &stop));
+            // Register the existing maintenance timer before making it eligible.
+            // Its readiness says nothing about publication completion.
             assert!(futures_util::poll!(actor.as_mut()).is_pending());
             tokio::time::advance(std::time::Duration::from_secs(
                 super::super::publication::MAINTENANCE_SECONDS,
             ))
             .await;
-            // Poll until the actual publisher has enqueued behind the held Store
-            // command; no elapsed-time assumption selects the financial outcome.
-            assert!(futures_util::poll!(actor.as_mut()).is_pending());
-            release.send(()).unwrap();
-            barrier.await.unwrap();
-            // The actor future is not polled while this serialized successor
-            // observes publication completion and requests ordinary shutdown.
-            let stopped = stop.clone();
-            store
-                .call(move |s| {
-                    assert!(s.prepared_bytes("projection").is_ok());
-                    stopped.cancel();
-                    Ok(())
-                })
+            tokio::time::resume();
+            // Real time prevents paused auto-advance from racing the blocking
+            // Store worker. Only the actual postcommit event selects shutdown.
+            tokio::time::timeout(std::time::Duration::from_secs(2), actor)
                 .await
+                .expect("actor must acknowledge the committed publication")
                 .unwrap();
-            actor.await.unwrap();
         }
-        tokio::time::resume();
         assert!(owner.completed.is_none() && !owner.healthy);
+        // The event selects shutdown, while independent durable evidence proves
+        // the original result was saved without disclosure or replay.
+        db.execute_batch("DROP TRIGGER corrupt_projection;")
+            .unwrap();
+        db.execute(
+            "UPDATE treasury_operations SET facts=?1 WHERE id='projection'",
+            [serde_json::to_string(&facts).unwrap()],
+        )
+        .unwrap();
+        store
+            .call(move |s| {
+                assert_eq!(
+                    s.prepared_bytes("projection")?.as_slice(),
+                    crate::rotation::store::test_support::transaction_raw(100)
+                );
+                assert_eq!(
+                    s.prepared_snapshot("projection")?.as_slice(),
+                    expected_snapshot.as_slice()
+                );
+                let original = s.operation("projection")?;
+                assert_eq!(original.facts, facts);
+                assert_eq!(original.attempts, 0);
+                assert_eq!(original.submission, "PREPARED");
+                assert!(s.operation_pending("projection")?);
+                Ok(())
+            })
+            .await
+            .unwrap();
         let logs = std::fs::read_to_string(log.path()).unwrap();
         let event = logs
             .lines()

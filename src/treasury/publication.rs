@@ -690,6 +690,27 @@ mod tests {
     #[tokio::test]
     async fn close_after_committed_projection_error_still_releases_physical_owner() {
         let mut fixture = late_fixture().await;
+        // Persist an actual observation so shutdown must transition it Offline;
+        // set_sync_phase deliberately does not manufacture a missing observation.
+        fixture
+            .owner
+            .checkpoint(SyncObservation {
+                phase: SyncPhase::Preparing,
+                last_error: None,
+                snapshot_revision: fixture.owner.revision,
+                checked_at: None,
+                checkpoint_at: 0,
+                scanned_blocks: 0,
+                target_height: None,
+                height: None,
+                observed_tip_height: None,
+                confirmations: 1,
+                confirmed_pool_balances_zatoshis: None,
+                confirmed_shielded_zatoshis: 0,
+                spendable_shielded_zatoshis: 0,
+            })
+            .await
+            .unwrap();
         fixture.db.execute_batch("CREATE TRIGGER reject_late BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture delayed publication'); END;").unwrap();
         assert!(
             fixture
