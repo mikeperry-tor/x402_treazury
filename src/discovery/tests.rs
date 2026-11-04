@@ -1040,7 +1040,7 @@ async fn real_http_directory_search_and_cached_client_workflow() {
         async move { axum::Json(json!({"query":query,"services":[{"spec_url":"https://api.example.com/openapi.json"}]})) }
     }))).await;
     let m = manager(None).await;
-    *m.fixture_directory.lock().unwrap() = Some(vendor);
+    *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(vendor.clone()));
     assert!(m.catalog.read().views["writer"].is_empty());
     let (base, task) = listen(crate::server::http_app(
         server(&m, "writer"),
@@ -1086,6 +1086,21 @@ async fn real_http_directory_search_and_cached_client_workflow() {
         )
         .await["isError"],
         true
+    );
+    *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::Public(vendor));
+    let error = m
+        .invoke_directory(
+            "writer",
+            directory::SEARCH,
+            json!({"q":"weather"}).as_object().unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("non-public destination rejected"));
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "public-route fixture must reject loopback before another request"
     );
     task.abort();
     vendor_task.abort();
@@ -1612,7 +1627,9 @@ async fn directory_payment_fixture() {
         .unwrap();
     assert_eq!(manager.directory("writer").unwrap().base, directory::BASE);
     // Use the public hostname on the fixture certificate; retain public-destination checks.
-    *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
+    *manager.fixture_directory.lock().unwrap() = Some(DirectoryFixture::Public(
+        "https://api.example.com/api/v1".into(),
+    ));
     assert!(manager.directory("hidden").is_err());
     assert_eq!(
         tools::listener_definitions(manager.policy("writer"), false, None, None).len(),
@@ -1960,7 +1977,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
         );
     let (vendor, vendor_task) = listen(app).await;
     let m = manager(None).await;
-    *m.fixture_directory.lock().unwrap() = Some(vendor);
+    *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(vendor));
     let (base, task) = listen(crate::server::http_app(
         server(&m, "writer"),
         "test-token".into(),
@@ -2157,7 +2174,7 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
     );
     let (vendor, vendor_task) = listen(app).await;
     let m = manager(None).await;
-    *m.fixture_directory.lock().unwrap() = Some(vendor);
+    *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(vendor));
     let server = server(&m, "writer");
     let work = server.work.clone();
     let (base, http_task) = listen(crate::server::http_app(server, "test-token".into())).await;
@@ -3024,7 +3041,7 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("registry.sqlite");
         let config = operator_config(dir.path(), &file);
-        let configured_file = Some(file);
+        let configured_file = Some(file.clone());
         let mut configured = listeners(true);
         configured.get_mut("writer").unwrap().discover_on_demand = on_demand;
         configured.get_mut("writer").unwrap().exclude_tools = vec!["dyn_Filtered__*".into()];
@@ -3109,8 +3126,17 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
                 .unwrap(),
             description
         );
-        let (url, http_task) =
-            listen(crate::server::http_app(endpoint.clone(), "fixture".into())).await;
+        let listener = crate::test_tls::listener().await;
+        let url = format!("https://{}", listener.local_addr().unwrap());
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let stopped = shutdown.clone();
+        let app = crate::server::http_app(endpoint.clone(), "fixture".into());
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(stopped.cancelled_owned())
+                .await
+                .unwrap();
+        });
         let listed = rpc(&url, "fixture", "tools/list", json!({})).await;
         let listed_search = listed["tools"]
             .as_array()
@@ -3164,8 +3190,14 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
                 .len(),
             2
         );
-        http_task.abort();
-        let _ = http_task.await;
+        assert!(
+            store::Store::open(&file, &[]).is_err(),
+            "live registry ownership must exclude reopening"
+        );
+        // Draining the listener also releases services held by established HTTP/2
+        // connections; aborting its accept task alone does not establish that.
+        shutdown.cancel();
+        http_task.await.unwrap();
         drop(endpoint);
         drop(m);
         let restored = manager_with(configured.clone()).await;

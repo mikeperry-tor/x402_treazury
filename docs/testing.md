@@ -304,6 +304,11 @@ Negative TLS controls use an independent context without the fixture CA and an
 intentionally untrusted certificate matching its fixture key. Keep that pair in
 sync when renewing fixture material. Assert captured HTTPS path/query and
 authority separately, preserving exact body, signature and isolation checks.
+Directory fixtures explicitly distinguish local TLS from public-route testing;
+changing a fixture URL's scheme must not change its destination authority.
+Registry restart fixtures gracefully stop their HTTP server and await connection
+and service release before dropping the registry owner and reopening. An aborted
+accept task, delay or ignored lock error does not prove ownership has drained.
 
 ### Sandbox permissions
 

@@ -149,7 +149,9 @@ async fn directory_relay_fixture() {
     )
     .await
     .unwrap();
-    *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
+    *manager.fixture_directory.lock().unwrap() = Some(DirectoryFixture::Public(
+        "https://api.example.com/api/v1".into(),
+    ));
 
     let search = manager
         .invoke_directory("writer", directory::SEARCH, json!({}).as_object().unwrap())
@@ -284,7 +286,9 @@ async fn directory_relay_fixture() {
             )
             .await
             .unwrap();
-            *m.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
+            *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::Public(
+                "https://api.example.com/api/v1".into(),
+            ));
             let before = paid_calls.lock().unwrap().len();
             let details = m
                 .invoke_source_details(

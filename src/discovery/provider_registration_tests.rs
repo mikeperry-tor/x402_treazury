@@ -219,7 +219,8 @@ async fn curated_details_preserve_the_single_directory_listing() {
     let address = listener.local_addr().unwrap();
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let m = manager(None).await;
-    *m.fixture_directory.lock().unwrap() = Some(format!("https://{address}"));
+    *m.fixture_directory.lock().unwrap() =
+        Some(DirectoryFixture::LocalTls(format!("https://{address}")));
     let output = m
         .invoke_source_details(
             "writer",
