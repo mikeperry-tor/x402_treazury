@@ -125,18 +125,15 @@ Production and all-target compiler/Clippy warning gates passed; source-matched
 complexity had no exclusions or production regression warnings. The large macOS
 test harness still emits its known compact-unwind linker size warning.
 
-This is **not** a green full default, managed or lifecycle stage. Twenty unrelated
-failures and a stalled deferred-startup fixture were attributed to unchanged O0
-test/consumer sources (33 compared files), including TLS trust/key setup, HTTP
-provider fixtures, URI/error assertions and retained registry ownership. The
-baseline executable was not rebuilt. Managed passed 43 tests but failed three;
-lifecycle carried 34 passes plus the corrected reconfirmation test, while its
-unchanged HTTP worker fixture failed before payment/rotation assertions. Two
-milestone-invalidated permissive recovery tests were corrected in the F1 fixups;
-they are not part of the unrelated-failure count. The
-[orchestration validation follow-up](review_orchestration.md#unfinished-validation-fixtures)
-retains the unfinished work and unvalidated assertions. No live-funded, consensus
-or Tor qualification was run.
+The replacement-authority acceptance above was historically scoped: its full
+stages had fixture failures, and the baseline executable was not rebuilt. Those
+fixture limitations are now repaired and independently accepted through focused
+continuations: all 58 default/compatibility targets account for 1,775 passes and
+41 ignored cases; proving passes four, lifecycle 36 (including the full worker)
+and the codec one. The [current validation foundation and publisher follow-up](review_orchestration.md#validation-foundation-and-reopened-publisher-consumer)
+records that assembled check and its explicit carry limits. The inherited publisher
+completion defect remains open at GF; passing fixture stages do not resolve it.
+No live-funded, consensus or live Tor qualification was run.
 
 ---
 
