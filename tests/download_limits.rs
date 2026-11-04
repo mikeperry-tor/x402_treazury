@@ -172,7 +172,11 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     assert!(
         format!(
             "{:#}",
-            x402_treazury::catalog::load_json_with_limit(&format!("{vendor}/spec"), &http, 8)
+            x402_treazury::catalog::load_json_with_limit(
+                &format!("{vendor}/spec"),
+                &tls::client(&vendor),
+                8,
+            )
                 .await
                 .unwrap_err()
         )
