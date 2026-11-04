@@ -220,7 +220,10 @@ impl RelayFailure {
                 "The returned content did not meet the required response contract"
             }
             "invalid_relay_envelope" => "The response did not match the configured relay format",
-            "catalog_parse" => "The relay returned content that is not valid catalog JSON",
+            "catalog_complexity" => {
+                "The relay catalog exceeds structural safety bounds: depth 64, 500000 nodes or 67108864 traversal/copy bytes"
+            }
+            "catalog_parse" => "The relay returned content that cannot be used as catalog JSON",
             "origin_request" => {
                 "The relay could not retrieve the requested content from its source"
             }

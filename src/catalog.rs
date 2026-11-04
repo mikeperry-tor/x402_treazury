@@ -1,5 +1,9 @@
 mod credit_pricing;
 pub(crate) mod diagnostics;
+pub(crate) mod expansion;
+#[cfg(test)]
+mod expansion_tests;
+mod sanitize;
 pub use credit_pricing::CreditPricing;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -954,7 +958,7 @@ async fn read_cached_catalog(
 ) -> Option<(crate::http_cache::Entry, Value)> {
     let slot = slot?;
     let entry = slot.read().await?;
-    match serde_json::from_slice::<Value>(&entry.data) {
+    match parse_document(&entry.data) {
         Ok(document) => Some((entry, document)),
         Err(_) => {
             tracing::debug!("Invalid HTTP cached catalog; fetching origin");
@@ -985,6 +989,8 @@ async fn revalidate_cached_catalog(
         ))
         .context(LoadStage::Headers);
     }
+    // A 304 may refresh only a representation that still meets the catalog contract.
+    parse_document(&entry.data)?;
     let metadata = crate::http_cache::Metadata::from_catalog_headers(
         headers,
         std::time::Duration::ZERO,
@@ -1050,22 +1056,34 @@ async fn persist_catalog_response(
         None
     }
 }
-fn parse_document(bytes: &[u8]) -> Result<Value> {
+pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value> {
     let started = std::time::Instant::now();
-    let document = serde_json::from_slice(bytes).context(LoadStage::Parse)?;
+    let document: Value = serde_json::from_slice(bytes).context(LoadStage::Parse)?;
+    // Validate actual conversion before cache publication, preserving the original
+    // document and accepting generic JSON used by the shared document loader.
+    if document.get("paths").is_some() || document.get("operations").is_some() {
+        operations_with_credits(&document, None, None)?;
+    } else {
+        expansion::shape(&document)?;
+    }
     tracing::debug!(target: "x402_treazury::startup", parse_ms = started.elapsed().as_millis() as u64,
         bytes = bytes.len(), "Catalog JSON parse complete");
     Ok(document)
 }
 
-fn resolve(root: &Value, node: &Value, seen: &mut BTreeSet<String>) -> Value {
+fn resolve(root: &Value, node: &Value, budget: &mut expansion::Budget) -> Result<Value> {
+    budget.expansion(root, node)?;
+    Ok(resolve_checked(root, node, &mut BTreeSet::new()))
+}
+
+fn resolve_checked(root: &Value, node: &Value, seen: &mut BTreeSet<String>) -> Value {
     match node {
         Value::Object(map) => {
             if let Some(reference) = node.get("$ref").and_then(Value::as_str) {
                 if reference.starts_with("#/") && seen.insert(reference.to_owned()) {
                     let result = root
                         .pointer(&reference[1..])
-                        .map(|v| resolve(root, v, seen));
+                        .map(|v| resolve_checked(root, v, seen));
                     seen.remove(reference);
                     if let Some(value) = result {
                         return value;
@@ -1075,41 +1093,17 @@ fn resolve(root: &Value, node: &Value, seen: &mut BTreeSet<String>) -> Value {
             }
             Value::Object(
                 map.iter()
-                    .map(|(k, v)| (k.clone(), resolve(root, v, seen)))
+                    .map(|(k, v)| (k.clone(), resolve_checked(root, v, seen)))
                     .collect(),
             )
         }
-        Value::Array(a) => Value::Array(a.iter().map(|v| resolve(root, v, seen)).collect()),
+        Value::Array(a) => Value::Array(a.iter().map(|v| resolve_checked(root, v, seen)).collect()),
         _ => node.clone(),
     }
 }
 
 pub fn sanitize(node: &Value) -> Value {
-    match node {
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .filter_map(|(k, v)| {
-                    if matches!(k.as_str(), "exclusiveMinimum" | "exclusiveMaximum") {
-                        let bound = if v == &Value::Bool(true) {
-                            map.get(if k == "exclusiveMinimum" {
-                                "minimum"
-                            } else {
-                                "maximum"
-                            })
-                        } else {
-                            Some(v)
-                        };
-                        return bound
-                            .filter(|v| v.is_number())
-                            .map(|v| (k.clone(), v.clone()));
-                    }
-                    Some((k.clone(), sanitize(v)))
-                })
-                .collect(),
-        ),
-        Value::Array(a) => Value::Array(a.iter().map(sanitize).collect()),
-        _ => node.clone(),
-    }
+    sanitize::sanitize(node)
 }
 
 fn schema(node: &Value) -> Value {
@@ -1161,6 +1155,8 @@ pub(crate) fn operations_with_credits(
     pricing_key: Option<&str>,
     credit_key: Option<&str>,
 ) -> Result<Vec<Value>> {
+    expansion::shape(root)?;
+    let mut budget = expansion::Budget::default();
     if root.get("paths").is_none() {
         return digest_operations(root, credit_key);
     }
@@ -1180,7 +1176,8 @@ pub(crate) fn operations_with_credits(
                 op,
                 pricing_key,
                 credit_key,
-            ));
+                &mut budget,
+            )?);
         }
     }
     Ok(ops)
@@ -1209,17 +1206,20 @@ fn openapi_operation(
     op: &Value,
     pricing_key: Option<&str>,
     credit_key: Option<&str>,
-) -> Value {
+    budget: &mut expansion::Budget,
+) -> Result<Value> {
     // Operation parameters override inherited parameters by (location, name),
     // not by name alone. Resolve references before comparing their identities.
     let mut params: Vec<Value> = Vec::new();
-    for parameter in root["paths"][path]["parameters"]
+    for parameter_source in root["paths"][path]["parameters"]
         .as_array()
         .into_iter()
         .flatten()
         .chain(op["parameters"].as_array().into_iter().flatten())
-        .filter_map(|p| openapi_parameter(root, p))
     {
+        let Some(parameter) = openapi_parameter(root, parameter_source, budget)? else {
+            continue;
+        };
         if let Some(previous) = params.iter_mut().find(|p| {
             p["in"] == parameter["in"]
                 && if p["in"] == "header" {
@@ -1236,26 +1236,28 @@ fn openapi_operation(
             params.push(parameter);
         }
     }
-    let body = op.get("requestBody").filter(|v| !v.is_null()).map(|rb| {
-        let rb = resolve(root, rb, &mut BTreeSet::new());
-        json!({"required": rb["required"].as_bool().unwrap_or(false),
-            "schema": schema(rb.pointer("/content/application~1json/schema").unwrap_or(&json!({})))})
-    });
-    json!({"path":path, "method":method, "summary":op["summary"],
+    let body = op.get("requestBody").filter(|v| !v.is_null()).map(|rb| -> Result<Value> {
+        let rb = resolve(root, rb, budget)?;
+        Ok(json!({"required": rb["required"].as_bool().unwrap_or(false),
+            "schema": schema(rb.pointer("/content/application~1json/schema").unwrap_or(&json!({}))) }))
+    }).transpose()?;
+    Ok(
+        json!({"path":path, "method":method, "summary":op["summary"],
         "description":op["description"], "tags":op.get("tags").cloned().unwrap_or(json!([])),
-        "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body})
+        "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body}),
+    )
 }
 
-fn openapi_parameter(root: &Value, parameter_source: &Value) -> Option<Value> {
-    let p = resolve(root, parameter_source, &mut BTreeSet::new());
+fn openapi_parameter(
+    root: &Value,
+    parameter_source: &Value,
+    budget: &mut expansion::Budget,
+) -> Result<Option<Value>> {
+    let p = resolve(root, parameter_source, budget)?;
     if !p["name"].is_string() {
-        return None;
+        return Ok(None);
     }
-    let original_schema = resolve(
-        root,
-        p.get("schema").unwrap_or(&json!({})),
-        &mut BTreeSet::new(),
-    );
+    let original_schema = resolve(root, p.get("schema").unwrap_or(&json!({})), budget)?;
     let s = schema(&original_schema);
     let mut parameter = json!({"name": p["name"], "in": p["in"],
         "required": p["required"].as_bool().unwrap_or(false),
@@ -1277,9 +1279,11 @@ fn openapi_parameter(root: &Value, parameter_source: &Value) -> Option<Value> {
         // This managed header never becomes a caller argument. Keep its authored
         // constraints instead of the lossy tool-schema projection so automatic
         // generation and digest input use the same authoritative schema field.
-        parameter["schema"] = headers::original_key_schema(root, parameter_source);
+        let original = headers::original_key_schema(root, parameter_source, budget)?;
+        budget.copying(original)?;
+        parameter["schema"] = original.clone();
     }
-    Some(parameter)
+    Ok(Some(parameter))
 }
 
 /// Listener tags match the exact path and case-insensitive HTTP method. Tag values

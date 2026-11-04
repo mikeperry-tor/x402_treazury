@@ -272,6 +272,10 @@ emits the terminal diagnostic; lower layers retain the safe facts needed to
 explain it without announcing each failed attempt as an operation failure.
 An optional initial Base destination read that fails while funding continues
 logs at DEBUG; failure to publish a positive observation still defers preparation.
+Catalog structural-budget rejection is an explicit exception: the shared guard
+always emits WARN with fixed reason and numeric usage/bounds, even if a caller
+catches the error or another catalog candidate remains. Never include catalog
+text, submitted names or URLs; import callers do not duplicate that warning.
 NEAR header/body timeout attempts also log at DEBUG with a safe stage and reason;
 the owning funding or CLI operation determines any terminal severity.
 

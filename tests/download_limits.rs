@@ -477,3 +477,54 @@ async fn catalog_failure_stages_preserve_http_status_without_urls_or_document_te
         json!({"paths":{}})
     );
 }
+
+#[tokio::test]
+async fn remote_catalog_expansion_rejection_is_visible_and_never_cached() {
+    let mut definitions = serde_json::Map::new();
+    for index in 0..70 {
+        definitions.insert(
+            index.to_string(),
+            json!({"$ref":format!("#/defs/{}", index + 1)}),
+        );
+    }
+    definitions.insert("70".into(), json!({"type":"string"}));
+    let document = json!({"defs":definitions,"paths":{"/test":{"get":{"parameters":[
+        {"name":"value","in":"query","schema":{"$ref":"#/defs/0"}}
+    ]}}}})
+    .to_string();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let (base, task) = serve_provider(Router::new().route(
+        "/spec",
+        get(move || {
+            let seen = seen.clone();
+            let document = document.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                ([("cache-control", "max-age=600")], document)
+            }
+        }),
+    ))
+    .await;
+    let temporary = tempfile::tempdir().unwrap();
+    let config = Config {
+        spec: format!("{base}/spec"),
+        http_cache_directory: Some(temporary.path().join("cache")),
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        let error = x402_treazury::catalog::load_json_discovery(&config)
+            .await
+            .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("document_complexity_limit"));
+        assert!(detail.contains("500000"));
+        assert!(!detail.contains("#/defs"));
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "rejected origin bytes must not become a fresh cache hit"
+    );
+    task.abort();
+}

@@ -81,25 +81,34 @@ fn automatic_key_schema(schema: &Value) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn original_key_schema(root: &Value, parameter: &Value) -> Value {
-    // Parameter references use the existing Reference Object behavior. Schema
-    // references with siblings may impose additional constraints in OpenAPI 3.1;
-    // keep those objects intact so unsupported constraints fail visibly.
-    let parameter = follow_reference(root, parameter, false);
-    follow_reference(root, &parameter["schema"], true).clone()
+pub(super) fn original_key_schema<'a>(
+    root: &'a Value,
+    parameter: &'a Value,
+    budget: &mut super::expansion::Budget,
+) -> Result<&'a Value> {
+    // Preserve authored Reference Object behavior, including schema siblings.
+    let parameter = follow_reference(root, parameter, false, budget)?;
+    follow_reference(root, &parameter["schema"], true, budget)
 }
 
 fn follow_reference<'a>(
     root: &'a Value,
     mut node: &'a Value,
     preserve_siblings: bool,
-) -> &'a Value {
+    budget: &mut super::expansion::Budget,
+) -> Result<&'a Value> {
     let mut seen = BTreeSet::new();
+    let mut depth = 0;
     while let Some(reference) = node["$ref"].as_str() {
         if preserve_siblings && node.as_object().is_some_and(|object| object.len() != 1) {
             break;
         }
-        if !reference.starts_with("#/") || !seen.insert(reference) {
+        if !reference.starts_with("#/") {
+            break;
+        }
+        depth += 1;
+        budget.reference(reference, depth)?;
+        if !seen.insert(reference) {
             break;
         }
         let Some(target) = root.pointer(&reference[1..]) else {
@@ -107,7 +116,7 @@ fn follow_reference<'a>(
         };
         node = target;
     }
-    node
+    Ok(node)
 }
 
 pub(super) fn collect(
