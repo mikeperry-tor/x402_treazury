@@ -83,7 +83,7 @@ class PepperVerificationTests(unittest.TestCase):
         seen = []
 
         def reverse(arguments, **options):
-            self.assertEqual(arguments, ["patch", "--batch", "--fuzz=0", "-R", "-p2"])
+            self.assertEqual(arguments, ["patch", "--binary", "--batch", "--fuzz=0", "-R", "-p2"])
             self.assertEqual(options["cwd"].name, "pepper-sync")
             self.assertNotEqual(options["cwd"], self.root / "pepper-sync")
             self.assertTrue(options["check"])
@@ -101,6 +101,29 @@ class PepperVerificationTests(unittest.TestCase):
         self.assertEqual((self.root / "pepper-sync/src/lib.rs").read_bytes(),
                          ("pub fn value() -> u8 { 3 }\n" +
                           "".join(f"// retained line {n}\n" for n in range(8))).encode())
+
+    def test_crlf_reconstruction_is_fatal_even_when_normalizing_would_match(self):
+        real_run = subprocess.run
+        final_patch = self.root.joinpath(self.manifest["patches"][0]).read_bytes()
+        expected = self.originals["Cargo.toml"].encode()
+        changed = expected.replace(b"\n", b"\r\n")
+
+        def reverse(arguments, **options):
+            result = real_run(arguments, **options)
+            if options["input"] == final_patch:
+                restored = options["cwd"] / "Cargo.toml"
+                self.assertEqual(restored.read_bytes(), expected)
+                restored.write_bytes(changed)
+            return result
+
+        with mock.patch.object(subprocess, "run", side_effect=reverse):
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path(str(self.root / "verify_pepper.py"), run_name="__main__")
+        diagnostic = str(raised.exception)
+        self.assertIn("expected_sha256=" + self.digest(expected), diagnostic)
+        self.assertIn("actual_sha256=" + self.digest(changed), diagnostic)
+        self.assertIn("crlf_to_lf_matches_expected=True (diagnostic only)", diagnostic)
+        self.assertNotEqual(self.digest(expected), self.digest(changed))
 
     def test_failed_patch_preserves_captured_streams_and_exit_code(self):
         failure = subprocess.CalledProcessError(
@@ -135,6 +158,7 @@ class PepperVerificationTests(unittest.TestCase):
                 result = self.verify()
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("differs from upstream plus declared patches", result.stderr)
+                self.assertIn("crlf_to_lf_matches_expected=False (diagnostic only)", result.stderr)
                 path.write_bytes(patched)
                 self.refresh_snapshot()
 
@@ -188,7 +212,7 @@ class TransportVerificationTests(unittest.TestCase):
                 with mock.patch.object(module.subprocess, "run", wraps=real_run) as reverse:
                     module.verify()
                 arguments, options = reverse.call_args
-                self.assertEqual(arguments[0], ["patch", "--batch", "--fuzz=0", "-R", "-p1"])
+                self.assertEqual(arguments[0], ["patch", "--binary", "--batch", "--fuzz=0", "-R", "-p1"])
                 self.assertEqual(options["input"], patch)
                 self.assertEqual(options["cwd"].name, "sample")
                 self.assertNotEqual(options["cwd"], root / "sample")
@@ -207,6 +231,21 @@ class TransportVerificationTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "differs from published source"):
                     module.verify()
                 source.write_bytes(patched)
+
+                def crlf_reconstruction(arguments, **options):
+                    result = real_run(arguments, **options)
+                    restored = options["cwd"] / "src/lib.rs"
+                    self.assertEqual(restored.read_bytes(), original)
+                    restored.write_bytes(original.replace(b"\n", b"\r\n"))
+                    return result
+
+                with mock.patch.object(module.subprocess, "run", side_effect=crlf_reconstruction):
+                    with self.assertRaisesRegex(SystemExit, "crlf_to_lf_matches_expected=True") as raised:
+                        module.verify()
+                self.assertIn("expected_sha256=" + hashlib.sha256(original).hexdigest(), str(raised.exception))
+                self.assertIn("actual_sha256=" + hashlib.sha256(original.replace(b"\n", b"\r\n")).hexdigest(),
+                              str(raised.exception))
+                self.assertEqual(source.read_bytes(), patched)
                 root.joinpath("sample.patch").write_bytes(b"not a patch\n")
                 manifest = json.loads(root.joinpath("transport-sources.json").read_text())
                 manifest["sample"]["patch_sha256"] = hashlib.sha256(b"not a patch\n").hexdigest()

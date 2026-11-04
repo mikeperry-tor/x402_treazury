@@ -24,7 +24,7 @@ def verify(manifest_name="transport-sources.json"):
             restored = Path(directory) / name
             shutil.copytree(source, restored)
             try:
-                subprocess.run(["patch", "--batch", "--fuzz=0", "-R", "-p1"],
+                subprocess.run(["patch", "--binary", "--batch", "--fuzz=0", "-R", "-p1"],
                                cwd=restored, input=patch.read_bytes(),
                                check=True, capture_output=True)
             except subprocess.CalledProcessError as error:
@@ -34,8 +34,15 @@ def verify(manifest_name="transport-sources.json"):
                     f"stderr:\n{error.stderr.decode('utf-8', errors='replace')}"
                 ) from None
             for relative, digest in expected.items():
-                if hashlib.sha256((restored / relative).read_bytes()).hexdigest() != digest:
-                    raise SystemExit(f"{name}/{relative}: differs from published source plus reviewed patch")
+                restored_bytes = (restored / relative).read_bytes()
+                actual_digest = hashlib.sha256(restored_bytes).hexdigest()
+                if actual_digest != digest:
+                    crlf_match = hashlib.sha256(restored_bytes.replace(b"\r\n", b"\n")).hexdigest() == digest
+                    raise SystemExit(
+                        f"{name}/{relative}: differs from published source plus reviewed patch; "
+                        f"expected_sha256={digest} actual_sha256={actual_digest} "
+                        f"crlf_to_lf_matches_expected={crlf_match} (diagnostic only)"
+                    )
         print(f"Verified {name} {entry['version']}: published source plus reviewed patch")
 
 
