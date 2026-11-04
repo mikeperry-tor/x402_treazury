@@ -10,6 +10,27 @@ assertions; do not trim documentation or loosen expectations to obtain a pass.
 Discovery tests inject public-URL documents and localhost fixtures only under
 `cfg(test)`. Never add a production loopback bypass for fixture convenience.
 
+## Native Windows evidence
+
+The [standard-runner Windows workflow](../.github/workflows/windows.yml) and
+[PowerShell entrypoint](../scripts/README.md#native-windows-validation) select
+ordinary native build/help smokes, format/vendor checks, the production and full
+all-target compiler-warning gates, compatibility/default remainder, and synthetic
+proving/lifecycle/codec phases. They use temporary state/public unfunded keys;
+ignored live-funded or consensus qualification is not selected. Windows ACL,
+reparse/alias, publication/restart and process-control tests must actually run
+through their owning selected modules before their semantics are claimed.
+
+Record exact Git SHA, Rust/Cargo host/compiler, lock/pin hashes, hosted image,
+commands, diagnostic review and nonzero test counts from CI console evidence.
+A compile failure, skipped private-repository job or unfinished runtime stage is
+unfinished acceptance. Cross-compilation does not replace native execution, and
+this workflow's existence does not establish Windows support. Preserve failures
+without masking native tests or weakening warning/provenance checks. POSIX
+shell-tooling checks and source-matched complexity review retain their separate
+coordinated evidence; this route does not claim full check-static execution or
+extend the existing macOS release/Tor qualification scope.
+
 ## Provider regressions
 
 Provider-specific regression storage should reproduce a named quirk, historical
