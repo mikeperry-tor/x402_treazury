@@ -535,10 +535,13 @@ impl Treasury {
         } else {
             SyncPhase::Failed
         };
-        observation.last_error = outcome
-            .as_ref()
-            .err()
-            .map(|error| diagnostics::sync_detail(error).unwrap_or_else(|| error.to_string()));
+        observation.last_error = outcome.as_ref().err().map(|error| {
+            if error.is::<diagnostics::SyncProgress>() {
+                diagnostics::sync_detail(error).unwrap_or_else(|| error.to_string())
+            } else {
+                error.to_string()
+            }
+        });
         tracing::debug!("treasury sync: saving final wallet checkpoint");
         let height = observation.height;
         let bytes = snapshot(self.client.as_ref().context("treasury unavailable")?).await?;
