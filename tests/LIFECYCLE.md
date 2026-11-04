@@ -42,7 +42,13 @@ for unused mempool and confirmed hint values.
 
 The Store bootstrap fixture covers operation-backed recovery without proving:
 accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
-outcomes permit worker recovery while startup still observes the accepted quote.
+outcomes permit recovery assessment but cannot authorize replacement of a confirmed
+deposit. Store regressions exercise fixed and ranged nominal policies through
+restart, retaining the same selected terms, accepted output, original bytes and
+zero new recovery charges after refusal. Stale bindings and malformed advisory
+negative flags grant no authority. Proven non-disclosure and completed SDK
+finite-expiry coverage retain their independent recovery paths, including when a
+provider reports FAILED/REFUNDED.
 Eligibility, retry permission and startup classification preserve
 the exact selected inputs, accepted quote, signed bytes, attempt count and claim
 ownership, and do not create replacement work.
