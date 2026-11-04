@@ -76,7 +76,10 @@ impl axum::serve::Listener for Listener {
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
             let (tcp, address) = self.tcp.accept().await.unwrap();
-            tokio::time::sleep(self.delay).await;
+            // An undelayed handshake must also progress with a paused test clock.
+            if !self.delay.is_zero() {
+                tokio::time::sleep(self.delay).await;
+            }
             if let Ok(Ok(tls)) =
                 tokio::time::timeout(std::time::Duration::from_secs(3), self.tls.accept(tcp)).await
             {

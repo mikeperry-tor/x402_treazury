@@ -88,7 +88,8 @@ async fn requested_refresh_child() {
             tokio::task::yield_now().await;
         }
     });
-    let origin = f.endpoint.strip_prefix("http://").unwrap().parse().unwrap();
+    let endpoint_uri: axum::http::Uri = f.endpoint.parse().unwrap();
+    let origin = endpoint_uri.authority().unwrap().as_str().parse().unwrap();
     let socks = crate::test_socks::Socks::start_on(
         tokio::net::TcpListener::bind(endpoint).await.unwrap(),
         BTreeMap::from([("127.0.0.1".into(), origin)]),

@@ -443,6 +443,8 @@ async fn malformed_advisory_row_does_not_hide_independent_wallet_observations() 
     drop(db);
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(60)).await;
+    // Advance only the owned cooldown; the following TLS I/O needs real time.
+    tokio::time::resume();
     f.pool.reconcile().await.unwrap();
     assert!(!f.status().await.low_balance);
     f.close().await;
