@@ -164,19 +164,19 @@ impl Treasury {
                     .expect("completed result")
                     .operation
                     .clone();
-                if let Err(error) = self.publish_completed().await {
-                    if self.completed.is_some() {
+                match self.publish_completed().await {
+                    Ok(_) => {}
+                    Err(error) if self.completed.is_some() => {
                         super::diagnostics::report_local_retry(&error, "transaction publication");
-                    } else {
+                        continue;
+                    }
+                    Err(_) => {
                         tracing::debug!(
                             operation,
                             category = "saved_transaction_projection_failed",
                             "A completed Zcash transaction was saved but its submission state could not be read; further wallet work requires reloading saved state"
                         );
                     }
-                }
-                if self.completed.is_some() {
-                    continue;
                 }
             }
             if stop.is_cancelled() {
