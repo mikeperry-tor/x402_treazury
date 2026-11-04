@@ -941,7 +941,7 @@ async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() 
     async {
         let h = Harness::new().await;
         let manager = make_pool(h.store.clone(), h.pool.clone(), &h.base);
-        let http = reqwest::Client::new();
+        let http = tls::client(&h.base);
         let mut c = challenge("1");
         c["resource"]["description"] = json!("short");
         c["extensions"] = json!({"agentkit":{"secret":"private-extension-value"}});
@@ -1197,7 +1197,7 @@ async fn direct_managed_calls_bound_body_challenges_and_drop_unused_header_bodie
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
-    let http = reqwest::Client::new();
+    let http = tls::client(&h.base);
     let retry = || reqwest::Request::new(reqwest::Method::GET, h.url.parse().unwrap());
     let oversized = reqwest::Response::from(
         axum::http::Response::builder()

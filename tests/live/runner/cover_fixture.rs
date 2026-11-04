@@ -222,8 +222,31 @@ pub fn write(options: Options) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn writer_creates_loadable_zero_authority_fixture_without_network() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+            .args([
+                "--ignored",
+                "--exact",
+                "cover_fixture::tests::writer_load_child",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[tokio::test]
-    async fn writer_creates_loadable_zero_authority_fixture_without_network() {
+    #[ignore = "isolated immutable network policy; invoked by parent"]
+    async fn writer_load_child() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("fixture");
         let exe = std::env::current_exe().unwrap();

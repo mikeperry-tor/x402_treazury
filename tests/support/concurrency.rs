@@ -339,12 +339,11 @@ async fn tor_burst_child() {
         socks::Fault::None,
     )
     .await;
-    network::install(NetworkPolicy {
+    install_network(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(proxy.address),
         ..Default::default()
-    })
-    .unwrap();
+    });
     let traces = rotation_burst().await;
     let records = proxy.records.lock().unwrap();
     let mut signed = 0;

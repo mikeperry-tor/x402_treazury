@@ -140,6 +140,38 @@ bypass or broad discovery/privacy redesign. Resume orchestration/F2 (indexer
 regression/recovery) after the affected validation foundation is repaired, or
 record an independently reviewed scoped continuation and its remaining limits.
 
+The selected fixture work starts at `db8bbeda`. The coordinator owns fixture
+implementation and all builds in the shared worktree; independent fixture,
+indexer and catalog design investigations remain read-only until explicit handoff.
+Existing local files stay untouched. Preserve the owning
+[test contracts](../testing.md), [network policy](../network-egress.md) and
+[source authority](../agent-sources.md); no production policy exception is selected.
+
+1. **FX1 — Trust, identity and wire fidelity.** Repair the intentionally untrusted
+   certificate/key pair, independent client trust, once-installed Tor fixture
+   policy, negative TLS control, HTTPS URI assertions and safe error-cause checks.
+   Update the permanent TLS-fixture guidance in `docs/testing.md`. Acceptance is
+   the affected real request/signature/identity tests, including negative controls.
+2. **FX2 — Discovery fixture authority and ownership.** Distinguish explicit
+   test-only local-TLS and public-route overrides, and drain HTTP connection/service
+   ownership before reopening the registry. Retain public-route enforcement and
+   exclusive locking; no sleeps, ignored errors or lock retry loop. Update testing
+   guidance and verify directory payloads, retained work and restart publication.
+3. **FX3 — Provider HTTPS fixtures.** Migrate qualification help, maintenance,
+   deferred startup and full treasury worker fixtures while retaining infrastructure
+   semantics and their exact financial assertions. Update testing/lifecycle guides;
+   acceptance requires the formerly blocked payment, rotation and cancellation work
+   to execute rather than merely avoid its previous error.
+
+Independently review each exact FX commit and any fixup before dependent work;
+use `--fixup` for findings and preserve unsquashed history. At the combined fixture
+gate after FX3, review all FX commits/fixups and complete consumers alongside the
+prior financial milestone, compare source-matched complexity, and finish the
+applicable static, production/all-target warning, compatibility, default, proving,
+lifecycle and codec stages with explicit valid continuations. Resolve material
+findings before the next code lane. Remove this fixture schedule when its owning
+guide handoff and all formerly blocked assertions are verified; do not archive it.
+
 ## Independent review gates and completion
 
 Independently review every exact implementation, integration and cleanup SHA with

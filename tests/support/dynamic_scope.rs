@@ -198,7 +198,10 @@ async fn scope_child() {
         .tool
         .name
         .clone();
-    let direct = NetworkContext::new(NetworkPolicy::default()).unwrap();
+    let direct = NetworkContext::new(NetworkPolicy::default())
+        .unwrap()
+        .with_trusted_roots([crate::test_tls::CA])
+        .unwrap();
     let mut tasks = vec![];
     for (id, key) in [("writer", 1), ("reader", 2), ("sibling", 1)] {
         let bound = m.catalog.read().views[id]

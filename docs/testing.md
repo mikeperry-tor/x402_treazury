@@ -291,6 +291,20 @@ or reproducible-release evidence. Sources and original build artifacts must stil
 remain fixed during tests. This workaround changes no production transport,
 wallet or transaction authority.
 
+### Verified TLS fixtures
+
+Local provider fixtures use verified TLS with the public fixture CA in
+`tests/fixtures/tls/ca.pem`. Independent MCP clients and caller-supplied low-level
+payment clients must explicitly trust that CA; process trust does not flow into
+separately constructed clients. Install a fixture's direct or Tor policy once,
+before constructing its harness, and retain the same policy through all calls.
+Tests that need different immutable policies run in separate child processes;
+their parents verify successful execution and a nonzero child test count.
+Negative TLS controls use an independent context without the fixture CA and an
+intentionally untrusted certificate matching its fixture key. Keep that pair in
+sync when renewing fixture material. Assert captured HTTPS path/query and
+authority separately, preserving exact body, signature and isolation checks.
+
 ### Sandbox permissions
 
 Choose execution permissions for the selected tests before starting them. Offline

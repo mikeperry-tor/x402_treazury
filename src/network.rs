@@ -1120,7 +1120,11 @@ mod public_destination_tests {
             Err(error) => error,
             Ok(_) => panic!("cleartext catalog must not produce a relay continuation"),
         };
-        assert_eq!(error.to_string(), "provider URLs require HTTPS");
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string() == "provider URLs require HTTPS")
+        );
         assert_eq!(context.http_cache_len(), 0);
         let error = crate::payment::PaidClient::unsigned()
             .execute_response(crate::catalog::RoutedRequest {
@@ -1132,7 +1136,11 @@ mod public_destination_tests {
             })
             .await
             .unwrap_err();
-        assert_eq!(error.to_string(), "provider URLs require HTTPS");
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string() == "provider URLs require HTTPS")
+        );
     }
 
     #[test]
