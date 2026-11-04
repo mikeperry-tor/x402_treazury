@@ -327,7 +327,8 @@ async fn fixture() {
     ];
     let m = manager_with(config).await;
     *m.fixture_coinbase.lock().unwrap() = Some("https://api.example.com/search".into());
-    *m.fixture_directory.lock().unwrap() = Some("https://spec.example.com".into());
+    *m.fixture_directory.lock().unwrap() =
+        Some(DirectoryFixture::Public("https://spec.example.com".into()));
     for q in ["success", "failure", "stall", "allfail"] {
         let result = m
             .invoke_search_remote(

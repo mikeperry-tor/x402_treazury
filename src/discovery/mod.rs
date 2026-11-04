@@ -79,13 +79,20 @@ struct Fetched {
 }
 type FetchCell = Arc<OnceCell<Fetched>>;
 
+#[cfg(test)]
+#[derive(Clone)]
+enum DirectoryFixture {
+    LocalTls(String),
+    Public(String),
+}
+
 pub struct Manager {
     #[cfg(test)]
     commit_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     #[cfg(test)]
     fixture_endpoint: Mutex<Option<String>>,
     #[cfg(test)]
-    fixture_directory: Mutex<Option<String>>,
+    fixture_directory: Mutex<Option<DirectoryFixture>>,
     #[cfg(test)]
     fixture_coinbase: Mutex<Option<String>>,
     #[cfg(test)]
@@ -208,11 +215,10 @@ impl Manager {
             .with_source_identity("builtin:x402-list");
         let base = directory::BASE.to_owned();
         #[cfg(test)]
-        if let Some(base) = self.fixture_directory.lock().unwrap().clone() {
-            let client = if base.starts_with("https://") {
-                client.public_destinations()
-            } else {
-                client
+        if let Some(fixture) = self.fixture_directory.lock().unwrap().clone() {
+            let (base, client) = match fixture {
+                DirectoryFixture::LocalTls(base) => (base, client),
+                DirectoryFixture::Public(base) => (base, client.public_destinations()),
             };
             return Ok(BoundTool {
                 tool: directory::tool("/services").clone(),

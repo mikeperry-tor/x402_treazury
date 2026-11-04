@@ -78,7 +78,7 @@ async fn directory_listing_survives_unavailable_url_discovery() {
     )
     .await
     .unwrap();
-    *m.fixture_directory.lock().unwrap() = Some(base);
+    *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(base));
     for (slug, status, listing) in [
         (
             "missing",
@@ -201,7 +201,9 @@ async fn fixture() {
     let m = Manager::new(ls, payers, Arc::new(CatalogState::default()), vec![])
         .await
         .unwrap();
-    *m.fixture_directory.lock().unwrap() = Some("https://api.example.com/directory".into());
+    *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::Public(
+        "https://api.example.com/directory".into(),
+    ));
     for (owner, args) in [
         ("writer", json!({"base_url":"https://api.example.com/v1"})),
         ("reader", json!({"x402_list_id":"vendor"})),
