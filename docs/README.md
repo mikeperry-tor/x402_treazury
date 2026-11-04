@@ -27,7 +27,9 @@ The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
 discovery, retained financial obligations and the choice between root recovery and
 discarding retired keys.
 The [code-review orchestration plan](plans/review_orchestration.md) coordinates
-implementation lanes, integration order and shared review gates. Its child plans cover
+implementation lanes, integration order and shared review gates. The
+[original review and maintainer disposition](plans/x402_treazury_review.md) are
+working reference material for those gates. The child plans cover
 [replacement funding authority](plans/funding_replacement_authority.md),
 [indexer regression and chain recovery](plans/indexer_regression_recovery.md),
 [catalog expansion and schema correctness](plans/catalog_safety_and_schema.md),

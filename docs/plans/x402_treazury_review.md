@@ -1,3 +1,124 @@
+# Maintainer disposition and decisions
+
+This is working input for the [orchestration plan](review_orchestration.md), not
+an additional implementation plan or authorization. The original report is
+preserved verbatim below, including its historical recommendations and conclusions.
+Those recommendations are source material, not instructions to execute. The
+maintainer decisions here and the owning guides govern the selected work.
+
+- Original reviewed revision: `3ceb88f2e41038c4f6ef6959494c2f501373f1cd`.
+- Unannotated copy: commit `842b4c4bf11d2311720467fae4b0fcd2e66d4b7e`, file
+  `docs/plans/x402_treazury_review.md`, SHA-256
+  `64d44587525af5c24fa30514da00939a8f845e5479dda5a9d3fc35a62486913e`.
+- Disposition baseline: `daabc401cedc169ed4e914b92fe276bb2876fd30`, including
+  `main` at `a626b998` and the reviewed implementation/fixups through `d557d82a`.
+  Original line numbers, counts and claims of verification belong to the old
+  revision; they do not establish current behavior or current validation.
+
+## Settled decisions
+
+1. **S1:** Empty/unset cap values may mean no cap where the configuration permits
+   them. An empty parsed cap emits WARN recommending explicit `none`/`off`.
+   Existing defaults and required-setting rules remain unchanged; finite amount
+   and qualification-budget parsers reject empty input without that misleading WARN.
+2. **S3:** Newly signed x402 authority lasts at most five minutes (300 seconds),
+   honoring a shorter provider lifetime. This is signed financial expiry, not an
+   HTTP timeout. Preserve original accepted offers and actual journaled expiry;
+   existing signatures are not rewritten and expiry grants no replay authority.
+3. **S7:** Provider upstreams require HTTPS with full certificate-chain and hostname
+   validation, including Tor routes. There is no insecure provider opt-in.
+   Infrastructure HTTP contracts and local MCP/control serving remain separate.
+4. **C1:** Preserve the conventional missing-token fallback and the existing
+   independently disabled auth/Host-check settings. Emit both warnings when both
+   protections are disabled; do not replace this decision with fail-closed startup.
+5. **Financial boundaries:** Retain per-wallet structured-insufficient-funds traversal,
+   first-positive-credit claim consumption, SDK-owned spendability and accepted-work
+   ownership. No new ordinary ZEC spending budgets, credited-output floor, top-ups,
+   whole-work deadlines or abandonment of accepted work. Randomized reserve bounds
+   authorize nominal sizing only. Qualification's API budget is separate authority.
+6. **Scope:** The five focused plans plus portability own the selected implementation.
+   R9 receives a separate scoped plan under orchestration R0/R1. Broad cover shaping
+   and discovery/indexer privacy changes are excluded, except tangible direct fixes.
+   Other deferred observations are not silently resolved or authorized by this table.
+
+## Finding disposition
+
+**Addressed** means the accepted scope was implemented, not that every original
+recommendation was adopted. **Planned** remains unfinished. **Partial** identifies
+both completed and remaining scope. **Policy** records a deliberate choice, not
+proof that a stated trade-off is absent. **Deferred** means no implementation was
+selected here; historical details not freshly checked are explicitly identified.
+
+| ID | Disposition | Decision, remaining work and evidence/owner |
+| --- | --- | --- |
+| S1 | Addressed / policy | Retain empty-as-unlimited with WARN and explicit `none`/`off` advice; defaults unchanged. [Parser](../../src/payment.rs), finite-budget guard and [warning regression](../../src/server/security_tests.rs). Implemented in `83dd3ab2` and its fixups. |
+| S2 | Policy | Try each existing eligible wallet once only after recognized structured insufficient funds, with each authorization potentially chargeable. Do not add a traversal cap, on-chain precondition, allocation or funding wait. Advisory low-balance information cannot reopen a consumed initial funding claim. [Unsigned retry contract](../architecture.md#unsigned-x402-requests-and-post-retries), [best-effort tests](../../src/payment/best_effort_tests.rs). |
+| S3 | Addressed | All registered static v1/v2 exact/upto and managed exact signing use the shorter lifetime or 300 seconds, preserving opaque accepted data and original liability. [Signing boundary](../../src/payment/lifetime.rs), [lifetime tests](../../src/payment/lifetime_tests.rs), managed offer tests and payment compatibility evidence. |
+| S4 | Planned; valid with narrower trigger | Reauthorization already requires source closure. The real gap is CONFIRMED/resolved source plus FAILED/REFUNDED: deposit confirmation does not close possible bridge delivery liability. Existing `negative_terminal_confirmed_source_can_reauthorize_under_current_claim` demonstrates the behavior, not its safety. [Replacement-authority plan](funding_replacement_authority.md) covers fixed/ranged draws, old SUCCESS/credit races and independent original liabilities. |
+| S5 | Policy; trust assumption remains | Do not introduce or restore a configurable per-transfer ZEC cap or derive one from nominal USDC bounds. Merged `main` deliberately removed that setting and qualification ZEC budgets. Actual spendable treasury capital, accepted principal and network-fee safeguards govern. Provider USD valuation remains a trust assumption, not an independent price oracle or a newly fixed issue. [Financial policy](../../AGENTS.md#financial-and-execution-boundaries), [funding guide](../wallet-rotation.md#funding-and-source-safety). |
+| S6 | Documentation addressed / policy | Documented compounded overhead/slippage (about 10.53% at 5%/5%). Do not impose a credited-output floor: nominal sizing is not guaranteed settlement output; first positive credit consumes the claim. [Funding guidance](../wallet-rotation.md#funding-and-source-safety). No claim that favorable/adverse market outcomes were eliminated. |
+| S7 | Addressed | Reject provider HTTP before acquisition/signing; retain full TLS validation and immutable additional trust for private PKI. Infrastructure transports remain separately governed. [Network policy](../network-egress.md), [factory](../../src/network.rs), TLS success/wrong-host/untrusted controls. No certificate/hostname bypass. |
+| C1 | Addressed warning coverage / policy | Retain missing conventional token fallback and independent auth/Host-check controls. Both WARNs are asserted together in [security tests](../../src/server/security_tests.rs). The report's fail-closed/refusal recommendations were not adopted. |
+| C2 | Addressed in accepted scope | Standalone HTTP resolves and validates all loopback addresses before provider I/O, then binds captured addresses. Bearer scheme is case-insensitive; token comparison remains exact. CLI token option remains with an exposure WARN; env input is preferred. [Standalone path](../../src/main.rs), [auth](../../src/server/auth.rs), [server regression](../../tests/server.rs). |
+| A1 | Planned | Protect all construction/expansion paths, including direct Value entrypoints, using justified shared accounting and stack-safe traversal. Parsing-only checks are insufficient; avoid imposing unrelated dynamic-import policy on authored catalogs. [Catalog safety/schema plan](catalog_safety_and_schema.md). |
+| A2 | Planned | Distinguish an uncorroborated stale tip from genuine chain replacement; retain deep-reorg recovery and justified persisted earlier scan floors. A blanket return to ChainError or birthday clamp is not the selected fix. [Indexer/recovery plan](indexer_regression_recovery.md), [SDK contract](../zingo-integration.md). |
+| A3 | Policy; availability trade-off retained | Do not add a whole-call deadline or arbitrary Retry-After ceiling. Preserve per-response inactivity, existing acquisition semantics and ownership of accepted work. Signed expiry does not cancel HTTP progress. This is not a claim that hostile progressing work cannot consume capacity. [Network timers](../network-egress.md#remaining-timers-and-budgets), [resource policy](../local-resource-limits.md). |
+| A4 | Partly obsolete; remaining work planned | Both calculation paths already use embedded lazy Sapling parameters; the disk-file/missing-parameter claim is stale. Per-operation adapters still reparse when used, and synchronous CPU calculation remains on the serving runtime. [Proving plan](proving_execution.md) covers safe reuse and owned offload while preserving accepted principal/fee authority. |
+| A5 | Partial | Immediate sanitized terminal funding-owner diagnostics now identify safe typed causes. Existing scoped decode/completion handling must not be described as absent. Shared Store failures can still terminate the funding lifecycle; no wholesale fault-scope redesign or automatic supervisor was added. [Funding owner](../../src/rotation/funding.rs), [scheduler](../../src/rotation/funding/scheduler.rs), owner diagnostic tests. |
+| A6 | Partial | Source-owner panic recovery now emits INFO; retained-owner retry diagnostics remain DEBUG. No new retry timer/backoff or Store-worker supervisor was selected. Restarting financial ownership cannot be presumed safe merely because a task exited. [Funding owner](../../src/rotation/funding.rs), [accepted-work contract](../wallet-rotation.md#funding-and-source-safety). |
+| A7 | Policy | Completed financial publication remains owned and retried rather than abandoned on cancellation/shutdown. Intermediate retriable failures do not automatically become WARN. No new command-queue redesign was selected. [Treasury owner](../../src/treasury/mod.rs), [ownership/reconciliation policy](../wallet-rotation.md#recovery-and-reconciliation-policy). |
+| P1 | Deferred; excluded scope | Broad cover episode shaping is outside this work. Original timing claims are not requalified or marked fixed. [Cover policy](../cover-traffic.md); any future change needs its own concrete threat model and evidence. |
+| P2 | Deferred; excluded scope | Same cover-shaping boundary as P1. No timing/anonymity guarantee is inferred from current fixtures or default-on settings. [Cover policy](../cover-traffic.md). |
+| P3 | Deferred; excluded scope | Broad shared/per-wallet circuit timing changes are outside this work. Preserve existing network identities; investigate a tangible direct defect separately rather than add speculative scheduling/cache policy. [Network policy](../network-egress.md). |
+| P4 | Deferred; excluded scope | Broad indexer-address privacy changes are outside this work. A2's chain-recovery plan does not implement address-query isolation. Original clustering claims are not marked fixed. [SDK integration](../zingo-integration.md). |
+| P5 | Deferred; excluded scope | No new discovery identity split was selected. Original Coinbase isolation observation is not independently requalified by this disposition. [Agent-source network categories](../agent-sources.md), [network policy](../network-egress.md). |
+| P6 | Addressed | Dirty SQLite preflight copies use a private temporary directory inside the state directory; clean read-only inspection and source DB/WAL preservation remain intact. [Preflight](../../src/rotation/store/preflight.rs) and its cleanup/byte-preservation regressions. This does not solve R6 snapshot retention. |
+| R1 | Policy | First positive advisory USDC credit consumes the wallet's initial claim, including partial credit; low/reorged estimates do not reopen it. Ordinary payment selection remains advisory. Confirmation-gated readiness or a minimum target fraction was not adopted. [Best-effort rules](../wallet-rotation.md#best-effort-wallet-rules), [observation policy](../wallet-rotation.md#wallet-observation-policy). |
+| R2 | Planned; original scope overstated | Mutation construction already runs in spawn_blocking and an aggregate document guard already exists. Remaining work is repeated build/parse, lookup cost and async readers sharing expensive mutation locking. No registration cap or identity normalization selected. [Registry-efficiency plan](registry_efficiency.md). |
+| R3 | Deferred assessment | Description/control-character/raw-pricing concerns were not fixed by the selected changes. No new arbitrary description cap selected; inspect actual output contracts before choosing a focused transformation. A1 expansion protection is not a claim to solve agent-facing untrusted prose. [Tool documentation policy](../agent-sources.md#tool-documentation). |
+| R4 | Policy; explicit endpoint trust retained | Explicit operation URL overrides remain supported, including public HTTPS hosts outside the base origin. Generic path-origin checks are not a blanket restriction on those overrides. Dynamic destinations retain public-URL guards and all providers now require HTTPS; these checks do not establish that a provider's chosen payee is trustworthy. No new provider-domain allowlist selected. [Import validation](../../src/discovery/import.rs), [provider configuration](../configuration.md). |
+| R5 | Policy; cost assessment deferred | Metadata relay fallback is explicitly configurable and each paid authorization remains independently chargeable. No blanket ban on URL-probe fallback selected. Original worst-case request/buffering figures have not been freshly measured; assess a concrete probe optimization separately without weakening payment uncertainty. [Relay categories](../agent-sources.md), [source details](../../src/discovery/source_details.rs). |
+| R6 | Deferred | Retained encrypted snapshots have financial provenance/recovery consumers. No snapshot-pruning implementation was selected or implied by P6. A future retention change must enumerate all required references and preserve accepted work and audit/recovery evidence; deleting rows or keeping only a hash is not automatically sufficient. [Store](../../src/rotation/store.rs), [recovery policy](../wallet-rotation.md#recovery-and-reconciliation-policy). |
+| R7 | Policy; diagnostic cleanup addressed | Do not restore an arbitrary freshness margin. Actual accepted quote deadlines and signed consensus expiry govern; external arrival/settlement details remain a separate contract question. Obsolete diagnostic arm removed. [Timer inventory](../network-egress.md#remaining-timers-and-budgets), [funding contract](../wallet-rotation.md#funding-and-source-safety). |
+| R8 | Planned; composed-body claim needs qualification | Path/query collisions, unsupported cookie routing and truthful media/serialization need focused coverage. Composed-body support already exists in parts: fix demonstrated gaps, preserve alternatives, do not blindly flatten exclusive schemas. [Catalog safety/schema plan](catalog_safety_and_schema.md). |
+| R9 | Follow-up scoped; implementation not yet planned in detail | Ordinary regex compilation and HTTP cache-lock construction costs remain. Re-audit broad status consumers rather than repeat the historical 10,000-payment claim as current fact. New qualification admission scans case/run/global history, parsing payment JSON under the write transaction; that aggravation is confirmed without a latency measurement. [Qualification budget](../../src/qualification/budget.rs), [admission](../../src/qualification/payment.rs), orchestration R0/R1 and the [R2 scope boundary](registry_efficiency.md). No cached monetary ledger, caps or pruning selected. |
+| R10 | Original premise not accepted | The implementation compares the stored transaction's computed txid with the original signed transaction's computed txid, rather than merely comparing the lookup key. Preserve ZIP-244 effects identity and original disclosed bytes. No removal selected on the report's premise. [SDK confirmation](../../src/treasury/send.rs), [identity/recovery contract](../zingo-integration.md). |
+| B1 | Deferred | CI and automated advisory coverage were not implemented here; existing vendor verifiers and maintained advisory notes are not equivalent to CI. Recheck current versions/advisories and intended native/MSRV scope before selecting pipeline work. Do not infer vulnerability resolution or authorize a compiler/platform matrix from this report. [Development](../development.md), [vendor provenance](../../vendor/README.md). |
+| B2 | Planned with A2 | Independent full-patch/recovery review belongs to the [indexer/recovery plan](indexer_regression_recovery.md). Upstream submission is separate authority; retain vendor provenance and genuine reorg coverage. Existing application review is not a claim of upstream approval. |
+| B3 | Policy plus plan review work | Mandatory complexity review and simplification at child architecture gates remain; no numerical complexity budget or automatic helper extraction. Review unchanged high-risk financial chains as well as changed functions. [Complexity discipline](../../tests/COMPLEXITY.md#review-discipline), [orchestration gates](review_orchestration.md). No blanket refactor completed. |
+| B4 | Deferred broader cleanup | Review archive semantics in S4 before any deduplication; superficially similar SQL can carry distinct ownership/history behavior. No general SQL-format/archive-helper rewrite completed, and historical counts are not newly verified. [Replacement-authority plan](funding_replacement_authority.md), [Store funding](../../src/rotation/store/funding.rs). |
+| B5 | Partial | Known obsolete diagnostic arms removed and new owner diagnostics use typed safe context. Broader string-based classification remains; no repository-wide conversion claimed. Prefer typed causes when changing owning paths without logging raw upstream prose. [Funding diagnostics](../../src/rotation/funding.rs), [logging contract](../development.md#logging-and-diagnostics). |
+| B6 | Deferred assessment / policy | Attribute counts alone do not establish a production defect. No blanket test-hook-to-trait rewrite selected; inspect changed financial boundaries and their production/test equivalence through owning reviews and production compiler evidence. Original hook inventory is not newly verified. [Testing policy](../testing.md). |
+| B7 | Deferred | Public-surface pruning was not implemented here. Re-audit actual library, integration-test and tooling consumers before narrowing visibility; historical counts are not current acceptance evidence. [Library surface](../../src/lib.rs), [development](../development.md). |
+| B8 | Planned | Shared private-storage contracts require equivalent Linux/macOS/Windows protection, native evidence and explicit refusal where unavailable. Compilation alone is insufficient. Include source/cache stores, financial journals and version-2 qualification authority without silently upgrading historical registries. [Portability plan](portability_fixes.md), [permanent policy](../development.md#portability). |
+| B9 | Deferred | No shared deployment-loader refactor completed. Inspect current show/load/warm/bootstrap ordering and failure contracts before selecting a simplification; the original literal/field counts are not reverified. [Deployment](../../src/deployment.rs), [configuration](../configuration.md). |
+| B10 | Deferred item-by-item | This bundles distinct build, dependency, locking, key-storage and panic observations. No blanket remediation or fresh inventory claimed. Dependency/toolchain changes retain the existing pin/reproducibility policy. Release arithmetic, lock replacement and other items require targeted assessment and tests in their owning area. [Development](../development.md), [reproducible builds](../reproducible-builds.md), [wallet CLI](../wallet-cli.md). |
+
+## Validation and final annotation
+
+Implementation evidence at the disposition baseline is staged: 32 focused library
+regressions and 30 compatibility tests passed; the production/all-target warning
+gate passed, with affected server-target revalidation after its final test-only
+fixup. Source-matched complexity completed with no exclusions or regression
+warnings. The full default/proving/lifecycle/codec suites were not run for that rebase;
+no live qualification is claimed. macOS emitted a compact-unwind size warning for
+the large test binary, separately from the clean source warning gate. These
+results neither close planned findings nor establish the original report's
+unverified claims.
+
+At each owning integration gate, update the affected rows with exact implementation
+and independently reviewed fixup SHAs, concrete test evidence and remaining limits.
+At final orchestration review reconcile all 42 IDs against the original report and
+settled decisions. A deferred or policy row needs an explicit disposition, not a
+fabricated fix; required planned work cannot be closed by annotation alone.
+Preserve the original body below while this working reference remains active.
+Before completion, transfer enduring rules to owning guides and retain concrete
+unfinished work in focused plans, then remove this completed working material and
+its links under the [documentation policy](../README.md). Independently review the
+cleanup SHA and final combined branch; never remove financial evidence.
+
+---
+
 # x402\_treazury Code Review
 
 Nov 2, 2026 · @B
