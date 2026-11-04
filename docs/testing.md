@@ -13,8 +13,9 @@ Discovery tests inject public-URL documents and localhost fixtures only under
 ## Native Windows evidence
 
 Focused `network::qualification_probe_tests` classify permission denials using
-production reporting and native OS-code mappings, then exercise real loopback
-TCP/UDP positive controls, reserved-port refusal, received-request reply timeout
+production reporting and native OS-code mappings, including exact refusal
+classification, then exercise real loopback TCP/UDP positive controls, a held
+non-listening TCP endpoint (native refusal or timeout), received-request reply timeout
 and destination preflight. These unfunded controls require no firewall changes
 and do not establish actual OS confinement. The runner EgressProbe command
 consumes this classifier; the legacy standalone live-Tor socket controls are a

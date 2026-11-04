@@ -19,18 +19,26 @@ fn only_permission_denied_establishes_a_denial_observation() {
 }
 
 #[test]
-fn native_permission_codes_use_the_same_production_classifier() {
+fn native_permission_and_refusal_codes_use_the_same_production_classifier() {
     #[cfg(unix)]
-    let codes = [libc::EPERM, libc::EACCES];
+    let codes = [
+        (libc::EPERM, "PermissionDenied", true),
+        (libc::EACCES, "PermissionDenied", true),
+        (libc::ECONNREFUSED, "ConnectionRefused", false),
+    ];
     #[cfg(windows)]
-    // ERROR_ACCESS_DENIED and Winsock WSAEACCES. These are classification controls,
-    // not an assertion that this unfunded unit test applies OS confinement.
-    let codes = [5, 10013];
+    // ERROR_ACCESS_DENIED, WSAEACCES and WSAECONNREFUSED. These classify native
+    // codes without asserting that this unfunded test applies OS confinement.
+    let codes = [
+        (5, "PermissionDenied", true),
+        (10013, "PermissionDenied", true),
+        (10061, "ConnectionRefused", false),
+    ];
     #[cfg(any(unix, windows))]
-    for code in codes {
+    for (code, kind, denied) in codes {
         assert_eq!(
             qualification_probe_failure(io::Error::from_raw_os_error(code)),
-            json!({"reached":false,"denied":true,"error_kind":"PermissionDenied"})
+            json!({"reached":false,"denied":denied,"error_kind":kind})
         );
     }
 }
@@ -67,16 +75,19 @@ async fn tcp_and_udp_positive_controls_reach_each_literal_loopback_family() {
 }
 
 #[tokio::test]
-async fn refused_reserved_tcp_endpoint_is_not_a_denied_connection() {
+async fn bound_unlistening_tcp_endpoint_is_unreached_without_denial() {
     let socket = tokio::net::TcpSocket::new_v4().unwrap();
     socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
     // Keep the port bound but not listening, excluding another owner/port reuse.
     let observation = qualification_probe(socket.local_addr().unwrap(), false)
         .await
         .unwrap();
-    assert_eq!(
-        observation,
-        json!({"reached":false,"denied":false,"error_kind":"ConnectionRefused"})
+    // A held, unlistening socket can refuse or silently withhold TCP acceptance
+    // depending on the OS. Neither outcome establishes a permission denial.
+    assert!(
+        observation == json!({"reached":false,"denied":false,"error_kind":"ConnectionRefused"})
+            || observation == json!({"reached":false,"denied":false,"error_kind":"timeout"}),
+        "{observation}"
     );
 }
 
