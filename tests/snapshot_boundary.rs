@@ -2,17 +2,28 @@
 use std::{io::Write, path::Path, process::Stdio, time::Duration};
 use x402_treazury::deployment::QUALIFICATION_SNAPSHOT_BYTES;
 
-fn write_spec(path: &Path, padding: usize) {
-    let mut file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
-    file.write_all(b"{\"paths\":{\"/read\":{\"get\":{\"responses\":{\"200\":{\"description\":\"")
+const CATALOGS: usize = 3;
+
+fn write_specs(dir: &Path, total_padding: usize) {
+    // Exercise the aggregate snapshot bound with individually valid catalogs.
+    // Each description stays below the separate 64 MiB document-work bound.
+    for index in 0..CATALOGS {
+        let padding = total_padding / CATALOGS + usize::from(index < total_padding % CATALOGS);
+        let mut file = std::io::BufWriter::new(
+            std::fs::File::create(dir.join(format!("spec{index}.json"))).unwrap(),
+        );
+        file.write_all(
+            b"{\"paths\":{\"/read\":{\"get\":{\"responses\":{\"200\":{\"description\":\"",
+        )
         .unwrap();
-    let block = [b'x'; 64 * 1024];
-    for _ in 0..padding / block.len() {
-        file.write_all(&block).unwrap();
+        let block = [b'x'; 64 * 1024];
+        for _ in 0..padding / block.len() {
+            file.write_all(&block).unwrap();
+        }
+        file.write_all(&block[..padding % block.len()]).unwrap();
+        file.write_all(b"\"}}}}}}").unwrap();
+        file.flush().unwrap();
     }
-    file.write_all(&block[..padding % block.len()]).unwrap();
-    file.write_all(b"\"}}}}}}").unwrap();
-    file.flush().unwrap();
 }
 
 async fn inspect(dir: &Path) -> std::process::ExitStatus {
@@ -47,10 +58,8 @@ async fn inspect(dir: &Path) -> std::process::ExitStatus {
 #[tokio::test]
 async fn snapshot_byte_limit_includes_newline_and_rejects_without_partial_stdout() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("config.toml"),
-        format!(
-            r#"version=1
+    let mut config = String::from(
+        r#"version=1
 [treasury]
 id="00000000-0000-4000-8000-000000000001"
 state_dir="must-not-be-created"
@@ -61,37 +70,49 @@ max_refund_shielding_fee_zec="0.001"
 [wallets.test]
 mode="static"
 private_key_env="ABSENT_KEY"
-[sources.test]
-spec="spec.json"
+"#,
+    );
+    let sources: Vec<_> = (0..CATALOGS).map(|index| format!("test{index}")).collect();
+    for (index, source) in sources.iter().enumerate() {
+        config.push_str(&format!(
+            r#"[sources.{source}]
+spec="spec{index}.json"
 base_url="https://snapshot.invalid"
-prefix="test"
+prefix="{source}"
 max_spec_bytes={}
-[servers.one]
+"#,
+            QUALIFICATION_SNAPSHOT_BYTES + 1024
+        ));
+    }
+    config.push_str(&format!(
+        r#"[servers.one]
 listen="127.0.0.1:0"
-sources=["test"]
+sources={}
 wallet="test"
 bearer_token_env="ABSENT_TOKEN"
 "#,
-            QUALIFICATION_SNAPSHOT_BYTES + 1024
-        ),
-    )
-    .unwrap();
-    let spec = dir.path().join("spec.json");
+        serde_json::to_string(&sources).unwrap()
+    ));
+    std::fs::write(dir.path().join("config.toml"), config).unwrap();
     let stdout = dir.path().join("stdout");
-    write_spec(&spec, 0);
+    write_specs(dir.path(), 0);
     assert!(inspect(dir.path()).await.success());
     let baseline = std::fs::read(&stdout).unwrap();
     let snapshot: serde_json::Value = serde_json::from_slice(&baseline).unwrap();
-    assert_eq!(
-        snapshot["sources"]["test"]["document"]["paths"]["/read"]["get"]["responses"]["200"]["description"],
-        ""
-    );
+    assert_eq!(snapshot["sources"].as_object().unwrap().len(), CATALOGS);
+    for source in sources {
+        assert_eq!(
+            snapshot["sources"][source.as_str()]["document"]["paths"]["/read"]["get"]["responses"]
+                ["200"]["description"],
+            ""
+        );
+    }
     assert_eq!(baseline.last(), Some(&b'\n'));
     let padding = QUALIFICATION_SNAPSHOT_BYTES
         .checked_sub(baseline.len())
         .unwrap();
 
-    write_spec(&spec, padding);
+    write_specs(dir.path(), padding);
     assert!(
         inspect(dir.path()).await.success(),
         "{}",
@@ -110,7 +131,7 @@ bearer_token_env="ABSENT_TOKEN"
     assert_eq!(&ending, b"}\n");
     drop(output);
 
-    write_spec(&spec, padding + 1);
+    write_specs(dir.path(), padding + 1);
     assert!(!inspect(dir.path()).await.success());
     assert_eq!(std::fs::metadata(&stdout).unwrap().len(), 0);
     let stderr = std::fs::read_to_string(dir.path().join("stderr")).unwrap();
