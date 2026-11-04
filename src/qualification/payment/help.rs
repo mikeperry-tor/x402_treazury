@@ -118,9 +118,8 @@ mod tests {
                 }
             }),
         );
-        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let tool = bound(format!("http://{}/", socket.local_addr().unwrap()));
-        let server = tokio::spawn(async move { axum::serve(socket, app).await.unwrap() });
+        let (address, server) = crate::test_tls::serve(app).await;
+        let tool = bound(format!("https://{address}/"));
         for (cache, status) in [
             ("fetch", "failed"),
             ("fetch", "succeeded"),
@@ -165,9 +164,8 @@ mod tests {
                 }
             }),
         );
-        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let tool = bound(format!("http://{}/", socket.local_addr().unwrap()));
-        let server = tokio::spawn(async move { axum::serve(socket, app).await.unwrap() });
+        let (address, server) = crate::test_tls::serve(app).await;
+        let tool = bound(format!("https://{address}/"));
         let (_dir, claim, db) = fixture().await;
         let copy = tool.clone();
         let first = tokio::spawn(async move {

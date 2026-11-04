@@ -324,8 +324,11 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         })),
         timestamp: now().unwrap(),
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let app = Router::new()
         .route(
             "/v0/tokens",

@@ -298,6 +298,11 @@ changing a fixture URL's scheme must not change its destination authority.
 Registry restart fixtures gracefully stop their HTTP server and await connection
 and service release before dropping the registry owner and reopening. An aborted
 accept task, delay or ignored lock error does not prove ownership has drained.
+Provider help, paid API and remote catalog fixtures use TLS even when their router
+also serves an infrastructure RPC. Separate infrastructure HTTP fixtures continue
+to cover cleartext infrastructure support. Deferred-request barriers must also
+observe an early client failure, so a rejected request cannot leave the test
+waiting for an origin event that will never occur.
 
 ### Sandbox permissions
 
