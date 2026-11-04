@@ -5,11 +5,17 @@ use std::{
     sync::atomic::{AtomicU64, AtomicUsize},
 };
 
+#[derive(Clone)]
+struct Header {
+    bytes: Vec<u8>,
+    computed_hash: Vec<u8>,
+    previous_hash: Vec<u8>,
+}
+
 pub(super) struct Blocks {
     pub tip: AtomicU64,
     mode: AtomicUsize,
-    // Public synthetic headers, computed identity and previous identity.
-    headers: BTreeMap<u64, (Vec<u8>, Vec<u8>, Vec<u8>)>,
+    headers: BTreeMap<u64, Header>,
 }
 impl Blocks {
     fn new() -> Self {
@@ -24,7 +30,14 @@ impl Blocks {
             header[100..104].copy_from_slice(&(height as u32).to_le_bytes());
             let parsed = zcash_primitives::block::BlockHeader::read(header.as_slice()).unwrap();
             let computed = parsed.hash().0.to_vec();
-            headers.insert(height, (header, computed.clone(), previous));
+            headers.insert(
+                height,
+                Header {
+                    bytes: header,
+                    computed_hash: computed.clone(),
+                    previous_hash: previous,
+                },
+            );
             previous = computed;
         }
         Self {
@@ -36,10 +49,14 @@ impl Blocks {
     pub fn hash(&self, height: u64) -> Vec<u8> {
         self.headers
             .get(&height)
-            .map_or_else(|| hash(height), |(_, hash, _)| hash.clone())
+            .map_or_else(|| hash(height), |header| header.computed_hash.clone())
     }
     pub fn block(&self, height: u64, unary: bool) -> Vec<u8> {
-        let (mut header, mut hash, previous) = self.headers[&height].clone();
+        let Header {
+            bytes: mut header,
+            computed_hash: mut hash,
+            previous_hash: previous,
+        } = self.headers[&height].clone();
         let mut returned_height = height;
         if unary {
             match self.mode.load(Ordering::SeqCst) {
