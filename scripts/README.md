@@ -2,8 +2,9 @@
 
 The root Makefile is the entrypoint for common operations. It requires GNU Make
 3.81+ (including macOS's installed Make), a POSIX shell and standard shell tools.
-On Windows, use a GNU Make/POSIX shell environment such as MSYS2; this does not
-establish native Windows application or qualification support. Install Rust/Cargo
+Windows can use a GNU Make/POSIX shell environment such as MSYS2 or the
+[native PowerShell validation entrypoint](#native-windows-validation). Neither
+entrypoint alone establishes platform or qualification support. Install Rust/Cargo
 matching `rust-toolchain.toml`; Make verifies both versions before application
 Cargo commands, including under Homebrew. Protoc comes from the locked Cargo
 helper, not a system installation. The application and normal Rust tests do not
@@ -234,3 +235,37 @@ analysis compilers, features, profiles or coverage modes. Follow
 [testing efficiency](../docs/testing.md#testing-efficiency) for evidence reuse,
 setup consolidation and deterministic synchronization. Existing optional coverage
 commands are separate capabilities, not additional evaluation requirements.
+
+## Native Windows validation
+
+The standard-runner [Windows workflow](../.github/workflows/windows.yml) runs
+ordinary native validation on public-repository branch pushes and manual dispatch.
+It uses the exact Rust/Cargo pin, locked host protoc and native
+`x86_64-pc-windows-msvc` toolchain. Standard public runners are free; jobs skip
+private repositories rather than authorizing paid execution. Skips do not count
+as acceptance. No Actions caches, artifact uploads, paid APIs or live-funded
+qualification are selected. Console logs retain source/compiler/image identities,
+commands, diagnostics and test results.
+
+From a Windows checkout with PowerShell 7, Rustup, Python 3.11+, Git for Windows
+and Visual Studio C++ build tools (including required native CMake/LLVM tools):
+
+```powershell
+$pin = (Select-String rust-toolchain.toml '^channel = "([^"]+)"$').Matches.Groups[1].Value
+rustup toolchain install $pin --profile minimal --component rustfmt --component clippy
+./scripts/windows-ci.ps1 -Stage Release
+./scripts/windows-ci.ps1 -Stage Checks
+```
+
+Release builds the ordinary release executable, runs root/wallet/catalog help
+smokes and prints its hash. Cargo metadata supplies the artifact directory,
+including inherited CARGO_TARGET_DIR; cross-target overrides are rejected. Checks
+runs format and byte-exact vendor reconstruction, production/all-target warning
+gates, compatibility/default remainder, then synthetic proving/lifecycle/codec
+phases sequentially. Git for Windows supplies the patch utility used by existing
+provenance verifiers. Missing prerequisites and native failures return errors.
+The two CI jobs use fresh VMs so release and dev/test output profiles do not share
+the standard runner's limited disk. This is not the full POSIX tooling selection
+of check-static; coordinated source-matched complexity and shell-tooling evidence
+still apply. These commands do not implement release reproducibility or Tor
+confinement. See [native evidence scope](../docs/testing.md#native-windows-evidence).

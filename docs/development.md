@@ -27,6 +27,15 @@ are separate: [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) currently have macOS-specific evidence.
 Keep those claims narrow until equivalent backends are implemented and qualified.
 
+The [native Windows entrypoint](../scripts/README.md#native-windows-validation)
+and standard public-runner CI provide a repeatable route for exact pinned builds,
+warnings, ordinary tests and synthetic recovery. Their presence is not evidence
+that compilation, ACL/storage or process-lifecycle gaps are resolved. Record the
+exact committed SHA and completed native stages before making a support claim;
+[testing guidance](testing.md#native-windows-evidence) defines the scope. Automated
+security-advisory scanning and an MSRV/platform matrix remain separately deferred;
+this selected native route does not implement those review recommendations.
+
 ## Dependency vendoring
 
 Before introducing a new vendored package, tell the user the concrete need,
