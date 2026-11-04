@@ -7,7 +7,9 @@ small shared abstractions where native behavior is necessary. This document
 records unfinished work and implementation options; the current request authorizes
 documentation, not implementation, live qualification or spending.
 
-The audited baseline is `eece8ff`. Independent source and build reviews were
+The original audited baseline is `eece8ff`. The B8 private-storage follow-up was
+rechecked against `1bd810eb`, after the review
+of `3ceb88f2e41038c4f6ef6959494c2f501373f1cd`. Independent source and build reviews were
 read-only; no alternative-target compilation or native Windows/Linux validation
 was performed. Findings below distinguish source-level blockers from expected
 runtime failures and deliberately narrow qualification coverage.
@@ -33,6 +35,11 @@ deadlines or financial replay authority to make platform implementations easier.
 Keep state formats, CLI/environment contracts, toolchain pins and existing
 qualification evidence intact.
 
+The refreshed B8 baseline includes `main` at `a626b998`, including randomized
+funding and version-2 qualification registries with a running USDC API budget.
+Preserve removed ZEC-budget policy, stable accepted work and historical registry
+read-only access; a storage migration cannot upgrade old financial authority.
+
 ## Known gaps and removal options
 
 | Gap and evidence | Impact | Options and required preservation |
@@ -50,6 +57,38 @@ The Makefile's Rust/Cargo 1.99.1 pin, the manifest's Rust 1.94.1 language minimu
 native compiler requirements and public Sapling parameter preparation are build
 requirements, not evidence of an OS exclusion. No CI platform matrix was found;
 the complete dependency graph remains to be validated natively.
+
+## B8: shared private-storage contract
+
+B8 identifies a latent privacy/correctness gap, not merely duplicated mode-setting
+code: non-Unix private-options branches can return success without equivalent
+protection. Inventory treasury store and preflight, backups, HTTP cache, source
+registry, wallet key/state CLI, qualification and live-runner file helpers before
+P2. Include qualification registry authorization/budget state, atomic API admissions
+and retained historical registries. Trace create, reopen, replace, recovery and cleanup, including the new
+state-local preflight temporary directory. A private parent directory alone does
+not establish every file/alias/publication contract.
+
+P2 should consolidate these paths behind the smallest shared secure-filesystem
+abstraction, using portable primitives where equivalent and isolated Linux/macOS/
+Windows implementations where necessary. Specify owner access, existing-file
+validation, symlink/reparse rejection, identity/alias checks, exclusive ownership,
+atomic publication and required directory durability. Avoid a broad filesystem
+framework or one helper per caller. Native ACLs and handles must establish actual
+Windows guarantees; successful no-op implementations are unacceptable. Explicit
+operation refusal when a required guarantee is unavailable is honest unfinished
+support, not native acceptance. Review dependencies under the development policy
+before introducing or vendoring one.
+
+Extend P2 acceptance with native permissive-existing-file, hostile parent/link/
+reparse, alias, lock-contention and publication-failure fixtures; verify accepted
+financial journals survive interruption/reopen and failed publication never grants
+replay. Check confidentiality from a distinct security principal where the OS
+contract needs it, rather than infer it from Unix mode bits or current-user access.
+Update the owning storage sections of wallet/source/cache guides and
+`docs/development.md#portability`; retain the AGENTS portability link there.
+At G1/G2 independently inspect every migrated caller and remaining non-Unix
+branch, requiring explicit evidence or a documented refusal for each guarantee.
 
 ## Ordered implementation boundaries
 
