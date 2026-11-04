@@ -265,10 +265,10 @@ within the remaining authorized range; the replacement choice is persisted befor
 the next request. A fixed target keeps its deterministic adjustment. Reuse is by
 current numeric bounds, not by the historical mode that produced the saved value,
 so a still-in-bounds saved choice survives a range or fixed configuration change.
-Each acquisition round allows at most three unsigned dry sizing attempts; each
-rejection must raise the provider floor, otherwise that round stops without a
-deposit. This bounds the provider-driven retry loop within one round and is not a
-transaction recovery charge; a later scheduler retry starts a new bounded round.
+Sizing continues while each rejection raises the provider floor within the
+authorized ceiling and the original quote deadline remains valid. Every valid
+replacement draw is persisted before the next request; there is no separate
+attempt cutoff or transaction recovery charge.
 The preview's NEAR-priced ZEC principal becomes the fixed input of the executable
 `EXACT_INPUT` quote. Acceptance fixes the operation's principal; an unprepared
 quote that no longer satisfies current overhead or claim policy is refreshed

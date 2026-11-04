@@ -720,10 +720,9 @@ the operation-local floor to a bridge minimum and redraw within the remaining
 range up to the slot maximum; fixed sizing keeps its deterministic adjustment.
 Original allocation floor and identity stay immutable. Source-input and fee
 safeguards still apply, with actual spendable treasury funds limiting ordinary
-funding. Each dry sizing negotiation allows at most three requests before
-requesting the executable fixed-input quote; that cap bounds the provider-driven
-retry loop within one acquisition round and is not a recovery charge or spending
-limit. A later scheduler retry starts a new bounded round.
+funding. Dry sizing negotiation continues while each bridge-minimum rejection
+raises the floor within the slot maximum and the original quote deadline remains
+valid. Retries do not renew that deadline or consume transaction recovery attempts.
 Other failures do not authorize amount changes or payment retries. Beneficial
 extra execution output is not capped by the nominal USDC sizing maximum.
 

@@ -356,10 +356,10 @@ async fn bridge_floor_above_the_ceiling_stops_without_a_second_preview() {
 }
 
 #[tokio::test]
-async fn bridge_minimum_must_strictly_increase_within_the_bounded_attempts() {
+async fn bridge_minimum_must_strictly_increase_within_the_authorized_ceiling() {
     for (mode, expected_calls, expected_error) in [
         ("non_increasing", 2, "near_bridge_minimum_not_increasing"),
-        ("unstable", 3, "near_bridge_minimum_unstable"),
+        ("above_ceiling", 7, "funding_amount_limit_exceeded"),
     ] {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let seen = calls.clone();
@@ -413,6 +413,161 @@ async fn bridge_minimum_must_strictly_increase_within_the_bounded_attempts() {
             "{mode}"
         );
     }
+}
+
+#[tokio::test]
+async fn three_valid_floor_increases_continue_to_a_successful_quote() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let requests = seen.clone();
+    let app = tokens(axum::Router::new().route(
+        "/v0/quote",
+        axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+            let mut seen = requests.lock().unwrap();
+            let index = seen.len();
+            seen.push(request.clone());
+            async move {
+                if index < 3 {
+                    return (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        axum::Json(json!({
+                            "message":format!("Amount is too low for bridge, try at least {}", (3 + index) * 1_000_000)
+                        })),
+                    );
+                }
+                let mut quote = json!({
+                    "amountIn":"321000",
+                    "amountOut":"5000000",
+                    "amountInUsd":"5.00"
+                });
+                if request["swapType"] == "EXACT_INPUT" {
+                    quote["minAmountOut"] = json!("4750000");
+                    quote["depositAddress"] = json!("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F");
+                    quote["deadline"] = request["deadline"].clone();
+                }
+                (
+                    axum::http::StatusCode::OK,
+                    axum::Json(json!({"quoteRequest":request,"quote":quote})),
+                )
+            }
+        }),
+    ));
+    let fixture = start("2", "9", app).await;
+    let quote = fixture
+        .quote(request(
+            &fixture.job,
+            2_000_000,
+            9_000_000,
+            SizingPolicy::Fixed {
+                target: 2_000_000,
+                maximum: 9_000_000,
+            },
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("{error:#}"));
+    assert_eq!(quote.output_atomic().unwrap(), 5_000_000);
+    assert_eq!(
+        fixture.saved().await.unwrap(),
+        ("5000000".into(), "9000000".into())
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 5, "four dry previews and one executable quote");
+    for (request, expected) in seen
+        .iter()
+        .take(4)
+        .zip(["2000000", "3000000", "4000000", "5000000"])
+    {
+        assert_eq!(request["swapType"], "EXACT_OUTPUT");
+        assert_eq!(request["amount"], expected);
+        assert_eq!(
+            request["deadline"], seen[0]["deadline"],
+            "retries never renew authority"
+        );
+    }
+    assert_eq!(seen[4]["swapType"], "EXACT_INPUT");
+}
+
+#[tokio::test]
+async fn an_expired_original_deadline_prevents_another_sizing_request() {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    };
+    const EPOCH: u64 = 2_000_000_000;
+    let clock = Arc::new(AtomicU64::new(EPOCH));
+    let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let (requests, response_clock) = (seen.clone(), clock.clone());
+    let app = tokens(axum::Router::new().route(
+        "/v0/quote",
+        axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+            let mut seen = requests.lock().unwrap();
+            seen.push(request);
+            let minimum = if seen.len() == 1 {
+                3_000_000
+            } else {
+                // The second progressing response reaches the original deadline.
+                // Advance only this acquisition's clock, without real-time sleeps.
+                response_clock.store(EPOCH + 60, Ordering::SeqCst);
+                4_000_000
+            };
+            async move {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    axum::Json(json!({
+                        "message": format!("Amount is too low for bridge, try at least {minimum}")
+                    })),
+                )
+            }
+        }),
+    ));
+    let fixture = start("2", "5", app).await;
+    let mut request = request(
+        &fixture.job,
+        2_000_000,
+        5_000_000,
+        SizingPolicy::Fixed {
+            target: 2_000_000,
+            maximum: 5_000_000,
+        },
+    );
+    request.deadline_seconds = 60;
+    let error = fixture
+        .observations
+        .quote_with_clock(request, || Ok(clock.load(Ordering::SeqCst)))
+        .await
+        .err()
+        .expect("expired quote");
+    assert!(error.is::<crate::rotation::near::QuoteWindowExpired>());
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "no further preview or executable quote");
+        assert_eq!(seen[0]["amount"], "2000000");
+        assert_eq!(seen[1]["amount"], "3000000");
+        for request in seen.iter() {
+            assert_eq!(request["swapType"], "EXACT_OUTPUT");
+            assert_eq!(request["deadline"], seen[0]["deadline"]);
+        }
+    }
+    assert_eq!(
+        fixture.saved().await.unwrap(),
+        ("4000000".into(), "5000000".into())
+    );
+    let job = fixture.job.clone();
+    fixture
+        .store
+        .call(move |s| {
+            let current = s.funding_job(&job.id)?.unwrap();
+            assert_eq!(current.phase, FundingPhase::Allocated);
+            assert_eq!(current.operation_id, job.operation_id);
+            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+            let facts = s.funding_facts(&job.id, &job.operation_id)?;
+            assert!(!facts.accepted_quote && !facts.preparation_accepted);
+            assert_eq!(facts.source_attempts, 0);
+            assert!(facts.source_submission.is_none());
+            assert!(s.prepared_bytes(&job.operation_id).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
 
 async fn redraw_swap_types(

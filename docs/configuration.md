@@ -523,12 +523,11 @@ the operation raises its local floor to `max(configured minimum, suggested USDC
 minimum)` and draws again uniformly within the remaining authorized range. A
 fixed target keeps its deterministic bridge adjustment. The replacement choice is
 persisted before the next request and reused across ordinary failures and
-restarts. Each acquisition round allows at most three unsigned dry sizing
-attempts; each rejection must raise the provider floor. That cap bounds the
-provider-driven retry loop within one round; the authorized USDC ceiling
-independently bounds the amount, and later scheduler retries start a new bounded
-round with their normal backoff. A provider minimum above the configured maximum
-stops that round with a funding amount-limit explanation and no deposit; the same
+restarts. Sizing continues while each rejection raises the provider floor within
+the authorized USDC ceiling and the original quote deadline remains valid; there
+is no separate attempt cutoff or transaction recovery charge. A provider minimum
+above the configured maximum stops that round with a funding amount-limit
+explanation and no deposit; the same
 saved draw is retried with normal backoff until configuration or external
 conditions change. This is not an empty treasury. The ceiling
 does not reject beneficial extra execution output. The executable `EXACT_INPUT`

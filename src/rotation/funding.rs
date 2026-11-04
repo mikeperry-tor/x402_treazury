@@ -735,9 +735,12 @@ pub struct Observations {
     near: super::near::NearClient,
     base: super::base::BaseRpc,
 }
-impl FundingObservations for Observations {
-    type QuoteRequest = QuoteRequest;
-    async fn quote(&self, request: QuoteRequest) -> Result<Quote> {
+impl Observations {
+    async fn quote_with_clock(
+        &self,
+        request: QuoteRequest,
+        clock: impl Fn() -> Result<u64> + Send,
+    ) -> Result<Quote> {
         let (job, operation, max_attempts) = (
             request.job.id.clone(),
             request.job.operation_id.clone(),
@@ -767,7 +770,7 @@ impl FundingObservations for Observations {
             .assets()
             .await
             .context(NearStage("asset catalog"))?;
-        let instant = now()?;
+        let instant = clock()?;
         let deadline = instant
             .checked_add(request.deadline_seconds)
             .context("deadline overflow")?;
@@ -776,8 +779,9 @@ impl FundingObservations for Observations {
             .parse::<u64>()
             .context("invalid selected funding target")?;
         let mut floor = request.sizing.minimum();
-        for attempt in 1..=3 {
-            let attempt_now = now()?;
+        loop {
+            let attempt_now = clock()?;
+            ensure!(deadline > attempt_now, super::near::QuoteWindowExpired);
             let quote_request = self.near.request(
                 &assets,
                 &request.job.recipient,
@@ -805,11 +809,6 @@ impl FundingObservations for Observations {
                         floor <= request.limits.max_output,
                         super::error::FundingCondition::AmountLimit
                     );
-                    if attempt == 3 {
-                        anyhow::bail!(
-                            "near_bridge_minimum_unstable: three unsigned quote attempts exhausted; no funds submitted"
-                        );
-                    }
                     let next = request.sizing.draw_from_floor(floor, &mut rand::rng());
                     let (store, id, operation) = (
                         self.store.clone(),
@@ -839,7 +838,7 @@ impl FundingObservations for Observations {
                     continue;
                 }
             };
-            let executable_now = now()?;
+            let executable_now = clock()?;
             let quote = self
                 .near
                 .executable_quote(
@@ -852,7 +851,13 @@ impl FundingObservations for Observations {
                 .context(NearStage("quote"))?;
             return Ok(quote);
         }
-        unreachable!()
+    }
+}
+
+impl FundingObservations for Observations {
+    type QuoteRequest = QuoteRequest;
+    async fn quote(&self, request: QuoteRequest) -> Result<Quote> {
+        self.quote_with_clock(request, now).await
     }
     async fn status(&self, quote: Quote) -> Result<SwapStatus> {
         self.near.status(&quote).await
@@ -1066,10 +1071,6 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
             }
             _ if cause.to_string().starts_with("near_bridge_minimum_atomic:") => {
                 return "near_quote_minimum_atomic; executable EXACT_INPUT offer is below the provider's ZEC minimum; no redraw or funds submitted; review the route minimum";
-            }
-            "near_bridge_minimum_unstable: three unsigned quote attempts exhausted; no funds submitted" =>
-            {
-                return "near_bridge_minimum_unstable; three unsigned quote attempts exhausted; no funds submitted";
             }
             "near_http_429" => return "near_rate_limited; backing off",
             "prepared_quote_window_exhausted" => {
