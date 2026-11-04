@@ -713,12 +713,9 @@ mod deferred_tests {
     async fn remote_aliases_defer_io_and_share_one_origin_request() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio_util::sync::CancellationToken;
-        let mut listener = crate::test_tls::listener().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let cfg = catalog::Config {
-            spec: format!(
-                "https://{}/spec",
-                axum::serve::Listener::local_addr(&listener).unwrap()
-            ),
+            spec: format!("https://{}/spec", listener.local_addr().unwrap()),
             http_cache_enabled: false,
             ..Default::default()
         };
@@ -734,13 +731,11 @@ mod deferred_tests {
         };
         assert!(Arc::ptr_eq(&first.0, &second.0));
         assert!(
-            tokio::time::timeout(
-                Duration::from_millis(20),
-                axum::serve::Listener::accept(&mut listener)
-            )
-            .await
-            .is_err()
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
         );
+        let listener = crate::test_tls::from_tcp(listener);
         let entered = CancellationToken::new();
         let release = CancellationToken::new();
         let requests = Arc::new(AtomicUsize::new(0));

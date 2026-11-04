@@ -43,8 +43,12 @@ pub fn acceptor() -> TlsAcceptor {
     TlsAcceptor::from(Arc::new(config))
 }
 pub async fn listener() -> Listener {
+    from_tcp(TcpListener::bind("127.0.0.1:0").await.unwrap())
+}
+/// Wrap an existing fixture socket after any raw connection-boundary assertions.
+pub fn from_tcp(tcp: TcpListener) -> Listener {
     Listener {
-        tcp: TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        tcp,
         tls: TlsAcceptor::from(Arc::new(config(
             &[&rustls::version::TLS13, &rustls::version::TLS12],
             &[b"h2", b"http/1.1"],
