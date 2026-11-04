@@ -84,7 +84,10 @@ async fn local_and_cache_admission_reject_expansion_and_304_cannot_refresh_it() 
     let file = directory.path().join("catalog.json");
     tokio::fs::write(&file, &document).await.unwrap();
     assert!(
-        load_json(file.to_str().unwrap(), &reqwest::Client::new())
+        load_json(
+            file.to_str().unwrap(),
+            &crate::test_tls::client("https://api.example.com"),
+        )
             .await
             .unwrap_err()
             .is::<expansion::ComplexityLimit>()
