@@ -54,7 +54,7 @@ selected here; historical details not freshly checked are explicitly identified.
 | S1 | Addressed / policy | Retain empty-as-unlimited with WARN and explicit `none`/`off` advice; defaults unchanged. [Parser](../../src/payment.rs), finite-budget guard and [warning regression](../../src/server/security_tests.rs). Implemented in `83dd3ab2` and its fixups. |
 | S2 | Policy | Try each existing eligible wallet once only after recognized structured insufficient funds, with each authorization potentially chargeable. Do not add a traversal cap, on-chain precondition, allocation or funding wait. Advisory low-balance information cannot reopen a consumed initial funding claim. [Unsigned retry contract](../architecture.md#unsigned-x402-requests-and-post-retries), [best-effort tests](../../src/payment/best_effort_tests.rs). |
 | S3 | Addressed | All registered static v1/v2 exact/upto and managed exact signing use the shorter lifetime or 300 seconds, preserving opaque accepted data and original liability. [Signing boundary](../../src/payment/lifetime.rs), [lifetime tests](../../src/payment/lifetime_tests.rs), managed offer tests and payment compatibility evidence. |
-| S4 | Addressed in accepted scope | `47b30aa8` removes FAILED/REFUNDED-only replacement authority; fixups `fdb71bba` and `625d6d6b` cover treasury recovery and explicit SDK reconfirmation through cancellation/restart. Canonical confirmation moves active expiry to historical evidence, which cannot grant another deposit. `ba368fe6` plus documentation fixup `88213cab` cover fixed/ranged redraw, late archived SUCCESS/credit and two disclosed originals. Independent exact-SHA and combined G1/G2 reviews accepted the scoped offline evidence; full-suite fixture limits remain below. See [funding authority](../wallet-rotation.md#funding-and-source-safety), [Store regressions](../../src/rotation/store/funding.rs) and [lifecycle contracts](../../tests/LIFECYCLE.md). |
+| S4 | Addressed in accepted scope | `47b30aa8` removes FAILED/REFUNDED-only replacement authority; fixups `fdb71bba` and `625d6d6b` cover treasury recovery and explicit SDK reconfirmation through cancellation/restart. Canonical confirmation moves active expiry to historical evidence, which cannot grant another deposit. `ba368fe6` plus documentation fixup `88213cab` cover fixed/ranged redraw, late archived SUCCESS/credit and two disclosed originals. Independent exact-SHA and combined G1/G2 reviews accepted the scoped offline evidence; the fixture foundation now passes through focused continuations. An inherited actual-publisher completion defect (`560b31796`, durable RESOLVED versus pending-only load) remains open under the [orchestration financial gate](review_orchestration.md#validation-foundation-and-reopened-publisher-consumer); Store-only race tests do not close that consumer gap. See [funding authority](../wallet-rotation.md#funding-and-source-safety), [Store regressions](../../src/rotation/store/funding.rs) and [lifecycle contracts](../../tests/LIFECYCLE.md). |
 | S5 | Policy; trust assumption remains | Do not introduce or restore a configurable per-transfer ZEC cap or derive one from nominal USDC bounds. Merged `main` deliberately removed that setting and qualification ZEC budgets. Actual spendable treasury capital, accepted principal and network-fee safeguards govern. Provider USD valuation remains a trust assumption, not an independent price oracle or a newly fixed issue. [Financial policy](../../AGENTS.md#financial-and-execution-boundaries), [funding guide](../wallet-rotation.md#funding-and-source-safety). |
 | S6 | Documentation addressed / policy | Documented compounded overhead/slippage (about 10.53% at 5%/5%). Do not impose a credited-output floor: nominal sizing is not guaranteed settlement output; first positive credit consumes the claim. [Funding guidance](../wallet-rotation.md#funding-and-source-safety). No claim that favorable/adverse market outcomes were eliminated. |
 | S7 | Addressed | Reject provider HTTP before acquisition/signing; retain full TLS validation and immutable additional trust for private PKI. Infrastructure transports remain separately governed. [Network policy](../network-egress.md), [factory](../../src/network.rs), TLS success/wrong-host/untrusted controls. No certificate/hostname bypass. |
@@ -125,18 +125,15 @@ Production and all-target compiler/Clippy warning gates passed; source-matched
 complexity had no exclusions or production regression warnings. The large macOS
 test harness still emits its known compact-unwind linker size warning.
 
-This is **not** a green full default, managed or lifecycle stage. Twenty unrelated
-failures and a stalled deferred-startup fixture were attributed to unchanged O0
-test/consumer sources (33 compared files), including TLS trust/key setup, HTTP
-provider fixtures, URI/error assertions and retained registry ownership. The
-baseline executable was not rebuilt. Managed passed 43 tests but failed three;
-lifecycle carried 34 passes plus the corrected reconfirmation test, while its
-unchanged HTTP worker fixture failed before payment/rotation assertions. Two
-milestone-invalidated permissive recovery tests were corrected in the F1 fixups;
-they are not part of the unrelated-failure count. The
-[orchestration validation follow-up](review_orchestration.md#unfinished-validation-fixtures)
-retains the unfinished work and unvalidated assertions. No live-funded, consensus
-or Tor qualification was run.
+The replacement-authority acceptance above was historically scoped: its full
+stages had fixture failures, and the baseline executable was not rebuilt. Those
+fixture limitations are now repaired and independently accepted through focused
+continuations: all 58 default/compatibility targets account for 1,775 passes and
+41 ignored cases; proving passes four, lifecycle 36 (including the full worker)
+and the codec one. The [current validation foundation and publisher follow-up](review_orchestration.md#validation-foundation-and-reopened-publisher-consumer)
+records that assembled check and its explicit carry limits. The inherited publisher
+completion defect remains open at GF; passing fixture stages do not resolve it.
+No live-funded, consensus or live Tor qualification was run.
 
 ---
 

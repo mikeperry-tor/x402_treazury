@@ -11,12 +11,16 @@ qualification changes from `main` at `a626b99898d21c91552813a8b2413f48d3a1fede`.
 Reconfirm the actual integration baseline before each implementation milestone.
 
 O0 and the selected replacement-authority milestone started from
-`d220eb95f766f98afe95dd8c2551778d993f5e6b`. Their implementation and child gates
-are complete; other lanes and the whole-branch GR/GI gates remain unfinished.
+`d220eb95f766f98afe95dd8c2551778d993f5e6b`. Their replacement-authority implementation
+and scoped child gates
+are complete; the reopened publisher consumer, other lanes and whole-branch GR/GI
+gates remain unfinished.
 The completed child plan has yielded the maintained
 [funding/source contract](../wallet-rotation.md#funding-and-source-safety) and
-[lifecycle coverage](../../tests/LIFECYCLE.md). Validation limitations below
-remain required follow-up, not completed application checks.
+[lifecycle coverage](../../tests/LIFECYCLE.md). The fixture validation foundation
+below is complete through focused continuations.
+The inherited publisher-completion finding reopens its affected financial consumer
+and GF; it does not change the settled replacement-authority decisions.
 
 The child plans own implementation commits, tests and permanent documentation;
 this document owns ordering, shared ownership and integration. It introduces no
@@ -63,7 +67,7 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | Milestone / lane | Child commits and default order | Integration acceptance |
 | --- | --- | --- |
 | O0 / coordination | Complete for the selected replacement scope: tracked baseline, preserved local changes, shared-worktree ownership, serialized builds and independent design review recorded in private evidence. | Material design findings resolved before implementation. O0 is preparation, not another application feature commit. |
-| F1 / financial | Complete: funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`. Contracts now live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 accepted the combined authority, archive/reconfirmation and race chains with scoped offline evidence. Confirmed deposit plus FAILED/REFUNDED grants no replacement; fixed/ranged redraw and late SUCCESS/credit races retain original liabilities. Full-suite fixture limitations remain below. |
+| F1 / financial | Replacement-authority scope complete; publisher consumer reopened below. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`. Contracts now live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 accepted the combined authority, archive/reconfirmation and race chains with scoped offline evidence. Confirmed deposit plus FAILED/REFUNDED grants no replacement; fixed/ranged redraw and late SUCCESS/credit races retain original liabilities. The validation foundation now passes; the publisher consumer below reopens GF. |
 | C1 / catalog | [Expansion/schema safety](catalog_safety_and_schema.md), C1 then C2; can start alongside financial F1. | All ingestion/direct-Value paths protected; generated schemas and outbound serialization remain faithful; child gates pass. |
 | F2 / financial | [Indexer regression/recovery](indexer_regression_recovery.md), I1 through I3, integrated after financial F1. | Stale tip cannot destructively reset valid state; genuine deep-reorg recovery and accepted randomized work survive. Complete GF below. |
 | C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, integrated after catalog C1 settles construction contracts. | Correct invalidation, atomic durable publication and progressing readers; no caching around expansion safety. Child gates pass. |
@@ -105,84 +109,34 @@ consumers and resume unfinished stages rather than repeat all passed checks.
 No baseline result substitutes for checks invalidated by integration. Use temporary
 state/public unfunded keys; offline results establish no live or Tor qualification.
 
-### Unfinished validation fixtures
+### Validation foundation and reopened publisher consumer
 
-The replacement milestone exposed unchanged fixture failures in the default,
-managed and synthetic worker suites. Those stages are not green; scoped financial
-acceptance does not close these gaps. Repair the fixtures before claiming a full
-application check, preserving settled HTTPS, immutable network policy, public
-destination enforcement, exclusive storage ownership and uncertain-payment rules.
-Exact diagnostics and baseline source comparisons remain in private review evidence;
-the baseline executable was not independently rebuilt.
+The fixture prerequisite is complete through `1ca4f524`, with maintained contracts
+in [verified TLS fixtures](../testing.md#verified-tls-fixtures),
+[network ownership](../network-egress.md) and
+[lifecycle coverage](../../tests/LIFECYCLE.md). The assembled macOS check uses
+focused continuations: all 58 default/compatibility targets account for 1,775
+passing tests and 41 ignored helpers/optional cases; proving passes four tests,
+synthetic treasury lifecycle passes 36 (including the full worker), and the codec
+passes one. Production/full all-target warning gates and source-matched complexity
+passed; unchanged static evidence plus the verifier regression is retained with
+explicit source/feature/carry provenance in private evidence. This is an assembled
+check, not a single successful `make check` invocation. The known macOS test-link
+compact-unwind diagnostic remains recorded. Later changes reopen affected checks.
+No live-funded, consensus or live Tor qualification ran. Windows CI is an execution
+route pending native results; Linux preparation is not native test acceptance.
 
-- Reconcile local verified-TLS directory fixtures with public-destination checks,
-  install explicit fixture CA trust in independent clients, and prevent managed
-  harness initialization from replacing an already installed Tor policy. Inspect
-  `src/discovery/`, `tests/support/dynamic_scope.rs`, `tests/managed.rs` and
-  `tests/support/concurrency.rs`; later signature/drain assertions remain unvalidated.
-- Correct the untrusted certificate/key pair and isolate the Base negative TLS
-  control from globally trusted fixture roots. Preserve certificate and hostname
-  verification in `src/network/tls_retry_tests.rs` and
-  `src/rotation/base/transport/tests.rs`.
-- Move provider HTTP fixtures to verified TLS in qualification help, managed
-  maintenance, deferred catalog startup and the full treasury worker. Infrastructure
-  HTTP remains distinct. The startup fixture currently waits for an origin request
-  rejected before I/O; the worker/maintenance payment and rotation assertions remain
-  unvalidated. Fix fixture synchronization rather than add a production deadline.
-- Make captured HTTPS URI assertions check path/query and authority faithfully,
-  inspect safe error causes through the execution wrapper, and prove registry
-  connection/service ownership has drained before reopening. Keep full output,
-  signature, uncertainty and exclusive-lock assertions; do not accept absent I/O
-  or missing metadata to make fixtures pass.
-
-These are focused validation prerequisites, not authorization for a new transport
-bypass or broad discovery/privacy redesign. Resume orchestration/F2 (indexer
-regression/recovery) after the affected validation foundation is repaired, or
-record an independently reviewed scoped continuation and its remaining limits.
-
-The selected fixture work starts at `db8bbeda`. The coordinator owns fixture
-implementation and all builds in the shared worktree; independent fixture,
-indexer and catalog design investigations remain read-only until explicit handoff.
-Existing local files stay untouched. Preserve the owning
-[test contracts](../testing.md), [network policy](../network-egress.md) and
-[source authority](../agent-sources.md); no production policy exception is selected.
-
-1. **FX1 — Trust, identity and wire fidelity.** Repair the intentionally untrusted
-   certificate/key pair, independent client trust, once-installed Tor fixture
-   policy, negative TLS control, HTTPS URI assertions and safe error-cause checks.
-   Update the permanent TLS-fixture guidance in `docs/testing.md`. Acceptance is
-   the affected real request/signature/identity tests, including negative controls.
-2. **FX2 — Discovery fixture authority and ownership.** Distinguish explicit
-   test-only local-TLS and public-route overrides, and drain HTTP connection/service
-   ownership before reopening the registry. Retain public-route enforcement and
-   exclusive locking; no sleeps, ignored errors or lock retry loop. Update testing
-   guidance and verify directory payloads, retained work and restart publication.
-3. **FX3 — Provider HTTPS fixtures.** Migrate qualification help, maintenance,
-   deferred startup and full treasury worker fixtures while retaining infrastructure
-   semantics and their exact financial assertions. Update testing/lifecycle guides;
-   acceptance requires the formerly blocked payment, rotation and cancellation work
-   to execute rather than merely avoid its previous error.
-4. **FX4 — Executable network override.** Repair the later-reached CLI fixture with
-   verified origin TLS and explicit network-file CA trust. Preserve proxy selection,
-   isolation and absent wallet/stdout assertions; observe actual origin requests
-   for inspection, warming and serving rather than accept a SOCKS attempt alone.
-
-The later constructor audit also exposed standalone listener DNS resolution in
-`main.rs`. **NV1 — Listener resolution boundary** moves that existing resolution
-and all-address loopback validation into `network.rs`, preserving its ordering,
-ephemeral ports and exact validated bind vector. This is a separate reviewed
-production boundary correction, not an audit exception or provider-routing change.
-Verify localhost/literal controls, CLI/Host behavior and the constructor inventory;
-update the network guide and include its full call chain/complexity at this gate.
-
-Independently review each exact FX commit and any fixup before dependent work;
-use `--fixup` for findings and preserve unsquashed history. At the combined fixture
-gate after FX4, review all FX commits/fixups and complete consumers alongside the
-prior financial milestone, compare source-matched complexity, and finish the
-applicable static, production/all-target warning, compatibility, default, proving,
-lifecycle and codec stages with explicit valid continuations. Resolve material
-findings before the next code lane. Remove this fixture schedule when its owning
-guide handoff and all formerly blocked assertions are verified; do not archive it.
+The proving audit exposed an inherited publication consumer defect introduced by
+`560b31796`: `prepare_with_facts` can durably retain a late-fulfilled calculation as
+RESOLVED, while the publisher mistakes failure to load its pending-only disclosure
+view for failure to publish. Its completed-result retry can then prevent actor or
+close progress. Resolve this in a separately reviewed fixup before dependent
+execution work. Separate durable acknowledgment from current disclosure authority;
+retain exact bytes, snapshots, inputs and existing fulfillment proofs, distinguish
+positive credit alone, and add actual publisher/funding/close consumer regressions.
+The former Store-only race evidence does not close this concern. GF is reopened
+for it; T2 must not build on the unresolved boundary. No new closure, spending,
+replay, input-release or replacement authority is granted by this correction.
 
 ## Independent review gates and completion
 
@@ -200,7 +154,8 @@ reopen affected gates. Earlier per-commit approval does not exempt code.
 - **GF, after orchestration/F2 and reopened after orchestration/F3:** review funding claim/quote, SDK recovery,
   preparation, calculation, disclosure, credit and retained original liabilities.
   Include integrated catalog/network/qualification consumers where they touch
-  these paths. Exit with allowed work progressing, no duplicate accepted I/O or
+  these paths, including durable publication completion versus pending disclosure
+  projections and all prior fixup causes. Exit with allowed work progressing, no duplicate accepted I/O or
   new financial authority, and applicable child acceptance evidence complete.
 - **GS, after orchestration/P2 shared-storage integration:** review financial, source/cache and qualification
   create/open/replace/backup/recovery chains together, including budget admission,
