@@ -1,5 +1,12 @@
 # Runtime egress inventory
 
+The development-only `tools/providers/provider_updates.rs` captures public evidence
+through `NetworkContext::http_policy` with discovery isolation, public-only
+destinations and provider HTTP compatibility settings. It accepts an explicit
+network policy and uses the existing inactivity timeout without an overall
+deadline. No cache, wallet, payment, relay or direct-fallback path is invoked.
+Offline replay performs no network reads.
+
 See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
 for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
 

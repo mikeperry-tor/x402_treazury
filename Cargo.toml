@@ -137,3 +137,7 @@ path = "tools/diagnostics/diagnose_credit.rs"
 [[example]]
 name = "provider_preflight"
 path = "tests/live/provider_preflight.rs"
+
+[[example]]
+name = "provider_updates"
+path = "tools/providers/provider_updates.rs"

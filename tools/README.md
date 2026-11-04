@@ -13,6 +13,7 @@ same arrangement with source beside its qualification inputs and runbooks.
 
 | Target | Source and purpose |
 | --- | --- |
+| `provider_updates` | `providers/provider_updates.rs`: complete public evidence capture and frozen offline replay; see [maintenance sweeps](../docs/provider-updates.md). |
 | `snapshot_spec` | `providers/snapshot_spec.rs`: fetch or reduce public OpenAPI inputs for maintained catalogs. |
 | `snapshot_agentutility` | `providers/snapshot_agentutility.rs`: maintain AgentUtility's authored catalog transformation. |
 | `diagnose_credit` | `diagnostics/diagnose_credit.rs`: read-only canonical Base credit checks; see the [wallet guide](../docs/wallet-cli.md). |

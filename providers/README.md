@@ -1,5 +1,10 @@
 # Provider definitions
 
+Use the shared [maintenance sweep](../docs/provider-updates.md) for public evidence
+and review. Keep provider-specific authority and authored repair rationale in
+[CAVEATS.md](CAVEATS.md); never introduce provider dispatch, executable update
+recipes or a transformation language into shared tooling or maintenance metadata.
+
 Rust reads TOML configuration. A deployment source can declare all settings
 inline or extend one of these reusable files:
 

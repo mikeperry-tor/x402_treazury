@@ -1,0 +1,35 @@
+# Development evidence only. Runtime membership and URLs come from the bundle/TOML.
+# Sources are public evidence, never executable update recipes. Missing entries
+# are explicit unfinished authority research, never guessed URLs.
+[agproxy]
+intent = "vendor-copy"
+guidance = "providers/CAVEATS.md#pinned-relay-contracts"
+sources = [{ url = "https://agproxy.shveik.dev/openapi.json", purpose = "schema" }]
+
+[horizonpulse]
+intent = "vendor-copy"
+guidance = "providers/CAVEATS.md#pinned-relay-contracts"
+sources = [{ url = "https://horizonpulse.dev/openapi.json", purpose = "schema" }]
+
+[curl]
+intent = "vendor-copy"
+guidance = "providers/CAVEATS.md#curl-http-request"
+sources = [{ url = "https://curl-http-request.underscoredone.com/openapi.json", purpose = "schema" }]
+
+[agentutility]
+intent = "authored"
+guidance = "providers/CAVEATS.md#refreshing-the-catalog"
+sources = [
+    { url = "https://x402.agentutility.ai/openapi.json", purpose = "schema" },
+    { url = "https://agentutility.ai/registry.json", purpose = "registry" },
+]
+
+[newsgurus]
+intent = "authored"
+guidance = "providers/CAVEATS.md#newsgurusprovidertoml--news-gurus-intel-api"
+sources = [{ url = "https://api.newsgurus.ai/x402/catalog", purpose = "registry" }]
+
+[daedalus]
+intent = "authored"
+guidance = "providers/CAVEATS.md#daedalus-daedalusprovidertoml"
+sources = [{ url = "https://agents.daedalusdevelopmentgroup.com/openapi.json", purpose = "schema" }]
