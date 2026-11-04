@@ -157,6 +157,38 @@ async fn matching_old_anchor_cannot_distinguish_a_fork_above_that_anchor() {
     );
     drop(wallet);
     replacement.chain.write().await.mine_empty_blocks(1100);
+    // Once a retained comparison can see the fork, exhausting the old common
+    // boundary clears derived observations and asks for a fresh scan cycle.
+    let error = owner.sync_once(&stop).await.unwrap_err();
+    assert_eq!(
+        diagnostics::sync_detail(&error).as_deref(),
+        Some("sync_scan_failed: reason=chain_verification_failed")
+    );
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(u32::from(wallet.birthday()), 100);
+        assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
+        assert!(wallet.wallet_blocks.is_empty());
+        assert!(wallet.wallet_transactions.is_empty());
+        assert!(
+            wallet
+                .sync_state
+                .scan_ranges()
+                .iter()
+                .all(|range| !range.priority().is_scanned())
+        );
+    }
+    let id = owner.status().await.unwrap().treasury_id;
+    owner.close().await.unwrap();
+    owner = Treasury::open_with_network(
+        _dir.path().join("state"),
+        _dir.path().join("key"),
+        id,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    owner.configure_sync(SyncSettings::new(replacement.indexer_uri().to_string(), 1).unwrap());
     owner.sync_once(&stop).await.unwrap();
     assert_eq!(
         owner.status().await.unwrap().sync.unwrap().phase,
