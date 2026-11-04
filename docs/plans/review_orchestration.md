@@ -162,10 +162,14 @@ Existing local files stay untouched. Preserve the owning
    semantics and their exact financial assertions. Update testing/lifecycle guides;
    acceptance requires the formerly blocked payment, rotation and cancellation work
    to execute rather than merely avoid its previous error.
+4. **FX4 — Executable network override.** Repair the later-reached CLI fixture with
+   verified origin TLS and explicit network-file CA trust. Preserve proxy selection,
+   isolation and absent wallet/stdout assertions; observe actual origin requests
+   for inspection, warming and serving rather than accept a SOCKS attempt alone.
 
 Independently review each exact FX commit and any fixup before dependent work;
 use `--fixup` for findings and preserve unsquashed history. At the combined fixture
-gate after FX3, review all FX commits/fixups and complete consumers alongside the
+gate after FX4, review all FX commits/fixups and complete consumers alongside the
 prior financial milestone, compare source-matched complexity, and finish the
 applicable static, production/all-target warning, compatibility, default, proving,
 lifecycle and codec stages with explicit valid continuations. Resolve material

@@ -1565,19 +1565,30 @@ async fn network_override_relay_file_is_reusable_by_offline_standalone_and_walle
 
 #[tokio::test]
 async fn network_override_routes_catalog_warming_and_serving_through_the_selected_proxy() {
-    use std::{collections::BTreeMap, sync::atomic::Ordering};
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    use std::{
+        collections::BTreeMap,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+    let listener = tls::listener().await;
     let address = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let calls = requests.clone();
     let app = axum::Router::new().route(
         "/spec",
-        axum::routing::get(|| async { axum::Json(json!({"paths":{"/read":{"get":{}}}})) }),
+        axum::routing::get(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { axum::Json(json!({"paths":{"/read":{"get":{}}}})) }
+        }),
     );
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     let authored = socks::Socks::start(BTreeMap::new(), socks::Fault::Refuse).await;
     let selected = socks::Socks::start(
-        BTreeMap::from([("catalog.invalid".into(), address)]),
+        BTreeMap::from([("spec.example.com".into(), address)]),
         socks::Fault::None,
     )
     .await;
@@ -1590,8 +1601,9 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
     std::fs::write(
         dir.path().join("network.toml"),
         format!(
-            "[network]\nmode='tor'\nsocks_endpoint='{}'\nisolation_namespace='override'\n",
-            selected.address
+            "[network]\nmode='tor'\nsocks_endpoint='{}'\nisolation_namespace='override'\ntrusted_ca_files=[{:?}]\n",
+            selected.address,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem")
         ),
     )
     .unwrap();
@@ -1605,10 +1617,11 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
         let file = dir.path().join("deployment.toml");
         let text = std::fs::read_to_string(&file).unwrap().replace(
             "catalog.invalid/spec'",
-            &format!("catalog.invalid/spec?{}'", command[1]),
+            &format!("spec.example.com/spec?{}'", command[1]),
         );
         std::fs::write(&file, text).unwrap();
         let before = selected.records.lock().unwrap().len();
+        let requests_before = requests.load(Ordering::SeqCst);
         let output = run(
             dir.path(),
             &[
@@ -1628,6 +1641,7 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(selected.records.lock().unwrap().len() > before);
+        assert!(requests.load(Ordering::SeqCst) > requests_before);
     }
     network_override_fixture(dir.path(), &embedded);
     // Static serving needs no treasury; warming used the empty directory only for cache storage.
@@ -1636,10 +1650,12 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
         &file,
         std::fs::read_to_string(&file)
             .unwrap()
-            .replace("[treasury]\nstate_dir='state'\n", ""),
+            .replace("[treasury]\nstate_dir='state'\n", "")
+            .replace("https://catalog.invalid/", "https://spec.example.com/"),
     )
     .unwrap();
     let before = selected.records.lock().unwrap().len();
+    let requests_before = requests.load(Ordering::SeqCst);
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .current_dir(dir.path())
         .env_clear()
@@ -1659,7 +1675,7 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
         .spawn()
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        while selected.records.lock().unwrap().len() == before {
+        while requests.load(Ordering::SeqCst) == requests_before {
             if let Some(status) = child.try_wait().unwrap() {
                 use tokio::io::AsyncReadExt;
                 let mut stderr = String::new();
@@ -1680,9 +1696,10 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
     child.kill().await.unwrap();
     let output = child.wait_with_output().await.unwrap();
     assert!(output.stdout.is_empty());
+    assert!(selected.records.lock().unwrap().len() > before);
     assert_eq!(authored.accepted.load(Ordering::SeqCst), 0);
     for record in selected.records.lock().unwrap().iter() {
-        assert_eq!(record.host, "catalog.invalid");
+        assert_eq!(record.host, "spec.example.com");
         assert_eq!(record.address_type, 3);
         assert_eq!(record.user, "<torS0X>0");
         assert!(record.password.starts_with("override:v1:"));
