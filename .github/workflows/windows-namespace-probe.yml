@@ -1,0 +1,31 @@
+name: Windows namespace primitive probe
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - '.github/workflows/windows-namespace-probe.yml'
+      - 'scripts/windows-namespace-probe.ps1'
+      - 'scripts/windows-namespace-probe.cs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native_namespace:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Preserve source bytes
+        run: |
+          git config --global core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Probe restricted-user namespace APIs without a durability claim
+        run: ./scripts/windows-namespace-probe.ps1

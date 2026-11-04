@@ -44,6 +44,14 @@ shell-tooling checks and source-matched complexity review retain their separate
 coordinated evidence; this route does not claim full check-static execution or
 extend the existing macOS release/Tor qualification scope.
 
+The [namespace primitive probe](../scripts/README.md#windows-namespace-primitive-probe)
+has a separate standard public-runner workflow and emits exact token, filesystem,
+identity, collision and flush evidence. It runs independently of application
+compilation with public disposable bytes. Keep candidate failures and unsupported
+scope explicit; a successful API experiment does not establish complete storage,
+ACL/sidecar behavior or hardware power-loss durability. Production storage and
+ordinary native acceptance remain separate portability gates.
+
 ## Provider regressions
 
 Provider-specific regression storage should reproduce a named quirk, historical

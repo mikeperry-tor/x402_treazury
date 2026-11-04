@@ -272,3 +272,19 @@ the standard runner's limited disk. This is not the full POSIX tooling selection
 of check-static; coordinated source-matched complexity and shell-tooling evidence
 still apply. These commands do not implement release reproducibility or Tor
 confinement. See [native evidence scope](../docs/testing.md#native-windows-evidence).
+
+### Windows namespace primitive probe
+
+Run `./scripts/windows-namespace-probe.ps1` in native x64 Windows PowerShell 7.
+The separate public standard-runner workflow runs it after probe-source changes
+or manual dispatch, independently of application compilation. It installs no
+packages and uses no wallet state, live funding or persistent test account.
+
+The isolated child uses an actual restricted ordinary-rights token, verifies its
+privilege/group/integrity state and access controls, then reports local fixed
+NTFS identity, no-clobber and native flush results as JSON. Failed candidate APIs
+retain their exact status; at least one complete candidate and all prerequisite
+controls are required for a successful probe. The script hash and exact Git/host
+provenance accompany the result. A successful probe establishes API compatibility
+for that environment; it does not establish hardware power-loss durability,
+Windows private-storage support or completion of the portability gates.
