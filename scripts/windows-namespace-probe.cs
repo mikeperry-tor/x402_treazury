@@ -261,15 +261,15 @@ public static class WindowsNamespaceProbe
             if (!ok) throw new NativeFailure(stage,error);
         }
     }
-    static int Rename(SafeFileHandle file,SafeFileHandle parent,string name,List<object> stages,string stage) {
-        byte[] encoded=Encoding.Unicode.GetBytes(name+"\0"); int offset=Marshal.OffsetOf<RenameHeader>("FirstCharacter").ToInt32();
+    static int Rename(SafeFileHandle file,string destination,List<object> stages,string stage) {
+        byte[] encoded=Encoding.Unicode.GetBytes(Path.GetFullPath(destination)+"\0"); int offset=Marshal.OffsetOf<RenameHeader>("FirstCharacter").ToInt32();
         int headerSize=Marshal.SizeOf<RenameHeader>();
         using (var data=new Buffer(checked(headerSize+encoded.Length))) {
-            Marshal.StructureToPtr(new RenameHeader{Replace=0,Root=parent.DangerousGetHandle(),NameLength=(uint)encoded.Length-2},data.Pointer,false);
+            Marshal.StructureToPtr(new RenameHeader{Replace=0,Root=IntPtr.Zero,NameLength=(uint)encoded.Length-2},data.Pointer,false);
             Marshal.Copy(encoded,0,IntPtr.Add(data.Pointer,offset),encoded.Length);
             bool ok=SetFileInformationByHandle(file,3,data.Pointer,(uint)data.Length);
             int error=ok?0:Marshal.GetLastWin32Error();
-            stages.Add(Row("stage",stage,"win32_error",error,"rename_form","relative_name_parent_handle","structure_size",headerSize,"filename_offset",offset,"name_byte_count",encoded.Length-2,"encoded_length",encoded.Length,"buffer_length",data.Length));
+            stages.Add(Row("stage",stage,"win32_error",error,"rename_form","absolute_path_null_root","structure_size",headerSize,"filename_offset",offset,"name_byte_count",encoded.Length-2,"encoded_length",encoded.Length,"buffer_length",data.Length));
             return error;
         }
     }
@@ -289,12 +289,12 @@ public static class WindowsNamespaceProbe
                     using (var file=CreatePublicFile(Path.Combine(childPath,"temporary"),sid)) {
                         var original=Identity(file,false); result["original_identity"]=original;
                         WritePublic(file); Require(FlushFileBuffers(file),"file_flush_before_rename"); stages.Add(Row("stage","file_flush_before_rename","win32_error",0));
-                        int rename=Rename(file,child,"final",stages,"rename_no_replace"); if (rename!=0) throw new NativeFailure("rename_no_replace",rename);
+                        int rename=Rename(file,Path.Combine(childPath,"final"),stages,"rename_no_replace"); if (rename!=0) throw new NativeFailure("rename_no_replace",rename);
                         Require(FlushFileBuffers(file),"file_flush_after_rename"); stages.Add(Row("stage","file_flush_after_rename","win32_error",0));
                         SameIdentity(original,Identity(file,false)); ReadPublic(file);
                         using (var duplicate=CreatePublicFile(Path.Combine(childPath,"duplicate"),sid)) {
                             var duplicateId=Identity(duplicate,false); WritePublic(duplicate);
-                            int collision=Rename(duplicate,child,"final",stages,"duplicate_rename");
+                            int collision=Rename(duplicate,Path.Combine(childPath,"final"),stages,"duplicate_rename");
                             if (collision!=80&&collision!=183) throw new NativeFailure("not_an_existing_name_collision",collision);
                             SameIdentity(original,Identity(file,false)); ReadPublic(file); SameIdentity(duplicateId,Identity(duplicate,false)); ReadPublic(duplicate);
                             using (var remaining=OpenWin32(Path.Combine(childPath,"duplicate"),Read|ReadControl,OpenReparse,7)) { SameIdentity(duplicateId,Identity(remaining,false)); ReadPublic(remaining); }
