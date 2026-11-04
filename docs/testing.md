@@ -310,6 +310,8 @@ Local provider fixtures use verified TLS with the public fixture CA in
 payment clients must explicitly trust that CA; process trust does not flow into
 separately constructed clients. Install a fixture's direct or Tor policy once,
 before constructing its harness, and retain the same policy through all calls.
+Tests that need different immutable policies run in separate child processes;
+their parents verify successful execution and a nonzero child test count.
 Executable fixtures pass the public CA through `trusted_ca_files` in their network
 configuration. A SOCKS connection alone does not prove a verified origin request;
 serving fixtures must observe the HTTP handler as well as proxy selection.
