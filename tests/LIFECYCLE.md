@@ -275,3 +275,9 @@ outside the public-edition test scope.
 
 For the planned all-provider mainnet run, including Tor observations, two-pool
 rotation/refill and stage-specific failures, see [qualification scope](../docs/testing.md#qualification-status).
+
+The indexer-regression characterization currently records destructive startup
+behavior for same-prefix shorter tips and interrupted unsigned targets; it is not
+acceptance of that behavior. The proposed distinction and unavoidable no-overlap
+ambiguity are specified in the SDK integration guide. Fresh future-birthday scans
+and existing genuine divergent deep-fork coverage remain separate controls.

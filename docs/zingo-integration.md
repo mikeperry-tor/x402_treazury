@@ -297,3 +297,20 @@ archive falls back to the crate version; with Git installed, the failed dirty
 check can add `_dirty`. Shared-cache, same-host comparison does not qualify
 reproducibility across independently populated caches. Parameter staging, integrity
 checks and OS network denial remain separate release requirements.
+
+## Proposed shorter-tip distinction
+
+Current startup normalization can clear retained observations from a shorter height
+alone, including a saved unsigned target beyond the actually scanned prefix. The
+indexer-regression lifecycle characterization reproduces both cases without
+changing runtime behavior. Proposed recovery first distinguishes actual retained
+blocks, scanned-priority ranges and confirmed transactions from unsigned queued
+scan targets. A target-only tail can be shortened without clearing observations.
+When protected observations exceed the endpoint tip, a correctly bound divergent
+retained block would permit existing recovery; matching or absent overlap would
+preserve observations and wait recoverably. This cannot immediately distinguish
+every genuine shorter fork: birthday100/tip50 has no retained overlap, and an
+anchor100 may match a tip150 fork beginning120. Fresh unscanned future-birthday
+wallets retain conservative activation scanning. This is proposed until the owning
+implementation and application recovery tests pass; no consensus or live evidence
+is claimed.
