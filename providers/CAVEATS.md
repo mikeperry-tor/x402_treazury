@@ -164,7 +164,7 @@ available without cover.
 
 ### Same-path method contracts
 
-GenuineGood's five grant pairs and Otto's generate-meme, llm-research,
+GenuineGood's five grant pairs and Otto's remaining llm-research,
 tx-explainer and meta-intelligence pairs have equivalent captured inputs,
 requireds, result envelopes and advertised payment metadata. POST carries JSON;
 GET array forms document comma separation that generic repeated-key query routing
@@ -179,10 +179,9 @@ is indicated, and equal advertised metadata does not establish equal charges.
 
 The canonical names are `genuinegood_search`, `genuinegood_detail`,
 `genuinegood_fit`, `genuinegood_brief`, `genuinegood_preflight`,
-`otto_generate_meme`, `otto_llm_research`, `otto_tx_explainer` and
-`otto_meta_intelligence`. Both old method suffixes are replaced in privacy selections, the live-Tor example,
-reviewed qualification preset and independent request fixture. Operators must update
-exact selectors; set `prefer_post = false` in a provider/source to inspect both methods.
+`otto_llm_research`, `otto_tx_explainer` and `otto_meta_intelligence`.
+Exact deployment selectors use these canonical names. Set `prefer_post = false`
+in a provider/source to inspect both methods.
 Do not create aliases or alter explicit raw HTTP methods.
 
 
@@ -387,7 +386,10 @@ and the $0.10 all-in-one `briefing`. The `/api/v1` anchor keeps existing tool na
 live in vendor prose (the spec's `x-x402` extension has the wrong shape for
 `pricing_key`). No startup endpoint pricing requests are made. Vendor prose
 remains; `kronos_track_record` stores its own free tariff in `pricing_description`
-and keeps the paid forecast-ledger alternative in its description.
+and keeps the paid forecast-ledger alternative in its description. Hit rate uses
+cache-source rows only, matching the vendor stats methodology; the Brier score
+covers its audit sample. Neither qualifier establishes accuracy across all served
+forecasts.
 Actual paid calls still use the live challenge and enforce spend caps.
 
 The `/api/v1` anchor preserves existing names; an empty fallback exposes the
@@ -724,6 +726,14 @@ unpaid discovery checks, not funded settlement qualification or universal prices
 Other networks and gateway variants in the challenges are not enabled by this
 provider; the existing payment compatibility policy still selects the supported
 Base USDC option.
+
+The x402 guide's per-search tariffs are lite/instant $0.004, auto/fast $0.007,
+deep-lite/deep $0.012 and deep-reasoning $0.015. The structured range starts at
+$0.007 and omits the cheaper indexed mode; authored pricing retains the guide's
+mode distinctions. Lite accepts restricted inputs and no live fetching; it is an
+advisory option rather than a forced default. Search summaries add $0.001 per
+result. Separate Contents requests cost $0.001 per page for each requested type
+(text, highlights or summary). Signing continues to use the actual challenge.
 
 The vendor's OpenAPI 3.1 nullable unions, nested content options and local schema
 references work with the generic converter. Contents uses a root presence-only
@@ -1231,7 +1241,15 @@ a missing integration contract, not proof the API lacks it. URL scanning retains
 signals, and its description identifies the unavailable asynchronous verdict.
 Bulk identity risk ($2.00) and campaign scanning ($5.50) exceed the default $1.00
 per-payment cap. The help document uses metered paths and includes extra routes;
-only selected MCP tools are callable.
+only selected MCP tools are callable. Paid overrides preserve the vendor's
+success-only billing statement; an uncertain transport result does not prove
+that nothing was charged.
+
+TAP `POST /v1/tap/intent-bind` and `POST /v1/tap/settle-check` require an API-key
+or bearer-authenticated tenant with the verifiers entitlement. They create and
+consume signed intent-binding/settlement state rather than ordinary x402 data
+reads. Exact method/path exclusions keep those operations unavailable without
+hiding future unrelated public TAP reads or the existing keyless checks.
 
 `relayshield/phone-reputation.toml` is an optional companion for the phone endpoint
 listed in vendor root discovery and help but absent from OpenAPI. Its local request
@@ -1332,6 +1350,9 @@ Input guidance and data caveats:
 - Many schemas permit extra JSON fields; do not globally close the provider.
   TheirStack jobs requires a date or company condition in prose, and
   technographics requires an identifier despite omitted schema required lists.
+- Fundable company lookup is $0.10 per call, while company search is $0.01.
+  Their authored descriptions retain separate tariffs; similar names do not make
+  lookup and discovery interchangeable or establish delivery reliability.
 - Fundable company/company-search say supply one identifier but have no formal
   `required`/`oneOf`. Preserve that schema and follow the tool guidance. The vendor
   documents a sampled company mismatch (1/10) and lagging total funding values;
@@ -1880,6 +1901,12 @@ Base USDC exact under v2; this does not qualify delivery. Authenticated account,
 credit and transaction workflows are separate from wallet-paid capabilities.
 Public metadata remains available where the schema supports ordinary reads.
 
+Exact exclusions also cover account-owned transaction listing/deletion,
+audit-token creation, dispute reads/submission, solution execution, webhook-secret
+access and web3 assurance. Public transaction verification remains available.
+Do not broaden these exclusions to whole transaction/job namespaces: unrelated
+public reads retain their own contracts.
+
 Sampled v2 offers include both `amount` and a legacy `maxAmountRequired`. These
 are ordinary Base USDC exact offers, not an unsupported transfer type. Managed
 selection formerly rejected the legacy field's presence; v2 now preserves it as
@@ -2309,6 +2336,14 @@ complete histories or private content. The Facebook plugin and AgData returned
 different page identifiers for the same named page; preserve source URLs and
 identifiers rather than asserting identifier equivalence. Public age/view-count
 text and missing fields should remain explicit.
+
+ShopSocial's Instagram reel read covers videos among the twelve newest grid
+posts plus newest IGTV items, rather than the complete reels tab; view counts
+are null. Contact reads expose bio links and email/phone-like bio text; business
+email, phone and address buttons are null for logged-out visitors. Profile business
+category and reel/highlight counts are also null. The vendor explicitly states that
+failed or blocked HTTP 503 results are uncharged for all seven overridden Instagram
+and YouTube reads. Preserve each route's published coverage and billing conditions.
 
 CompanyRecords NY company lookup matched 2s on IBM's DOS ID 30059, legal name,
 1911-06-16 filing date and service address. Its Swedish snapshot matched Strale's

@@ -21,6 +21,7 @@ max_conversion_overhead_percent = 5
 
 [sources.exa]
 extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.
+instructions_text = "Use exa_search for URL discovery and exa_contents for known URLs. Consider type=lite ($0.004) for lower-cost indexed search when its restricted inputs and lack of live fetching fit the task; auto ($0.007) remains the general-search default. Use deeper modes when the task needs them. Content options add charges; choose freshness, coverage and quality before price."
 
 [servers.research]
 listen = "127.0.0.1:8000"

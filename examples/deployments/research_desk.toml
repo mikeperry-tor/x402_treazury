@@ -325,11 +325,15 @@ send_tools = [
 
 # Retain distinct equity, macro, on-chain, curated social and weather research.
 # Omit generative and model workflows, aggregate mega reports and video generation.
+# Web retrieval alternatives already selected below include Exa Search/Contents,
+# APEX page_markdown/page_extract and StableEnrich Firecrawl. They preserve
+# alternatives to Otto reads without establishing equivalence to its curated
+# crypto summaries or every browser-dependent JSON/link mode.
 [sources.otto]
 extends = "../../providers/otto.toml"
 send_tools = [
   # Direct Exa returned more primary sources in both sampled searches and exposes filters/content controls.
-  { to = "exclude", tools = ["web_search"] }, # Superseded by Exa search; $0.007 sampled versus $0.009 for this Exa wrapper.
+  { to = "exclude", tools = ["web_search"] }, # Replaced by direct Exa search: $0.007 sampled versus $0.009 for this same-upstream wrapper. Remove this exclusion to restore the wrapper if direct Exa fails.
   # AgOSINT covers domain enrichment; NetIntel supplies DNS and RDAP dates.
   { to = "exclude", tools = ["domain_report"] },
   # Keep complementary crypto briefings alongside Exa's source-level news search.
@@ -1144,7 +1148,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON, static HTML links and closest dated archive snapshots. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials. WebIntel adds news aggregation with per-engine errors and GDELT article/sentence matches; these are not tone or volume timelines."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON, static HTML links and closest dated archive snapshots. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials. WebIntel adds news aggregation with per-engine errors and GDELT article/sentence matches; these are not tone or volume timelines."
 
 [servers.science]
 listen = "127.0.0.1:3011"

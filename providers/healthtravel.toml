@@ -13,6 +13,8 @@ description = "Read SiteCheck's health, travel and transport endpoint guide, pri
 
 [overrides.healthtravel_health_ema_shortages_safety]
 description = "Search EMA medicine supply-shortage records by medicine or INN words. Supply shortages only; no safety-signal or pharmacovigilance data. Returns status, forms, alternatives, update dates and source links. Results can include resolved shortages and discontinued medicines; a match does not mean an active shortage today."
+pricing_description = "Cost: ~$0.002/call [spec]."
 
 [overrides.healthtravel_travel_numbeo]
 description = "Read crowd-sourced cost-of-living item prices for city. Preserve priceText and its currency symbol when normalized currency is unavailable. These are user-submitted observations, not official prices or booking quotes."
+pricing_description = "Cost: ~$0.002/call [spec]."

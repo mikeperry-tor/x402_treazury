@@ -28,6 +28,7 @@ limit = "Max items to collect (default 20). Keep well below 200 to reduce async 
 
 [overrides.hirescrape_tiktok]
 description = "Read TikTok profiles, videos, comments and transcripts, or discover popular songs, creators, videos and hashtags with trend charts. Snapshot results cannot be retrieved through this integration."
+pricing_description = "Cost: ~$0.00225 per record [vendor guide]; published call range $0.00225–$11.25."
 
 [overrides.hirescrape_tiktok.params]
 mode = "Use schema enum values, not legacy names from the guide. Some modes may return snapshots that cannot be retrieved here."

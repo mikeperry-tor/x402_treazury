@@ -13,7 +13,7 @@ instructions_text = "Research uses ok/data/charged_cents; preserve source dates 
 
 [overrides.vaaya_fundable_company]
 description = "Retrieve a company and its latest funding round, investors and source articles. Supply one of id, domain, linkedin or crunchbase. Vendor sampling mismatched 1 of 10 entities; total_raised can lag the attached round. Verify identity and prefer dated deal evidence."
-pricing_description = "Cost: ~$0.01/call [spec]."
+pricing_description = "Cost: ~$0.10/call [spec]."
 
 [overrides.vaaya_fundable_company_search]
 description = "Resolve a company to its Fundable id. Supply one of name, domain, linkedin or crunchbase; use the returned id with company. Verify returned identity and relevance."

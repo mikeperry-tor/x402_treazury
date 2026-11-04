@@ -10,15 +10,20 @@ help_url = "https://google-trends.use.x402atlas.com/llms.txt"
 
 [overrides.google_trends_trend]
 description = "Retrieve keyword interest over time, defaulting to 2004_present. For explicit bucket granularity use google_trends_trend_over_time. Values are relative interest (0–100), not search counts. Check data_source, notice and the returned geo/timeframe: fallback data may cover only worldwide, all-time monthly interest."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.google_trends_trend_over_time]
 description = "Retrieve a keyword interest timeline and bucket granularity; defaults to past_12_months. Set timeframe=2004_present for all-time monthly data. Values are relative interest (0–100), not search counts. Check data_source, notice and returned geo/timeframe: fallback data may cover only worldwide, all-time monthly interest. Low-volume keywords may return no series."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.google_trends_interest_by_region]
 description = "Compare keyword interest across a country's subregions; geo defaults to US. Values are relative popularity (0–100), not search counts. Low-volume keywords may return no regions."
+pricing_description = "Cost: ~$0.03/call [spec]."
 
 [overrides.google_trends_related_queries]
 description = "Find search phrases related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0–100) and rising percentage growth. Check data_source, notice and returned timeframe: fallback data may cover only past_12_months. Use google_trends_related_topics for subjects/entities."
+pricing_description = "Cost: ~$0.03/call [spec]."
 
 [overrides.google_trends_related_topics]
 description = "Find subjects/entities related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0–100) and rising percentage growth. Check data_source, notice and returned timeframe: fallback data may cover only past_12_months. Use google_trends_related_queries for search phrases."
+pricing_description = "Cost: ~$0.03/call [spec]."

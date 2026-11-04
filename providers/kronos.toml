@@ -6,14 +6,14 @@ name = "Kronos Crypto Data"
 base_url = "https://kronossignals.com"
 prefix = "kronos"
 include = ["/api/v1", ""]
-instructions_text = "Asset paths support BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT; HYPE is derivatives-only. Use the free kronos_track_record to inspect served-model accuracy before forecasts."
+instructions_text = "Asset paths support BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT; HYPE is derivatives-only. Use free kronos_track_record before forecasts; its hit rate covers cache-source rows and its Brier score covers the audit sample."
 
 help_url = "https://kronossignals.com/llms.txt"
 
 [overrides]
 
 [overrides.kronos_track_record]
-description = "Forecast-accuracy summary: hit_rate, resolved count, per-asset breakdown, Brier score and the last 20 resolved forecasts. Use kronos_forecast_ledger for paginated history ($0.02/call)."
+description = "Forecast-accuracy summary: hit_rate uses cache-source rows; Brier score covers the audit sample. Includes resolved count, per-asset breakdown and the last 20 resolved forecasts. Use kronos_forecast_ledger for paginated history ($0.02/call)."
 pricing_description = "Free."
 
 [overrides.kronos_help]

@@ -13,6 +13,8 @@ description = "Read SiteCheck's news, web and security endpoint guide, prices an
 
 [overrides.webintel_security_ssl_cert_chain]
 description = "Read a host's cached Qualys SSL Labs certificate-chain and cipher audit: grade, chain length, trust store, TLS versions, weak ciphers, Heartbleed/POODLE/BEAST flags and HSTS. Returns an error when no cached report exists; does not start a scan."
+pricing_description = "Cost: ~$0.002/call [spec]."
 
 [overrides.webintel_security_tls_cipher_enum]
 description = "Read a host's cached Qualys SSL Labs TLS versions and cipher-suite strength, including deprecated protocols, suite counts, weak suites and forward secrecy. Returns an error when no cached report exists; does not start a scan."
+pricing_description = "Cost: ~$0.002/call [spec]."

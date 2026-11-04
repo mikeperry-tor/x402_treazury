@@ -9,12 +9,15 @@ instructions_text = "Search company names to obtain LEIs for entity and parent l
 
 [overrides.legal_entities_search]
 description = "Find company legal names, LEIs, jurisdictions and registration status using nonempty query and optional page. Returns up to ten matches per page. Omitted or empty query returns a fixed paid sample, not a live search."
+pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.legal_entities_entity_lei]
 description = "Retrieve a legal entity's registration profile using its 20-character uppercase LEI with valid checksum. Returns legal name, jurisdiction, registration ID and update/renewal dates. Entity status and LEI registration status are separate facts."
+pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.legal_entities_parent_companies_lei]
 description = "Retrieve reported direct and ultimate accounting-consolidation parents for lei, with relationship statuses or reporting exceptions and up to ten records per parent category. These are accounting relationships, not a complete beneficial-ownership tree."
+pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.legal_entities_help]
 description = "Read the legal-entity bridge's request examples, search pagination and registration/parent response guide."

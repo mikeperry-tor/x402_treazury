@@ -7,6 +7,8 @@ base_url = "https://api.relayshield.net"
 prefix = "relayshield"
 recommended_tools = ["relayshield_breach", "relayshield_ip_intel", "relayshield_supply_chain", "relayshield_wallet_risk", "relayshield_scan_url", "relayshield_help"]
 exclude = ["/v1/metered", "/v1/account", "/v1/siem", "/v1/webhook", "/v1/payg/scan-file"]
+# TAP bindings require an API-key entitlement and tenant-owned settlement state.
+exclude_operations = ["POST /v1/tap/intent-bind", "POST /v1/tap/settle-check"]
 
 include = ["/v1/payg", ""]
 
@@ -50,7 +52,7 @@ domain = "Primary root domain to check for exposed machine/CI-CD credentials in 
 
 [overrides.relayshield_scan_url]
 description = "Scan a URL (`http://` or `https://`) for phishing or malware using synchronous heuristic signals (Google Safe Browsing, RDAP domain age, and RelayShield IOC corpus `malware_families` attribution). Also returns a VirusTotal `analysis_id`, which cannot be polled through this catalog because `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json`."
-pricing_description = "Cost: ~$0.05/call [spec]."
+pricing_description = "Cost: ~$0.05/call [spec]. Vendor bills only successful calls."
 
 
 [overrides.relayshield_v1_email_check]
@@ -71,27 +73,27 @@ pricing_description = "Cost: ~$0.10/call [spec]."
 
 [overrides.relayshield_agent_bait_scan]
 description = "Scan a GitHub repository URL or owner/repo for agent-facing instructions that request remote execution, instruction overrides or credential-file access. Checks referenced domains against criminal indicators and returns findings."
-pricing_description = "Cost: ~$0.50/call [spec]."
+pricing_description = "Cost: ~$0.50/call [spec]. Vendor bills only successful calls."
 
 [overrides.relayshield_domain]
 description = "Find phishing lookalikes of domain, including typosquats, homoglyphs and suspicious registration patterns. Returns matched domains found in the wild."
-pricing_description = "Cost: ~$0.50/call [spec]."
+pricing_description = "Cost: ~$0.50/call [spec]. Vendor bills only successful calls."
 
 [overrides.relayshield_mcp_registry_risk]
 description = "Assess server_url for MCP registry and supply-chain risk, including unverified publishers and known-malicious servers. Returns a verdict and findings."
-pricing_description = "Cost: ~$0.35/call [spec]."
+pricing_description = "Cost: ~$0.35/call [spec]. Vendor bills only successful calls."
 
 [overrides.relayshield_nhi_exposure]
 description = "Check domain and/or vendor_domains for exposed machine, service-account and CI/CD credentials in criminal stealer logs. Returns findings and severity."
-pricing_description = "Cost: ~$0.40/call [spec]."
+pricing_description = "Cost: ~$0.40/call [spec]. Vendor bills only successful calls."
 
 [overrides.relayshield_oauth_watchlist]
 description = "Check email for connected-app credential exposure associated with known SaaS breaches. Returns matched apps, breach details and revoke-access links."
-pricing_description = "Cost: ~$0.30/call [spec]."
+pricing_description = "Cost: ~$0.30/call [spec]. Vendor bills only successful calls."
 
 [overrides.relayshield_session_risk]
 description = "Check email for stolen session cookies in criminal archives, including adversary-in-the-middle (AiTM) exposure. Returns session findings and severity."
-pricing_description = "Cost: ~$0.30/call [spec]."
+pricing_description = "Cost: ~$0.30/call [spec]. Vendor bills only successful calls."
 
 [overrides.relayshield_identity_graph]
 description = "Correlate an email address against the criminal breach/stealer corpus to surface linked phone numbers, secondary domains, and other identifiers tied to the same compromised identity. Call to map the blast radius of a known compromise across an organization. Vendor bills successful calls."

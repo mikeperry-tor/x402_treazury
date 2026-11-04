@@ -39,9 +39,11 @@ description = "Current Pyth spot price for fixed EUR-USD. No symbol/path substit
 
 [overrides.blockrun_pm_binance_candles_btcusdt]
 description = "Historical OHLCV candlesticks for fixed BTCUSDT. No symbol/path substitution."
+pricing_description = "Cost: ~$0.0085/call [spec]."
 
 [overrides.blockrun_pm_binance_ticks_btcusdt]
 description = "Raw book ticker data at microsecond granularity for fixed BTCUSDT. No symbol/path substitution."
+pricing_description = "Cost: ~$0.0085/call [spec]."
 
 # New synchronous model gateways retain the same completed-response contract.
 [overrides.blockrun_messages.params]

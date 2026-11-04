@@ -168,6 +168,13 @@ include_tools = [
 extends = "../../providers/otto.toml"
 include_tools = ["otto_financial_statements", "otto_equity_news"]
 
+# Latest SEC US-GAAP facts complement Otto statements and filing summaries.
+# Compare actual periods: quarterly flows are not fiscal-year-to-date totals.
+# The pinned local catalog avoids another remote catalog download.
+[sources.company_horizonpulse]
+extends = "../../providers/horizonpulse.toml"
+include_tools = ["horizonpulse_sec_company_facts"]
+
 # Startup/crypto/investor research: RootData profiles crypto projects and venture
 # organizations, including teams, backers and funding rounds. Search resolves IDs
 # for project/org lookups; this is company intelligence, not trading execution.
@@ -336,11 +343,11 @@ wallet = "company"
 sources = ["social", "pdl_people", "social_stableenrich"]
 
 [servers.company]
-instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Missing findings do not prove absence."
+instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Compare SEC fact periods explicitly: latest quarterly flows differ from fiscal-year-to-date and annual totals; Horizon supplies US-GAAP facts, not IFRS. Missing findings do not prove absence."
 listen = "127.0.0.1:6339"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
+sources = ["genuinegood", "pdl_company", "company_otto", "company_horizonpulse", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
 
 # Start with discovery tools; persist agent-added APIs separately from the treasury.
 [servers.toolbox]

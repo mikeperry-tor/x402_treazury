@@ -33,6 +33,14 @@ instructions, capabilities and wallet references. See
 [source tool distribution](../docs/configuration.md#source-tool-distribution) for
 matching, potential bindings and `config check --explain-routing` inspection.
 
+Exa mode choice remains advisory in the managed starter and research desk. Lite
+is $0.004 for lower-cost indexed search with restricted inputs and no live fetching;
+auto is $0.007 and remains the general-search default. Choose coverage, freshness
+and quality before price; content options add charges. No example forces lite.
+The comprehensive company listener also selects the pinned Horizon Pulse
+company-facts read alongside existing statements and filings. Compare each fact's
+actual period and US-GAAP scope; quarterly, year-to-date and annual flows differ.
+
 The research desk prefers Exa for general/news search and retains Otto's topical
 crypto news and linked market recaps as complementary coverage. Topical reports
 lack citations; recap generation time can be newer than the underlying news window.
