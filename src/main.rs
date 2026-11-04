@@ -213,17 +213,7 @@ async fn run() -> Result<()> {
 
 async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()> {
     let listen = if args.transport == "http" {
-        let addresses: Vec<_> = tokio::net::lookup_host((args.host.as_str(), args.port))
-            .await?
-            .collect();
-        ensure!(
-            !addresses.is_empty(),
-            "HTTP listen host resolved to no addresses"
-        );
-        for address in &addresses {
-            x402_treazury::server::host::require_loopback(address.ip())?;
-        }
-        Some(addresses)
+        Some(x402_treazury::network::loopback_listener_addresses(&args.host, args.port).await?)
     } else {
         None
     };
