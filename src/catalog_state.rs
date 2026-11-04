@@ -410,8 +410,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let hits = Arc::new(AtomicUsize::new(0));
         let seen = hits.clone();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/help", listener.local_addr().unwrap());
+        let listener = crate::test_tls::listener().await;
+        let url = format!("https://{}/help", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
             axum::serve(
                 listener,
@@ -459,3 +459,6 @@ mod tests {
 #[cfg(test)]
 #[path = "catalog_state/help_tests.rs"]
 mod help_tests;
+
+#[cfg(test)]
+use axum::serve::Listener as _;

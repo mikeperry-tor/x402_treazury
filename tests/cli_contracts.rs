@@ -1,4 +1,8 @@
 //! Offline executable boundaries, with synthetic stores and no real wallet material.
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
+use x402_treazury::network;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
 #[path = "support/funding_quote.rs"]
@@ -963,6 +967,20 @@ async fn source_maintenance_has_explicit_operator_commands() {
 
 #[tokio::test]
 async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() {
+    async fn run_trusted(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+        let trust = dir.join("fixture-network.toml");
+        std::fs::write(
+            &trust,
+            format!(
+                "[network]\ntrusted_ca_files=[{:?}]\n",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem")
+            ),
+        )
+        .unwrap();
+        let mut args = args.to_vec();
+        args.extend(["--network-config", trust.to_str().unwrap()]);
+        run(dir, &args, env).await
+    }
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -976,8 +994,8 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
         calls.fetch_add(1, Ordering::SeqCst);
         async { "unsigned" }
     });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -990,14 +1008,14 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
         "spec='spec.json'\nprefix='api'\n",
     )
     .unwrap();
-    let tags = run(
+    let tags = run_trusted(
         dir.path(),
         &["catalog", "tags", "--provider", "provider.toml"],
         &[],
     )
     .await;
     assert_eq!(good(tags), json!({"read":1}));
-    let error = bad(run(
+    let error = bad(run_trusted(
         dir.path(),
         &["catalog", "tools", "--provider", "provider.toml"],
         &[],
@@ -1010,7 +1028,7 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
     )
     .unwrap();
     let tools = good(
-        run(
+        run_trusted(
             dir.path(),
             &["catalog", "tools", "--provider", "provider.toml"],
             &[],
@@ -1023,7 +1041,7 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
         tools[0]["input_schema"],
         json!({"type":"object","properties":{}})
     );
-    let checked = run(
+    let checked = run_trusted(
         dir.path(),
         &["config", "check", "--provider", "provider.toml"],
         &[],
@@ -1032,7 +1050,7 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
     assert!(checked.status.success());
     assert_eq!(checked.stdout, b"1 tools validated\n");
     let routed = good(
-        run(
+        run_trusted(
             dir.path(),
             &[
                 "catalog",
@@ -1049,7 +1067,7 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
         routed,
         json!({"method":"GET","url":format!("{base}/read"),"query":{},"body":null})
     );
-    let unknown = bad(run(
+    let unknown = bad(run_trusted(
         dir.path(),
         &[
             "catalog",
@@ -1064,7 +1082,7 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
     )
     .await);
     assert!(unknown.contains("unknown tool"), "{unknown}");
-    let invalid = bad(run(
+    let invalid = bad(run_trusted(
         dir.path(),
         &[
             "serve",
@@ -1080,11 +1098,12 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
         invalid.contains("price must be a nonnegative decimal"),
         "{invalid}"
     );
-    let missing = bad(run(dir.path(), &["serve", "--provider", "provider.toml"], &[]).await);
+    let missing =
+        bad(run_trusted(dir.path(), &["serve", "--provider", "provider.toml"], &[]).await);
     assert!(missing.contains("EVM_PRIVATE_KEY required"), "{missing}");
     assert_eq!(count.load(Ordering::SeqCst), 0);
     good(
-        run(
+        run_trusted(
             dir.path(),
             &["catalog", "tools", "--provider", "provider.toml"],
             &[],
@@ -1093,7 +1112,7 @@ async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() 
     );
     assert_eq!(count.load(Ordering::SeqCst), 0);
     let key = "0000000000000000000000000000000000000000000000000000000000000001";
-    let auth = bad(run(
+    let auth = bad(run_trusted(
         dir.path(),
         &[
             "serve",
@@ -1281,7 +1300,7 @@ state_dir='state'
 mode='static'
 private_key_env='UNREAD_KEY'
 [sources.api]
-spec='http://catalog.invalid/spec'
+spec='https://catalog.invalid/spec'
 base_url='https://api.example.com'
 [servers.research]
 listen='127.0.0.1:0'

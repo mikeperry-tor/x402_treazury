@@ -352,7 +352,7 @@ async fn fixture() {
         global()
             .http_transport(
                 &IsolationId::treasury(&format!("api-evict-{n}")),
-                &format!("http://127.0.0.1:{}", 20000 + n),
+                &format!("https://127.0.0.1:{}", 20000 + n),
                 None,
                 false,
                 Default::default(),

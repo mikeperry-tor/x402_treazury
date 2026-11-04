@@ -1,6 +1,8 @@
 //! Task-scoped case identity, copied explicitly into the accepted store command.
 use super::*;
 use alloy_primitives::U256;
+#[cfg(test)]
+use axum::serve::Listener as _;
 mod offers;
 pub use offers::record as record_challenge;
 mod help;
@@ -876,8 +878,8 @@ mod tests {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let listener = crate::test_tls::listener().await;
+        let url = format!("https://{}/", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -995,7 +997,7 @@ mod tests {
                 axum::Json(json!({"url":request["url"],"method":"GET","statusCode":200,"headers":{"content-type":"text/plain"},"body":"complete free relay result","redirectChain":[],"error":null}))
             }
         }));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = crate::test_tls::listener().await;
         let relay_address = listener.local_addr().unwrap();
         let relay_task = tokio::spawn(async move {
             axum::serve(listener, relay).await.unwrap();
@@ -1021,7 +1023,7 @@ mod tests {
         );
         let relay = Arc::new(
             crate::discovery_relay::SearchRelay::fixture(
-                format!("http://{relay_address}/curl"),
+                format!("https://{relay_address}/curl"),
                 Default::default(),
             )
             .with_policy(crate::discovery_relay::Policy {

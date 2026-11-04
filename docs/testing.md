@@ -150,6 +150,12 @@ assertions stay in that child; the parent verifies successful execution of one
 test. Other fixtures remain parallel; this is not a reason to serialize an entire
 harness.
 
+Production subprocess fixtures cover CLI JSON rendering, remote HTTPS catalog-size
+limits and command-line overrides, using explicit fixture CA configuration and real
+TLS requests. Local specification files are not downloads and do not acquire the
+remote `max_spec_bytes` contract. These fixtures add no production trust environment
+variable and modify no OS trust store.
+
 Exercise ordinary CLI rendering once per distinct output contract. Use direct
 configuration/catalog APIs for advisory metadata and parser combinations; retain
 actual serving-source selection for warning scope. Functional cache lifetime and

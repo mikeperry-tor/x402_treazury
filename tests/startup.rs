@@ -1,17 +1,37 @@
 //! Production deployment loading against controlled, unsigned catalogs.
+#[path = "support/tls.rs"]
+mod tls;
 use x402_treazury::mcp_wire::McpResponse;
+use x402_treazury::network;
 #[path = "support/socks.rs"]
 mod socks;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::{Semaphore, mpsc},
-};
+use tokio::sync::{Semaphore, mpsc};
 use x402_treazury::{
     deployment::Deployment,
     network::{IsolationId, Mode, NetworkContext, NetworkPolicy},
 };
+
+fn fixture_network_config(directory: &std::path::Path) -> std::path::PathBuf {
+    let path = directory.join("fixture-network.toml");
+    let ca = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem");
+    std::fs::write(&path, format!("[network]\ntrusted_ca_files=[{ca:?}]\n")).unwrap();
+    path
+}
+
+struct PendingBody {
+    id: usize,
+    closed: mpsc::Sender<usize>,
+    released: bool,
+}
+impl Drop for PendingBody {
+    fn drop(&mut self) {
+        if !self.released {
+            // The fixture has fewer active responses than the cancellation queue.
+            let _ = self.closed.try_send(self.id);
+        }
+    }
+}
 
 struct Fixture {
     address: std::net::SocketAddr,
@@ -27,43 +47,46 @@ impl Drop for Fixture {
 }
 impl Fixture {
     async fn new(count: usize, bad: Option<usize>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
+        Self::with_alpn(count, bad, &[b"h2", b"http/1.1"]).await
+    }
+    async fn with_alpn(count: usize, bad: Option<usize>, alpn: &[&[u8]]) -> Self {
         let gates: Vec<_> = (0..count).map(|_| Arc::new(Semaphore::new(0))).collect();
         let (arrived, arrivals) = mpsc::channel(64);
         let (closed, cancelled) = mpsc::channel(64);
         let gate_copy = gates.clone();
-        let task = tokio::spawn(async move {
-            let mut connections = tokio::task::JoinSet::new();
-            loop {
-                let (mut socket, _) = listener.accept().await.unwrap();
+        let app = axum::Router::new().route("/{id}", axum::routing::get(
+            move |axum::extract::Path(id): axum::extract::Path<usize>, version: axum::http::Version| {
                 let (gates, arrived, closed) = (gate_copy.clone(), arrived.clone(), closed.clone());
-                connections.spawn(async move {
-                    let mut request = Vec::new();
-                    loop {
-                        let byte = socket.read_u8().await.unwrap();
-                        request.push(byte);
-                        assert!(request.len() < 8192);
-                        if request.ends_with(b"\r\n\r\n") { break; }
-                    }
-                    let text = String::from_utf8(request).unwrap();
-                    let id: usize = text.split_whitespace().nth(1).unwrap().trim_start_matches('/').parse().unwrap();
+                async move {
                     let body = if bad == Some(id) { b"invalid".to_vec() } else {
                         serde_json::to_vec(&serde_json::json!({"openapi":"3.0.0","servers":[{"url":"https://api.example"}],"paths":{"/read":{"get":{"summary":"Read","responses":{}}},"/other":{"get":{"summary":"Other","responses":{}}}}})).unwrap()
                     };
-                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
-                    arrived.send(id).await.unwrap();
-                    let mut byte = [0];
-                    tokio::select! {
-                        permit = gates[id].acquire() => {
-                            permit.unwrap().forget();
-                            let _ = socket.write_all(&body).await;
-                        }
-                        _ = socket.read(&mut byte) => { let _ = closed.send(id).await; }
+                    let length = body.len();
+                    let pending = PendingBody { id, closed, released: false };
+                    let body = axum::body::Body::from_stream(futures_util::stream::once(async move {
+                        // Own the entire drop guard, not only its released field.
+                        let mut pending = pending;
+                        arrived.send(id).await.unwrap();
+                        gates[id].acquire().await.unwrap().forget();
+                        pending.released = true;
+                        Ok::<_, std::io::Error>(body)
+                    }));
+                    let mut response = axum::http::Response::builder()
+                        .header(axum::http::header::CONTENT_LENGTH, length);
+                    // Keep the original fixture's one response per HTTP/1 connection.
+                    if version == axum::http::Version::HTTP_11 {
+                        response = response.header(axum::http::header::CONNECTION, "close");
                     }
-                });
+                    response.body(body).unwrap()
+                }
             }
-        });
+        ));
+        let (address, task) = tls::serve_with(
+            app,
+            &[&rustls::version::TLS13, &rustls::version::TLS12],
+            alpn,
+        )
+        .await;
         Self {
             address,
             gates,
@@ -108,11 +131,12 @@ fn config(
 }
 #[tokio::test]
 async fn rolling_slots_and_inventory_match_serial_loading() {
+    tls::install_trust();
     let mut fixture = Fixture::new(5, None).await;
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         5,
         Some(2),
         "",
@@ -135,7 +159,7 @@ async fn rolling_slots_and_inventory_match_serial_loading() {
     assert_eq!(inventory[0]["tools"][0]["source"], "s00"); // tool-name order, not completion order
     config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         5,
         Some(1),
         "",
@@ -148,11 +172,12 @@ async fn rolling_slots_and_inventory_match_serial_loading() {
 }
 #[tokio::test]
 async fn default_limit_is_two_and_abort_drops_active_requests() {
+    tls::install_trust();
     let mut fixture = Fixture::new(3, None).await;
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         3,
         None,
         "",
@@ -181,11 +206,12 @@ async fn default_limit_is_two_and_abort_drops_active_requests() {
 }
 #[tokio::test]
 async fn failure_cancels_other_fetches_and_never_starts_queued_sources() {
+    tls::install_trust();
     let mut fixture = Fixture::new(3, Some(0)).await;
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         3,
         Some(2),
         "",
@@ -207,11 +233,12 @@ async fn failure_cancels_other_fetches_and_never_starts_queued_sources() {
 }
 #[tokio::test]
 async fn failed_inspection_finishes_independent_catalogs_with_rolling_bound() {
+    tls::install_trust();
     let mut fixture = Fixture::new(3, Some(0)).await;
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         3,
         Some(2),
         "",
@@ -236,9 +263,10 @@ async fn failed_inspection_finishes_independent_catalogs_with_rolling_bound() {
 }
 #[tokio::test]
 async fn failed_inspection_aliases_share_one_failure_without_retry() {
+    tls::install_trust();
     let mut fixture = Fixture::new(1, Some(0)).await;
     let dir = tempfile::tempdir().unwrap();
-    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 3, 2);
+    let path = alias_config(dir.path(), &format!("https://{}", fixture.address), 3, 2);
     let task = tokio::spawn(async move { Deployment::inspect_catalogs(&path).await });
     assert_eq!(fixture.next().await, 0);
     fixture.release(0);
@@ -255,9 +283,10 @@ async fn failed_inspection_aliases_share_one_failure_without_retry() {
 }
 #[tokio::test]
 async fn startup_config_is_strict_and_validated_before_fetching() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     for limit in [0, 65] {
-        let path = config(dir.path(), "http://127.0.0.1:1", 1, Some(limit), "");
+        let path = config(dir.path(), "https://127.0.0.1:1", 1, Some(limit), "");
         assert!(
             Deployment::show_config(&path)
                 .await
@@ -274,7 +303,7 @@ async fn startup_config_is_strict_and_validated_before_fetching() {
                 .contains("catalog_concurrency")
         );
     }
-    let path = config(dir.path(), "http://127.0.0.1:1", 1, Some(64), "");
+    let path = config(dir.path(), "https://127.0.0.1:1", 1, Some(64), "");
     assert_eq!(
         Deployment::show_config(&path).await.unwrap()["startup"]["catalog_concurrency"],
         64
@@ -288,6 +317,7 @@ async fn startup_config_is_strict_and_validated_before_fetching() {
 }
 #[tokio::test]
 async fn parallel_discovery_keeps_origin_credentials() {
+    tls::install_trust();
     let result = tokio::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "tor_catalog_child", "--ignored", "--nocapture"])
         .output()
@@ -302,11 +332,11 @@ async fn parallel_discovery_keeps_origin_credentials() {
 #[tokio::test]
 #[ignore = "subprocess helper owns immutable Tor policy"]
 async fn tor_catalog_child() {
-    let mut fixture = Fixture::new(3, None).await;
+    let mut fixture = Fixture::with_alpn(3, None, &[b"http/1.1"]).await;
     let proxy = socks::Socks::start(
         BTreeMap::from([
-            ("a.test".into(), fixture.address),
-            ("b.test".into(), fixture.address),
+            ("a.example.com".into(), fixture.address),
+            ("b.example.com".into(), fixture.address),
         ]),
         socks::Fault::None,
     )
@@ -316,13 +346,21 @@ async fn tor_catalog_child() {
         socks_endpoint: Some(proxy.address),
         ..Default::default()
     };
+    network::install_context(
+        NetworkContext::new(policy.clone())
+            .unwrap()
+            .with_trusted_roots([tls::CA])
+            .unwrap(),
+    )
+    .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let network = format!("[network]\nmode='tor'\nsocks_endpoint='{}'", proxy.address);
-    let path = config(dir.path(), "http://a.test", 4, Some(4), &network);
+    let path = config(dir.path(), "https://a.example.com", 4, Some(4), &network);
     let text = std::fs::read_to_string(&path)
         .unwrap()
-        .replace("http://a.test/2", "http://b.test/2")
-        .replace("http://a.test/3", "http://a.test/0");
+        .replace("https://a.example.com/2", "https://b.example.com/2")
+        .replace("https://a.example.com/3", "https://a.example.com/0")
+        .replace("spec=", "allow_http1=true\nspec=");
     std::fs::write(&path, text).unwrap();
     let task = tokio::spawn(async move { Deployment::load(&path).await });
     for _ in 0..3 {
@@ -336,16 +374,22 @@ async fn tor_catalog_child() {
     for record in records.iter() {
         assert_eq!(record.address_type, 3);
         let legacy = context
-            .credentials(&IsolationId::discovery(&format!("http://{}", record.host)).unwrap());
+            .credentials(&IsolationId::discovery(&format!("https://{}", record.host)).unwrap());
         assert_eq!(record.user, legacy.0);
         assert_ne!(record.password, legacy.1);
         assert_eq!(record.password.len(), legacy.1.len());
         assert!(record.password.starts_with("x402_treazury:v1:"));
     }
-    let a: Vec<_> = records.iter().filter(|r| r.host == "a.test").collect();
+    let a: Vec<_> = records
+        .iter()
+        .filter(|r| r.host == "a.example.com")
+        .collect();
     assert_eq!(a.len(), 2);
     assert!(a.iter().all(|r| r.password == a[0].password));
-    let b: Vec<_> = records.iter().filter(|r| r.host == "b.test").collect();
+    let b: Vec<_> = records
+        .iter()
+        .filter(|r| r.host == "b.example.com")
+        .collect();
     assert_eq!(b.len(), 1);
     assert!(b.iter().all(|r| r.password == b[0].password));
     assert_ne!(a[0].password, b[0].password);
@@ -353,12 +397,13 @@ async fn tor_catalog_child() {
 
 #[tokio::test]
 async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
+    tls::install_trust();
     let fixture = Fixture::new(2, None).await;
     for id in 0..2 {
         fixture.release(id);
     }
     let dir = tempfile::tempdir().unwrap();
-    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 3, 2);
+    let path = alias_config(dir.path(), &format!("https://{}", fixture.address), 3, 2);
     let local = dir.path().join("local.json");
     std::fs::write(
         &local,
@@ -373,6 +418,8 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
     command.env_remove("RUST_LOG");
     let output = command
         .args(["catalog", "tools", "--config", path.to_str().unwrap()])
+        .arg("--network-config")
+        .arg(fixture_network_config(dir.path()))
         .output()
         .await
         .unwrap();
@@ -408,12 +455,13 @@ fn alias_config(
 
 #[tokio::test]
 async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
+    tls::install_trust();
     let fixture = Fixture::new(1, Some(0)).await;
     fixture.release(0);
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         1,
         None,
         "",
@@ -421,6 +469,8 @@ async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_remove("RUST_LOG")
         .args(["catalog", "tools", "--config", path.to_str().unwrap()])
+        .arg("--network-config")
+        .arg(fixture_network_config(dir.path()))
         .output()
         .await
         .unwrap();
@@ -436,16 +486,18 @@ async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
 
 #[tokio::test]
 async fn failed_inspection_retains_structured_stages_but_never_a_partial_inventory() {
+    tls::install_trust();
     let fixture = Fixture::new(2, Some(0)).await;
     fixture.release(0);
     fixture.release(1);
     let dir = tempfile::tempdir().unwrap();
+    let trust = std::fs::read_to_string(fixture_network_config(dir.path())).unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         2,
         None,
-        "",
+        &trust,
     );
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args([
@@ -475,9 +527,10 @@ async fn failed_inspection_retains_structured_stages_but_never_a_partial_invento
 
 #[tokio::test]
 async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
+    tls::install_trust();
     let mut fixture = Fixture::new(1, None).await;
     let dir = tempfile::tempdir().unwrap();
-    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 4, 2);
+    let path = alias_config(dir.path(), &format!("https://{}", fixture.address), 4, 2);
     let text = std::fs::read_to_string(&path)
         .unwrap()
         .replace(
@@ -523,6 +576,7 @@ async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
 
 #[tokio::test]
 async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits() {
+    tls::install_trust();
     for setting in [
         "read_timeout_seconds=2",
         "max_spec_bytes=1",
@@ -533,7 +587,7 @@ async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits
     ] {
         let mut fixture = Fixture::new(1, None).await;
         let dir = tempfile::tempdir().unwrap();
-        let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 1);
+        let path = alias_config(dir.path(), &format!("https://{}", fixture.address), 2, 1);
         let text = std::fs::read_to_string(&path)
             .unwrap()
             .replace("[sources.s01]", &format!("[sources.s01]\n{setting}"));
@@ -555,9 +609,10 @@ async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits
 
 #[tokio::test]
 async fn shared_fetch_cancellation_closes_request_and_next_load_fetches_again() {
+    tls::install_trust();
     let mut fixture = Fixture::new(1, None).await;
     let dir = tempfile::tempdir().unwrap();
-    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 2);
+    let path = alias_config(dir.path(), &format!("https://{}", fixture.address), 2, 2);
     let task_path = path.clone();
     let task = tokio::spawn(async move { Deployment::load(&task_path).await });
     assert_eq!(fixture.next().await, 0);
@@ -579,9 +634,10 @@ async fn shared_fetch_cancellation_closes_request_and_next_load_fetches_again() 
 
 #[tokio::test]
 async fn malformed_shared_catalog_fails_startup_without_alias_retry() {
+    tls::install_trust();
     let mut fixture = Fixture::new(1, Some(0)).await;
     let dir = tempfile::tempdir().unwrap();
-    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 2, 2);
+    let path = alias_config(dir.path(), &format!("https://{}", fixture.address), 2, 2);
     let task = tokio::spawn(async move { Deployment::load(&path).await });
     assert_eq!(fixture.next().await, 0);
     fixture.release(0);
@@ -591,9 +647,10 @@ async fn malformed_shared_catalog_fails_startup_without_alias_retry() {
 
 #[tokio::test]
 async fn inspection_retains_shared_http_rejection_without_retry_or_url() {
+    tls::install_trust();
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
+    let listener = tls::listener().await;
+    let address = axum::serve::Listener::local_addr(&listener).unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let seen = count.clone();
     let app = axum::Router::new().fallback(move || {
@@ -605,7 +662,7 @@ async fn inspection_retains_shared_http_rejection_without_retry_or_url() {
     });
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
-    let path = alias_config(dir.path(), &format!("http://{address}"), 3, 2);
+    let path = alias_config(dir.path(), &format!("https://{address}"), 3, 2);
     let (result, rows) = Deployment::inspect_catalogs(&path).await;
     assert!(result.is_err());
     assert_eq!(count.load(Ordering::SeqCst), 1);
@@ -629,6 +686,7 @@ async fn inspection_retains_shared_http_rejection_without_retry_or_url() {
 
 #[tokio::test]
 async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
+    tls::install_trust();
     let fixture = Fixture::new(2, Some(1)).await;
     for gate in &fixture.gates {
         gate.add_permits(4);
@@ -636,7 +694,7 @@ async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         2,
         Some(2),
         "",
@@ -685,12 +743,13 @@ async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
 
 #[tokio::test]
 async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
+    tls::install_trust();
     let fixture = Fixture::new(1, None).await;
     fixture.gates[0].add_permits(8);
     let dir = tempfile::tempdir().unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         1,
         Some(1),
         "",
@@ -720,6 +779,7 @@ async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
 
 #[tokio::test]
 async fn optional_outage_defers_only_unambiguous_listener_selectors() {
+    tls::install_trust();
     let fixture = Fixture::new(2, Some(1)).await;
     for gate in &fixture.gates {
         gate.add_permits(32);
@@ -729,7 +789,7 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
     std::fs::write(dir.path().join("optional.toml"), "prefix='offline'\n").unwrap();
     let path = config(
         dir.path(),
-        &format!("http://{}", fixture.address),
+        &format!("https://{}", fixture.address),
         2,
         Some(2),
         "",
@@ -774,12 +834,13 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
 
 #[tokio::test]
 async fn optional_remote_base_url_failures_are_isolated_but_authored_urls_are_strict() {
+    tls::install_trust();
     let document = std::sync::Arc::new(std::sync::Mutex::new(
         serde_json::json!({"paths":{"/read":{"get":{}}}}),
     ));
     let served = document.clone();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
+    let listener = tls::listener().await;
+    let address = axum::serve::Listener::local_addr(&listener).unwrap();
     let server = tokio::spawn(async move {
         let app = axum::Router::new().fallback(move || {
             let document = served.lock().unwrap().clone();
@@ -795,7 +856,7 @@ async fn optional_remote_base_url_failures_are_isolated_but_authored_urls_are_st
     .unwrap();
     let path = dir.path().join("config.toml");
     let config = format!(
-        "version=1\n[sources.good]\nspec='good.json'\nbase_url='http://127.0.0.1:9'\n[sources.optional]\nspec='http://{address}/spec'\noptional_startup=true\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
+        "version=1\n[sources.good]\nspec='good.json'\nbase_url='https://127.0.0.1:9'\n[sources.optional]\nspec='https://{address}/spec'\noptional_startup=true\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
     );
     for remote in [None, Some("not a URL"), Some("ftp://example.com")] {
         *document.lock().unwrap() = serde_json::json!({"paths":{"/read":{"get":{}}}, "servers":remote.map(|url| serde_json::json!([{"url":url}]))});

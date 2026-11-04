@@ -1,5 +1,9 @@
 //! Real executable, frozen offline catalogs, synthetic registry, no wallet credentials.
 #![allow(dead_code, unused_imports)]
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
+use x402_treazury::network;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
 #[path = "support/consume_reserve.rs"]
@@ -10,6 +14,7 @@ mod rpc_evidence;
 use serde_json::json;
 use std::path::Path;
 fn fixture(dir: &Path) -> (manifest::Manifest, std::path::PathBuf) {
+    tls::install_trust();
     let state = dir.join("state");
     let store =
         x402_treazury::rotation::store::Store::create(&state, &dir.join("key"), 1, b"synthetic")
@@ -22,6 +27,8 @@ fn fixture(dir: &Path) -> (manifest::Manifest, std::path::PathBuf) {
         dir.join("deployment.toml"),
         format!(
             r#"version=1
+[network]
+trusted_ca_files=[{fixture_ca:?}]
 [treasury]
 id="{id}"
 state_dir="state"
@@ -41,7 +48,8 @@ listen="127.0.0.1:18777"
 sources=["api"]
 wallet="test"
 bearer_token_env="TOKEN"
-"#
+"#,
+            fixture_ca = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem")
         ),
     )
     .unwrap();
@@ -92,8 +100,8 @@ async fn production_startup_preserves_inventory_without_endpoint_pricing_probes(
     let app = axum::Router::new()
         .route("/read", handler.clone())
         .route("/price", handler);
-    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let vendor = tls::listener().await;
+    let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
     for nonempty in [false, true] {
         price.store(nonempty, Ordering::SeqCst);
@@ -274,8 +282,8 @@ async fn runner_executes_concurrent_keyless_cases_once_and_retains_failures() {
             }),
         );
     }
-    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let vendor = tls::listener().await;
+    let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
     let cwd = std::env::current_dir().unwrap();
     let tmp = tempfile::tempdir_in(cwd.join("target")).unwrap();
@@ -392,8 +400,8 @@ async fn runner_response_limit_and_timeout_are_visible_and_never_replayed() {
                 }
             }),
         );
-    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let vendor = tls::listener().await;
+    let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
     let tmp = tempfile::tempdir().unwrap();
     let (mut m, state) = fixture(tmp.path());
@@ -1093,8 +1101,8 @@ async fn runner_skips_closed_windows_and_failed_dependencies_but_runs_independen
             axum::Json(json!({"degraded":true}))
         }
     }));
-    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let vendor = tls::listener().await;
+    let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1249,8 +1257,8 @@ async fn runner_cancellation_retains_completed_peer_and_pending_claim_while_drai
                 }
             }),
         );
-    let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", vendor.local_addr().unwrap());
+    let vendor = tls::listener().await;
+    let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -62,7 +62,7 @@ impl Options {
         let url = if self.public_only {
             network::public_url(&self.url)?
         } else {
-            self.url.parse()?
+            network::provider_url(&self.url)?
         };
         ensure!(
             self.allowed_origins.is_empty()

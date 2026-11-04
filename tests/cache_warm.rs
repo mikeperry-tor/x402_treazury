@@ -1,4 +1,9 @@
 //! Explicit direct warming in a separate process, with no wallet keys or paid I/O.
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
+use x402_treazury::network;
+const FIXTURE_CA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem");
 use axum::{
     Router,
     extract::{Request, State},
@@ -41,6 +46,7 @@ fn config(path: &Path, origin: &str, socks: std::net::SocketAddr, extra: bool) {
             r#"
 version=1
 [network]
+trusted_ca_files=['{FIXTURE_CA}']
 mode='tor'
 socks_endpoint='{socks}'
 isolation_namespace='direct-warm-fixture'
@@ -104,8 +110,8 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
             other => panic!("unselected request: {other}"),
         }
     }
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let app = Router::new()
         .fallback(any(handler))
         .with_state(calls.clone());
@@ -132,7 +138,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown cache-warming source"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let network_path = dir.path().join("network.toml");
-    std::fs::write(&network_path, format!("[network]\nmode='tor'\nsocks_endpoint='{socks_address}'\nisolation_namespace='direct-warm-fixture'\n")).unwrap();
+    std::fs::write(&network_path, format!("[network]\ntrusted_ca_files=['{FIXTURE_CA}']\nmode='tor'\nsocks_endpoint='{socks_address}'\nisolation_namespace='direct-warm-fixture'\n")).unwrap();
     let warmed = cli(&[
         "catalog",
         "warm",
@@ -250,7 +256,7 @@ async fn warming_requires_existing_state_and_cannot_be_selected_for_serving() {
     let path = dir.path().join("deployment.toml");
     config(
         &path,
-        "http://127.0.0.1:1",
+        "https://127.0.0.1:1",
         "127.0.0.1:2".parse().unwrap(),
         false,
     );
@@ -309,8 +315,8 @@ async fn warming_sorts_local_and_shared_remote_catalogs_without_endpoint_reads()
             other => panic!("unexpected request {other}"),
         }
     }
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
@@ -330,6 +336,8 @@ async fn warming_sorts_local_and_shared_remote_catalogs_without_endpoint_reads()
         format!(
             r#"
 version=1
+[network]
+trusted_ca_files=['{FIXTURE_CA}']
 [startup]
 catalog_concurrency=2
 [treasury]
@@ -452,8 +460,8 @@ async fn warming_rolls_forward_within_source_bound_and_sorts_completion_order() 
         gates[id].acquire().await.unwrap().forget();
         r#"{"operations":[{"method":"GET","path":"/read"}]}"#
     }
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let state = (gates.clone(), send);
     let server = tokio::spawn(async move {
         axum::serve(
@@ -464,8 +472,8 @@ async fn warming_rolls_forward_within_source_bound_and_sorts_completion_order() 
         .unwrap()
     });
     let path = dir.path().join("deployment.toml");
-    let mut config = String::from(
-        "version=1\n[startup]\ncatalog_concurrency=2\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_KEY'\nmax_api_payment_usdc='0.01'\n",
+    let mut config = format!(
+        "version=1\n[network]\ntrusted_ca_files=['{FIXTURE_CA}']\n[startup]\ncatalog_concurrency=2\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_KEY'\nmax_api_payment_usdc='0.01'\n",
     );
     for id in 0..3 {
         config.push_str(&format!(

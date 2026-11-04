@@ -215,11 +215,11 @@ async fn curated_details_preserve_the_single_directory_listing() {
         let response = response.clone();
         async move { axum::Json(response) }
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::test_tls::listener().await;
     let address = listener.local_addr().unwrap();
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let m = manager(None).await;
-    *m.fixture_directory.lock().unwrap() = Some(format!("http://{address}"));
+    *m.fixture_directory.lock().unwrap() = Some(format!("https://{address}"));
     let output = m
         .invoke_source_details(
             "writer",
@@ -449,3 +449,6 @@ fn ambiguous_spec_choices_only_recommend_available_local_registration() {
             && !remote.contains("netintel")
     );
 }
+
+#[cfg(test)]
+use axum::serve::Listener as _;

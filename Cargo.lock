@@ -6967,6 +6967,7 @@ dependencies = [
  "alloy-signer-local",
  "alloy-sol-types",
  "anyhow",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "bip0039 0.14.0",

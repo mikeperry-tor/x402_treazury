@@ -1,3 +1,5 @@
+#[path = "support/tls.rs"]
+mod tls;
 use axum::{
     Router,
     extract::{OriginalUri, State},
@@ -17,6 +19,7 @@ use std::{
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use x402_treazury::mcp_wire::McpResponse;
+use x402_treazury::network;
 use x402_treazury::{deployment::Deployment, payment::USDC};
 
 #[derive(Clone)]
@@ -48,7 +51,7 @@ async fn endpoint(
     } else {
         "14000"
     };
-    let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"paid","mimeType":"application/json"},
+    let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/pay","description":"paid","mimeType":"application/json"},
         "accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,
         "payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     (
@@ -69,8 +72,12 @@ async fn vendor(name: &'static str, prefix: &str) -> (String, Vendor, tokio::tas
         arrived: Arc::default(),
         release: Arc::default(),
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}{prefix}", listener.local_addr().unwrap());
+    tls::install_trust();
+    let listener = tls::listener().await;
+    let base = format!(
+        "https://{}{prefix}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let app = Router::new()
         .route(&format!("{prefix}/pay"), get(endpoint))
         .route(&format!("{prefix}/expensive"), get(endpoint))
@@ -147,6 +154,7 @@ async fn rpc(
 }
 #[tokio::test]
 async fn listeners_filter_authenticate_route_pay_and_drain_together() {
+    tls::install_trust();
     let (a, state, va) = vendor("alpha", "/api").await;
     let (b, beta, vb) = vendor("beta", "/gateway").await;
     let dir = tempfile::tempdir().unwrap();
@@ -293,11 +301,12 @@ async fn listeners_filter_authenticate_route_pay_and_drain_together() {
 
 #[tokio::test]
 async fn validation_and_inventory_need_no_wallet_credentials() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta"] {
         std::fs::write(
             dir.path().join(format!("{name}.json")),
-            spec("http://127.0.0.1:1").to_string(),
+            spec("https://127.0.0.1:1").to_string(),
         )
         .unwrap();
     }
@@ -379,11 +388,12 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
 
 #[tokio::test]
 async fn optional_auth_is_explicit_and_independent_per_listener() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta"] {
         std::fs::write(
             dir.path().join(format!("{name}.json")),
-            spec("http://127.0.0.1:1").to_string(),
+            spec("https://127.0.0.1:1").to_string(),
         )
         .unwrap();
     }
@@ -433,11 +443,12 @@ async fn optional_auth_is_explicit_and_independent_per_listener() {
 
 #[tokio::test]
 async fn binding_is_atomic_and_missing_auth_opens_no_port() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta"] {
         std::fs::write(
             dir.path().join(format!("{name}.json")),
-            spec("http://127.0.0.1:1").to_string(),
+            spec("https://127.0.0.1:1").to_string(),
         )
         .unwrap();
     }
@@ -473,12 +484,13 @@ async fn binding_is_atomic_and_missing_auth_opens_no_port() {
 
 #[tokio::test]
 async fn extended_providers_keep_overrides_and_resolve_declaring_paths() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("config")).unwrap();
     for name in ["alpha", "beta"] {
         std::fs::write(
             dir.path().join(format!("{name}.json")),
-            spec("http://127.0.0.1:1").to_string(),
+            spec("https://127.0.0.1:1").to_string(),
         )
         .unwrap();
     }
@@ -487,7 +499,7 @@ async fn extended_providers_keep_overrides_and_resolve_declaring_paths() {
         r#"spec = "alpha.json"
 prefix = "alpha"
 instructions_text = "Use alpha_pay"
-help_url = "http://127.0.0.1:1/llms.txt"
+help_url = "https://127.0.0.1:1/llms.txt"
 [overrides.alpha_pay]
 description = "Authored instructions"
 "#,
@@ -521,6 +533,7 @@ description = "Authored instructions"
 
 #[tokio::test]
 async fn serving_and_inventory_do_not_send_unsolicited_endpoint_requests() {
+    tls::install_trust();
     let (base, state, vendor) = vendor("shared", "/api").await;
     let dir = tempfile::tempdir().unwrap();
     for file in ["alpha.json", "beta.json"] {
@@ -581,6 +594,7 @@ async fn serving_and_inventory_do_not_send_unsolicited_endpoint_requests() {
 
 #[tokio::test]
 async fn wallet_bindings_are_explicit_offline_and_provider_files_cannot_assign_them() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     let text = configuration().replace("[sources.beta]", "[sources.beta]\nwallet = 'specific'")
         + "\n[wallets.specific]\nmode='static'\nprivate_key_env='SOURCE_KEY'\n";
@@ -662,6 +676,7 @@ async fn wallet_bindings_are_explicit_offline_and_provider_files_cannot_assign_t
 
 #[tokio::test]
 async fn source_wallet_overrides_route_real_signatures_across_server_defaults() {
+    tls::install_trust();
     let (base, _, vendor) = vendor("api", "/api").await;
     let dir = tempfile::tempdir().unwrap();
     for file in ["alpha.json", "beta.json"] {
@@ -747,6 +762,7 @@ include_tools=['beta_pay']
 
 #[tokio::test]
 async fn remote_catalogs_progress_together_before_complete_inventory_publication() {
+    tls::install_trust();
     use std::time::Duration;
     let gates = Arc::new([
         tokio::sync::Semaphore::new(0),
@@ -769,8 +785,11 @@ async fn remote_catalogs_progress_together_before_complete_inventory_publication
             axum::Json(json!({"paths":{"/pay":{"get":{"summary":"Pay","pricing":{"amount":"0.001","currency":"USD"}}}}}))
         }
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let vendor = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let path = write_config(
@@ -858,10 +877,14 @@ async fn remote_catalogs_progress_together_before_complete_inventory_publication
 
 #[tokio::test]
 async fn repeated_inventory_reads_preserve_authored_guidance_without_endpoint_io() {
+    tls::install_trust();
     let hits = Arc::new(AtomicUsize::new(0));
     let counter = hits.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let app = Router::new().route(
         "/read",
         get(move || {
@@ -910,11 +933,12 @@ sources=['alpha']
 
 #[tokio::test]
 async fn host_policy_is_listener_local_and_visible_in_config() {
+    tls::install_trust();
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta"] {
         std::fs::write(
             dir.path().join(format!("{name}.json")),
-            spec("http://127.0.0.1:1").to_string(),
+            spec("https://127.0.0.1:1").to_string(),
         )
         .unwrap();
     }
@@ -975,6 +999,7 @@ async fn host_policy_is_listener_local_and_visible_in_config() {
 
 #[tokio::test]
 async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() {
+    tls::install_trust();
     let (base, state, vendor_task) = vendor("lazy", "/api").await;
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("alpha.json"), spec(&base).to_string()).unwrap();
@@ -1073,6 +1098,7 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
 
 #[tokio::test]
 async fn cover_compatibility_uses_selected_non_help_routes_and_complete_owner_key() {
+    tls::install_trust();
     let documented = include_str!("../docs/cover-traffic.md");
     let table: toml::Table = toml::from_str(
         documented
@@ -1196,6 +1222,7 @@ sources=['a','b']
 
 #[tokio::test]
 async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity_guards() {
+    tls::install_trust();
     use x402_treazury::rotation::{
         config::TreasuryConfig,
         store::{Store, status},
@@ -1280,6 +1307,7 @@ async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity
 
 #[tokio::test]
 async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() {
+    tls::install_trust();
     let (base, state, vendor_task) = vendor("guidance", "/api").await;
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta"] {

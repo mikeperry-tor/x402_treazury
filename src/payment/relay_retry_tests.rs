@@ -1,6 +1,7 @@
 //! Relay legs return typed terminal delays without draining rejected error bodies.
 use super::*;
 use crate::network::acquisition::{Failure, FailureKind};
+use axum::serve::Listener as _;
 use axum::{Router, routing::post};
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
@@ -10,8 +11,8 @@ use std::{
 #[tokio::test]
 async fn direct_relay_failure_retains_delay_and_drops_body_after_one_unsigned_attempt() {
     let calls = Arc::new(AtomicUsize::new(0));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/relay", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}/relay", listener.local_addr().unwrap());
     let app = Router::new().route(
         "/relay",
         post({

@@ -284,9 +284,12 @@ impl ReservesConfig {
 /// Explicit finite nonnegative tolerance, including zero. Unlike API caps,
 /// unlimited spellings never grant retirement authority.
 pub fn retirement_remainder(s: &str) -> Result<u64> {
-    let amount = SpendPolicy::dollars(s)?
-        .max_atomic
-        .context("max_retirement_remainder_usdc must be a finite nonnegative USDC decimal")?;
+    let amount = if s.is_empty() {
+        None
+    } else {
+        SpendPolicy::dollars(s)?.max_atomic
+    }
+    .context("max_retirement_remainder_usdc must be a finite nonnegative USDC decimal")?;
     ensure!(
         amount <= U256::from(i64::MAX as u64),
         "max_retirement_remainder_usdc exceeds accounting limit"
@@ -362,7 +365,11 @@ pub fn usdc_amount(s: &str) -> Result<u64> {
     Ok(amount.to::<u64>())
 }
 pub fn positive_usdc(s: &str) -> Result<U256> {
-    let n = SpendPolicy::dollars(s)?.max_atomic;
+    let n = if s.is_empty() {
+        None
+    } else {
+        SpendPolicy::dollars(s)?.max_atomic
+    };
     ensure!(
         n.is_some_and(|n| n > U256::ZERO),
         "reserve funding amount must be a positive USDC decimal"

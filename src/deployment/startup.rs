@@ -831,9 +831,8 @@ mod price_alias_tests {
                 r#"{"paths":{"/items":{"get":{"summary":"Read items."}}}}"#
             }
         });
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/spec", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (address, server) = crate::test_tls::serve(app).await;
+        let url = format!("https://{address}/spec");
         let source = |base: &str, prefix: &str| -> SourceConfig {
             toml::from_str(&format!(
                 "spec='{url}'\nbase_url='{base}'\nprefix='{prefix}'"
@@ -887,5 +886,6 @@ mod price_alias_tests {
             assert_eq!(requests.load(Ordering::SeqCst), round + 1);
         }
         server.abort();
+        let _ = server.await;
     }
 }

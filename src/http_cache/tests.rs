@@ -172,8 +172,8 @@ async fn handler(State(state): State<Arc<Mutex<Origin>>>, request: Request) -> R
     }
 }
 async fn fixture() -> (String, Arc<Mutex<Origin>>, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/catalog", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}/catalog", listener.local_addr().unwrap());
     let state = Arc::new(Mutex::new(Origin::default()));
     let app = Router::new()
         .fallback(any(handler))
@@ -330,8 +330,8 @@ async fn origin_limit_has_consumer_error_and_sanitized_log() {
 #[tokio::test]
 async fn deployment_uses_existing_state_only_and_qualification_bypasses() {
     let dir = tempfile::tempdir().unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/spec", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}/spec", listener.local_addr().unwrap());
     let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let calls = count.clone();
     let app = Router::new().fallback(any(move || {
@@ -1185,7 +1185,7 @@ async fn unfollowed_catalog_redirects_consume_complete_json_without_retries_or_d
                                 async { "{\"value\":999}" }
                             }),
                         );
-                    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                    let listener = crate::test_tls::listener().await;
                     let address = listener.local_addr().unwrap();
                     let server = tokio::spawn(async move {
                         axum::serve(listener, app).await.unwrap();
@@ -1200,13 +1200,14 @@ async fn unfollowed_catalog_redirects_consume_complete_json_without_retries_or_d
                         socks_endpoint: (mode == Mode::Tor).then_some(socks.address),
                         ..Default::default()
                     })
-                    .unwrap();
+                    .unwrap()
+                    .with_test_root(crate::test_tls::CA);
                     let dir = tempfile::tempdir().unwrap();
                     let mut cfg = config(dir.path());
                     cfg.spec = if mode == Mode::Tor {
-                        "http://api.example.com/spec".into()
+                        "https://api.example.com/spec".into()
                     } else {
-                        format!("http://{address}/spec")
+                        format!("https://{address}/spec")
                     };
                     let identity = IsolationId::discovery(&cfg.spec).unwrap();
                     let before = network
@@ -1547,7 +1548,9 @@ async fn static_catalog_partial_documents_and_bounds_never_schedule_paid_fallbac
     let (url, origin, task) = fixture().await;
     let (relay, observed, relay_task) =
         crate::discovery_relay::tests::fixture(serde_json::json!({}), false, false).await;
-    let network = crate::network::NetworkContext::new(Default::default()).unwrap();
+    let network = crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .with_test_root(crate::test_tls::CA);
     let cfg = Config {
         spec: url.clone(),
         max_spec_bytes: 1024,
@@ -1679,3 +1682,5 @@ async fn catalog_304_renews_prices_and_changed_body_discards_them_without_api_ca
     assert_eq!(origin.lock().unwrap().calls.len(), 3);
     task.abort();
 }
+
+use axum::serve::Listener as _;

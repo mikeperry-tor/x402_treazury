@@ -28,7 +28,7 @@ reserves={small={funding_amount_usdc='5'}}
 max_conversion_overhead_percent=5
 [sources.api]
 spec='spec.json'
-base_url='http://127.0.0.1:1'
+base_url='https://127.0.0.1:1'
 [servers.one]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
@@ -82,8 +82,8 @@ async fn serving_preflight_rejects_credentials_and_providers_before_state_or_req
     };
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/spec", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}/spec", listener.local_addr().unwrap());
     let app = axum::Router::new().fallback(move || {
         let count = count.clone();
         async move {
@@ -146,7 +146,7 @@ async fn selected_static_initialization_intersects_effective_dynamic_and_relay_w
         r#"
 [sources.api]
 spec='spec.json'
-base_url='http://127.0.0.1:1'
+base_url='https://127.0.0.1:1'
 wallet='effective'
 [servers.api]
 listen='127.0.0.1:0'
@@ -261,7 +261,7 @@ async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wa
     let dir = tempfile::tempdir().unwrap();
     let declaring = dir.path().join("deployment.toml");
     let network = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let remote = format!("http://{}/schema", network.local_addr().unwrap());
+    let remote = format!("https://{}/schema", network.local_addr().unwrap());
     let document = serde_json::json!({"openapi":"3.0.0","paths":{"/curl":{"post":{"operationId":"curl","responses":{"200":{"description":"complete"}}}}}});
     std::fs::write(
         dir.path().join("local.json"),
@@ -414,7 +414,7 @@ async fn binding_completes_only_effective_static_payers_from_reused_relay_initia
             ));
         }
         config.push_str(
-            "[sources.api]\nspec='spec.json'\nbase_url='http://127.0.0.1:1'\nwallet='effective'\n[servers.api]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n",
+            "[sources.api]\nspec='spec.json'\nbase_url='https://127.0.0.1:1'\nwallet='effective'\n[servers.api]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n",
         );
         std::fs::write(&path, config).unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();
@@ -583,12 +583,12 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
         let first_address = first.local_addr().unwrap();
         drop(first);
         let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let provider_url = format!("http://{}", provider.local_addr().unwrap());
+        let mut provider = crate::test_tls::listener().await;
+        let provider_url = format!("https://{}", provider.local_addr().unwrap());
         let mut config = managed_config()
             .replace("auto_fund=false", "auto_fund=true")
             .replace("listen='127.0.0.1:0'", &format!("listen='{first_address}'"))
-            .replace("http://127.0.0.1:1", &provider_url);
+            .replace("https://127.0.0.1:1", &provider_url);
         if fail_second_bind {
             config.push_str(&format!("\n[servers.two]\nlisten='{}'\nbearer_token_env='TOKEN'\nwallet='selected'\nsources=['api']\n", occupied.local_addr().unwrap()));
         }
@@ -679,14 +679,14 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     let id = owner.status().await.unwrap().treasury_id;
     owner.close().await.unwrap();
     write_spec(dir.path());
-    let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let provider_url = format!("http://{}", provider.local_addr().unwrap());
+    let mut provider = crate::test_tls::listener().await;
+    let provider_url = format!("https://{}", provider.local_addr().unwrap());
     let relay_provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
     let config = format!(
         "{}\n[relay_fallback]\nrelays.GET=['{}']\nwallet='selected'\n",
         managed_config()
             .replace("auto_fund=false", "auto_fund=true")
-            .replace("http://127.0.0.1:1", &provider_url),
+            .replace("https://127.0.0.1:1", &provider_url),
         relay_provider.display()
     );
     let path = dir.path().join("deployment.toml");
@@ -754,3 +754,5 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
         .unwrap();
     owner.close().await.unwrap();
 }
+
+use axum::serve::Listener as _;

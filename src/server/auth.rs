@@ -62,7 +62,7 @@ pub(super) struct Gate {
 impl Gate {
     pub(super) fn new(token: String, listener: String) -> Self {
         Self {
-            expected: format!("Bearer {token}"),
+            expected: token,
             listener,
             windows: Mutex::new(std::array::from_fn(|_| Window::default())),
         }
@@ -73,11 +73,16 @@ impl Gate {
         if values.next().is_some() {
             return Err(Failure::Invalid);
         }
-        // Preserve the existing exact, constant-time authentication comparison.
-        if bool::from(self.expected.as_bytes().ct_eq(actual)) {
+        let (scheme, token) = actual.split_at_checked(6).ok_or(Failure::Invalid)?;
+        if !scheme.eq_ignore_ascii_case(b"Bearer") || !token.starts_with(b" ") {
+            return Err(Failure::Invalid);
+        }
+        let token = &token[1..];
+        // Only the scheme is case-insensitive; credentials retain exact,
+        // constant-time comparison, including configured nonstandard tokens.
+        if bool::from(self.expected.as_bytes().ct_eq(token)) {
             return Ok(());
         }
-        let token = actual.strip_prefix(b"Bearer ").ok_or(Failure::Invalid)?;
         if token.is_empty()
             || !token
                 .iter()
@@ -128,6 +133,16 @@ mod tests {
         assert_eq!(gate.check(&headers), Err(Failure::IncorrectToken));
         headers.insert(AUTHORIZATION, "Bearer secret-value".parse().unwrap());
         assert_eq!(gate.check(&headers), Ok(()));
+        for scheme in ["bearer", "BEARER", "bEaReR"] {
+            headers.insert(
+                AUTHORIZATION,
+                format!("{scheme} secret-value").parse().unwrap(),
+            );
+            assert_eq!(gate.check(&headers), Ok(()));
+        }
+        headers.insert(AUTHORIZATION, "bearer Secret-value".parse().unwrap());
+        assert_eq!(gate.check(&headers), Err(Failure::IncorrectToken));
+        headers.insert(AUTHORIZATION, "Bearer secret-value".parse().unwrap());
         headers.append(AUTHORIZATION, "Bearer secret-value".parse().unwrap());
         assert_eq!(gate.check(&headers), Err(Failure::Invalid));
         for failure in [Failure::Missing, Failure::Invalid, Failure::IncorrectToken] {

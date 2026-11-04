@@ -33,6 +33,7 @@ zcash-testutils = ["zingolib/testutils", "dep:orchard", "dep:zingo-status"]
 zcash-regtest = ["zcash-testutils", "dep:zcash_local_net"]
 
 [dependencies]
+async-trait = "0.1"
 rand = "0.9"
 rand10 = { package = "rand", version = "0.10" }
 sapling-crypto = "0.9.0"

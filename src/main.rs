@@ -212,6 +212,21 @@ async fn run() -> Result<()> {
 }
 
 async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()> {
+    let listen = if args.transport == "http" {
+        let addresses: Vec<_> = tokio::net::lookup_host((args.host.as_str(), args.port))
+            .await?
+            .collect();
+        ensure!(
+            !addresses.is_empty(),
+            "HTTP listen host resolved to no addresses"
+        );
+        for address in &addresses {
+            x402_treazury::server::host::require_loopback(address.ip())?;
+        }
+        Some(addresses)
+    } else {
+        None
+    };
     let mut cfg = standalone_config(&args, &env).await?;
     if !args.list_tools && !args.list_tags && !args.check && args.route_tool.is_none() {
         x402_treazury::provider_status::warn(cfg.name.as_deref().unwrap_or("standalone"), &cfg);
@@ -264,6 +279,11 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if args.transport == "stdio" {
         serve_standalone_stdio(server).await?;
     } else {
+        if args.bearer_token.is_some() {
+            tracing::warn!(
+                "Passing the MCP bearer token on the command line exposes it to process inspection; set X402_MCP_BEARER_TOKEN instead"
+            );
+        }
         let token = if args.no_auth {
             None
         } else {
@@ -274,7 +294,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
         };
         let signals = ShutdownSignals::new()?;
-        let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
+        let listener = tokio::net::TcpListener::bind(listen.as_deref().unwrap()).await?;
         tracing::info!(address = %listener.local_addr()?, "MCP listening at /mcp");
         serve_http_with_signals(listener, server, token, signals).await?;
     }

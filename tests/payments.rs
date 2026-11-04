@@ -1,3 +1,5 @@
+#[path = "support/tls.rs"]
+mod tls;
 use axum::{
     Router,
     extract::State,
@@ -15,6 +17,7 @@ use std::{
     },
 };
 use tokio::sync::Notify;
+use x402_treazury::network;
 use x402_treazury::{
     catalog::RoutedRequest,
     payment::{PaidClient, Payer, SpendPolicy, USDC},
@@ -65,7 +68,7 @@ async fn handle(State(gate): State<Gate>, headers: HeaderMap) -> Response {
         .into_response()
 }
 fn challenge(scheme: &str, amount: &str) -> Value {
-    json!({"x402Version":2,"error":"insufficient_funds","resource":{"url":"http://localhost/pay","description":"x".repeat(700),"mimeType":"application/json"},
+    json!({"x402Version":2,"error":"insufficient_funds","resource":{"url":"https://localhost/pay","description":"x".repeat(700),"mimeType":"application/json"},
         "accepts":[{"scheme":scheme,"network":"eip155:8453","asset":USDC,"amount":amount,
         "payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,
         "extra":{"name":"USD Coin","version":"2","facilitatorAddress":"0x0000000000000000000000000000000000000004"}}]})
@@ -82,20 +85,16 @@ fn gate(challenge: Value) -> Gate {
     }
 }
 async fn start(gate: Gate) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/pay", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            Router::new()
-                .route("/pay", get(handle).post(handle))
-                .with_state(gate),
-        )
-        .await
-        .unwrap();
-    });
-    (url, task)
+    tls::install_trust();
+    let (address, task) = tls::serve(
+        Router::new()
+            .route("/pay", get(handle).post(handle))
+            .with_state(gate),
+    )
+    .await;
+    (format!("https://{address}/pay"), task)
 }
+
 fn payer(key: &str, cap: &str) -> Payer {
     Payer::new(key, SpendPolicy::dollars(cap).unwrap()).unwrap()
 }
@@ -114,16 +113,23 @@ fn route(url: String) -> RoutedRequest {
 
 #[tokio::test]
 async fn exact_signature_recovers_payer_and_preserves_requirements() {
+    tls::install_trust();
     use alloy_primitives::{Address, B256, Signature, U256};
     use alloy_sol_types::{SolStruct, eip712_domain, sol};
     sol! { struct TransferWithAuthorization { address from; address to; uint256 value; uint256 validAfter; uint256 validBefore; bytes32 nonce; } }
-    let gate = gate(challenge("exact", "14000"));
+    let mut requirements = challenge("exact", "14000");
+    requirements["accepts"][0]["maxTimeoutSeconds"] = json!(3600);
+    let gate = gate(requirements);
+    let started = x402_treazury::rotation::base::now().unwrap();
     let (url, task) = start(gate.clone()).await;
     assert_eq!(client("1").execute(route(url)).await.unwrap(), "paid");
     assert_eq!(gate.count.load(Ordering::SeqCst), 2);
     let signed = gate.signed.lock().unwrap();
     let p = &signed[0];
     let a = &p["payload"]["authorization"];
+    let before: u64 = a["validBefore"].as_str().unwrap().parse().unwrap();
+    assert!(before >= started + 300);
+    assert!(before <= x402_treazury::rotation::base::now().unwrap() + 300);
     assert_eq!(p["accepted"], gate.challenge["accepts"][0]);
     assert_eq!(p["resource"]["description"].as_str().unwrap().len(), 500);
     let uint = |field: &str| U256::from_str_radix(a[field].as_str().unwrap(), 10).unwrap();
@@ -149,6 +155,7 @@ async fn exact_signature_recovers_payer_and_preserves_requirements() {
 
 #[tokio::test]
 async fn upto_authorizes_maximum_and_facilitator() {
+    tls::install_trust();
     let gate = gate(challenge("upto", "250000"));
     let (url, task) = start(gate.clone()).await;
     assert_eq!(client("1").execute(route(url)).await.unwrap(), "paid");
@@ -232,6 +239,7 @@ async fn upto_authorizes_maximum_and_facilitator() {
 
 #[tokio::test]
 async fn cap_asset_and_network_reject_before_paid_retry() {
+    tls::install_trust();
     for kind in ["cap", "asset", "network"] {
         let mut c = challenge("exact", "1000001");
         if kind == "asset" {
@@ -256,6 +264,7 @@ async fn cap_asset_and_network_reject_before_paid_retry() {
 
 #[tokio::test]
 async fn final_rejection_is_reported_without_third_attempt() {
+    tls::install_trust();
     let mut gate = gate(challenge("exact", "1"));
     gate.reject = true;
     let (url, task) = start(gate.clone()).await;
@@ -272,6 +281,7 @@ async fn final_rejection_is_reported_without_third_attempt() {
 
 #[tokio::test]
 async fn wallet_switch_keeps_inflight_signer() {
+    tls::install_trust();
     let arrived = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let mut gate = gate(challenge("exact", "1"));
@@ -341,8 +351,9 @@ fn caps_use_exact_decimal_arithmetic() {
 
 #[tokio::test]
 async fn legacy_v1_uses_x_payment_header() {
+    tls::install_trust();
     let c = json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","asset":USDC,
-        "maxAmountRequired":"14000","resource":"http://localhost/pay","description":"legacy",
+        "maxAmountRequired":"14000","resource":"https://localhost/pay","description":"legacy",
         "mimeType":"application/json","payTo":"0x0000000000000000000000000000000000000003",
         "maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     for header in [false, true] {
@@ -368,6 +379,7 @@ async fn legacy_v1_uses_x_payment_header() {
 
 #[tokio::test]
 async fn source_transports_share_payer_replacement_but_profiles_are_isolated() {
+    tls::install_trust();
     let gate = gate(challenge("exact", "1"));
     let (url, task) = start(gate.clone()).await;
     let wallet = client("1");
@@ -396,6 +408,7 @@ async fn source_transports_share_payer_replacement_but_profiles_are_isolated() {
 
 #[tokio::test]
 async fn mixed_offers_caps_and_invalid_requirements_never_bypass_policy() {
+    tls::install_trust();
     for reversed in [false, true] {
         let mut c = challenge("exact", "1000000");
         let good = c["accepts"][0].clone();
@@ -452,6 +465,7 @@ async fn mixed_offers_caps_and_invalid_requirements_never_bypass_policy() {
 
 #[tokio::test]
 async fn malformed_headers_and_versions_send_no_paid_retry() {
+    tls::install_trust();
     let mut version = challenge("exact", "1");
     version["x402Version"] = json!(3);
     let mut empty = challenge("exact", "1");
@@ -466,8 +480,12 @@ async fn malformed_headers_and_versions_send_no_paid_retry() {
     ] {
         let hits = Arc::new(AtomicUsize::new(0));
         let calls = hits.clone();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/pay", listener.local_addr().unwrap());
+        tls::install_trust();
+        let listener = tls::listener().await;
+        let url = format!(
+            "https://{}/pay",
+            axum::serve::Listener::local_addr(&listener).unwrap()
+        );
         let task = tokio::spawn(async move {
             axum::serve(
                 listener,
@@ -503,6 +521,7 @@ async fn malformed_headers_and_versions_send_no_paid_retry() {
 
 #[tokio::test]
 async fn unicode_challenge_description_boundary_preserves_other_fields() {
+    tls::install_trust();
     for length in [499, 500, 501] {
         let mut c = challenge("exact", "1");
         c["resource"]["description"] = json!("雪".repeat(length));
@@ -524,6 +543,7 @@ async fn unicode_challenge_description_boundary_preserves_other_fields() {
 
 #[tokio::test]
 async fn signed_post_failures_preserve_request_bytes_and_never_replay() {
+    tls::install_trust();
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     for outcome in [
@@ -533,17 +553,19 @@ async fn signed_post_failures_preserve_request_bytes_and_never_replay() {
         "disconnect",
         "timeout",
     ] {
+        tls::install_trust();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/pay?fixed=yes", listener.local_addr().unwrap());
+        let url = format!("https://{}/pay?fixed=yes", listener.local_addr().unwrap());
+        let acceptor = tls::acceptor();
         let captured = Arc::new(Mutex::new(vec![]));
         let logs = captured.clone();
         let server = tokio::spawn(async move {
             for index in 0..2 {
-                let (mut socket, _) =
-                    tokio::time::timeout(Duration::from_secs(3), listener.accept())
-                        .await
-                        .unwrap()
-                        .unwrap();
+                let (socket, _) = tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let mut socket = acceptor.accept(socket).await.unwrap();
                 let mut bytes = vec![];
                 let (header_end, content_length) = loop {
                     let mut buffer = [0; 4096];
@@ -623,6 +645,10 @@ async fn signed_post_failures_preserve_request_bytes_and_never_replay() {
         };
         assert!(
             client("1")
+                .with_transport(network::HttpPolicy {
+                    allow_http1: true,
+                    allow_tls12: false
+                })
                 .with_timeout(Duration::from_millis(150))
                 .execute(request)
                 .await
@@ -639,6 +665,7 @@ async fn signed_post_failures_preserve_request_bytes_and_never_replay() {
 
 #[tokio::test]
 async fn agentutility_captured_v2_challenge_signs_base_with_static_payer() {
+    tls::install_trust();
     let challenge: Value =
         serde_json::from_str(include_str!("fixtures/agentutility_payment_required.json")).unwrap();
     assert!(challenge["extensions"].get("bazaar").is_some());
@@ -669,7 +696,8 @@ async fn agentutility_captured_v2_challenge_signs_base_with_static_payer() {
 
 #[tokio::test]
 async fn unsigned_client_never_signs_valid_v1_v2_or_zero_amount_challenges() {
-    let v1 = json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","maxAmountRequired":"1","resource":"http://localhost/pay","description":"fixture","mimeType":"text/plain","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"asset":USDC,"extra":{"name":"USD Coin","version":"2"}}]});
+    tls::install_trust();
+    let v1 = json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","maxAmountRequired":"1","resource":"https://localhost/pay","description":"fixture","mimeType":"text/plain","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"asset":USDC,"extra":{"name":"USD Coin","version":"2"}}]});
     for c in [
         v1,
         challenge("exact", "0"),
@@ -692,6 +720,7 @@ async fn unsigned_client_never_signs_valid_v1_v2_or_zero_amount_challenges() {
 
 #[tokio::test]
 async fn signed_api_body_uses_idle_timeout_without_replay() {
+    tls::install_trust();
     use axum::body::Body;
     use std::time::Duration;
     for stalled in [false, true] {
@@ -731,8 +760,12 @@ async fn signed_api_body_uses_idle_timeout_without_replay() {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/pay", listener.local_addr().unwrap());
+        tls::install_trust();
+        let listener = tls::listener().await;
+        let url = format!(
+            "https://{}/pay",
+            axum::serve::Listener::local_addr(&listener).unwrap()
+        );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let started = std::time::Instant::now();
         let result = client("1")

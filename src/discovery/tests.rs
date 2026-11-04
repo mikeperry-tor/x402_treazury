@@ -130,8 +130,8 @@ fn server(m: &Arc<Manager>, id: &str) -> Server {
 }
 
 async fn listen(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let url = format!("https://{}", listener.local_addr().unwrap());
     (
         url,
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
@@ -1769,6 +1769,7 @@ async fn directory_payment_fixture() {
     .await;
     let local = NetworkContext::new(Default::default())
         .unwrap()
+        .with_test_root(crate::test_tls::CA)
         .http(
             &IsolationId::discovery(&base).unwrap(),
             &base,
@@ -2164,6 +2165,7 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
         let base = base.clone();
         let request = tokio::spawn(async move {
             crate::network::NetworkContext::new(Default::default()).unwrap()
+                .with_test_root(crate::test_tls::CA)
                 .discovery(&base, Duration::from_secs(3)).unwrap().post(format!("{base}/mcp"))
                 .bearer_auth("test-token")
                 .header("accept", "application/json, text/event-stream")
@@ -3724,3 +3726,5 @@ mod directory_relay_tests;
 
 #[path = "raw_privacy_tests.rs"]
 mod raw_privacy_tests;
+
+use axum::serve::Listener as _;

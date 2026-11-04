@@ -110,7 +110,7 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
     let proxy = Socks::start(
         BTreeMap::from([
             ("grpc.example.com".into(), address),
-            ("wrong.example.com".into(), address),
+            ("wrong.invalid".into(), address),
         ]),
         Fault::None,
     )
@@ -124,11 +124,11 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
     let identity = IsolationId::treasury("fixture");
     for (trust, url) in [
         (false, "https://grpc.example.com"),
-        (true, "https://wrong.example.com"),
+        (true, "https://wrong.invalid"),
     ] {
         let mut ctx = NetworkContext::new(policy.clone()).unwrap();
         if trust {
-            ctx = ctx.with_test_root(crate::test_tls::CA);
+            ctx = ctx.with_trusted_roots([crate::test_tls::CA]).unwrap();
         }
         assert!(
             ctx.http(&identity, url, Duration::from_secs(2))
@@ -147,7 +147,8 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
     );
     let ctx = NetworkContext::new(policy)
         .unwrap()
-        .with_test_root(crate::test_tls::CA);
+        .with_trusted_roots([crate::test_tls::CA])
+        .unwrap();
     assert!(
         ctx.http(
             &identity,
@@ -479,4 +480,76 @@ async fn oversized_protobuf_unary_warns_with_safe_status_code() {
         "{text}"
     );
     server.abort();
+}
+
+#[tokio::test]
+async fn trust_roots_cannot_change_after_transport_creation() {
+    let context = NetworkContext::new(Default::default()).unwrap();
+    let _transport = context
+        .http(&IsolationId::bootstrap(), "https://localhost", None)
+        .unwrap();
+    assert!(context.with_trusted_roots([crate::test_tls::CA]).is_err());
+    let context = NetworkContext::new(Default::default()).unwrap();
+    assert!(
+        context
+            .with_trusted_roots([b"invalid certificate".as_slice()])
+            .is_err()
+    );
+}
+
+#[test]
+fn configured_trust_files_require_absolute_paths_and_snapshot_public_certificates() {
+    let relative = NetworkPolicy {
+        trusted_ca_files: vec!["fixture-ca.pem".into()],
+        ..Default::default()
+    };
+    assert!(relative.validate().is_err());
+    assert!(
+        serde_json::to_value(NetworkPolicy::default())
+            .unwrap()
+            .get("trusted_ca_files")
+            .is_none()
+    );
+    let parsed: NetworkConfig =
+        toml::from_str("[network]\ntrusted_ca_files=['relative.pem']\n").unwrap();
+    assert!(parsed.network.validate().is_err());
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("private-path.pem");
+    let policy = NetworkPolicy {
+        trusted_ca_files: vec![path.clone()],
+        ..Default::default()
+    };
+    assert_eq!(
+        policy.inspection()["trusted_ca_files"][0],
+        path.to_str().unwrap()
+    );
+    assert!(
+        NetworkPolicy::default()
+            .inspection()
+            .get("trusted_ca_files")
+            .is_none()
+    );
+    let missing = NetworkContext::new(policy.clone())
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(missing.contains("NotFound") && !missing.contains("private-path"));
+    std::fs::write(&path, crate::test_tls::CA).unwrap();
+    let context = NetworkContext::new(policy.clone()).unwrap();
+    std::fs::write(&path, b"private credential text").unwrap();
+    assert_eq!(context.trusted_roots, vec![crate::test_tls::CA.to_vec()]);
+    let malformed = NetworkContext::new(policy.clone())
+        .err()
+        .unwrap()
+        .to_string();
+    assert_eq!(malformed, "invalid configured trust certificate");
+    std::fs::write(
+        &path,
+        b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n",
+    )
+    .unwrap();
+    assert_eq!(
+        NetworkContext::new(policy).err().unwrap().to_string(),
+        "invalid configured trust certificate"
+    );
 }

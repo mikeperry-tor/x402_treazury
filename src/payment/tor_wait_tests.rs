@@ -1,5 +1,6 @@
 //! API retry scheduling through retained application owners, using fixture SOCKS.
 use super::*;
+use axum::serve::Listener as _;
 use axum::{
     Router,
     extract::State,
@@ -115,7 +116,7 @@ fn route(path: &str) -> RoutedRequest {
     RoutedRequest {
         headers: Default::default(),
         method: "POST".into(),
-        url: format!("http://wait-api.example.com{path}"),
+        url: format!("https://wait-api.example.com{path}"),
         query: BTreeMap::new(),
         body: Some(serde_json::json!({"exact":"business argument"})),
     }
@@ -135,7 +136,7 @@ async fn tor_retry_wait_child() {
         test_socks::{Fault, Socks},
     };
     let observed = Observations::default();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::test_tls::listener().await;
     let address = listener.local_addr().unwrap();
     let app = Router::new().fallback(handler).with_state(observed.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -150,7 +151,8 @@ async fn tor_retry_wait_child() {
             socks_endpoint: Some(proxy.address),
             ..Default::default()
         })
-        .unwrap(),
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
     );
 
     // A disconnected waiter relinquishes delivery, while its accepted owner
@@ -163,7 +165,7 @@ async fn tor_retry_wait_child() {
         crate::network::global()
             .http_participating(
                 &identity,
-                "http://wait-api.example.com",
+                "https://wait-api.example.com",
                 None,
                 false,
                 Default::default(),

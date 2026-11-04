@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
@@ -61,6 +61,9 @@ pub struct NetworkPolicy {
     pub tor_isolation_retries: Option<usize>,
     /// Maximum HTTP read inactivity, identically in direct and Tor mode.
     pub read_timeout_seconds: Option<u64>,
+    /// Absolute PEM files adding private-PKI trust without disabling TLS checks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_ca_files: Vec<PathBuf>,
 }
 impl NetworkPolicy {
     pub fn cover_enabled(&self) -> bool {
@@ -69,6 +72,10 @@ impl NetworkPolicy {
 
     pub fn validate(&self) -> Result<()> {
         self.cover_limits.validate()?;
+        ensure!(
+            self.trusted_ca_files.iter().all(|path| path.is_absolute()),
+            "network.trusted_ca_files requires absolute paths"
+        );
         self.tor_attempts()?;
         if self.mode == Mode::Direct {
             ensure!(
@@ -123,7 +130,11 @@ impl NetworkPolicy {
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"tor_isolation_retries":self.tor_isolation_retries.unwrap_or(2),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        let mut value = serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"tor_isolation_retries":self.tor_isolation_retries.unwrap_or(2),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]});
+        if !self.trusted_ca_files.is_empty() {
+            value["trusted_ca_files"] = serde_json::json!(self.trusted_ca_files);
+        }
+        value
     }
     pub fn load(path: &Path) -> Result<Self> {
         Ok(NetworkConfig::load(path)?.network)
@@ -328,6 +339,7 @@ pub struct NetworkContext {
     pub policy: NetworkPolicy,
     http: Mutex<HashMap<HttpKey, CachedClient<Arc<HttpTransport>>>>,
     startup_socks: tokio::sync::OnceCell<()>,
+    trusted_roots: Vec<Vec<u8>>,
     #[cfg(test)]
     test_root: Option<&'static [u8]>,
     #[cfg(test)]
@@ -353,19 +365,64 @@ impl NetworkContext {
     }
     pub fn new(policy: NetworkPolicy) -> Result<Self> {
         policy.validate()?;
-        Ok(Self {
+        let roots = policy
+            .trusted_ca_files
+            .iter()
+            .map(|path| {
+                std::fs::read(path).map_err(|error| {
+                    anyhow::anyhow!(
+                        "reading configured trust certificate failed ({:?})",
+                        error.kind()
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let context = Self {
             cover: policy
                 .cover_enabled()
                 .then(|| crate::cover::runtime::Engine::new(policy.cover_limits.clone())),
             policy,
             http: Mutex::new(HashMap::new()),
             startup_socks: tokio::sync::OnceCell::new(),
+            trusted_roots: Vec::new(),
             #[cfg(test)]
             test_root: None,
             #[cfg(test)]
             test_dns: None,
             grpc: tokio::sync::Mutex::new(HashMap::new()),
-        })
+        };
+        context
+            .with_trusted_roots(roots)
+            .map_err(|_| anyhow::anyhow!("invalid configured trust certificate"))
+    }
+    /// Add private-PKI trust anchors before creating transports. Ordinary certificate
+    /// and hostname validation remains enabled; process installation freezes trust.
+    pub fn with_trusted_roots(
+        mut self,
+        roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
+    ) -> Result<Self> {
+        ensure!(
+            self.http.lock().expect("network cache poisoned").is_empty()
+                && self.grpc.try_lock().is_ok_and(|clients| clients.is_empty()),
+            "trust roots must be configured before creating transports"
+        );
+        for root in roots {
+            use rustls::pki_types::{CertificateDer, pem::PemObject};
+            let mut store = rustls::RootCertStore::empty();
+            for certificate in CertificateDer::pem_slice_iter(root.as_ref()) {
+                store
+                    .add(certificate.context("invalid trust certificate")?)
+                    .context("invalid trust certificate")?;
+            }
+            ensure!(
+                !store.is_empty(),
+                "trust certificate file contains no certificates"
+            );
+            self.trusted_roots.push(root.as_ref().to_vec());
+        }
+        self.trusted_roots.sort();
+        self.trusted_roots.dedup();
+        Ok(self)
     }
     /// HTTP inactivity has one policy in both transports. Explicit caller
     /// overrides replace the network default; there is no Tor floor.
@@ -573,6 +630,9 @@ impl NetworkContext {
             };
             builder = builder.dns_resolver(Arc::new(resolver));
         }
+        for root in &self.trusted_roots {
+            builder = builder.tls_certs_merge(reqwest::Certificate::from_pem_bundle(root)?);
+        }
         #[cfg(test)]
         if let Some(root) = self.test_root {
             builder = builder.tls_certs_only([reqwest::Certificate::from_pem(root)?]);
@@ -612,15 +672,39 @@ impl NetworkContext {
 static NETWORK: OnceLock<Arc<NetworkContext>> = OnceLock::new();
 pub fn global() -> &'static Arc<NetworkContext> {
     NETWORK.get_or_init(|| {
-        Arc::new(NetworkContext::new(NetworkPolicy::default()).expect("valid direct default"))
+        let context = NetworkContext::new(NetworkPolicy::default()).expect("valid direct default");
+        // Library fixtures use a public private-PKI CA with normal TLS verification.
+        // Independent contexts retain ordinary platform trust, including rejection tests.
+        #[cfg(test)]
+        let context = context
+            .with_trusted_roots([crate::test_tls::CA])
+            .expect("valid fixture CA");
+        Arc::new(context)
     })
 }
+/// Select process policy, preserving any already installed private-PKI trust.
 pub fn install(policy: NetworkPolicy) -> Result<()> {
-    let ctx = Arc::new(NetworkContext::new(policy.clone())?);
-    if NETWORK.set(ctx).is_err() {
+    if policy.trusted_ca_files.is_empty()
+        && let Some(context) = NETWORK.get()
+    {
         ensure!(
-            global().policy == policy,
+            context.policy == policy,
             "network policy cannot change after initialization; restart required"
+        );
+        return Ok(());
+    }
+    let context = NetworkContext::new(policy)?;
+    #[cfg(test)]
+    let context = context.with_trusted_roots([crate::test_tls::CA])?;
+    install_context(context)
+}
+/// Install immutable process transport policy and trust before the first request.
+pub fn install_context(context: NetworkContext) -> Result<()> {
+    let context = Arc::new(context);
+    if NETWORK.set(context.clone()).is_err() {
+        ensure!(
+            global().policy == context.policy && global().trusted_roots == context.trusted_roots,
+            "network policy or trust cannot change after initialization; restart required"
         );
     }
     Ok(())
@@ -637,6 +721,7 @@ pub fn provider_discovery(
     timeout: impl Into<Option<Duration>>,
     policy: HttpPolicy,
 ) -> Result<reqwest::Client> {
+    provider_url(url)?;
     global().http_policy(&IsolationId::discovery(url)?, url, timeout, false, policy)
 }
 pub fn discovery(url: &str, timeout: impl Into<Option<Duration>>) -> Result<reqwest::Client> {
@@ -821,7 +906,10 @@ impl NetworkContext {
             .connect_timeout(self.policy.connect_timeout())
             .tcp_nodelay(true);
         if uri.scheme_str() == Some("https") {
-            let tls = ClientTlsConfig::new().with_webpki_roots();
+            let mut tls = ClientTlsConfig::new().with_webpki_roots();
+            for root in &self.trusted_roots {
+                tls = tls.ca_certificate(tonic::transport::Certificate::from_pem(root));
+            }
             #[cfg(test)]
             let tls = if let Some(root) = self.test_root {
                 tls.ca_certificate(tonic::transport::Certificate::from_pem(root))
@@ -911,6 +999,15 @@ pub fn public_ip(ip: std::net::IpAddr) -> bool {
             }),
     }
 }
+/// Validate a provider endpoint without imposing agent-selected public routing.
+pub fn provider_url(url: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(url).context("invalid provider URL")?;
+    ensure!(
+        url.scheme() == "https" && url.host_str().is_some(),
+        "provider URLs require HTTPS"
+    );
+    Ok(url)
+}
 pub fn public_url(url: &str) -> Result<reqwest::Url> {
     let u = reqwest::Url::parse(url).map_err(|_| anyhow::anyhow!("invalid source URL"))?;
     ensure!(
@@ -999,6 +1096,45 @@ fn validate_public_addresses(addresses: &[std::net::SocketAddr]) -> std::io::Res
 #[cfg(test)]
 mod public_destination_tests {
     use super::*;
+    #[test]
+    fn provider_https_policy_preserves_private_pki_and_infrastructure() {
+        assert!(provider_url("http://127.0.0.1:1/read").is_err());
+        assert!(provider_url("https://localhost/read").is_ok());
+        assert!(provider_url("https://127.0.0.1/read").is_ok());
+        assert!(public_url("https://localhost/read").is_err());
+        let context = NetworkContext::new(Default::default()).unwrap();
+        assert!(
+            context
+                .http(&IsolationId::bootstrap(), "http://127.0.0.1:1", None)
+                .is_ok()
+        );
+    }
+    #[tokio::test]
+    async fn cleartext_provider_requests_fail_before_io_or_relay() {
+        let cfg = crate::catalog::Config {
+            spec: "http://127.0.0.1:1/spec".into(),
+            ..Default::default()
+        };
+        let context = NetworkContext::new(Default::default()).unwrap();
+        let error = match crate::catalog::prepare_json_discovery_with(&cfg, &context).await {
+            Err(error) => error,
+            Ok(_) => panic!("cleartext catalog must not produce a relay continuation"),
+        };
+        assert_eq!(error.to_string(), "provider URLs require HTTPS");
+        assert_eq!(context.http_cache_len(), 0);
+        let error = crate::payment::PaidClient::unsigned()
+            .execute_response(crate::catalog::RoutedRequest {
+                method: "GET".into(),
+                url: "http://127.0.0.1:1/read".into(),
+                headers: Default::default(),
+                query: Default::default(),
+                body: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "provider URLs require HTTPS");
+    }
+
     #[test]
     fn password_only_userinfo_is_rejected_before_transport_creation() {
         let url = "https://:fixture-password@api.example.com/read";

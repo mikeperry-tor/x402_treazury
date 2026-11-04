@@ -1,4 +1,7 @@
 //! Offline end-to-end admission against a local Base RPC and x402 seller.
+#[path = "support/tls.rs"]
+mod tls;
+use x402_treazury::network;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
 #[path = "support/log_capture.rs"]
@@ -32,6 +35,18 @@ use x402_treazury::{
 };
 #[path = "support/signatures.rs"]
 mod signatures;
+fn install_network(policy: network::NetworkPolicy) {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        network::install_context(
+            network::NetworkContext::new(policy)
+                .unwrap()
+                .with_trusted_roots([tls::CA])
+                .unwrap(),
+        )
+        .unwrap();
+    });
+}
 struct UnsignedGate {
     barrier: Arc<tokio::sync::Barrier>,
     remaining: usize,
@@ -77,11 +92,11 @@ struct Fake {
     traces: Arc<Mutex<Vec<(std::net::SocketAddr, String, String)>>>,
 }
 fn challenge(amount: &str) -> Value {
-    json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"x".repeat(700),"mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
+    json!({"x402Version":2,"resource":{"url":"https://localhost/pay","description":"x".repeat(700),"mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
 }
 async fn rpc(
     State(f): State<Fake>,
-    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    ConnectInfo(tls::PeerAddr(peer)): ConnectInfo<tls::PeerAddr>,
     Json(v): Json<Value>,
 ) -> Json<Value> {
     if v["method"] == "eth_call"
@@ -282,7 +297,7 @@ async fn rpc(
 }
 async fn seller(
     State(f): State<Fake>,
-    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    ConnectInfo(tls::PeerAddr(peer)): ConnectInfo<tls::PeerAddr>,
     headers: HeaderMap,
 ) -> Response {
     if f.free.load(Ordering::SeqCst) {
@@ -302,6 +317,17 @@ async fn seller(
         let db = rusqlite::Connection::open(&f.db).unwrap();
         let count:i64=db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED' AND nonce=?1",[p["payload"]["authorization"]["nonce"].as_str().unwrap()],|r|r.get(0)).unwrap();
         assert_eq!(count, 1);
+        let expiry: i64 = db.query_row(
+            "SELECT valid_before FROM payment_attempts WHERE nonce=?1 AND state='POSSIBLY_SUBMITTED'",
+            [p["payload"]["authorization"]["nonce"].as_str().unwrap()],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            expiry.to_string(),
+            p["payload"]["authorization"]["validBefore"]
+                .as_str()
+                .unwrap()
+        );
         f.signed.lock().unwrap().push(p);
         if f.hold.swap(false, Ordering::SeqCst) {
             f.arrived.notify_one();
@@ -412,8 +438,12 @@ impl Harness {
                 .insert(address.address.clone(), 5_000_000);
         }
         let (store, worker) = StoreHandle::spawn(store);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
+        install_network(Default::default());
+        let listener = tls::listener().await;
+        let base = format!(
+            "https://{}",
+            axum::serve::Listener::local_addr(&listener).unwrap()
+        );
         let app = Router::new()
             .route("/rpc", post(rpc))
             .route("/pay", get(seller).post(seller))
@@ -421,7 +451,7 @@ impl Harness {
         let server = tokio::spawn(async move {
             axum::serve(
                 listener,
-                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                app.into_make_service_with_connect_info::<tls::PeerAddr>(),
             )
             .await
             .unwrap()
@@ -598,6 +628,7 @@ fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
 }
 #[tokio::test]
 async fn concurrent_calls_journal_unique_attempts_without_a_local_balance_ceiling() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let before = h.store.call(|s| s.status()).await.unwrap();
     let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
@@ -623,6 +654,7 @@ async fn concurrent_calls_journal_unique_attempts_without_a_local_balance_ceilin
 }
 #[tokio::test]
 async fn confirmed_depletion_consumes_ready_independently_of_failed_refill() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
@@ -688,6 +720,7 @@ impl std::io::Write for LogCapture {
 }
 #[tokio::test]
 async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization() {
+    install_network(Default::default());
     if log_capture::run_in_child(
         "managed_extensions_are_stripped_logged_and_do_not_change_authorization",
     ) {
@@ -774,6 +807,7 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
 }
 #[tokio::test]
 async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_prose() {
+    install_network(Default::default());
     if log_capture::run_in_child(
         "managed_failure_diagnostics_survive_cancellation_and_hide_upstream_prose",
     ) {
@@ -889,6 +923,7 @@ async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_pros
 
 #[tokio::test]
 async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() {
+    install_network(Default::default());
     if log_capture::run_in_child(
         "direct_managed_failure_diagnostics_distinguish_refusal_and_rejection",
     ) {
@@ -985,6 +1020,7 @@ async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() 
 // separate from rejecting unreviewed metadata inside payment offers.
 #[tokio::test]
 async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
+    install_network(Default::default());
     let fixtures: BTreeMap<String, Value> =
         serde_json::from_str(include_str!("fixtures/provider_payment_challenges.json")).unwrap();
     for (name, challenge) in fixtures {
@@ -1020,6 +1056,7 @@ async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
 }
 #[tokio::test]
 async fn output_schema_is_opaque_metadata_and_invalid_shapes_fail_before_admission() {
+    install_network(Default::default());
     let h = Harness::new().await;
     for schema in [json!(null), json!("object"), json!([]), json!(1)] {
         let mut c = challenge("1");
@@ -1049,17 +1086,27 @@ async fn output_schema_is_opaque_metadata_and_invalid_shapes_fail_before_admissi
 }
 #[tokio::test]
 async fn opaque_annotations_and_display_prices_preserve_atomic_payment_terms() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let mut c = challenge("1");
+    c["accepts"][0]["maxTimeoutSeconds"] = json!(3600);
     c["accepts"][0]["vendorAnnotation"] = json!({"nested": [1, "value"]});
     c["accepts"][0]["extra"]["totalUsd"] = json!("0.000001");
     c["accepts"][0]["extra"]["breakdown"] = json!({"search": "display only"});
     c["accepts"][0]["extra"]["merchant"] = json!({"name": "vendor"});
     *h.f.challenge.lock().unwrap() = c.clone();
+    let started = now().unwrap();
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
     {
         let signed = h.f.signed.lock().unwrap();
         assert_eq!(signed.last().unwrap()["accepted"], c["accepts"][0]);
+        let expiry: u64 = signed.last().unwrap()["payload"]["authorization"]["validBefore"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(expiry >= started + 300);
+        assert!(expiry <= now().unwrap() + 300);
         assert_eq!(
             signed.last().unwrap()["payload"]["authorization"]["value"],
             "1"
@@ -1069,6 +1116,7 @@ async fn opaque_annotations_and_display_prices_preserve_atomic_payment_terms() {
 }
 #[tokio::test]
 async fn v2_legacy_amount_metadata_preserves_signature_journal_cap_and_no_replay() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let mut c = challenge("1");
     c["accepts"][0]["maxAmountRequired"] = json!("5000001");
@@ -1115,6 +1163,7 @@ async fn v2_legacy_amount_metadata_preserves_signature_journal_cap_and_no_replay
 }
 #[tokio::test]
 async fn informational_metadata_cannot_override_payment_safety() {
+    install_network(Default::default());
     let h = Harness::new().await;
     for (key, value) in [
         ("amount", json!("0")),
@@ -1139,6 +1188,7 @@ async fn informational_metadata_cannot_override_payment_safety() {
 }
 #[tokio::test]
 async fn direct_managed_calls_bound_body_challenges_and_drop_unused_header_bodies() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let manager = ManagedPool::new(
         h.store.clone(),
@@ -1200,7 +1250,7 @@ async fn direct_managed_calls_bound_body_challenges_and_drop_unused_header_bodie
             let raw = &mut v1["accepts"][0];
             raw["network"] = json!("base");
             raw["maxAmountRequired"] = raw.as_object_mut().unwrap().remove("amount").unwrap();
-            raw["resource"] = json!("http://localhost/pay");
+            raw["resource"] = json!("https://localhost/pay");
             raw["description"] = json!("legacy direct fixture");
             reqwest::Response::from(
                 axum::http::Response::builder()
@@ -1225,6 +1275,7 @@ async fn direct_managed_calls_bound_body_challenges_and_drop_unused_header_bodie
 
 #[tokio::test]
 async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
+    install_network(Default::default());
     let h = Harness::new().await;
     for kind in [
         "v3",
@@ -1284,7 +1335,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
             "network": "base",
             "asset": USDC,
             "maxAmountRequired": "1",
-            "resource": "http://localhost/pay",
+            "resource": "https://localhost/pay",
             "description": "v1 exact payment",
             "mimeType": "application/json",
             "payTo": "0x0000000000000000000000000000000000000003",
@@ -1303,6 +1354,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
 }
 #[tokio::test]
 async fn rejected_payment_stays_journaled_across_restart_without_automatic_replay() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.f.reject.store(true, Ordering::SeqCst);
     h.f.challenge.lock().unwrap()["extensions"] = json!({"unknown": {"secret": "not logged"}});
@@ -1337,6 +1389,7 @@ async fn rejected_payment_stays_journaled_across_restart_without_automatic_repla
 }
 #[tokio::test]
 async fn foreground_signing_does_not_fetch_stale_wrong_chain_or_reorg_evidence() {
+    install_network(Default::default());
     let h = restart(Harness::new().await).await;
     for flag in [&h.f.stale, &h.f.wrong_chain, &h.f.reorg] {
         flag.store(true, Ordering::SeqCst);
@@ -1356,6 +1409,7 @@ async fn foreground_signing_does_not_fetch_stale_wrong_chain_or_reorg_evidence()
 }
 #[tokio::test]
 async fn cancellation_after_submission_retains_liability() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.f.hold.store(true, Ordering::SeqCst);
     let client = h.client.clone();
@@ -1375,6 +1429,7 @@ async fn cancellation_after_submission_retains_liability() {
 }
 #[tokio::test]
 async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     db.execute_batch("CREATE TRIGGER fail_journal BEFORE INSERT ON payment_attempts WHEN NEW.state='POSSIBLY_SUBMITTED' BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
@@ -1432,6 +1487,7 @@ async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
 
 #[tokio::test]
 async fn managed_deployment_shares_pools_keeps_static_profiles_and_releases_ownership() {
+    install_network(Default::default());
     use x402_treazury::{deployment::Deployment, treasury::Treasury};
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
@@ -1667,6 +1723,7 @@ sources=["api"]
 
 #[tokio::test]
 async fn free_calls_do_not_touch_admission_and_funded_active_serves_independently() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let before = h.f.rpc_calls.load(Ordering::SeqCst);
     h.f.free.store(true, Ordering::SeqCst);
@@ -1701,6 +1758,7 @@ async fn free_calls_do_not_touch_admission_and_funded_active_serves_independentl
 }
 #[tokio::test]
 async fn unused_expired_authorization_requires_explicit_canonical_resolution() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.f.challenge.lock().unwrap()["accepts"][0]["maxTimeoutSeconds"] = json!(5);
     h.f.reject.store(true, Ordering::SeqCst);
@@ -1729,6 +1787,7 @@ async fn unused_expired_authorization_requires_explicit_canonical_resolution() {
 }
 #[tokio::test]
 async fn pending_exposure_does_not_block_independent_permitted_calls() {
+    install_network(Default::default());
     let h = Harness::new().await;
     exhaust_ready(&h).await;
     let other_id = h
@@ -1778,6 +1837,7 @@ async fn pending_exposure_does_not_block_independent_permitted_calls() {
 }
 #[tokio::test]
 async fn configured_payment_cap_allows_attempts_above_estimated_funded_capacity() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
@@ -1820,6 +1880,7 @@ async fn configured_payment_cap_allows_attempts_above_estimated_funded_capacity(
 
 #[tokio::test]
 async fn ordinary_balance_refresh_preserves_unresolved_authorizations() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let payer = signatures::recover_exact(&h.f.signed.lock().unwrap()[0]).to_string();
@@ -1853,6 +1914,7 @@ mod lifecycle;
 mod socks;
 #[tokio::test]
 async fn managed_payments_use_isolated_tor_connections() {
+    install_network(Default::default());
     let proxy = socks::Socks::start(
         std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
         socks::Fault::None,
@@ -1889,13 +1951,12 @@ async fn managed_payments_use_isolated_tor_connections() {
 #[test]
 #[ignore = "subprocess helper runs with its own immutable Tor policy"]
 fn tor_managed_child() {
-    use x402_treazury::network::{Mode, NetworkPolicy, install};
-    install(NetworkPolicy {
+    use x402_treazury::network::{Mode, NetworkPolicy};
+    install_network(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(std::env::var("TOR_TEST_PROXY").unwrap().parse().unwrap()),
         ..Default::default()
-    })
-    .unwrap();
+    });
     confirmed_depletion_consumes_ready_independently_of_failed_refill();
     concurrent_calls_journal_unique_attempts_without_a_local_balance_ceiling();
     unsupported_and_over_target_offers_have_no_admission_side_effects();
@@ -1907,6 +1968,7 @@ fn tor_managed_child() {
 
 #[tokio::test]
 async fn post_handoff_gets_one_new_challenge_and_signs_once() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
@@ -1942,6 +2004,7 @@ async fn post_handoff_gets_one_new_challenge_and_signs_once() {
 }
 #[tokio::test]
 async fn promotion_keeps_rpc_and_payment_transport_bound_to_address() {
+    install_network(Default::default());
     let output = tokio::process::Command::new(std::env::current_exe().unwrap())
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
@@ -1970,12 +2033,11 @@ async fn promotion_identity_child() {
         socks::Fault::None,
     )
     .await;
-    network::install(NetworkPolicy {
+    install_network(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(proxy.address),
         ..Default::default()
-    })
-    .unwrap();
+    });
     for method in ["GET", "POST"] {
         let h = Harness::new().await;
         let initial = h.store.call(|s| s.status()).await.unwrap();
@@ -2065,6 +2127,7 @@ async fn promotion_identity_child() {
 
 #[tokio::test]
 async fn malformed_base_evidence_never_applies_a_partial_view() {
+    install_network(Default::default());
     for fault in [
         "id",
         "version",
@@ -2114,6 +2177,7 @@ mod concurrency;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_signed_response_does_not_block_shared_pool_or_reconciliation() {
+    install_network(Default::default());
     let h = Harness::new().await;
     exhaust_ready(&h).await;
     let pool = make_pool(h.store.clone(), h.pool.clone(), &h.base);
@@ -2157,6 +2221,7 @@ async fn slow_signed_response_does_not_block_shared_pool_or_reconciliation() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn confirmed_payment_can_rotate_while_original_seller_response_is_pending() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.f.hold.store(true, Ordering::SeqCst);
     let client = h.client.clone();
@@ -2203,6 +2268,7 @@ async fn confirmed_payment_can_rotate_while_original_seller_response_is_pending(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_chain_reconciliation_allows_waiting_admission_without_blocking_other_pools() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let pool = make_pool(h.store.clone(), h.pool.clone(), &h.base);
     let client = PaidClient::managed(pool.clone());
@@ -2238,6 +2304,7 @@ async fn slow_chain_reconciliation_allows_waiting_admission_without_blocking_oth
 
 #[tokio::test]
 async fn qualification_guard_allows_existing_ready_consumption_but_denies_refill() {
+    install_network(Default::default());
     let h = Harness::new().await;
     h.store
         .call(|s| {
@@ -2295,6 +2362,7 @@ async fn qualification_guard_allows_existing_ready_consumption_but_denies_refill
 
 #[tokio::test]
 async fn qualification_deployment_installs_guard_before_bootstrap_even_with_auto_fund() {
+    install_network(Default::default());
     use x402_treazury::rotation::restriction::FundingRestriction;
     use x402_treazury::{deployment::Deployment, treasury::Treasury};
     for existing in [false, true] {
@@ -2319,7 +2387,7 @@ async fn qualification_deployment_installs_guard_before_bootstrap_even_with_auto
         owner.close().await.unwrap();
         std::fs::write(
             dir.path().join("spec.json"),
-            r#"{"servers":[{"url":"http://127.0.0.1:1"}],"paths":{"/pay":{"get":{}}}}"#,
+            r#"{"servers":[{"url":"https://127.0.0.1:1"}],"paths":{"/pay":{"get":{}}}}"#,
         )
         .unwrap();
         let config = format!(
@@ -2392,6 +2460,7 @@ sources=["api"]
 
 #[tokio::test]
 async fn explicit_api_cap_independent_of_funding_target_uses_confirmed_capacity() {
+    install_network(Default::default());
     let mut h = Harness::new().await;
     for balance in h.f.balances.lock().unwrap().values_mut() {
         *balance = 6_000_000;
@@ -2428,6 +2497,7 @@ async fn explicit_api_cap_independent_of_funding_target_uses_confirmed_capacity(
 
 #[tokio::test]
 async fn foreground_admission_does_not_start_historical_authorization_sweep() {
+    install_network(Default::default());
     let mut h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
@@ -2451,6 +2521,7 @@ async fn foreground_admission_does_not_start_historical_authorization_sweep() {
 
 #[tokio::test]
 async fn nonce_outages_retain_journals_without_vetoing_signing_across_restart() {
+    install_network(Default::default());
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     h.client.execute(h.route()).await.unwrap();
@@ -2483,6 +2554,7 @@ async fn nonce_outages_retain_journals_without_vetoing_signing_across_restart() 
 
 #[tokio::test]
 async fn held_balance_refresh_does_not_gate_signing_or_resolve_history() {
+    install_network(Default::default());
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
     h.client.execute(h.route()).await.unwrap();
@@ -2513,6 +2585,7 @@ mod draining;
 
 #[tokio::test]
 async fn replacement_credit_survives_restart_without_releasing_old_authorizations() {
+    install_network(Default::default());
     let h = Harness::new().await;
     let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
     a.unwrap();

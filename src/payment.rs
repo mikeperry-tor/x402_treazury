@@ -13,6 +13,8 @@ use x402_chain_eip155::{V2Eip155ExactClient, V2Eip155UptoClient};
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 mod document_identity;
+mod lifetime;
+pub(crate) use lifetime::{BoundedClient, MAX_AUTHORITY_SECONDS};
 mod presentation;
 pub(crate) use presentation::{
     ApiExecution, ResponseFacts, present as present_api_error, summary as api_error_summary,
@@ -83,6 +85,12 @@ pub struct SpendPolicy {
 }
 impl SpendPolicy {
     pub fn dollars(text: &str) -> Result<Self> {
+        if text.is_empty() {
+            tracing::warn!(
+                category = "implicit_unlimited_payment_cap",
+                "The API payment cap is empty, so payments have no amount limit; use \"none\" or \"off\" to request unlimited payments explicitly"
+            );
+        }
         if matches!(text.to_ascii_lowercase().as_str(), "none" | "off" | "") {
             return Ok(Self { max_atomic: None });
         }
@@ -121,9 +129,9 @@ impl Payer {
         let address = signer.address().to_string();
         let signer = Arc::new(signer);
         let client = X402Client::new()
-            .register(V1ExactClient::new(signer.clone()))
-            .register(V2Eip155ExactClient::new(signer.clone()))
-            .register(V2Eip155UptoClient::new(signer))
+            .register(BoundedClient(V1ExactClient::new(signer.clone())))
+            .register(BoundedClient(V2Eip155ExactClient::new(signer.clone())))
+            .register(BoundedClient(V2Eip155UptoClient::new(signer)))
             .with_selector(policy);
         Ok(Self { client, address })
     }
@@ -1243,8 +1251,10 @@ async fn static_payment(
 }
 
 fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
-    let mut request =
-        reqwest::Request::new(route.method.parse()?, reqwest::Url::parse(&route.url)?);
+    let mut request = reqwest::Request::new(
+        route.method.parse()?,
+        crate::network::provider_url(&route.url)?,
+    );
     let mut query = Vec::new();
     for (name, value) in route.headers {
         let name = crate::catalog::headers::business_name(&name)?;

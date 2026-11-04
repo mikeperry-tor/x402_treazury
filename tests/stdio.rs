@@ -1,6 +1,10 @@
 //! Exercise the actual CLI process and wire framing without a Python MCP client.
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+use x402_treazury::network;
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
 use std::{
@@ -17,8 +21,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let vendor = tokio::spawn(async move {
         axum::serve(
             listener,
@@ -58,11 +62,22 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
         format!("spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\n"),
     )
     .unwrap();
+    let network_config = dir.path().join("network.toml");
+    std::fs::write(
+        &network_config,
+        format!(
+            "[network]\ntrusted_ca_files=['{}']\n",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem")
+        ),
+    )
+    .unwrap();
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
         .arg("serve")
+        .arg("--network-config")
+        .arg(&network_config)
         .arg("--provider")
         .arg(&config)
         .stdin(Stdio::piped())

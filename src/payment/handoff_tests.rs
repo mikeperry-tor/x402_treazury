@@ -8,6 +8,7 @@ use crate::rotation::{
     store::{AllocationKind, Store, StoreHandle},
 };
 use crate::test_signatures as signatures;
+use axum::serve::Listener as _;
 use axum::{
     Json, Router,
     body::Bytes,
@@ -65,7 +66,7 @@ struct Fixture {
     db: std::path::PathBuf,
 }
 fn challenge(amount: &str) -> Value {
-    json!({"x402Version":2,"resource":{"url":"http://localhost/protected"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
+    json!({"x402Version":2,"resource":{"url":"https://localhost/protected"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
 }
 fn required(challenge: Value) -> Response {
     (
@@ -108,7 +109,7 @@ async fn rpc(State(f): State<Fixture>, Json(v): Json<Value>) -> Json<Value> {
 }
 async fn protected(
     State(f): State<Fixture>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ConnectInfo(crate::test_tls::PeerAddr(peer)): ConnectInfo<crate::test_tls::PeerAddr>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
@@ -247,8 +248,8 @@ async fn run_case_private(
         db: dir.path().join("state/state.sqlite"),
     };
     let (store, owner) = StoreHandle::spawn(store);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let redirects = f.redirects.clone();
     let app = Router::new()
         .route("/rpc", post(rpc))
@@ -267,7 +268,7 @@ async fn run_case_private(
     let server = tokio::spawn(async move {
         axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
+            app.into_make_service_with_connect_info::<crate::test_tls::PeerAddr>(),
         )
         .await
         .unwrap()

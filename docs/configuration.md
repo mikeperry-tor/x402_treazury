@@ -197,8 +197,10 @@ the initialized treasury and binds the listener before
 background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
 adds multiple research listeners, Tor, relay and persistent source registrations.
 
-Each listener serves stateless Streamable HTTP at `/mcp`. Meta-config listeners
-require loopback addresses. There is no hot reload; restart to apply changes.
+Each listener serves stateless Streamable HTTP at `/mcp`. Both deployment and
+standalone HTTP listeners require loopback addresses. Standalone hostnames must
+resolve exclusively to loopback addresses; serving binds those validated addresses.
+There is no hot reload; restart to apply changes.
 Static wallet profiles remain supported and use `mode = "static"` with
 `private_key_env`; they do not require treasury configuration. Static serving
 loads only the keys used by selected tools.
@@ -367,10 +369,16 @@ To disable HTTP authentication for one listener, set `auth = false` and omit
 authentication policy. Standalone HTTP uses `--transport http --no-auth`; this
 explicit flag ignores `X402_MCP_BEARER_TOKEN` and conflicts with `--bearer-token`.
 Startup warns when a listener allows clients to call tools without authentication.
+Disabling both authentication and the Host allowlist remains permitted and emits
+both independent startup warnings.
+Prefer `X402_MCP_BEARER_TOKEN` to standalone `--bearer-token`: the latter exposes
+the credential to process inspection and emits a warning.
 Stdio needs no authentication. Live integration qualification still requires
 authenticated listeners and fresh runner-generated tokens.
 
-Authenticated HTTP clients send `Authorization: Bearer <token>`; `bearer_token_env` names the
+Authenticated HTTP clients send `Authorization: Bearer <token>`; the scheme name
+is case-insensitive while the token comparison remains exact and constant-time.
+`bearer_token_env` names the
 environment variable containing only the token. HTTP 401 responses distinguish
 missing headers, malformed or duplicate authorization headers, and incorrect token
 values. Warnings identify the listener and failure category without including
@@ -492,9 +500,10 @@ Configuration changes take effect when the deployment is reopened. Managed
 profiles require an explicit `max_api_payment_usdc`; the static-wallet default
 remains unchanged. The cap applies to every active, reserve and retained wallet,
 independently of original funding size. Explicit unlimited spellings retain their
-existing meaning for payment authority only. A cap above every nominal bound is
-valid, and nominal bounds above the cap are valid; neither arrangement authorizes
-extra funding.
+existing meaning for payment authority only. Empty caps also mean unlimited,
+with a WARN asking for explicit `"none"` or `"off"`; configured defaults are unchanged.
+A cap above every nominal bound is valid, and nominal bounds above the cap are
+valid; neither arrangement authorizes extra funding.
 
 `reserves.small` defaults to a randomized $2-5 nominal range when omitted or empty.
 `reserves.large` is optional; an absent large table stays disabled, while an
@@ -1459,11 +1468,30 @@ allow_tls12 = true  # permit TLS 1.2; still prefer TLS 1.3
 Both default to `false`, inherit through `extends`, and appear in `config show`.
 They are independent: an HTTP/1.1-only server with TLS 1.3 needs only
 `allow_http1`. There is no automatic downgrade retry on a strict connection
-failure. These flags do not relax certificate or hostname checks. Existing
-cleartext `http://` URLs retain their previous behavior; these settings do not
-upgrade them to HTTPS. Treasury/NEAR/RPC and lightwalletd transports keep their
+failure. These flags do not relax certificate or hostname checks. Provider catalog, help
+and unsigned/signed API URLs require HTTPS, including
+authored cross-origin operation URLs. Cleartext URLs are rejected before provider
+I/O, signing or relay fallback. Local specification files remain supported. Treasury/NEAR/RPC and lightwalletd
+transports keep their
 own existing policies. Agent-added providers use the strict defaults; agents
 cannot supply compatibility overrides.
+
+Private PKI can add trust anchors through the deployment's `[network]` section
+or an explicit `--network-config` file:
+
+```toml
+[network]
+trusted_ca_files = ["/absolute/path/private-ca.pem"]
+```
+
+Paths must be absolute native filesystem paths. Each file contains one or more
+PEM certificates; these extend the existing HTTP and gRPC trust stores while
+certificate-chain, hostname and protocol validation remain enabled. Files are
+loaded into an immutable transport context before provider I/O. Missing, empty or
+malformed files fail explicitly. Changing file contents does not alter existing
+transports; restart to change process trust. `config show` reports configured paths
+without reading certificate contents. Ordinary defaults contain no additional
+anchors. Explicit direct catalog warming retains the configured trust anchors.
 
 Concurrent requests may multiplex over one HTTP/2 connection when origin,
 wallet/discovery identity, timeout and transport policy match. Different wallets

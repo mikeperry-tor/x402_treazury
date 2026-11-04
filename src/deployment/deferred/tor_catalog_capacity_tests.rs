@@ -58,7 +58,7 @@ fn config(mode: &str, socks: std::net::SocketAddr) -> String {
     );
     for id in ["a", "b", "z"] {
         config.push_str(&format!(
-            "[sources.{id}]\nspec='http://catalog.example.com/{mode}/{id}'\nbase_url='http://catalog.example.com'\n"
+            "[sources.{id}]\nspec='https://catalog.example.com/{mode}/{id}'\nbase_url='https://catalog.example.com'\n"
         ));
     }
     config.push_str("[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['a','b','z']\nwait_for_catalogs=false\n");
@@ -96,7 +96,7 @@ async fn catalog_capacity_child() {
         rejected: Arc::new(tokio::sync::Barrier::new(2)),
         changed: Default::default(),
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = crate::test_tls::listener().await;
     let address = listener.local_addr().unwrap();
     let app = Router::new().fallback(origin).with_state(state.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

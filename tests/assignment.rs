@@ -1,6 +1,10 @@
 use serde_json::{Value, json};
+#[path = "support/tls.rs"]
+mod tls;
+use axum::serve::Listener as _;
 use x402_treazury::deployment::Deployment;
 use x402_treazury::mcp_wire::McpResponse;
+use x402_treazury::network;
 fn config(scope: &str) -> String {
     format!(
         r#"version=1
@@ -40,6 +44,7 @@ sources=["a","b"]
     )
 }
 async fn show(dir: &std::path::Path, text: &str) -> Value {
+    tls::install_trust();
     let path = dir.join("servers.toml");
     std::fs::write(&path, text).unwrap();
     Deployment::show_config(&path).await.unwrap()
@@ -282,6 +287,7 @@ async fn seed_managed_inventory(
 
 #[tokio::test]
 async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
+    tls::install_trust();
     use x402_treazury::{rotation::store::status, treasury::Treasury};
     let dir = tempfile::tempdir().unwrap();
     let owner=Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
@@ -398,6 +404,7 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
 mod signatures;
 #[tokio::test]
 async fn automatic_scope_bindings_match_actual_payment_signers() {
+    tls::install_trust();
     use axum::{
         Json,
         http::{HeaderMap, StatusCode},
@@ -412,8 +419,8 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
     };
     let signed = Arc::new(Mutex::new(vec![]));
     let logs = signed.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let timestamp = now().unwrap();
     let rpc = move |Json(request): Json<Value>| async move {
         let result = match request["method"].as_str().unwrap() {

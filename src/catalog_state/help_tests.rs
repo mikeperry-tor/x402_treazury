@@ -66,8 +66,8 @@ async fn complete_empty_and_utf8_help_are_cached_but_partial_or_invalid_text_is_
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     for kind in [
         "partial-status",
@@ -528,3 +528,6 @@ async fn paid_fixture() {
     client.drain().await;
     server.abort();
 }
+
+#[cfg(test)]
+use axum::serve::Listener as _;

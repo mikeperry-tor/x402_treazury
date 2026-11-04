@@ -1,5 +1,7 @@
 //! One serving-owned publisher; accepted relay work drains before financial owners.
 #[cfg(test)]
+use axum::serve::Listener as _;
+#[cfg(test)]
 mod readiness_tests;
 #[cfg(test)]
 mod startup_socks_tests;
@@ -328,8 +330,8 @@ mod tests {
 
     #[tokio::test]
     async fn conflicting_catalogs_withdraw_all_owners_in_either_completion_order() {
-        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", origin.local_addr().unwrap());
+        let origin = crate::test_tls::listener().await;
+        let base = format!("https://{}", origin.local_addr().unwrap());
         let task = tokio::spawn(async move {
             axum::serve(
                 origin,
@@ -568,7 +570,8 @@ mod tests {
             crate::network::install_test_context(
                 crate::network::NetworkContext::new(Default::default())
                     .unwrap()
-                    .with_test_dns(Arc::new(DeferredFixtureDns)),
+                    .with_test_dns(Arc::new(DeferredFixtureDns))
+                    .with_test_root(crate::test_tls::CA),
             );
             return false;
         }
@@ -603,8 +606,8 @@ mod tests {
         tokio::task::JoinHandle<()>,
     ) {
         let dir = tempfile::tempdir().unwrap();
-        let api = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", api.local_addr().unwrap());
+        let api = crate::test_tls::listener().await;
+        let base = format!("https://{}", api.local_addr().unwrap());
         let api_task = tokio::spawn(async move {
             axum::serve(
                 api,
@@ -657,7 +660,7 @@ discover_on_demand=true
         .unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();
         // The unsigned origin fails locally before paid continuation is prepared.
-        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = crate::test_tls::listener().await;
         let target = format!(
             "https://spec.example.com:{}/spec",
             origin.local_addr().unwrap().port()
@@ -720,8 +723,8 @@ discover_on_demand=true
     #[tokio::test]
     async fn ordinary_serving_binds_before_slow_unsigned_origin_without_relay() {
         let dir = tempfile::tempdir().unwrap();
-        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", origin.local_addr().unwrap());
+        let origin = crate::test_tls::listener().await;
+        let base = format!("https://{}", origin.local_addr().unwrap());
         let (arrived, observed) = tokio::sync::oneshot::channel();
         let (release, wait) = tokio::sync::oneshot::channel();
         let arrived = Arc::new(tokio::sync::Mutex::new(Some(arrived)));
@@ -895,8 +898,8 @@ discovery_search_tool_instructions_text='Pending platform guidance'
         use axum::http::{HeaderMap, StatusCode};
         use std::sync::atomic::AtomicUsize;
         let dir = tempfile::tempdir().unwrap();
-        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", origin.local_addr().unwrap());
+        let origin = crate::test_tls::listener().await;
+        let base = format!("https://{}", origin.local_addr().unwrap());
         let probes = Arc::new(AtomicUsize::new(0));
         let catalogs = Arc::new(AtomicUsize::new(0));
         let api = Router::new()
@@ -1074,8 +1077,8 @@ wait_for_catalogs=false
                     .unwrap();
             }
             let (store, worker) = StoreHandle::spawn(state);
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let base = format!("http://{}", listener.local_addr().unwrap());
+            let listener = crate::test_tls::listener().await;
+            let base = format!("https://{}", listener.local_addr().unwrap());
             let timestamp = crate::rotation::base::now().unwrap();
             let rpc = tokio::spawn(async move {
                 axum::serve(

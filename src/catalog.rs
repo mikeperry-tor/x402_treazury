@@ -463,6 +463,7 @@ pub async fn load_json_with_limit(
             .context(LoadStage::LocalRead)?;
         return parse_document(&bytes);
     }
+    crate::network::provider_url(source)?;
     let started = std::time::Instant::now();
     let response = crate::http_cache::discovery_get(http, source)
         .send()
@@ -684,6 +685,9 @@ pub(crate) async fn prepare_json_discovery_bounded(
     network: &crate::network::NetworkContext,
     gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
 ) -> Result<CatalogLoad> {
+    if cfg.spec.starts_with("http://") || cfg.spec.starts_with("https://") {
+        crate::network::provider_url(&cfg.spec)?;
+    }
     tracing::debug!(
         cache = crate::http_cache::Slot::availability(cfg, "catalog"),
         "Catalog disk cache configuration"

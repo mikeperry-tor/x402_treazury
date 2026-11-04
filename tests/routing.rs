@@ -1,9 +1,12 @@
+#[path = "support/tls.rs"]
+mod tls;
 use axum::{Router, extract::Request};
 use serde_json::json;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use x402_treazury::network;
 use x402_treazury::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -81,6 +84,7 @@ fn inherited_parameters_preserve_required_arguments_when_routing() {
 
 #[tokio::test]
 async fn nullable_body_fields_preserve_presence_and_wire_names() {
+    tls::install_trust();
     let root = json!({"openapi":"3.1.0","paths":{"/profile":{"patch":{
         "parameters":[{"name":"nickname","in":"query","schema":{"type":"string"}}],
         "requestBody":{"content":{"application/json":{"schema":{"type":"object",
@@ -116,18 +120,12 @@ async fn nullable_body_fields_preserve_presence_and_wire_names() {
             )
             .is_err()
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            Router::new().fallback(
-                |axum::Json(value): axum::Json<serde_json::Value>| async move { axum::Json(value) },
-            ),
-        )
-        .await
-        .unwrap()
-    });
+    tls::install_trust();
+    let (address, task) = tls::serve(Router::new().fallback(
+        |axum::Json(value): axum::Json<serde_json::Value>| async move { axum::Json(value) },
+    ))
+    .await;
+    let base = format!("https://{address}");
     let result = PaidClient::unsigned()
         .execute(tool.route(&base, args.as_object().unwrap()).unwrap())
         .await
@@ -141,15 +139,16 @@ async fn nullable_body_fields_preserve_presence_and_wire_names() {
 
 #[tokio::test]
 async fn dot_arguments_are_rejected_before_provider_io() {
+    tls::install_trust();
     let requests = Arc::new(AtomicUsize::new(0));
     let seen = requests.clone();
     let app = Router::new().fallback(move |request: Request| {
         seen.fetch_add(1, Ordering::SeqCst);
         async move { request.uri().path().to_owned() }
     });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}/gateway", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tls::install_trust();
+    let (address, task) = tls::serve(app).await;
+    let base = format!("https://{address}/gateway");
     let tools = path_tools();
     let name = tools[0].name.clone();
     let payer = Payer::new(

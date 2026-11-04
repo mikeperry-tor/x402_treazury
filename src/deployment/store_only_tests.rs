@@ -134,8 +134,8 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     };
     let before = store.snapshot().unwrap();
     drop(store);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let listener = crate::test_tls::listener().await;
+    let origin = format!("https://{}", listener.local_addr().unwrap());
     let app = Router::new()
         .route("/rpc", post(rpc))
         .route("/read", get(paid))
@@ -150,7 +150,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     let path = dir.path().join("deployment.toml");
     let mut config = managed_config()
         .replace("auto_fund=false", "auto_fund=true")
-        .replace("http://127.0.0.1:1", &origin);
+        .replace("https://127.0.0.1:1", &origin);
     config = match fault {
         "credential" => config.replace("[funding]", "[funding]\nnear_api_key_env='NEAR'"),
         "quote" => config.replace("[funding]", "[funding]\nquote_deadline_seconds=0"),
@@ -496,8 +496,8 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         drop(store);
         let requests = Arc::new(AtomicUsize::new(0));
         let count = requests.clone();
-        let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let origin = format!("http://{}", provider.local_addr().unwrap());
+        let provider = crate::test_tls::listener().await;
+        let origin = format!("https://{}", provider.local_addr().unwrap());
         let app = Router::new().fallback(move || {
             let count = count.clone();
             async move {
@@ -507,7 +507,7 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         });
         let server = tokio::spawn(async move { axum::serve(provider, app).await.unwrap() });
         write_spec(dir.path());
-        let mut config = managed_config().replace("http://127.0.0.1:1", &origin);
+        let mut config = managed_config().replace("https://127.0.0.1:1", &origin);
         if fault == "declaration" {
             config = config.replace("[funding]", "[funding]\nbase_confirmations=0");
         }
@@ -625,3 +625,5 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         server.abort();
     }
 }
+
+use axum::serve::Listener as _;

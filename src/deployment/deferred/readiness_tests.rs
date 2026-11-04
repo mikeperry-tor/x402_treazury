@@ -136,8 +136,8 @@ impl Fixture {
         let slow = Arc::new(Semaphore::new(0));
         let failure = Arc::new(Semaphore::new(0));
         let arrived = Arc::new(Semaphore::new(0));
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
+        let listener = crate::test_tls::listener().await;
+        let base = format!("https://{}", listener.local_addr().unwrap());
         let app = Router::new().fallback(get({
             let slow = slow.clone();
             let failure = failure.clone();

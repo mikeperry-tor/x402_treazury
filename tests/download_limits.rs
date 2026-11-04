@@ -1,3 +1,5 @@
+#[path = "support/tls.rs"]
+mod tls;
 use axum::{
     Router,
     http::{HeaderMap, StatusCode},
@@ -12,6 +14,7 @@ use std::sync::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use x402_treazury::mcp_wire::McpResponse;
+use x402_treazury::network;
 use x402_treazury::{
     catalog::{Config, build_tools},
     payment::{PaidClient, Payer, SpendPolicy},
@@ -31,6 +34,11 @@ impl std::io::Write for Capture {
 fn payer() -> PaidClient {
     PaidClient::new(Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap())
 }
+async fn serve_provider(app: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
+    tls::install_trust();
+    let (address, task) = tls::serve(app).await;
+    (format!("https://{address}"), task)
+}
 async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", l.local_addr().unwrap());
@@ -46,6 +54,7 @@ async fn call(http: &reqwest::Client, url: &str, name: &str) -> Value {
 }
 #[tokio::test]
 async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_success() {
+    tls::install_trust();
     let logs = Capture(Arc::default());
     let sink = logs.clone();
     tracing::subscriber::set_global_default(
@@ -103,10 +112,10 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     let unsigned = Arc::new(AtomicUsize::new(0));
     let help = Arc::new(AtomicUsize::new(0));
     let (s, u, h) = (signed.clone(), unsigned.clone(), help.clone());
-    let (vendor,v)=serve(Router::new().route("/pay",get(move |headers:HeaderMap| {let(s,u)=(s.clone(),u.clone());async move {
+    let (vendor,v)=serve_provider(Router::new().route("/pay",get(move |headers:HeaderMap| {let(s,u)=(s.clone(),u.clone());async move {
         if headers.contains_key("payment-signature") {s.fetch_add(1,Ordering::SeqCst);return "PRIVATE-CONTENT".into_response();}
         u.fetch_add(1,Ordering::SeqCst);
-        let challenge=json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"fixture".repeat(100),"mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+        let challenge=json!({"x402Version":2,"resource":{"url":"https://localhost/pay","description":"fixture".repeat(100),"mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
         (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(challenge.to_string()))]).into_response()
     }})).route("/help",get(move||{let h=h.clone();async move{h.fetch_add(1,Ordering::SeqCst);"雪🙂"}}))
         .route("/spec",get(||async {json!({"paths":{"/unused":{"get":{}}}}).to_string()}))).await;
@@ -221,12 +230,20 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
 
 #[tokio::test]
 async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
-    let (vendor, task) = serve(Router::new().route(
+    let (vendor, task) = serve_provider(Router::new().route(
         "/spec",
         get(|| async { json!({"paths":{"/hello":{"get":{}}}}).to_string() }),
     ))
     .await;
     let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("network.toml"),
+        format!(
+            "[network]\ntrusted_ca_files=[{:?}]\n",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem")
+        ),
+    )
+    .unwrap();
     std::fs::write(
         tmp.path().join("provider.toml"),
         format!(
@@ -240,7 +257,14 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
             .env_clear()
             .current_dir(tmp.path())
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-            .args(["catalog", "tools", "--provider", "provider.toml"])
+            .args([
+                "catalog",
+                "tools",
+                "--provider",
+                "provider.toml",
+                "--network-config",
+                "network.toml",
+            ])
             .kill_on_drop(true);
         if override_limit {
             command.args(["--max-spec-bytes", "1024"]);
@@ -267,7 +291,14 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
         .env_clear()
         .current_dir(tmp.path())
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-        .args(["config", "check", "--config", "servers.toml"])
+        .args([
+            "config",
+            "check",
+            "--config",
+            "servers.toml",
+            "--network-config",
+            "network.toml",
+        ])
         .kill_on_drop(true)
         .output()
         .await
@@ -283,9 +314,11 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
 
 #[tokio::test]
 async fn deployment_sources_sharing_a_wallet_keep_distinct_response_caps() {
+    tls::install_trust();
     use std::collections::BTreeMap;
     use x402_treazury::deployment::Deployment;
-    let (vendor, v) = serve(Router::new().route("/hello", get(|| async { "123456789" }))).await;
+    let (vendor, v) =
+        serve_provider(Router::new().route("/hello", get(|| async { "123456789" }))).await;
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(
         tmp.path().join("spec.json"),
@@ -336,9 +369,10 @@ async fn deployment_sources_sharing_a_wallet_keep_distinct_response_caps() {
 
 #[tokio::test]
 async fn oversized_legacy_challenge_is_rejected_before_signing() {
+    tls::install_trust();
     let attempts = Arc::new(AtomicUsize::new(0));
     let count = attempts.clone();
-    let (url, task) = serve(Router::new().route(
+    let (url, task) = serve_provider(Router::new().route(
         "/pay",
         get(move |headers: HeaderMap| {
             let count = count.clone();
@@ -374,8 +408,9 @@ async fn oversized_legacy_challenge_is_rejected_before_signing() {
 
 #[tokio::test]
 async fn catalog_failure_stages_preserve_http_status_without_urls_or_document_text() {
+    tls::install_trust();
     use x402_treazury::catalog::{LoadStage, load_json_with_limit};
-    let (base, task) = serve(
+    let (base, task) = serve_provider(
         Router::new()
             .route(
                 "/rejected",
@@ -385,7 +420,11 @@ async fn catalog_failure_stages_preserve_http_status_without_urls_or_document_te
             .route("/large", get(|| async { "\"PRIVATE-CONTENT\"" })),
     )
     .await;
-    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let http = reqwest::Client::builder()
+        .no_proxy()
+        .tls_certs_merge([reqwest::Certificate::from_pem(tls::CA).unwrap()])
+        .build()
+        .unwrap();
     for (path, limit, stage, status) in [
         ("rejected", 32, LoadStage::Headers, Some(429)),
         ("malformed", 32, LoadStage::Parse, None),

@@ -1,5 +1,7 @@
 //! Actual CLI signals while an unfunded, locally signed payment is in flight.
 #![cfg(unix)]
+#[path = "support/tls.rs"]
+mod tls;
 use axum::{
     Router,
     http::{HeaderMap, StatusCode},
@@ -21,6 +23,14 @@ use tokio::{
     sync::Notify,
 };
 use x402_treazury::mcp_wire::McpResponse;
+use x402_treazury::network;
+
+fn fixture_network_config(directory: &std::path::Path) -> std::path::PathBuf {
+    let path = directory.join("fixture-network.toml");
+    let ca = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem");
+    std::fs::write(&path, format!("[network]\ntrusted_ca_files=[{ca:?}]\n")).unwrap();
+    path
+}
 
 #[derive(Clone, Default)]
 struct Vendor {
@@ -47,7 +57,7 @@ async fn payment(
         v.unsigned_arrived.notify_one();
         v.unsigned_release.notified().await;
     }
-    let challenge = json!({"x402Version":2,"resource":{"url":"http://localhost/pay","description":"fixture","mimeType":"text/plain"},
+    let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/pay","description":"fixture","mimeType":"text/plain"},
         "accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"14000",
         "payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
     (
@@ -62,8 +72,11 @@ async fn payment(
 
 async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
     let vendor = Vendor::default();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let app = Router::new()
         .route("/pay", post(payment))
         .with_state(vendor.clone());
@@ -114,6 +127,9 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
             "0",
         ]);
     }
+    command
+        .arg("--network-config")
+        .arg(fixture_network_config(tmp.path()));
     let mut child = command.spawn().unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let pattern = regex::Regex::new(r"127\.0\.0\.1:\d+").unwrap();
@@ -248,6 +264,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
 
 #[tokio::test]
 async fn http_signals_drain_signed_calls_and_release_all_ports() {
+    tls::install_trust();
     for meta in [false, true] {
         for signal in ["-INT", "-TERM"] {
             scenario(meta, signal, true, false).await;
@@ -256,6 +273,7 @@ async fn http_signals_drain_signed_calls_and_release_all_ports() {
 }
 #[tokio::test]
 async fn http_explicit_force_reports_ambiguous_paid_calls_without_replay() {
+    tls::install_trust();
     for meta in [false, true] {
         scenario(meta, "-TERM", false, false).await;
     }
@@ -263,6 +281,7 @@ async fn http_explicit_force_reports_ambiguous_paid_calls_without_replay() {
 
 #[tokio::test]
 async fn http_disconnect_does_not_abandon_accepted_payment() {
+    tls::install_trust();
     for meta in [false, true] {
         scenario(meta, "-TERM", true, true).await;
     }
@@ -270,6 +289,7 @@ async fn http_disconnect_does_not_abandon_accepted_payment() {
 
 #[tokio::test]
 async fn stdio_eof_and_signal_preserve_accepted_calls_before_and_after_signing() {
+    tls::install_trust();
     for (before_signing, signal) in [(true, false), (false, false), (false, true)] {
         stdio_scenario(before_signing, signal, false).await;
     }
@@ -277,6 +297,7 @@ async fn stdio_eof_and_signal_preserve_accepted_calls_before_and_after_signing()
 
 #[tokio::test]
 async fn stdio_explicit_force_reports_ambiguous_paid_calls_without_replay() {
+    tls::install_trust();
     stdio_scenario(false, true, true).await;
 }
 
@@ -285,8 +306,11 @@ async fn stdio_scenario(before_signing: bool, signal: bool, force: bool) {
     vendor
         .pause_unsigned
         .store(before_signing, Ordering::SeqCst);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
+    let listener = tls::listener().await;
+    let base = format!(
+        "https://{}",
+        axum::serve::Listener::local_addr(&listener).unwrap()
+    );
     let app = Router::new()
         .route("/pay", post(payment))
         .with_state(vendor.clone());
@@ -309,6 +333,8 @@ async fn stdio_scenario(before_signing: bool, signal: bool, force: bool) {
         .env("EVM_PRIVATE_KEY", format!("{:064x}", 1))
         .args(["serve", "--provider"])
         .arg(&config)
+        .arg("--network-config")
+        .arg(fixture_network_config(dir.path()))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

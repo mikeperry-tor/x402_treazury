@@ -108,6 +108,40 @@ impl TickClock {
     }
 }
 
+/// Report only typed, value-free causes; storage and upstream prose may contain secrets.
+fn report_owner_failure(error: &anyhow::Error) {
+    let sqlite = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<rusqlite::Error>());
+    let sqlite_code = match sqlite {
+        Some(rusqlite::Error::SqliteFailure(code, _)) => Some(code),
+        _ => None,
+    };
+    let io = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>());
+    let json = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<serde_json::Error>());
+    let category = if sqlite.is_some() {
+        "sqlite_failure"
+    } else if io.is_some() {
+        "io_failure"
+    } else if json.is_some() {
+        "json_failure"
+    } else {
+        "internal_failure"
+    };
+    tracing::error!(
+        category,
+        sqlite_code = sqlite_code.map(|code| format!("{:?}", code.code)),
+        sqlite_extended_code = sqlite_code.map(|code| code.extended_code),
+        io_kind = io.map(|error| format!("{:?}", error.kind())),
+        json_category = json.map(|error| format!("{:?}", error.classify())),
+        "Automatic wallet funding stopped after an internal failure; accepted financial work remains recorded, and this service lifecycle will not restart funding automatically"
+    );
+}
+
 pub struct FundingWorker<B> {
     pub store: StoreHandle,
     pub backend: std::sync::Arc<tokio::sync::Mutex<B>>,
@@ -141,7 +175,18 @@ impl<B: FundingBackend> FundingWorker<B> {
             if stop.is_cancelled() {
                 return Ok(());
             }
-            match self.schedule(now()?, stop.clone(), false).await {
+            let result = match now() {
+                Ok(instant) => self.schedule(instant, stop.clone(), false).await,
+                Err(error) => Err(error),
+            };
+            match result {
+                Err(error)
+                    if !error.is::<tokio::task::JoinError>()
+                        && !error.is::<scheduler::AlreadyOwned>() =>
+                {
+                    report_owner_failure(&error);
+                    return Err(error);
+                }
                 result if stop.is_cancelled() => return result,
                 Err(error)
                     if error.is::<tokio::task::JoinError>()
@@ -149,10 +194,20 @@ impl<B: FundingBackend> FundingWorker<B> {
                 {
                     // schedule joins its owner. Accepted source tasks retain the
                     // existing lease and backoff state until their own completion.
-                    tracing::debug!(
-                        category = "funding_owner_restart_pending",
-                        "funding owner exited or remains retained; retrying existing ownership without replay"
-                    );
+                    if error
+                        .downcast_ref::<tokio::task::JoinError>()
+                        .is_some_and(|error| error.is_panic())
+                    {
+                        tracing::info!(
+                            category = "funding_owner_panic_recovery",
+                            "Automatic wallet funding was interrupted by an internal task failure; retrying existing ownership without replaying accepted work"
+                        );
+                    } else {
+                        tracing::debug!(
+                            category = "funding_owner_restart_pending",
+                            "funding owner exited or remains retained; retrying existing ownership without replay"
+                        );
+                    }
                 }
                 result => return result,
             }
@@ -898,14 +953,12 @@ fn near_diagnostic(error: &anyhow::Error) -> String {
             "quote overhead limit" | "platform fee exceeds overhead cap" => {
                 "fee/overhead cap exceeded"
             }
-            "quote deadline too close" => "quote deadline too close",
             "near_bridge_minimum_not_increasing" => "invalid bridge minimum",
             _ if text.starts_with("near_bridge_minimum_atomic:") => "bridge minimum below offer",
             "required asset missing or ambiguous" => "required asset missing or ambiguous",
             "invalid token catalog" => "invalid asset catalog",
             "quote output mismatch" => "output target mismatch",
             "missing deposit" => "missing deposit address",
-            "invalid transparent address" => "invalid deposit address",
             _ if text.starts_with("near_response_too_large:") => {
                 "response rejected: fixed 2000000-byte limit exceeded"
             }
@@ -1097,3 +1150,7 @@ mod credit_tests;
 #[cfg(test)]
 #[path = "funding/redraw_tests.rs"]
 mod redraw_tests;
+
+#[cfg(test)]
+#[path = "funding/owner_diagnostic_tests.rs"]
+mod owner_diagnostic_tests;
