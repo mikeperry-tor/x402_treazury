@@ -1,5 +1,13 @@
 # Deployment examples
 
+Provider sweeps also maintain these deployment selections. Follow the
+[deployment acceptance procedure](../docs/provider-updates.md#stage-and-accept-changes):
+review new catch-all assignments and stale exact selectors, find catalog replacements
+for deleted APIs, compare useful coverage before price, and retain adjacent reversible
+replacement comments when displacing a tool. Refresh dynamic-endpoint search keyword
+hints and endpoint summaries with capability/routing changes. A backup sharing the
+same upstream adds gateway redundancy, not an independent data source.
+
 Start with [deployments/managed.toml](deployments/managed.toml): one authenticated
 MCP listener, one managed wallet pool, Exa web search and page contents, and
 source management for agent-added APIs. Exa's catalog loads from its public

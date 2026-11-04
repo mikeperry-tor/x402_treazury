@@ -325,13 +325,13 @@ send_tools = [
   # These fresh domain reads matched the alternatives and retain distinct fields.
   { to = "security", tools = ["dns_lookup", "whois_lookup", "domain_age"] },
   { to = "exclude", tools = ["tweet_search"] }, # Botsmith supplies matching posts and metrics.
+  # generate_meme and video_gen were removed upstream; keep neither as an exact
+  # selector. If restored, review their generative workflows before selecting them.
   { to = "exclude", tools = [        # Expensive low-value LLM calls
-    "generate_meme",
     "llm_research",
     "mega_report",
     "meta_intelligence",
     "tx_explainer",
-    "video_gen",
   ] },
   # Keep provider feedback/refund workflows outside endpoint research; inline schemas replace help.
   { to = "exclude", tools = ["feedback", "help"] },

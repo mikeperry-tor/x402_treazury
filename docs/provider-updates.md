@@ -166,12 +166,32 @@ OpenAPI plus overrides, full pinned relays and multi-source authored catalogs:
    patch against the current file; never copy an old candidate over them. Use
    ordinary context-checked patches and inspect the full diff. The tool supplies
    no apply operation and cannot overwrite the destination, even if replay is stale.
-5. Regenerate effective tools through the production catalog and review the full
+5. Reconcile every affected `examples/deployments/` consumer in the same coherent
+   update. Compare actual original method/path identities, generated names and
+   current `send_tools` decisions, including new APIs reaching catch-all rules.
+   Review all examples, not only the running deployment. Retire missing exact
+   selectors instead of weakening validation or disguising them as wildcards.
+   Search the bundled catalog for alternatives to deleted selected APIs and consider
+   useful new APIs as replacements or backups. Compare purpose, request controls,
+   returned fields, freshness, upstream diversity, billing and useful result quality;
+   cheaper listed prices alone do not establish interchangeability. Treat schema-only
+   proposals as unqualified until their needed delivery evidence exists. Existing
+   public/free trials may help; paid live comparisons require separate operator
+   authorization and must preserve the configured payment and network authority.
+   If a superior or cheaper new API displaces a selection, retain the original
+   selector beside an exclusion/comment naming the replacement, the concrete
+   coverage/quality/price reason and how to re-enable it if the replacement fails.
+   Keep partial alternatives as complements or backups rather than silently claiming
+   full equivalence. Record unresolved replacement gaps explicitly. Update affected
+   endpoint summaries and, for dynamic endpoints, discovery search keyword hints
+   in the same change. Catalog acquisition success does not establish valid routing
+   or a usable waiting endpoint; validate the resulting deployment inventory.
+6. Regenerate effective tools through the production catalog and review the full
    file diff. Run affected configuration, routing, bundle and named authored-contract
    tests; fixtures must independently witness a real quirk/transformation. Never
    regenerate fixtures merely to pass assertions. Unavailable providers need not
    block independent fully reviewed updates.
-6. Commit coherent accepted changes, have a different read-only agent review each
+7. Commit coherent accepted changes, have a different read-only agent review each
    exact SHA and affected call chains, address findings with reviewed fixups and
    preserve history through combined integration review. Report attempted coverage,
    unresolved sources and accepted commits separately; process success is no proof

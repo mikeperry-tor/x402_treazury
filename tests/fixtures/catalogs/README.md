@@ -46,6 +46,13 @@ Preserve full inputs only where a concrete comparison needs the entire inventory
 The following notes describe scoped inputs, their concrete consumers and refresh
 basis.
 
+The separate `tests/fixtures/otto_routing_openapi.json` reproduces the removed
+`generate_meme`/`video_gen` exact-selector failure in research-desk distribution.
+It retains complete current path objects for that deployment's exact selections,
+one rendered-reader family and one finance fallback, not the whole vendor catalog.
+`tests/deployment_provider_updates.rs` checks the actual deployment source through
+production selection and routing without network, secrets, funding or state reads.
+
 ## Reviewed request and method contracts
 
 These inputs are scoped captures, not complete current vendor inventories. The
