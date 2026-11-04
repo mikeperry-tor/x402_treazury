@@ -136,6 +136,13 @@ fn compare_provider(
     provider: &Provider,
     prior: Option<(&Path, &Provider)>,
 ) -> Result<Value> {
+    let current_schema = schema(provider).filter(|r| r.hash.is_some());
+    let multiple_schemas = provider
+        .inputs
+        .iter()
+        .filter(|r| r.purpose == "schema")
+        .count()
+        > 1;
     let mut sources = vec![];
     for read in &provider.inputs {
         let basis = prior
@@ -164,10 +171,19 @@ fn compare_provider(
             (Some(_), _) => json!({"basis":"baseline established; no historical upstream capture"}),
             _ => json!({"basis":"source unavailable","outcome":read.outcome}),
         };
-        sources.push(json!({"source":read.source,"purpose":read.purpose,"comparison":comparison}));
+        let projection = match (
+            multiple_schemas,
+            read.purpose.as_str(),
+            read.hash.as_ref(),
+            provider.config.as_ref(),
+        ) {
+            (true, "schema", Some(_), Some(cfg)) => Some(projected(cfg, &bytes(run, read)?)),
+            _ => None,
+        };
+        sources.push(json!({"source":read.source,"purpose":read.purpose,"comparison":comparison,"projection":projection}));
     }
-    let current_schema = schema(provider).filter(|r| r.hash.is_some());
 
+    let removed_sources:Vec<_>=prior.into_iter().flat_map(|(_,p)|p.inputs.iter()).filter(|old|!provider.inputs.iter().any(|new|new.source==old.source && new.purpose==old.purpose)).map(|read|json!({"source":read.source,"purpose":read.purpose,"outcome":"source declaration removed; review authority change"})).collect();
     // Runtime history and authority history answer different questions. An authored
     // asset is runtime evidence, never a substitute for historical upstream input.
     let runtime = projected_input(run, provider, runtime_input(provider))?;
@@ -202,7 +218,9 @@ fn compare_provider(
             ))
         })
         .transpose()?;
-    let outcome = if provider.config.is_none() || provider.inputs.iter().any(|r| r.hash.is_none()) {
+    let outcome = if provider.config.is_none() {
+        provider.outcome.as_str()
+    } else if provider.inputs.iter().any(|r| r.hash.is_none()) {
         "source unavailable"
     } else if provider.asset.is_some() && provider.evidence.is_none() {
         "missing maintenance metadata; authored review needed"
@@ -214,7 +232,7 @@ fn compare_provider(
         "comparison ready; human review pending"
     };
     Ok(
-        json!({"provider":provider.id,"outcome":outcome,"accepted":false,"sources":sources,"runtime":runtime,"previous_runtime":previous_runtime,"runtime_changes":runtime_changes,"asset_changes":asset_changes,"upstream":upstream,"previous_upstream":previous,"tool_changes":tool_changes,"tool_basis":tool_basis,"guidance":provider.evidence.as_ref().map(|e| &e.guidance)}),
+        json!({"provider":provider.id,"outcome":outcome,"accepted":false,"sources":sources,"removed_sources":removed_sources,"runtime":runtime,"previous_runtime":previous_runtime,"runtime_changes":runtime_changes,"asset_changes":asset_changes,"upstream":upstream,"previous_upstream":previous,"tool_changes":tool_changes,"tool_basis":tool_basis,"guidance":provider.evidence.as_ref().map(|e| &e.guidance)}),
     )
 }
 pub(super) fn review(run: &Path, prior: Option<&Path>) -> Result<()> {
@@ -259,7 +277,7 @@ pub(super) fn review(run: &Path, prior: Option<&Path>) -> Result<()> {
     std::fs::write(
         run.join("review.json"),
         serde_json::to_vec_pretty(
-            &json!({"attempted":packets.len(),"accepted":0,"providers":packets}),
+            &json!({"selected":report.selected.len(),"attempted":packets.len(),"accepted":0,"providers":packets}),
         )?,
     )?;
     Ok(())
@@ -511,6 +529,7 @@ mod tests {
             dirty: String::new(),
             network: json!({}),
             metadata: captured(run, "metadata", "test", b"frozen metadata"),
+            selected: BTreeMap::new(),
             providers: vec![failed, valid],
         };
         std::fs::write(
@@ -532,6 +551,49 @@ mod tests {
             summary["providers"][1]["outcome"],
             "baseline established; current consistency review needed"
         );
+    }
+    #[test]
+    fn multiple_schema_projections_and_removed_authority_are_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        let mut old = provider(run, &raw);
+        old.inputs.push(captured(
+            run,
+            "https://example.com/registry",
+            "registry",
+            b"old registry",
+        ));
+        let mut new = provider(run, &raw);
+        let mut second = spec();
+        second["paths"] = json!({"/second":{"post":{"responses":{}}}});
+        new.inputs.push(captured(
+            run,
+            "https://example.com/second.json",
+            "schema",
+            &serde_json::to_vec(&second).unwrap(),
+        ));
+        new.asset = Some(captured(run, "authored.json", "committed asset", &raw));
+        let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+        assert_eq!(
+            packet["removed_sources"][0]["source"],
+            "https://example.com/registry"
+        );
+        assert!(
+            packet["sources"][0]["projection"]["operations"]
+                .get("GET /one")
+                .is_some()
+        );
+        assert!(
+            packet["sources"][1]["projection"]["operations"]
+                .get("POST /second")
+                .is_some()
+        );
+        assert!(packet["upstream"].is_null());
+        assert!(packet["tool_changes"].is_null());
+        new.inputs.truncate(1);
+        new.inputs[0].hash = None;
+        assert!(compare_provider(run, &new, Some((run, &old))).unwrap()["tool_changes"].is_null());
     }
     #[test]
     fn failed_prior_capture_uses_complete_pinned_raw_basis() {
@@ -610,6 +672,7 @@ mod tests {
                 dirty: String::new(),
                 network: json!({}),
                 metadata: captured(run, "metadata", "test", b"valid metadata"),
+                selected: BTreeMap::new(),
                 providers: vec![bad, healthy],
             };
             std::fs::write(

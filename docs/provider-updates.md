@@ -16,8 +16,9 @@ Commands write a compact JSON result to stdout (`run` for capture; `run`,
 
 Capture accepts `--network-config FILE` and uses the shared network factory,
 public destinations, discovery identities and the provider's HTTP compatibility
-settings. Tor retains remote DNS and no direct fallback. Reads with identical URLs
-and compatibility settings share a capture, including failed reads. No whole-sweep
+settings. Tor retains remote DNS and no direct fallback. Local inputs are frozen first; independent public reads then run concurrently.
+Reads with identical URLs and compatibility settings share a capture, including
+failed reads. No whole-sweep
 deadline, retry framework or new resource limit is introduced; the existing
 network inactivity policy applies. A payment response is unavailable evidence.
 No upstream error bodies are logged or persisted.
@@ -30,7 +31,12 @@ go into a new ignored `target/provider-updates/RUN`, preserving unrelated target
 content and every tracked file. Capture stores complete exact bytes under SHA-256
 names with their URL/path, purpose and outcome in `capture.json`. It records Git
 baseline/dirty status, executable hash/version, network policy, resolved Config,
-provider TOML, local asset, maintenance guidance and metadata. Offline replay
+provider TOML, local asset, maintenance guidance and metadata. The selected ID/path
+map remains explicit even in an interrupted capture. Each completed remote read
+updates every matching alias and atomically replaces the manifest before logging
+completion; a pending sibling does not hide already captured evidence. An
+interruption preserves the previous or new complete snapshot. Compare selected coverage
+with attempted outcomes before calling a sweep complete. Offline replay
 checks blob hashes and reads frozen configuration and inputs only. Corrupt or
 missing provider/prior-source blobs produce unavailable review outcomes only for
 their consumers, which receive no candidate. Malformed capture manifests or shared
@@ -86,7 +92,10 @@ Packets include recursive raw JSON differences (including root metadata, securit
 responses and vendor extensions), atomic ordered-array differences, and exact text
 plus content hashes for non-JSON changes. Only JSON object serialization order is
 ignored. Source bytes remain available even for binary/invalid text. Guide and
-registry evidence are compared independently of schema changes. Inspect the frozen
+registry evidence are compared independently of schema changes. Removed source
+declarations are explicit authority-review items. Multiple authoritative schemas
+receive separate production projections alongside the authored runtime view;
+the tool never invents their union. Inspect the frozen
 changed evidence, rather than treating structural comparison as semantic proof of
 request compatibility, lifecycle or billing conditions.
 
