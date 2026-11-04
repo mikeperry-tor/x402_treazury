@@ -617,7 +617,7 @@ It does not rewrite another operation's provider result or close that operation'
 already-disclosed source liability. If success arrives during a replacement's
 accepted calculation, the exact result is still journaled as resolved; it cannot
 receive first-disclosure authority. A replacement already disclosed remains owned
-until its own source confirmation or finite-expiry recovery, including after
+until its own bound fulfillment, source confirmation or finite-expiry recovery, including after
 positive credit completes the funding job. Changed nominal bounds and an unsigned
 redraw do not change these original obligations. Initial credit can finish the job regardless
 of which attempt was current when the scalar observation was saved; unresolved
