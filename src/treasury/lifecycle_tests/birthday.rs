@@ -43,8 +43,33 @@ async fn reorg_before_declared_birthday_keeps_earlier_coverage_through_failure_a
             ),
         );
     }
+    // No old block overlaps tip50, so a true shorter fork is still ambiguous.
+    // Preserve history until the endpoint can demonstrate a divergent block100.
     assert!(owner.sync_once(&CancellationToken::new()).await.is_err());
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
+    }
+    net.chain.write().await.mine_empty_blocks(50);
+    let error = owner
+        .sync_once(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        diagnostics::sync_detail(&error).as_deref(),
+        Some("sync_scan_failed: reason=chain_verification_failed")
+    );
+    assert_eq!(net.chain.read().await.faults.pending(Rpc::BlockRange), 1);
     let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+    assert!(wallet.wallet_blocks.is_empty());
+    assert!(wallet.wallet_transactions.is_empty());
+    assert!(
+        wallet
+            .sync_state
+            .scan_ranges()
+            .iter()
+            .all(|range| !range.priority().is_scanned())
+    );
     assert_eq!(
         u32::from(wallet.birthday()),
         100,
@@ -52,6 +77,31 @@ async fn reorg_before_declared_birthday_keeps_earlier_coverage_through_failure_a
     );
     assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
     drop(wallet);
+    // The proven-clear cycle ends before BlockRange. Exercise the intended
+    // interrupted rescan separately, then reopen its saved earlier coverage.
+    let error = owner
+        .sync_once(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        diagnostics::sync_detail(&error).as_deref(),
+        Some(
+            "sync_scan_failed: reason=indexer_request_failed grpc_code=3 grpc_status=InvalidArgument"
+        )
+    );
+    assert_eq!(net.chain.read().await.faults.pending(Rpc::BlockRange), 0);
+    assert_eq!(
+        owner
+            .client
+            .as_ref()
+            .unwrap()
+            .wallet()
+            .read()
+            .await
+            .sync_state
+            .wallet_birthday(),
+        Some(1.into())
+    );
     let id = owner.status().await.unwrap().treasury_id;
     owner.close().await.unwrap();
     let mut owner = Treasury::open_with_network(
@@ -82,11 +132,37 @@ async fn reorg_before_declared_birthday_keeps_earlier_coverage_through_failure_a
         .await
         .mine_empty_blocks(pepper_sync::sync::MAX_REORG_ALLOWANCE + 1);
     owner.sync_once(&CancellationToken::new()).await.unwrap();
+    let old_tip = net.chain.read().await.tip();
     net.chain.write().await.reorg_to(50);
-    owner.sync_once(&CancellationToken::new()).await.unwrap();
+    let error = owner
+        .sync_once(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        diagnostics::sync_detail(&error).as_deref(),
+        Some("sync_scan_failed: reason=indexer_tip_regressed_without_divergence")
+    );
+    net.chain.write().await.mine_empty_blocks(old_tip - 50);
+    let error = owner
+        .sync_once(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        diagnostics::sync_detail(&error).as_deref(),
+        Some("sync_scan_failed: reason=chain_verification_failed")
+    );
     let wallet = owner.client.as_ref().unwrap().wallet().read().await;
     assert_eq!(u32::from(wallet.birthday()), 100);
     assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
+    assert!(wallet.wallet_blocks.is_empty());
+    assert!(wallet.wallet_transactions.is_empty());
+    assert!(
+        wallet
+            .sync_state
+            .scan_ranges()
+            .iter()
+            .all(|range| !range.priority().is_scanned())
+    );
     drop(wallet);
     owner.close().await.unwrap();
     let mut owner = Treasury::open_with_network(

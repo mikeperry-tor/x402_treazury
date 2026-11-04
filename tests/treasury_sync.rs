@@ -1,5 +1,7 @@
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
+#[path = "treasury_sync/indexer_identity.rs"]
+mod indexer_identity;
 #[path = "treasury_sync/recovery.rs"]
 mod recovery;
 #[path = "treasury_sync/retirement.rs"]
@@ -116,6 +118,7 @@ struct Mock {
     delay_first: Arc<AtomicBool>,
     reuse_probe: Option<Arc<ReuseProbe>>,
     checkpoint_lock: Option<Arc<CheckpointLock>>,
+    block_identity: Option<Arc<indexer_identity::Blocks>>,
 }
 // A real Pepper pool-recovery request made while holding the wallet write lock.
 #[derive(Default)]
@@ -163,7 +166,9 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
                 number(5, 419_200),
                 number(
                     7,
-                    if let Some(probe) = &mock.reuse_probe {
+                    if let Some(blocks) = &mock.block_identity {
+                        blocks.tip.load(Ordering::SeqCst)
+                    } else if let Some(probe) = &mock.reuse_probe {
                         probe.tip.load(Ordering::SeqCst)
                     } else if mock
                         .calls
@@ -183,10 +188,15 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             .concat(),
         ],
         "GetLatestBlock" => {
-            let (tip, hash) = mock.reuse_probe.as_ref().map_or_else(
-                || (mock.tip, hash(mock.tip)),
-                |p| (p.tip.load(Ordering::SeqCst), p.hash.lock().unwrap().clone()),
-            );
+            let (tip, hash) = if let Some(blocks) = &mock.block_identity {
+                let tip = blocks.tip.load(Ordering::SeqCst);
+                (tip, blocks.hash(tip))
+            } else {
+                mock.reuse_probe.as_ref().map_or_else(
+                    || (mock.tip, hash(mock.tip)),
+                    |p| (p.tip.load(Ordering::SeqCst), p.hash.lock().unwrap().clone()),
+                )
+            };
             vec![[number(1, tip), bytes(2, &hash)].concat()]
         }
         "GetBlock" => {
@@ -199,7 +209,11 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
                 probe.entered.notify_one();
                 probe.release.notified().await;
             }
-            vec![block(h)]
+            vec![
+                mock.block_identity
+                    .as_ref()
+                    .map_or_else(|| block(h), |blocks| blocks.block(h, true)),
+            ]
         }
         "GetBlockRange" => {
             if mock.delay_first.swap(false, Ordering::SeqCst) {
@@ -233,16 +247,31 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
                         // tree sizes from that block's metadata. Only the last
                         // empty block reports a spurious commitment, entering
                         // actual IncorrectTreeSize recovery under the wallet lock.
-                        [block(h), bytes(8, &number(2, 1))].concat()
+                        [
+                            mock.block_identity
+                                .as_ref()
+                                .map_or_else(|| block(h), |blocks| blocks.block(h, false)),
+                            bytes(8, &number(2, 1)),
+                        ]
+                        .concat()
                     } else {
-                        block(h)
+                        mock.block_identity
+                            .as_ref()
+                            .map_or_else(|| block(h), |blocks| blocks.block(h, false))
                     }
                 })
                 .collect()
         }
         "GetTreeState" => {
             let h = height(request);
-            let hash: String = hash(h).iter().rev().map(|b| format!("{b:02x}")).collect();
+            let hash: String = mock
+                .block_identity
+                .as_ref()
+                .map_or_else(|| hash(h), |blocks| blocks.hash(h))
+                .iter()
+                .rev()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             vec![
                 [
                     bytes(1, b"main"),
@@ -352,6 +381,7 @@ async fn mock_with_delay(
         delay_first: Arc::new(AtomicBool::new(delay)),
         reuse_probe: None,
         checkpoint_lock: None,
+        block_identity: None,
     });
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -700,6 +730,7 @@ async fn checkpoint_waiting_for_pepper_wallet_lock_does_not_stop_engine_progress
         delay_first: Arc::new(AtomicBool::new(false)),
         reuse_probe: None,
         checkpoint_lock: Some(probe.clone()),
+        block_identity: None,
     });
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let mut treasury = Treasury::create(
@@ -1515,6 +1546,7 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
         delay_first: Arc::new(AtomicBool::new(false)),
         reuse_probe: Some(probe.clone()),
         checkpoint_lock: None,
+        block_identity: None,
     });
     let peers = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let observed_peers = peers.clone();

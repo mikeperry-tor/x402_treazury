@@ -158,7 +158,8 @@ impl ServerError {
             ServerError::FetcherDropped => true,
             // A re-org lowered the chain height or the server is behind the
             // chain tip. The next sync starts from the server's chain height.
-            ServerError::ChainHeightBelowScanRange { .. } => true,
+            ServerError::ChainHeightBelowScanRange { .. }
+            | ServerError::UnverifiedChainRegression => true,
 
             // Network weather is transient. The next request may be served
             // by a fresh connection to the same server.
@@ -172,6 +173,7 @@ impl ServerError {
             | ServerError::InvalidTransaction(_)
             | ServerError::InvalidSubtreeRoot
             | ServerError::ChainVerificationError
+            | ServerError::InvalidBlockIdentity
             | ServerError::GenesisBlockOnly
             | ServerError::TreeStateNotServed { .. }
             | ServerError::UnsupportedProtocolVersion { .. } => false,
@@ -280,7 +282,8 @@ impl ServerError {
             // A re-org lowered the chain height or the server is behind the
             // chain tip. Syncing again starts from the server's chain height
             // and verifies the wallet against its chain.
-            ServerError::ChainHeightBelowScanRange { .. } => {
+            ServerError::ChainHeightBelowScanRange { .. }
+            | ServerError::UnverifiedChainRegression => {
                 SyncRecoveryObservables::MaybeRecoverableServer
             }
             // Network weather is transient. The same server may answer the
@@ -295,6 +298,7 @@ impl ServerError {
             | ServerError::InvalidTransaction(_)
             | ServerError::InvalidSubtreeRoot
             | ServerError::ChainVerificationError
+            | ServerError::InvalidBlockIdentity
             | ServerError::TreeStateNotServed { .. }
             | ServerError::UnsupportedProtocolVersion { .. } => {
                 SyncRecoveryObservables::ServerUnavailable
@@ -515,6 +519,14 @@ pub enum ServerError {
         "server returned blocks that could not be verified against wallet block data. exceeded max verification window. wallet data has been cleared as shard tree data cannot be truncated further. wallet rescan required."
     )]
     ChainVerificationError,
+    /// A shorter endpoint has not demonstrated divergence from retained observations.
+    #[error(
+        "indexer tip is behind retained wallet observations without demonstrated divergence; observations preserved; sync again"
+    )]
+    UnverifiedChainRegression,
+    /// A compact block did not bind the requested height to a 32-byte block hash.
+    #[error("indexer compact block has an invalid height or block hash; observations preserved")]
+    InvalidBlockIdentity,
     /// Fetcher task was dropped.
     #[error("fetcher task was dropped.")]
     FetcherDropped,

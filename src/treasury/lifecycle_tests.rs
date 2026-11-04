@@ -972,6 +972,8 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
         IronwoodNote, OrchardNote, OutputInterface, SaplingNote, TransparentCoin,
     };
     use shardtree::store::ShardStore as _;
+    use zingo_netutils::lightwallet_protocol::{BlockId, CompactTxStreamer as _};
+    use zingolib::testutils::mock_indexer::MockIndexerService;
     fn canonical_input<T: OutputInterface>(
         wallet: &zingolib::wallet::LightWallet,
         input: &OwnedInput,
@@ -999,7 +1001,7 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
     for (rollback, old_checkpoint_window, same_height_fork) in [
         (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, false, false),
         (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, true, false),
-        (pepper_sync::sync::MAX_REORG_ALLOWANCE + 1, false, false),
+        (pepper_sync::sync::MAX_REORG_ALLOWANCE + 11, false, false),
         (pepper_sync::sync::MAX_REORG_ALLOWANCE + 1, false, true),
     ] {
         let (dir, net, mut owner, _endpoint) = funded_fixture(1).await;
@@ -1026,6 +1028,19 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
         let deadline = now().unwrap() + 7200;
         save_quotes(&store, vec![job.clone()], deadline).await;
         let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+        let durable = rusqlite::Connection::open_with_flags(
+            dir.path().join("state/state.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let original_preparation: Vec<u8> = durable
+            .query_row(
+                "SELECT preparation FROM outgoing WHERE id=?1",
+                [&job.operation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!original_preparation.is_empty());
         let addresses = owner.addresses().await.unwrap();
         let original_inputs = {
             let operation = job.operation_id.clone();
@@ -1033,6 +1048,21 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
                 .call(move |s| s.prepared_inputs(&operation))
                 .await
                 .unwrap()
+        };
+        let source_bytes = if rollback > pepper_sync::sync::MAX_REORG_ALLOWANCE && !same_height_fork
+        {
+            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+            assert_eq!(original_inputs.len(), 1);
+            let source_id =
+                zcash_primitives::transaction::TxId::from_hex(&original_inputs[0].txid).unwrap();
+            let source = &wallet.wallet_transactions[&source_id];
+            assert_eq!(source.transaction().txid(), source_id);
+            assert_eq!(source.status().get_confirmed_height(), Some(21.into()));
+            let mut bytes = Vec::new();
+            source.transaction().write(&mut bytes).unwrap();
+            Some(bytes)
+        } else {
+            None
         };
         let settings = owner.sync_settings.clone().unwrap();
         let treasury_id = owner.status().await.unwrap().treasury_id;
@@ -1081,19 +1111,130 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
             owner.configure_sync(settings.clone());
             store = owner.store_handle();
         }
-        {
+        let (served_tip, fork_height) = {
             let mut chain = net.chain.write().await;
             let tip = chain.tip();
-            chain.reorg_to(23);
-            if same_height_fork {
-                chain.mine_empty_blocks(tip - 23);
+            // Shallow33 verifies from24 and rolls back at checkpoint23.
+            // A deep regression may retain only the original funding21 below
+            // tip33, so keep its exact transaction at21 on a changed block21.
+            let fork_height = if let Some(source) = &source_bytes {
+                let evicted = chain.reorg_to(20);
+                assert!(
+                    evicted.as_slice() == std::slice::from_ref(source),
+                    "the replacement must contain only the exact original funding21 transaction"
+                );
+                chain.mine_block(evicted);
+                chain.mine_empty_blocks(12);
+                21
+            } else {
+                let fork_height = if same_height_fork { 23 } else { 33 };
+                chain.reorg_to(fork_height - 1);
+                chain.mine_empty_blocks(1);
+                if same_height_fork {
+                    chain.mine_empty_blocks(tip - fork_height);
+                }
+                fork_height
+            };
+            if !same_height_fork {
+                assert_eq!(chain.tip(), 33);
+                assert_eq!(
+                    tip - chain.tip() > pepper_sync::sync::MAX_REORG_ALLOWANCE,
+                    rollback > pepper_sync::sync::MAX_REORG_ALLOWANCE,
+                    "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}"
+                );
             }
-        }
+            (chain.tip(), fork_height)
+        };
+        let (comparison_height, old_hash) = {
+            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+            if rollback < pepper_sync::sync::MAX_REORG_ALLOWANCE {
+                assert!(wallet.wallet_blocks.contains_key(&23.into()));
+                assert_eq!(
+                    wallet
+                        .shard_trees
+                        .orchard
+                        .store()
+                        .get_checkpoint(&23.into())
+                        .unwrap()
+                        .is_none(),
+                    old_checkpoint_window
+                );
+            } else if same_height_fork {
+                assert!(!wallet.wallet_blocks.contains_key(&14.into()));
+            }
+            let (height, block) = wallet
+                .wallet_blocks
+                .range(..=zcash_protocol::consensus::BlockHeight::from_u32(served_tip))
+                .next_back()
+                .unwrap();
+            assert!(
+                u32::from(*height) >= fork_height,
+                "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: the actual retained comparison must be on the changed branch"
+            );
+            (*height, block.block_hash().0)
+        };
+        // This is the actual service behind this MockNet, not a fabricated
+        // branch hash. Its headerless fixture uses the SDK's raw-hash identity.
+        let served = MockIndexerService::new(net.chain.clone())
+            .get_block(tonic::Request::new(BlockId {
+                height: u64::from(comparison_height),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(served.height, u64::from(comparison_height));
+        assert!(served.header.is_empty());
+        assert_eq!(served.hash.len(), 32);
+        assert!(
+            served.hash.as_slice() != old_hash.as_slice(),
+            "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: the actual selected comparison must prove divergence"
+        );
         if old_checkpoint_window || same_height_fork {
-            // Existing SDK truncation/fork recovery checkpoints its cleared
-            // derived state even when this scan reports the recovery error.
-            assert!(owner.sync_once(&CancellationToken::new()).await.is_err());
+            // Only these proven recovery dispositions permit the following
+            // fresh cycle; the durable original remains owned throughout.
+            let error = owner
+                .sync_once(&CancellationToken::new())
+                .await
+                .unwrap_err();
+            let reason = if old_checkpoint_window {
+                "sync_scan_failed: reason=truncation_checkpoint_missing"
+            } else {
+                "sync_scan_failed: reason=chain_verification_failed"
+            };
+            assert_eq!(diagnostics::sync_detail(&error).as_deref(), Some(reason));
+            {
+                let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+                assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
+                assert!(wallet.wallet_blocks.is_empty());
+                assert!(wallet.wallet_transactions.is_empty());
+                assert!(
+                    wallet
+                        .sync_state
+                        .scan_ranges()
+                        .iter()
+                        .all(|range| !range.priority().is_scanned())
+                );
+            }
             pending(&store, &job, prepared.bytes()).await;
+            let operation = job.operation_id.clone();
+            let expected_inputs = original_inputs.clone();
+            store
+                .call(move |s| {
+                    assert_eq!(s.prepared_inputs(&operation)?, expected_inputs);
+                    assert_eq!(s.operation(&operation)?.attempts, 0);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let retained: Vec<u8> = durable
+                .query_row(
+                    "SELECT preparation FROM outgoing WHERE id=?1",
+                    [&job.operation_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, original_preparation);
             drop(store);
             owner.close().await.unwrap();
             owner = Treasury::open_with_network(
@@ -1107,8 +1248,24 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
             owner.configure_sync(settings);
             store = owner.store_handle();
         }
-        owner.sync_once(&CancellationToken::new()).await.unwrap();
+        owner
+            .sync_once(&CancellationToken::new())
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: {error:#}"
+                )
+            });
         assert_eq!(owner.addresses().await.unwrap(), addresses);
+        let retained: Vec<u8> = durable
+            .query_row(
+                "SELECT preparation FROM outgoing WHERE id=?1",
+                [&job.operation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, original_preparation);
+        drop(durable);
         let synced = owner.status().await.unwrap().sync.unwrap();
         assert_eq!(synced.phase, SyncPhase::Ready);
         let (funding_value, reservation) = {

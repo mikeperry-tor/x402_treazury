@@ -276,8 +276,21 @@ outside the public-edition test scope.
 For the planned all-provider mainnet run, including Tor observations, two-pool
 rotation/refill and stage-specific failures, see [qualification scope](../docs/testing.md#qualification-status).
 
-The indexer-regression characterization currently records destructive startup
-behavior for same-prefix shorter tips and interrupted unsigned targets; it is not
-acceptance of that behavior. The proposed distinction and unavoidable no-overlap
-ambiguity are specified in the SDK integration guide. Fresh future-birthday scans
-and existing genuine divergent deep-fork coverage remain separate controls.
+Indexer regression coverage distinguishes an actual retained history horizon from
+unsigned scheduled targets. Same-prefix shallow/deep shorter tips and no-overlap
+or matching-anchor ambiguity preserve observations and recoverable failure;
+interrupted target-only tails can shrink and resume without lowering the scan
+floor. Fresh future birthdays retain activation scanning. A genuine fork with
+retained divergent history still rescans below the declared birthday, including
+interruption/reopen and pruned checkpoint recovery. Compact-block identity checks
+reject wrong heights and incomplete hashes before they can justify a reset, and
+the selected raw-gRPC application fixture proves valid full-header identity wins
+over omitted or conflicting compact hash projections. Interrupted Verify and
+nullifier-retrieval ranges preserve their observations; a confirmed transaction
+merged above published scan bounds also prevents an unsigned-tail reset. A funded
+SDK fixture preserves the current Ironwood checkpoint root, owned-note witness and
+spendability with future cached shard annotations/bare roots after a lower target,
+including failure before root ingestion and equal-tip stale metadata after reopen.
+Future completion ranges are repaired without pruning actual roots or witnesses;
+later owned commitments and both original/new witnesses remain spendable.
+These local fixtures establish no consensus, live bridge settlement or Tor claim.

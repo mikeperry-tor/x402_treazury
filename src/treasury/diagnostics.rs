@@ -158,6 +158,8 @@ fn server_reason(error: &ServerError, diagnostic: &mut SyncDiagnostic) -> &'stat
         ServerError::InvalidTransaction(_) => "indexer_invalid_transaction",
         ServerError::InvalidSubtreeRoot => "indexer_invalid_subtree_root",
         ServerError::ChainVerificationError => "chain_verification_failed",
+        ServerError::UnverifiedChainRegression => "indexer_tip_regressed_without_divergence",
+        ServerError::InvalidBlockIdentity => "indexer_block_identity_invalid",
         ServerError::FetcherDropped => "indexer_fetcher_dropped",
         ServerError::GenesisBlockOnly => "indexer_genesis_only",
         ServerError::TreeStateNotServed { .. } => "indexer_tree_state_not_served",

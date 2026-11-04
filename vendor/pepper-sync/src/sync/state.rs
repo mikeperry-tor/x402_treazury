@@ -192,11 +192,28 @@ pub(super) fn create_scan_range(
 }
 
 /// Splits the range containing [`truncate_height` + 1] and removes all ranges containing block heights above
-/// `truncate_height`.
+/// `truncate_height`. Drops shard-completion metadata above that height without changing the shard trees.
 /// If `truncate_height` is zero, the sync state will be cleared completely.
-pub(super) fn truncate_scan_ranges(truncate_height: BlockHeight, sync_state: &mut SyncState) {
+/// Returns whether any range metadata changed.
+pub(super) fn truncate_scan_ranges(
+    truncate_height: BlockHeight,
+    sync_state: &mut SyncState,
+) -> bool {
     if truncate_height == zcash_protocol::consensus::H0 {
         *sync_state = SyncState::new();
+        return true;
+    }
+    let mut changed = false;
+    for ranges in [
+        &mut sync_state.sapling_shard_ranges,
+        &mut sync_state.orchard_shard_ranges,
+        &mut sync_state.ironwood_shard_ranges,
+    ] {
+        let previous_len = ranges.len();
+        // A cached future root does not make its shard complete on this chain tip.
+        // Keep the actual tree; do not invent a completing block by clipping a range.
+        ranges.retain(|range| range.end - 1 <= truncate_height);
+        changed |= ranges.len() != previous_len;
     }
     let Some((index, range_to_split)) = sync_state
         .scan_ranges()
@@ -205,7 +222,7 @@ pub(super) fn truncate_scan_ranges(truncate_height: BlockHeight, sync_state: &mu
         .enumerate()
         .find(|(_index, range)| range.block_range().contains(&(truncate_height + 1)))
     else {
-        return;
+        return changed;
     };
 
     if let Some((first_segment, second_segment)) = range_to_split.split_at(truncate_height + 1) {
@@ -218,6 +235,7 @@ pub(super) fn truncate_scan_ranges(truncate_height: BlockHeight, sync_state: &mu
         .partition_point(|range| range.block_range().start <= truncate_height)]
         .to_vec();
     sync_state.scan_ranges = truncated_scan_ranges;
+    true
 }
 
 /// Resets scan ranges to recover from previous sync interruptions.
@@ -2042,6 +2060,39 @@ mod tests {
 
         super::lower_transparent_scan_floor(&mut sync_state, 90.into());
         assert_eq!(sync_state.transparent_scan_floor, Some(90.into()));
+    }
+
+    #[test]
+    fn truncate_completion_metadata_without_a_straddling_scan_range() {
+        let mut state = SyncState::new();
+        state.scan_ranges = vec![ScanRange::from_parts(
+            1.into()..24.into(),
+            ScanPriority::Scanned,
+        )];
+        for ranges in [
+            &mut state.sapling_shard_ranges,
+            &mut state.orchard_shard_ranges,
+            &mut state.ironwood_shard_ranges,
+        ] {
+            *ranges = vec![
+                1.into()..24.into(),
+                23.into()..101.into(),
+                100.into()..201.into(),
+            ];
+        }
+        assert!(super::truncate_scan_ranges(23.into(), &mut state));
+        for ranges in [
+            state.sapling_shard_ranges(),
+            state.orchard_shard_ranges(),
+            state.ironwood_shard_ranges(),
+        ] {
+            assert_eq!(ranges, &[1.into()..24.into()]);
+        }
+        assert_eq!(state.scan_ranges()[0].block_range(), &(1.into()..24.into()));
+        assert!(!super::truncate_scan_ranges(23.into(), &mut state));
+        assert!(super::truncate_scan_ranges(0.into(), &mut state));
+        assert!(state.scan_ranges().is_empty());
+        assert!(state.ironwood_shard_ranges().is_empty());
     }
 
     /// Reopening splits the range straddling the height and returns every

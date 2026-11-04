@@ -526,16 +526,13 @@ where
         // not held behind a slow server. the requests are made with the wallet lock released.
         let Some(chain_height) = unless_shutdown(
             &sync_mode,
-            client::get_chain_height(fetch_request_sender.clone()),
+            reconcile_chain_tip(&wallet, fetch_request_sender.clone()),
         )
         .await?
         else {
             break 'continuous_sync;
         };
         let chain_height = chain_height?;
-        if chain_height == 0.into() {
-            return Err(SyncError::ServerError(ServerError::GenesisBlockOnly));
-        }
 
         let mut wallet_guard = wallet.write().await;
         let last_known_chain_height =
@@ -624,8 +621,8 @@ where
                     .await
                     .get_wallet_block(chain_height)
                     .map_err(SyncError::WalletError)?;
-                if chain_height_wallet_block.block_hash().0.to_vec()
-                    != chain_height_server_block.hash
+                if chain_height_wallet_block.block_hash().0
+                    != bound_block_hash(&chain_height_server_block, chain_height)?
                 {
                     tracing::info!(
                         "Zcash chain changed; rolling back wallet observations before rescanning"
@@ -738,6 +735,7 @@ where
                 consensus_parameters,
                 &mut *wallet.write().await,
                 subtree_roots,
+                chain_height,
             )?;
 
             if !first_verification_complete {
@@ -984,6 +982,99 @@ where
         total_outputs: sync_status.total_outputs,
         nullifier_retrieval_pending: sync_status.nullifier_retrieval_pending(),
     })
+}
+
+/// An unscanned target is scheduling, not an immutable observation. Shortening
+/// its tail does not discard any retained chain fact. Established observations
+/// above the endpoint tip instead require actual, correctly bound divergence.
+async fn reconcile_chain_tip<W>(
+    wallet: &Arc<RwLock<W>>,
+    fetch: mpsc::UnboundedSender<FetchRequest>,
+) -> Result<BlockHeight, SyncError<W::Error>>
+where
+    W: SyncWallet + SyncBlocks + SyncTransactions,
+{
+    let chain_height = client::get_chain_height(fetch.clone()).await?;
+    if chain_height == 0.into() {
+        return Err(ServerError::GenesisBlockOnly.into());
+    }
+    let (protected_height, comparison) = {
+        let mut wallet = wallet.write().await;
+        let scanned = wallet
+            .get_sync_state()
+            .map_err(SyncError::WalletError)?
+            .scan_ranges()
+            .iter()
+            .filter(|range| range.priority().is_scanned())
+            .map(|range| range.block_range().end - 1)
+            .max();
+        let confirmed = wallet
+            .get_wallet_transactions()
+            .map_err(SyncError::WalletError)?
+            .values()
+            .filter_map(|transaction| transaction.status().get_confirmed_height())
+            .max();
+        let blocks = wallet
+            .get_wallet_blocks_mut()
+            .map_err(SyncError::WalletError)?;
+        let protected = scanned
+            .into_iter()
+            .chain(confirmed)
+            .chain(blocks.keys().next_back().copied())
+            .max();
+        let comparison = blocks
+            .range(..=chain_height)
+            .next_back()
+            .map(|(height, block)| (*height, block.block_hash().0));
+        (protected, comparison)
+    };
+    if protected_height.is_none_or(|height| height <= chain_height) {
+        let mut wallet = wallet.write().await;
+        let state = wallet
+            .get_sync_state_mut()
+            .map_err(SyncError::WalletError)?;
+        let shortened = state
+            .last_known_chain_height()
+            .is_some_and(|height| height > chain_height);
+        let changed = state::truncate_scan_ranges(chain_height, state);
+        if shortened {
+            state::lower_transparent_scan_floor(state, chain_height);
+        }
+        if shortened || changed {
+            wallet.set_save_flag().map_err(SyncError::WalletError)?;
+        }
+        return Ok(chain_height);
+    }
+    let pending = ServerError::UnverifiedChainRegression;
+    let Some((height, hash)) = comparison else {
+        return Err(pending.into());
+    };
+    // Fetch through the existing owner with the wallet lock released. Comparing
+    // a block for another height or a malformed hash cannot prove divergence.
+    let block = client::get_compact_block(fetch, height).await?;
+    if bound_block_hash(&block, height)? == hash {
+        return Err(pending.into());
+    }
+    Ok(chain_height)
+}
+
+fn bound_block_hash(
+    block: &zingo_netutils::lightwallet_protocol::CompactBlock,
+    height: BlockHeight,
+) -> Result<[u8; 32], ServerError> {
+    if block.height != u64::from(height) {
+        return Err(ServerError::InvalidBlockIdentity);
+    }
+    // Match WalletBlock's established SDK identity: a parseable full header
+    // owns its computed hash; the raw hash is only the fallback projection.
+    if let Some(header) = crate::utils::block::get_compact_header(block) {
+        return Ok(header.hash().0);
+    }
+    block
+        .hash
+        .as_slice()
+        .try_into()
+        .map_err(|_| ServerError::InvalidBlockIdentity)
 }
 
 /// The scan floor can move earlier after a fork crosses the declared birthday.
@@ -2825,6 +2916,7 @@ fn add_fetched_subtree_roots<W>(
     consensus_parameters: &impl consensus::Parameters,
     wallet: &mut W,
     subtree_roots: FetchedSubtreeRoots,
+    chain_height: BlockHeight,
 ) -> Result<(), SyncError<W::Error>>
 where
     W: SyncWallet + SyncShardTrees,
@@ -2869,6 +2961,10 @@ where
             subtree_roots,
         );
     }
+
+    // Requests can observe roots completed after this cycle's tip. Retain their
+    // tree cache, but only current completion ranges may govern note selection.
+    state::truncate_scan_ranges(chain_height, sync_state);
 
     let shard_trees = wallet
         .get_shard_trees_mut()
@@ -3161,6 +3257,37 @@ fn max_nullifier_map_size(performance_level: PerformanceLevel) -> Option<usize> 
 mod test {
     use zcash_protocol::consensus::BlockHeight;
     use zcash_protocol::local_consensus::LocalNetwork;
+
+    #[test]
+    fn compact_block_identity_requires_requested_height_and_complete_hash() {
+        use zingo_netutils::lightwallet_protocol::CompactBlock;
+        let mut block = CompactBlock {
+            height: 100,
+            hash: vec![7; 32],
+            ..Default::default()
+        };
+        assert_eq!(
+            super::bound_block_hash(&block, 100.into()).unwrap(),
+            [7; 32]
+        );
+        assert!(matches!(
+            super::bound_block_hash(&block, 99.into()),
+            Err(crate::error::ServerError::InvalidBlockIdentity)
+        ));
+        for size in [0, 31, 33] {
+            block.hash = vec![7; size];
+            assert!(matches!(
+                super::bound_block_hash(&block, 100.into()),
+                Err(crate::error::ServerError::InvalidBlockIdentity)
+            ));
+        }
+        assert!(crate::error::ServerError::UnverifiedChainRegression.recommend_same_server());
+        assert_eq!(
+            crate::error::ServerError::UnverifiedChainRegression.recovery_recommendation(),
+            crate::error::SyncRecoveryObservables::MaybeRecoverableServer
+        );
+        assert!(!crate::error::ServerError::InvalidBlockIdentity.recommend_same_server());
+    }
 
     /// A local network with every upgrade active from `height`.
     const fn activated_at(height: u32) -> LocalNetwork {
