@@ -371,9 +371,11 @@ impl Store {
     }
 
     /// Verified native expiry permits a fresh current-authority attempt while the
-    /// original accepted request remains independently observed by Status.
+    /// original accepted request remains independently observed by Status. A
+    /// negative provider report cannot prove that a confirmed deposit will not
+    /// also fulfill the claim; it grants no replacement authority.
     pub(crate) fn funding_retry_allowed(&self, job: &str, operation: &str) -> Result<bool> {
-        let ((success, failed, refunded, incomplete), attempts, confirmed, no_journal) = self.db.query_row(
+        let ((success, _failed, _refunded, incomplete), attempts, confirmed, no_journal) = self.db.query_row(
             "SELECT j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,COALESCE(o.attempts,0),COALESCE(o.submission='CONFIRMED',0),NOT EXISTS(SELECT 1 FROM outgoing WHERE id=j.operation_id) AND o.id IS NULL,o.submission,o.id IS NOT NULL,EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) FROM funding_progress j LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE j.job_id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((provider_flags(r,0)?,observation_disclosure(r,7,4,r.get(8)?,r.get(9)?)?.1,r.get::<_,bool>(5)?,r.get::<_,bool>(6)?)),
         )?;
@@ -381,8 +383,6 @@ impl Store {
         Ok(!success
             && !claim_succeeded(&self.db, operation)?
             && (expired
-                || failed
-                || refunded
                 || source_attempt_closed(&self.db, job, operation)? && no_journal
                 || (attempts == 0 && !confirmed && !incomplete)))
     }
@@ -3879,6 +3879,13 @@ mod completion_tests {
                 !destination_obligation_pending(&store.db, &job.wallet_id).unwrap(),
                 "current terminal report supersedes archived unknown flags for same operation"
             );
+            assert_eq!(
+                store
+                    .funding_retry_allowed(&job.id, &job.operation_id)
+                    .unwrap(),
+                !matches!(terminal, SwapStatus::Success),
+                "finite SDK expiry grants authority independently of a negative provider report"
+            );
             store
                 .record_destination_readiness(&job.id, "10", "block", 1)
                 .unwrap();
@@ -4139,48 +4146,121 @@ mod completion_tests {
     }
 
     #[test]
-    fn negative_terminal_confirmed_source_can_reauthorize_under_current_claim() {
-        use crate::rotation::near::SwapStatus;
-        for terminal in [SwapStatus::Failed, SwapStatus::Refunded] {
-            let (_dir, mut store, job) = fixture();
-            store
-                .select_quote_terms(&job.id, &job.operation_id, &job.target, &job.target)
-                .unwrap();
-            assert!(store.quote_terms_snapshot(&job.id).unwrap().is_some());
-            store
-                .save_funding_quote(
-                    &job.id,
-                    &serde_json::to_vec(
-                        &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-            submit_source_for_status(&mut store, &job);
-            let raw = store.prepared_bytes(&job.operation_id).unwrap();
-            store.confirm_spend(&job.operation_id).unwrap();
-            store
-                .record_provider_outcome(&job.id, &job.operation_id, &terminal, 1)
-                .unwrap();
-            assert!(
+    fn negative_terminal_confirmed_source_cannot_reauthorize_under_current_claim() {
+        use crate::rotation::{
+            config::{ReserveConfig, ReservesConfig},
+            near::SwapStatus,
+        };
+        for ranged in [false, true] {
+            for terminal in [SwapStatus::Failed, SwapStatus::Refunded] {
+                let (dir, mut store, job) = fixture();
+                let output = if ranged { "12" } else { "10" };
+                if ranged {
+                    store
+                        .ensure_capacity_group(
+                            "pool",
+                            &ReservesConfig {
+                                small: ReserveConfig {
+                                    funding_amount_usdc: None,
+                                    min_funding_amount_usdc: Some("0.000010".into()),
+                                    max_funding_amount_usdc: Some("0.000020".into()),
+                                },
+                                large: None,
+                            },
+                            Some(U256::from(1_000_000)),
+                            0,
+                        )
+                        .unwrap();
+                }
                 store
-                    .funding_retry_allowed(&job.id, &job.operation_id)
-                    .unwrap()
-            );
-            store
-                .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                    .select_quote_terms(&job.id, &job.operation_id, &job.target, output)
+                    .unwrap();
+                let terms = store.quote_terms_snapshot(&job.id).unwrap();
+                let quote = serde_json::to_vec(&serde_json::json!({
+                    "request":{"amount":output,"recipient":job.recipient}
+                }))
                 .unwrap();
-            let replacement = store.funding_job(&job.id).unwrap().unwrap();
-            assert_ne!(replacement.operation_id, job.operation_id);
-            assert_eq!(replacement.phase, FundingPhase::Allocated);
-            assert_eq!(store.quote_terms_snapshot(&job.id).unwrap(), None);
-            assert_eq!(store.prepared_bytes(&job.operation_id).unwrap(), raw);
-            assert_eq!(
-                store.operation(&job.operation_id).unwrap().submission,
-                "CONFIRMED"
-            );
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
-            assert!(!store.preparation_pending().unwrap());
+                store.save_funding_quote(&job.id, &quote).unwrap();
+                submit_source_for_status(&mut store, &job);
+                let raw = store.prepared_bytes(&job.operation_id).unwrap();
+                store.confirm_spend(&job.operation_id).unwrap();
+                store
+                    .record_provider_outcome(&job.id, &job.operation_id, &terminal, 1)
+                    .unwrap();
+                let identity = store.id().to_owned();
+                for restart in [false, true] {
+                    if restart {
+                        drop(store);
+                        store = Store::open(
+                            &dir.path().join("state"),
+                            &dir.path().join("key"),
+                            &identity,
+                        )
+                        .unwrap();
+                    }
+                    assert!(
+                        !store
+                            .funding_retry_allowed(&job.id, &job.operation_id)
+                            .unwrap()
+                    );
+                    assert!(
+                        store
+                            .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                            .is_err()
+                    );
+                    assert!(
+                        store
+                            .reauthorize_closed_funding_for_operation(&job.id, "stale-operation", 3)
+                            .is_err()
+                    );
+                    assert!(
+                        store
+                            .reselect_quote_terms(&job.id, &job.operation_id, &job.target, output)
+                            .is_err()
+                    );
+                    assert!(
+                        store
+                            .refresh_unprepared_quote_for_operation(&job.id, &job.operation_id)
+                            .is_err()
+                    );
+                    assert!(
+                        store
+                            .require_unstarted_preparation(&job.operation_id)
+                            .is_err()
+                    );
+                    let current = store.funding_job(&job.id).unwrap().unwrap();
+                    assert_eq!(current.operation_id, job.operation_id);
+                    assert_eq!(current.target, job.target);
+                    assert_eq!(current.accepted_output.as_deref(), Some(output));
+                    assert_eq!(store.quote_terms_snapshot(&job.id).unwrap(), terms);
+                    assert_eq!(store.funding_quote(&job.id).unwrap().as_slice(), quote);
+                    assert_eq!(store.prepared_bytes(&job.operation_id).unwrap(), raw);
+                    assert_eq!(
+                        store.operation(&job.operation_id).unwrap().submission,
+                        "CONFIRMED"
+                    );
+                    assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+                    assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+                    assert!(!store.preparation_pending().unwrap());
+                }
+                // Unreadable advisory flags cannot manufacture replacement authority.
+                store.db.execute("UPDATE funding_progress SET provider_failed='broken',provider_refunded=x'00' WHERE job_id=?1", [&job.id]).unwrap();
+                assert!(
+                    !store
+                        .funding_retry_allowed(&job.id, &job.operation_id)
+                        .unwrap()
+                );
+                assert!(
+                    store
+                        .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                        .is_err()
+                );
+                assert_eq!(
+                    store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                    job.operation_id
+                );
+                assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+            }
         }
     }
 

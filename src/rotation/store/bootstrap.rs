@@ -658,8 +658,8 @@ mod tests {
                     assert!(!path.facts.preparation_accepted && path.facts.accepted_quote);
                     assert_eq!(path.facts.source_pending, pending);
                     // Nonterminal originals wait before recovery classification.
-                    // Bound terminal facts permit worker recovery, while startup
-                    // still observes the accepted quote until that worker finishes.
+                    // A terminal provider report permits recovery assessment,
+                    // but cannot authorize replacing a confirmed deposit.
                     assert_eq!(
                         funding::can_recover_facts(Some(operation), &path.facts),
                         recoverable
@@ -711,7 +711,7 @@ mod tests {
                 facts.provider_refunded,
                 matches!(terminal, SwapStatus::Refunded)
             );
-            assess(&mut store, "CONFIRMED", true, true, false);
+            assess(&mut store, "CONFIRMED", true, false, false);
         }
     }
 
@@ -747,7 +747,26 @@ mod tests {
                 }),
             )
             .unwrap();
-        store.confirm_spend(&old.operation_id).unwrap();
+        let revision = store.snapshot().unwrap().0;
+        let observation = SyncObservation {
+            phase: SyncPhase::Ready,
+            last_error: None,
+            snapshot_revision: revision,
+            checked_at: Some(1),
+            checkpoint_at: 1,
+            scanned_blocks: 200,
+            target_height: Some(200),
+            observed_tip_height: Some(200),
+            height: Some(200),
+            confirmations: 2,
+            confirmed_pool_balances_zatoshis: None,
+            confirmed_shielded_zatoshis: 1000,
+            spendable_shielded_zatoshis: 1000,
+        };
+        let revision = store
+            .save_sync_snapshot(revision, b"expiry SDK", Some(observation))
+            .unwrap();
+        store.resolve_expired(&old.operation_id, revision).unwrap();
         store
             .record_provider_outcome(&old.id, &old.operation_id, &SwapStatus::Failed, 1)
             .unwrap();
