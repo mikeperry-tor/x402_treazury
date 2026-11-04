@@ -23,8 +23,16 @@ def verify(manifest_name="transport-sources.json"):
         with tempfile.TemporaryDirectory() as directory:
             restored = Path(directory) / name
             shutil.copytree(source, restored)
-            subprocess.run(["patch", "--batch", "--fuzz=0", "-R", "-p1", "-d", str(restored),
-                            "-i", str(patch)], check=True, capture_output=True)
+            try:
+                subprocess.run(["patch", "--batch", "--fuzz=0", "-R", "-p1"],
+                               cwd=restored, input=patch.read_bytes(),
+                               check=True, capture_output=True)
+            except subprocess.CalledProcessError as error:
+                raise SystemExit(
+                    f"{name}: cannot reverse {patch.name} (exit {error.returncode})\n"
+                    f"stdout:\n{error.stdout.decode('utf-8', errors='replace')}"
+                    f"stderr:\n{error.stderr.decode('utf-8', errors='replace')}"
+                ) from None
             for relative, digest in expected.items():
                 if hashlib.sha256((restored / relative).read_bytes()).hexdigest() != digest:
                     raise SystemExit(f"{name}/{relative}: differs from published source plus reviewed patch")
