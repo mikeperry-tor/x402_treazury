@@ -36,6 +36,13 @@ Owning guides are [wallet rotation](../wallet-rotation.md),
 [development/portability](../development.md#portability) and [testing](../testing.md).
 Follow their existing links in [AGENTS.md](../../AGENTS.md#read-the-relevant-guide-before-editing).
 
+The [tracked original review and maintainer disposition](x402_treazury_review.md)
+provides the finding-by-finding reference for integration and final review. Its
+original recommendations are source material, not implementation instructions;
+settled decisions and owning guides govern. Update dispositions/evidence at the
+owning gates and reconcile every finding at GI, including intentionally retained
+behavior and deferred work. Preserve the original report body while annotating.
+
 ## Lanes and ordered integration boundaries
 
 Rows identify integration milestones, not replacement implementation commits.
@@ -127,7 +134,8 @@ Each child implementation commit updates its named permanent guides. Before
 removing a completed child plan, verify its owning-guide/AGENTS link handoff and
 update this document's references and remaining schedule in the same cleanup.
 Keep detailed contracts in those guides. Once required coordinated work is complete,
-remove this meta-plan and its [documentation-index](../README.md) link; independently
+remove this meta-plan, the completed working review/disposition and their
+[documentation-index](../README.md) links after the same handoff; independently
 review that exact cleanup SHA and final combined branch after removal. Retain
 focused unfinished optional work, never a completed-plan archive. Documentation
 cleanup cannot delete financial evidence or authorize replay.
