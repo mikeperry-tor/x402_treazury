@@ -4823,7 +4823,7 @@ mod test {
                     .create_mock_wallet();
                 let activation = zcash_protocol::consensus::Parameters::activation_height(
                     &LOCAL_NETWORK,
-                    consensus::NetworkUpgrade::Sapling,
+                    zcash_protocol::consensus::NetworkUpgrade::Sapling,
                 )
                 .unwrap();
                 assert_eq!(
@@ -4999,6 +4999,7 @@ mod test {
         }
         mod no_last_known_chain_height {
             use super::*;
+            use crate::wallet::traits::SyncWallet as _;
             // If there are know scan_ranges in the SyncState
             #[tokio::test]
             async fn get_bday_error() {
