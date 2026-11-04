@@ -24,6 +24,12 @@ async fn shorter_prefix_characterizes_current_destructive_reset() {
         let (_dir, mut owner) = empty_owner(&original, 100).await;
         let stop = CancellationToken::new();
         owner.sync_once(&stop).await.unwrap();
+        {
+            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+            assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
+            assert!(wallet.wallet_blocks.contains_key(&100.into()));
+            assert!(wallet.wallet_blocks.contains_key(&old_tip.into()));
+        }
         let shorter = MockNet::launch().await;
         shorter.chain.write().await.mine_empty_blocks(shorter_tip);
         shorter.chain.write().await.faults.inject(
@@ -73,6 +79,7 @@ async fn interrupted_unsigned_target_characterizes_current_reset_of_completed_pr
         wallet.sync_state.last_known_chain_height(),
         Some(1250.into())
     );
+    assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
     assert!(wallet.wallet_blocks.contains_key(&100.into()));
     drop(wallet);
     let shorter = MockNet::launch().await;
@@ -88,6 +95,7 @@ async fn interrupted_unsigned_target_characterizes_current_reset_of_completed_pr
     assert!(owner.sync_once(&stop).await.is_err());
     let wallet = owner.client.as_ref().unwrap().wallet().read().await;
     assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
+    assert!(!wallet.wallet_blocks.contains_key(&100.into()));
     drop(wallet);
     owner.close().await.unwrap();
 }
@@ -112,6 +120,12 @@ async fn same_prefix_shallow_regression_characterizes_current_loss_of_scanned_ta
     let (_dir, mut owner) = empty_owner(&original, 100).await;
     let stop = CancellationToken::new();
     owner.sync_once(&stop).await.unwrap();
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
+        assert!(wallet.wallet_blocks.contains_key(&100.into()));
+        assert!(wallet.wallet_blocks.contains_key(&1250.into()));
+    }
     let shorter = MockNet::launch().await;
     shorter.chain.write().await.mine_empty_blocks(1200);
     owner.configure_sync(SyncSettings::new(shorter.indexer_uri().to_string(), 1).unwrap());
