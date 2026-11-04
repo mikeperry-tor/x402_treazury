@@ -51,11 +51,42 @@ fn rich_partial_and_strict_vec_preserve_healthy_get_before_post_preference() {
             ..Default::default()
         },
     ] {
-        let error = build_catalog(&cfg, &document, "api")
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("no compatible tools"));
-        assert!(!error.contains("unknown provider"));
+        let error = build_catalog(&cfg, &document, "api").unwrap_err();
+        let configuration = error
+            .downcast_ref::<ToolConfigurationError>()
+            .expect("partial selector refusal remains a configuration error");
+        let incomplete = configuration
+            .error
+            .downcast_ref::<IncompleteCatalog>()
+            .expect("the exact omitted operation remains available");
+        assert_eq!(
+            incomplete.0,
+            vec![OperationIssue {
+                method: "POST".into(),
+                path: "/same".into(),
+                reason: Unsupported::CookieParameter,
+            }]
+        );
+        let detail = format!("{error:#}");
+        assert!(detail.contains("provider tool selector api_missing matches no compatible tools"));
+        assert!(detail.contains("POST /same: Cookie parameters are not supported"));
+        assert!(!detail.contains("unknown provider"));
+        // Startup's public safe projection selects authored configuration guidance,
+        // while CLI/MCP operation results retain the detailed cause chain.
+        let failure = diagnostics::Failure::from_error(&error, "generation");
+        assert!(failure.reason.contains("no compatible tools"));
+        assert!(failure.reason.contains("inspect omitted operations"));
+        assert!(!failure.reason.contains("api_missing"));
+        assert!(!failure.reason.contains("/same"));
+
+        let complete_error = build_catalog(&cfg, &compatible, "api").unwrap_err();
+        let complete = complete_error
+            .downcast_ref::<ToolConfigurationError>()
+            .expect("unknown selectors remain configuration errors");
+        assert!(complete.error.downcast_ref::<IncompleteCatalog>().is_none());
+        assert!(
+            format!("{complete_error:#}").contains("unknown provider tool selector api_missing")
+        );
     }
 }
 #[test]
