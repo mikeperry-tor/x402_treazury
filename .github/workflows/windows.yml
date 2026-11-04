@@ -29,6 +29,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify reviewed vendor sources before Rust installation
+        run: ./scripts/windows-ci.ps1 -Stage Vendor
       - name: Install the repository Rust pin
         run: |
           $pin = (Select-String -Path rust-toolchain.toml -Pattern '^channel = "([^"]+)"$').Matches.Groups[1].Value

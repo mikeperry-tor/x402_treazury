@@ -31,12 +31,27 @@ with tempfile.TemporaryDirectory() as directory:
     restored = Path(directory) / "pepper-sync"
     shutil.copytree(source, restored)
     for name in reversed(manifest["patches"]):
-        subprocess.run(["patch", "--batch", "--fuzz=0", "-R", "-p2", "-d", str(restored),
-                        "-i", str(root / name)], check=True, capture_output=True)
+        try:
+            subprocess.run(["patch", "--binary", "--batch", "--fuzz=0", "-R", "-p2"],
+                           cwd=restored, input=(root / name).read_bytes(),
+                           check=True, capture_output=True)
+        except subprocess.CalledProcessError as error:
+            raise SystemExit(
+                f"Pepper: cannot reverse {name} (exit {error.returncode})\n"
+                f"stdout:\n{error.stdout.decode('utf-8', errors='replace')}"
+                f"stderr:\n{error.stderr.decode('utf-8', errors='replace')}"
+            ) from None
     actual = {path.relative_to(restored).as_posix() for path in restored.rglob("*") if path.is_file()}
     if actual != set(expected):
         raise SystemExit(f"Restored Pepper inventory differs: {actual ^ set(expected)}")
     for name, digest in expected.items():
-        if hashlib.sha256((restored / name).read_bytes()).hexdigest() != digest:
-            raise SystemExit(f"pepper-sync/{name}: differs from upstream plus declared patches")
+        restored_bytes = (restored / name).read_bytes()
+        actual_digest = hashlib.sha256(restored_bytes).hexdigest()
+        if actual_digest != digest:
+            crlf_match = hashlib.sha256(restored_bytes.replace(b"\r\n", b"\n")).hexdigest() == digest
+            raise SystemExit(
+                f"pepper-sync/{name}: differs from upstream plus declared patches; "
+                f"expected_sha256={digest} actual_sha256={actual_digest} "
+                f"crlf_to_lf_matches_expected={crlf_match} (diagnostic only)"
+            )
 print(f"Verified Pepper: {len(expected)} upstream files plus declared patches at {manifest['revision']}")

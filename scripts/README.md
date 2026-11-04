@@ -251,11 +251,21 @@ From a Windows checkout with PowerShell 7, Rustup, Python 3.11+, Git for Windows
 and Visual Studio C++ build tools (including required native CMake/LLVM tools):
 
 ```powershell
+./scripts/windows-ci.ps1 -Stage Vendor
 $pin = (Select-String rust-toolchain.toml '^channel = "([^"]+)"$').Matches.Groups[1].Value
 rustup toolchain install $pin --profile minimal --component rustfmt --component clippy
 ./scripts/windows-ci.ps1 -Stage Release
 ./scripts/windows-ci.ps1 -Stage Checks
 ```
+
+Vendor runs byte-exact source/patch reconstruction without requiring Rust. The
+build job runs it before installing Rust; Checks repeats verification on its own
+fresh VM. Patch bytes are supplied through binary stdin with the restored tree as
+the working directory, avoiding platform path arguments. GNU patch uses
+`--binary` to preserve source bytes on hosts with text-mode I/O; failures retain
+the patch utility's stdout/stderr and exit status. Original-source hash mismatches
+report expected/actual digests and whether CRLF-to-LF conversion would match for
+diagnostics only; every mismatch remains fatal and no source is normalized.
 
 Release builds the ordinary release executable, runs root/wallet/catalog help
 smokes and prints its hash. Cargo metadata supplies the artifact directory,

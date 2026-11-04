@@ -1,6 +1,6 @@
 # Native Windows equivalents of the named Make validation commands. This is
 # ordinary unfunded validation, not release reproducibility or live qualification.
-param([Parameter(Mandatory = $true)][ValidateSet('Release', 'Checks')][string]$Stage)
+param([Parameter(Mandatory = $true)][ValidateSet('Vendor', 'Release', 'Checks')][string]$Stage)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 if (-not $IsWindows) { throw 'This entrypoint requires native Windows PowerShell 7' }
@@ -10,6 +10,20 @@ function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     Write-Host ('> ' + $Command + ' ' + ($Arguments -join ' '))
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Command failed with exit code $LASTEXITCODE" }
+}
+
+if ($Stage -in @('Vendor', 'Checks')) {
+    # Git for Windows already includes GNU patch, needed by the existing byte-exact
+    # vendor reconstruction checks. Fail explicitly if that prerequisite is absent.
+    $gitRoot = Split-Path -Parent (Split-Path -Parent (Get-Command git).Source)
+    $gitTools = Join-Path $gitRoot 'usr/bin'
+    if (-not (Get-Command patch -ErrorAction SilentlyContinue)) {
+        $env:PATH = $gitTools + [IO.Path]::PathSeparator + $env:PATH
+    }
+    Invoke-Checked 'patch' @('--version')
+    Invoke-Checked 'python' @('vendor/verify.py')
+    Invoke-Checked 'python' @('vendor/verify_pepper.py')
+    if ($Stage -eq 'Vendor') { return }
 }
 
 $pin = (Select-String -Path rust-toolchain.toml -Pattern '^channel = "([^"]+)"$').Matches.Groups[1].Value
@@ -62,17 +76,7 @@ if ($Stage -eq 'Release') {
     return
 }
 
-# Git for Windows already includes GNU patch, needed by the existing byte-exact
-# vendor reconstruction checks. Fail explicitly if that prerequisite is absent.
-$gitRoot = Split-Path -Parent (Split-Path -Parent (Get-Command git).Source)
-$gitTools = Join-Path $gitRoot 'usr/bin'
-if (-not (Get-Command patch -ErrorAction SilentlyContinue)) {
-    $env:PATH = $gitTools + [IO.Path]::PathSeparator + $env:PATH
-}
-Invoke-Checked 'patch' @('--version')
 Invoke-Checked 'cargo' @('fmt', '--check')
-Invoke-Checked 'python' @('vendor/verify.py')
-Invoke-Checked 'python' @('vendor/verify_pepper.py')
 # Keep the same production and full all-target warning owners as Make. No
 # dependency warnings, features or failing native tests are silently filtered.
 Invoke-Checked 'python' @('scripts/check_warnings.py', 'cargo', 'check', '--locked', '--manifest-path', 'Cargo.toml', '--lib', '--bins', '--message-format=json')
