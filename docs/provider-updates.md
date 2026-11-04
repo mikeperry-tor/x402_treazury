@@ -205,8 +205,48 @@ For examples of authority reconciliation, AgentUtility combines schema plus regi
 CoinMarketCap combines two schemas plus an access guide; NewsGurus uses its Bazaar
 catalog rather than the incomplete OpenAPI. Banking Compliance additionally requires
 manual public MCP `tools/list` evidence, which this GET-only collector does not
-capture. Preserve that unresolved request-schema responsibility explicitly. Their
-existing authored transformations remain described in [caveats](../providers/CAVEATS.md).
+capture; complete that part of each review separately using the procedure below.
+Existing authored transformations remain described in [caveats](../providers/CAVEATS.md).
+
+## Manual public MCP schema evidence
+
+When an authored HTTP catalog derives request schemas from a public MCP server,
+capture that authority alongside the ordinary GET evidence. The current collector
+does not send JSON-RPC POST requests; a successful root-page capture does not
+complete this verification.
+
+1. Read the provider's provenance and identify the public MCP endpoint and its
+   mapping to HTTP routes. Use unsigned metadata requests through the chosen
+   network policy, preserving Tor remote DNS and no direct fallback where selected.
+   Send `tools/list`; perform MCP initialization/notification only if required.
+   Negotiate the server's supported protocol and accept JSON or event-stream
+   responses. Authentication or payment requirements leave this public capture
+   unresolved; do not use paid raw calls, payment headers or `tools/call` to obtain
+   schema evidence.
+2. Preserve complete successful response bytes under ignored
+   `target/provider-updates/`, including the full SSE wire body when applicable.
+   Record the public URL, HTTP/JSON-RPC method, noncredential request payload,
+   protocol/transport, observation time, Git baseline, status, content type and
+   SHA-256. Exclude credentials and session headers. Reject partial responses;
+   discard upstream error prose and record the unavailable outcome. Follow every
+   `nextCursor`, retaining each page and checking the JSON-RPC result/error and
+   request identity. Keep parsed JSON separate from the exact wire evidence.
+3. Compare each mapped `inputSchema` recursively with its authored HTTP request
+   body. Review descriptions separately from structural equality; preserve dialect
+   declarations, references, required lists, extra-property rules, types, bounds,
+   defaults and alternatives. Any projection difference needs an explicit rationale.
+   Do not turn prose options/defaults into schema constraints. Reconcile current
+   root/guide route and price evidence separately: a similarly named preview schema
+   does not establish a paid operation's request body or prove HTTP delivery.
+4. Apply the normal acceptance, deployment-consumer, validation and independent
+   review steps above. Record per-source provenance so a new schema observation
+   does not imply that an older preview or paid sample was repeated. Report remaining
+   gaps explicitly; metadata verification does not qualify output quality or payment.
+
+Keep this path manual for now. If more providers need it, consider a shared public
+MCP metadata-capture primitive with independent uses and synthetic protocol tests,
+including pagination and JSON/SSE completeness. Review its transport and authority
+boundaries before implementation; avoid provider dispatch or per-provider recipes.
 
 ## Validation responsibilities
 

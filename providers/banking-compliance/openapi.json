@@ -8,23 +8,27 @@
       "sources": [
         {
           "url": "https://banking-compliance-production.up.railway.app/",
-          "purpose": "Paid HTTP route names and advertised USDC prices."
+          "purpose": "Paid HTTP route names and advertised USDC prices.",
+          "observed_at": "2026-11-04",
+          "sha256": "06ab96cfee2046bdb55f5a87b18648293b2f49f3c133be38bab95f8b5135729a"
         },
         {
           "url": "https://banking-compliance-production.up.railway.app/mcp",
           "method": "POST",
           "jsonrpc_method": "tools/list",
-          "purpose": "check_content, lookup_rule and generate_compliant_post input schemas."
+          "purpose": "check_content, lookup_rule and generate_compliant_post input schemas.",
+          "observed_at": "2026-11-04",
+          "sha256": "8404209a2ca7e2dd2d435e77b4b743adbf6085ba8dd78de1c63c53ea220663dc"
         },
         {
           "url": "https://banking-compliance-production.up.railway.app/mcp",
           "method": "POST",
           "jsonrpc_method": "tools/call",
           "tool": "preview_campaign",
-          "purpose": "Free preview explicitly identifies POST /api/campaign and $5 price, without a complete request schema."
+          "purpose": "Free preview explicitly identifies POST /api/campaign and $5 price, without a complete request schema.",
+          "observed_at": "2026-10-29"
         }
       ],
-      "observed_at": "2026-10-29",
       "transformations": [
         "Translated MCP inputSchema into application/json request bodies without adding enums, bounds or defaults.",
         "Rewrote descriptions for concise tool use; original structural constraints are preserved.",
@@ -71,7 +75,8 @@
                 "required": [
                   "text"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
               }
             }
           }
@@ -130,7 +135,8 @@
                 "required": [
                   "query"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
               }
             }
           }
@@ -237,7 +243,8 @@
                   "product_type",
                   "product_details"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
               }
             }
           }

@@ -29,6 +29,16 @@ The free MCP campaign preview advertises POST `/api/campaign` and $5 but supplie
 no complete paid request schema. Its deliberately generic placeholder is excluded
 by exact operation until that contract is published or otherwise verified.
 
+Refresh the MCP authority with the maintained
+[manual public MCP schema procedure](../docs/provider-updates.md#manual-public-mcp-schema-evidence).
+Public `tools/list` returns a complete SSE JSON-RPC result without initialization
+or pagination in the verified capture. The check, lookup and generation schemas
+match the authored constraints; their Draft-07 dialect declarations are preserved,
+while descriptions remain concise authored guidance. Current root routes/prices
+also match. Per-source provenance distinguishes this metadata verification from the
+older campaign-preview and paid samples. The preview's input schema describes the
+free preview only; it still does not establish the paid campaign body.
+
 Paid samples on 2026-10-29 delivered checks, lookup and drafting. Keyword `APY`
 returned rules without a filter but no matches with the advertised `Reg DD`
 filter. The check flagged missing FDIC language but did not catch the full

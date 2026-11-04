@@ -50,8 +50,9 @@ sources = [
 [banking-compliance]
 intent = "authored"
 guidance = "providers/CAVEATS.md#banking-compliance"
-# Public tools/list is POST; this GET-only collector leaves its manual capture
-# unresolved. Root discovery alone does not establish paid request contracts.
+# Public tools/list requires a separate manual POST capture at each review; see
+# docs/provider-updates.md#manual-public-mcp-schema-evidence. Root discovery alone
+# does not establish paid request contracts.
 sources = [{ url = "https://banking-compliance-production.up.railway.app/", purpose = "discovery" }]
 
 [coinmarketcap]
