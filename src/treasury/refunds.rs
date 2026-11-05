@@ -73,11 +73,17 @@ impl Treasury {
         max_fee: u64,
         stop: &CancellationToken,
     ) -> Result<PreparedTransaction> {
+        self.drain_calculation().await;
         ensure!(self.healthy, "treasury SDK unavailable");
         ensure!(!stop.is_cancelled(), "treasury stopping");
         self.store
             .call(|s| s.require_preparation_available())
             .await?;
+        self.client
+            .as_mut()
+            .context("treasury unavailable")?
+            .clear_proposal()
+            .await;
         let operation = uuid::Uuid::new_v4().to_string();
         let client = self.client.as_mut().context("treasury unavailable")?;
         let _pause = client
@@ -90,7 +96,7 @@ impl Treasury {
         else {
             anyhow::bail!("refund must be transparent")
         };
-        let (raw, facts) = {
+        let (proposal, usk, fee, input, shielded_value, calculation, inputs) = {
             let mut wallet = client.wallet().write().await;
             ensure!(
                 wallet
@@ -181,74 +187,74 @@ impl Treasury {
                 zip32::AccountId::ZERO,
             )
             .map_err(|_| anyhow::anyhow!("treasury key derivation failed"))?;
-            let id = operation.clone();
-            self.healthy = false;
-            let stop_for_acceptance = stop.clone();
-            let acceptance = self
-                .store
-                .call(move |s| {
-                    ensure!(!stop_for_acceptance.is_cancelled(), "treasury stopping");
-                    if let Some(recipient) = recipient {
-                        s.bind_operation_recipient(&id, &recipient)?;
-                    }
-                    s.accept_preparation(&id, None, i64::try_from(fee)?, Some(calculation))
-                })
-                .await;
-            if let Err(error) = acceptance {
-                let id = operation.clone();
-                if self
-                    .store
-                    .call(move |s| s.require_unstarted_preparation(&id))
-                    .await
-                    .is_ok()
-                {
-                    self.healthy = true;
-                    return Err(error.context(crate::rotation::transaction::PreparationDeferred));
-                }
-                return Err(error);
-            }
-            let ids = create_proposed_transactions::<
-                _,
-                _,
-                std::convert::Infallible,
-                _,
-                std::convert::Infallible,
-                _,
-            >(
-                &mut *wallet,
-                &chain,
-                &zcash_client_backend::util::SystemClock,
-                &mut zingolib::utils::system_rng(),
-                &prover::SAPLING_PROVER,
-                &prover::SAPLING_PROVER,
-                &SpendingKeys::new(usk),
-                OvkPolicy::Sender,
-                &proposal,
-                None,
+            let inputs = step
+                .transparent_inputs()
+                .iter()
+                .map(|input| input.outpoint().clone())
+                .collect::<Vec<_>>();
+            (
+                proposal,
+                usk,
+                fee,
+                input,
+                shielded_value,
+                calculation,
+                inputs,
             )
-            .map_err(|_| anyhow::anyhow!("refund shielding calculation failed"))?;
-            ensure!(ids.len() == 1, "multiple shielding transactions");
-            let record = wallet
-                .wallet_transactions
-                .get(ids.first())
-                .context("shield transaction missing")?;
-            let transaction = record.transaction();
-            let mut raw = Zeroizing::new(vec![]);
-            transaction.write(&mut *raw)?;
-            let facts: Result<TransactionFacts> = (|| {
+        };
+        let id = operation.clone();
+        let stop_for_acceptance = stop.clone();
+        self.calculate_owned(
+            operation,
+            move |s| {
+                ensure!(!stop_for_acceptance.is_cancelled(), "treasury stopping");
+                if let Some(recipient) = recipient {
+                    s.bind_operation_recipient(&id, &recipient)?;
+                }
+                s.accept_preparation(&id, None, i64::try_from(fee)?, Some(calculation))
+            },
+            move |wallet| {
+                let _pause = _pause;
+                let ids = create_proposed_transactions::<
+                    _,
+                    _,
+                    std::convert::Infallible,
+                    _,
+                    std::convert::Infallible,
+                    _,
+                >(
+                    wallet,
+                    &chain,
+                    &zcash_client_backend::util::SystemClock,
+                    &mut zingolib::utils::system_rng(),
+                    &prover::SAPLING_PROVER,
+                    &prover::SAPLING_PROVER,
+                    &SpendingKeys::new(usk),
+                    OvkPolicy::Sender,
+                    &proposal,
+                    None,
+                )
+                .map_err(|_| anyhow::anyhow!("refund shielding calculation failed"))?;
+                Ok(ids.into_iter().collect())
+            },
+            move |wallet, id| {
+                let record = wallet
+                    .wallet_transactions
+                    .get(id)
+                    .context("shield transaction missing")?;
+                let transaction = record.transaction();
                 let transparent = transaction
                     .transparent_bundle()
                     .context("shield inputs missing")?;
                 ensure!(
-                    transparent.vout.is_empty()
-                        && transparent.vin.len() == step.transparent_inputs().len(),
+                    transparent.vout.is_empty() && transparent.vin.len() == inputs.len(),
                     "unexpected shielding outputs/inputs"
                 );
                 ensure!(
-                    transparent.vin.iter().all(|i| step
-                        .transparent_inputs()
+                    transparent
+                        .vin
                         .iter()
-                        .any(|o| o.outpoint() == i.prevout())),
+                        .all(|i| inputs.iter().any(|o| o == i.prevout())),
                     "shielding input mismatch"
                 );
                 let value: i64 = [
@@ -305,9 +311,8 @@ impl Treasury {
                     deadline: None,
                 };
                 Ok(facts)
-            })();
-            (raw, facts)
-        };
-        self.retain_calculation(operation, raw, facts).await
+            },
+        )
+        .await
     }
 }

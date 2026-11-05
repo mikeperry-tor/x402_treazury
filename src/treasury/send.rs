@@ -74,6 +74,7 @@ impl Treasury {
         base: Option<crate::rotation::base::BaseRpc>,
         stop: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<PreparedTransaction> {
+        self.drain_calculation().await;
         ensure!(
             self.healthy,
             "treasury requires reopen after failed preparation"
@@ -137,6 +138,11 @@ impl Treasury {
                 Ok((treasury_id, scope))
             })
             .await?;
+        self.client
+            .as_mut()
+            .context("treasury unavailable")?
+            .clear_proposal()
+            .await;
         let observation = base.zip(observation_scope);
         let identity = crate::network::IsolationId::treasury(&treasury_id);
         // SDK selection is local. Capital waiting must not probe tips between
@@ -215,55 +221,22 @@ impl Treasury {
         let pool = request.pool_id.clone();
         let deadline = request.deadline;
         let authority = request.managed_funding;
-        // A commit may succeed without an acknowledgment. Poison before dispatch;
-        // only a serialized proof of no accepted intent permits reuse on failure.
-        self.healthy = false;
-        let acceptance = self
-            .store
-            .call(move |s| {
+        self.calculate_owned(
+            request.operation_id.clone(),
+            move |s| {
                 ensure!(now()? < deadline, "funding_deadline_expired");
                 s.require_preparation_authority(&id, authority.as_ref())?;
                 s.accept_preparation(&id, pool.as_deref(), authorized_cost, Some(calculation))?;
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(())
-            })
-            .await;
-        if let Err(error) = acceptance {
-            let id = request.operation_id.clone();
-            if self
-                .store
-                .call(move |s| s.require_unstarted_preparation(&id))
-                .await
-                .is_ok()
-            {
-                client.clear_proposal().await;
-                self.healthy = true;
-                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
-            }
-            return Err(error);
-        }
-        let calculation_result = {
-            let mut wallet = client.wallet().write().await;
-            calculate_deposit(&mut wallet, &proposal)
-        };
-        // Public cleanup also restores the SDK proposal pause. Drop the wallet
-        // guard before acquiring it through the client on either result path.
-        client.clear_proposal().await;
-        let ids = calculation_result?;
-        ensure!(ids.len() == 1, "calculation produced multiple transactions");
-        let (raw, facts) = {
-            let wallet = client.wallet().read().await;
-            let record = wallet
-                .wallet_transactions
-                .get(
-                    ids.first()
-                        .context("calculated transaction identity missing")?,
-                )
-                .context("calculated transaction missing")?;
-            let transaction = record.transaction();
-            let mut raw = zeroize::Zeroizing::new(Vec::new());
-            transaction.write(&mut *raw)?;
-            let facts: Result<TransactionFacts> = (|| {
+            },
+            move |wallet| calculate_deposit(wallet, &proposal),
+            move |wallet, id| {
+                let record = wallet
+                    .wallet_transactions
+                    .get(id)
+                    .context("calculated transaction missing")?;
+                let transaction = record.transaction();
                 let transparent = transaction
                     .transparent_bundle()
                     .context("deposit output missing")?;
@@ -304,11 +277,9 @@ impl Treasury {
                     deadline: Some(request.deadline),
                 };
                 Ok(facts)
-            })();
-            (raw, facts)
-        };
-        self.retain_calculation(request.operation_id, raw, facts)
-            .await
+            },
+        )
+        .await
     }
 }
 impl Treasury {

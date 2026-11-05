@@ -525,6 +525,19 @@ Optional-outage fixtures also check inherited prefixes and ambiguous listener
 selectors. Birthday fixtures advance the tip between observations. Nonce-outage
 fixtures retain original authorizations and explicit canonical reporting proofs;
 nonce outages are not payment admission gates.
+Calculation-owner fixtures hold the real accepted blocking task with a per-owner
+test barrier; its Drop releases the task on assertion failure. Publication fixtures
+replace only the existing minute wait with an explicit test retry-release channel,
+then use the same worker, exact snapshot and idempotent SQL boundary. They do not
+qualify elapsed cadence. Actual MCP progress coverage starts the authenticated application HTTP server on
+the same current-thread runtime as preparation. An external controller issues a
+real cached unsigned help tools/call only after the actual accepted SDK hold;
+its existing fixture watchdog remains runnable if that serving runtime blocks.
+It releases and joins held work before assertions, including failed HTTP or a
+pre-handoff preparation failure. This is functional progress, not a latency claim.
+Normal-runtime-drop coverage holds no external Store
+sender and observes a real async task's abort before releasing accepted CPU work.
+
 Synthetic proving checks actual-fee affordability and exact saved bytes through
 failed publication, lost acknowledgement, cancellation and reopen. First-use Sapling
 parameter assertions run as exact isolated child test processes with a checked

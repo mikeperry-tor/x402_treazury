@@ -135,13 +135,19 @@ checks the actual proposal against the configured network-fee cap,
 then persists the exact input owner before calculation. Backend calculation
 borrows that same public proposal and retains ordinary consensus expiry, including
 the SDK's NU7 delta, rather than the offline high-level API's epoch-end expiry.
-Sapling proving uses lazily parsed embedded parameters. Proposal cleanup happens
-after releasing the wallet guard; accepted input ownership remains durable.
+Sapling proving uses lazily parsed embedded parameters. The blocking calculation clears the public wallet proposal before saving; the
+returned client releases its proposal pause through public cleanup after the join.
+Accepted input ownership remains durable.
 Canonical actor validation supplies the network/anchor check without an additional
 connection for local calculation; direct preparation keeps its network validation.
 A configured maximum is a
 rejection ceiling, not a capital reservation. The serialized SDK owner retains live
-calculations and completed results until publication. The preparation phase commits
+calculations and completed results until publication. One started blocking owner
+owns the actual offline client before serialized input acceptance, calculates once,
+and publishes exact bytes through the same Store worker. Dropping a caller, the
+Treasury or its normal Tokio runtime does not discard started accepted work.
+A queued task that never starts cannot accept inputs. Deposit deadline/claim checks
+and shielding stop checks retain their existing acceptance semantics. The preparation phase commits
 with accepted input evidence; known proposal shortages and fee rejections leave the quoted operation
 unstarted without consuming transaction recovery attempts. The
 SDK owns current balances, confirmations, witnesses, spent outputs and chain
@@ -164,6 +170,15 @@ The Store alone owns exact accepted costs, selected inputs and signed bytes.
 A zero-new-funding restriction remains independent of API payment authority.
 
 Treasury command and sync drivers retain their cleanup owner when callers disconnect.
+Async SDK mutations drain a retained calculation before checking health and current
+authority; the join handle stays installed throughout cancelable waits. Store-only
+status, independent MCP tools and payment work stay available while that SDK capability is busy; SDK-only
+views can report temporary unavailability. A surviving owner installs the actual
+returned client and revision synchronously, remains unhealthy through public async
+proposal cleanup, then restores validated health. Cancellation during cleanup leaves
+reconstruction responsible for the old mutation. An unaccepted proposal left by
+preflight cancellation is cleared only after draining prior ownership and the
+existing unstarted/availability read, before selecting new inputs.
 After an unhealthy SDK mutation, they discard that SDK and reconstruct it from the
 latest committed snapshot through the same serialized Store. Queued commands remain
 queued; an interrupted command is never replayed. Accepted input evidence, funding
@@ -171,10 +186,14 @@ restrictions and Base handles remain preserved. Successful offline reconstructio
 can close an unpublished calculation whose outgoing and factual transaction journals
 are both absent. Completed bytes take precedence:
 only an unacknowledged local publication repeats on the existing 60-second cadence,
-including shutdown. A known durable commit clears that retry owner even if its
+including shutdown. The blocking owner alone owns this retry and its diagnostic;
+its first publication error can return to the caller while identical work continues.
+Normal runtime shutdown can wait for persistent local storage failure to be repaired;
+there is no forced abandonment deadline. A known durable commit clears that retry owner even if its
 submission view cannot be decoded; that view failure requires SDK reconstruction,
 not another calculation or publication. Shutdown releases the SDK and Store worker
-before returning a terminal view error. A bound initial claim fulfilled during
+before returning a terminal view error. Expected proven-unstarted or already-fulfilled
+operation dispositions do not turn physical shutdown into a failure. A bound initial claim fulfilled during
 calculation still retains exact calculated bytes, accepted inputs and snapshot;
 it finishes preparation without disclosure authority or a deferred-calculation
 failure. Positive credit alone retains the pending source journal while preventing
@@ -531,7 +550,11 @@ retained signed original therefore keeps its source-work fence until closure;
 actor serialization alone cannot prevent later input reselection after that reset.
 This protects genuinely unfinished work without auditing completed transactions.
 
-Production calculation is offline. Broadcasting requires committed outgoing bytes
+Production calculation is offline and runs outside async executor threads. SDK
+calculation panics terminate before reconstruction. If exact bytes were already
+extracted, a later facts-validation panic still publishes them without submission
+facts; it cannot authorize a replacement, disclosure or another calculation.
+Broadcasting requires committed outgoing bytes
 and factual transaction metadata before the Store can grant disclosure authority.
 After successful exclusive offline SDK reconstruction, with no completed result
 still owned, a funding calculation with neither journal can close automatically.

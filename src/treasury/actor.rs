@@ -153,29 +153,16 @@ impl Treasury {
         tokio::pin!(socks);
         let mut startup_ready = false;
         loop {
-            if self.completed.is_some() {
+            if self.running.is_some() {
                 tokio::select! {
-                    _=stop.cancelled()=>break,
-                    _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{}
-                }
-                let operation = self
-                    .completed
-                    .as_ref()
-                    .expect("completed result")
-                    .operation
-                    .clone();
-                match self.publish_completed().await {
-                    Ok(_) => {}
-                    Err(error) if self.completed.is_some() => {
-                        super::diagnostics::report_local_retry(&error, "transaction publication");
-                        continue;
-                    }
-                    Err(_) => {
-                        tracing::debug!(
-                            operation,
-                            category = "saved_transaction_projection_failed",
-                            "A completed Zcash transaction was saved but its submission state could not be read; further wallet work requires reloading saved state"
-                        );
+                    _ = stop.cancelled() => break,
+                    result = self.finish_calculation() => {
+                        if result.is_err() && !self.healthy {
+                            tracing::debug!(
+                                category = "treasury_preparation_recovery_needed",
+                                "Zcash preparation finished; reloading saved wallet state before further work"
+                            );
+                        }
                     }
                 }
             }
@@ -1059,8 +1046,8 @@ mod tests {
                 self.event.extend_from_slice(bytes);
                 if self
                     .event
-                    .windows(b"saved_transaction_projection_failed".len())
-                    .any(|part| part == b"saved_transaction_projection_failed")
+                    .windows(b"treasury_preparation_recovery_needed".len())
+                    .any(|part| part == b"treasury_preparation_recovery_needed")
                 {
                     self.stop.cancel();
                 }
@@ -1101,6 +1088,9 @@ mod tests {
             fee_zatoshis: 10,
             deadline: None,
         };
+        let expected_snapshot = super::super::snapshot(owner.client.as_ref().unwrap())
+            .await
+            .unwrap();
         assert!(
             owner
                 .retain_calculation(
@@ -1113,24 +1103,13 @@ mod tests {
                 .await
                 .is_err()
         );
-        let expected_snapshot = super::super::snapshot(owner.client.as_ref().unwrap())
-            .await
-            .unwrap();
         db.execute_batch("DROP TRIGGER reject_projection; CREATE TRIGGER corrupt_projection AFTER INSERT ON treasury_operations BEGIN UPDATE treasury_operations SET facts='not-json' WHERE id=NEW.id; END;").unwrap();
+        owner.release_publication_retry();
         let store = owner.store.clone();
         let (_handle, mut commands) = channel();
         let mut submission = NoSubmission;
         {
-            tokio::time::pause();
-            let mut actor = Box::pin(owner.command_loop(&mut commands, &mut submission, &stop));
-            // Register the existing maintenance timer before making it eligible.
-            // Its readiness says nothing about publication completion.
-            assert!(futures_util::poll!(actor.as_mut()).is_pending());
-            tokio::time::advance(std::time::Duration::from_secs(
-                super::super::publication::MAINTENANCE_SECONDS,
-            ))
-            .await;
-            tokio::time::resume();
+            let actor = Box::pin(owner.command_loop(&mut commands, &mut submission, &stop));
             // Real time prevents paused auto-advance from racing the blocking
             // Store worker. Only the actual postcommit event selects shutdown.
             tokio::time::timeout(std::time::Duration::from_secs(2), actor)
@@ -1138,7 +1117,7 @@ mod tests {
                 .expect("actor must acknowledge the committed publication")
                 .unwrap();
         }
-        assert!(owner.completed.is_none() && !owner.healthy);
+        assert!(owner.running.is_none() && !owner.healthy);
         // The event selects shutdown, while independent durable evidence proves
         // the original result was saved without disclosure or replay.
         db.execute_batch("DROP TRIGGER corrupt_projection;")
@@ -1170,7 +1149,7 @@ mod tests {
         let logs = std::fs::read_to_string(log.path()).unwrap();
         let event = logs
             .lines()
-            .find(|line| line.contains("saved_transaction_projection_failed"))
+            .find(|line| line.contains("treasury_preparation_recovery_needed"))
             .unwrap();
         assert!(
             event.contains("DEBUG") && !event.contains("WARN") && !event.contains("ERROR"),

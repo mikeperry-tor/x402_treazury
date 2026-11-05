@@ -1,6 +1,7 @@
 //! Local synthetic-chain coverage of the real treasury owner and signed journal.
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
 mod birthday;
+mod calculation_owner;
 mod discovery;
 mod indexer_recovery;
 mod indexer_regression;
@@ -258,7 +259,7 @@ async fn inclusion_after_wallet_scan_waits_without_resubmitting_or_releasing_inp
     save_quotes(&owner.store, vec![job.clone()], deadline).await;
     let revision = owner.revision;
     let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
-    assert!(owner.healthy && owner.completed.is_none());
+    assert!(owner.healthy && owner.running.is_none());
     assert_eq!(owner.revision, revision + 1);
     let raw = prepared.bytes().to_vec();
     let mut sender = MineDuringLookup {

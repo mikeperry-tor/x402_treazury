@@ -636,6 +636,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
         let db = rusqlite::Connection::open(state.join("state.sqlite"))?;
         if fail_commit {
             db.execute_batch("CREATE TRIGGER reject_shield BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture shield commit failure'); END;")?;
+            treasury.enable_publication_retry();
         }
         let error = treasury
             .shield_refund(
@@ -654,7 +655,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
         }
         if fail_commit {
             db.execute_batch("DROP TRIGGER reject_shield;")?;
-            assert!(treasury.completed.is_some());
+            assert!(treasury.running.is_some());
             retained_shield = Some(
                 treasury
                     .publish_completed()

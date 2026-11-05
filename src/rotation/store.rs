@@ -1126,6 +1126,18 @@ fn read_status(db: &Connection) -> Result<Status> {
 
 // The async facade serializes all SQL on a dedicated blocking task. A cancelled
 // caller drops only its response receiver; an accepted transaction still finishes.
+/// The caller owns any remaining recovery; this does not grant mutation retry.
+#[derive(Clone, Copy)]
+pub(crate) enum FailureDisposition {
+    Terminal,
+    Retrying,
+}
+pub(crate) fn database_busy(error: &anyhow::Error) -> bool {
+    matches!(error.downcast_ref::<rusqlite::Error>(),
+        Some(rusqlite::Error::SqliteFailure(failure, _))
+        if matches!(failure.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+}
+
 type Work = Box<dyn FnOnce(&mut Store) + Send>;
 #[derive(Default)]
 struct GroupOwners {
@@ -1218,34 +1230,51 @@ impl StoreHandle {
         &self,
         f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        let (work, recv) = Self::work(f, FailureDisposition::Terminal);
+        crate::limits::send_capacity(&self.sender, work, "store_queue_full", 32)
+            .await
+            .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
+        recv.await.context("store worker stopped")?
+    }
+    pub(crate) fn call_blocking<T: Send + 'static>(
+        &self,
+        disposition: FailureDisposition,
+        f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let (work, recv) = Self::work(f, disposition);
+        self.sender
+            .blocking_send(work)
+            .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
+        recv.blocking_recv().context("store worker stopped")?
+    }
+
+    fn work<T: Send + 'static>(
+        f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,
+        disposition: FailureDisposition,
+    ) -> (Work, tokio::sync::oneshot::Receiver<Result<T>>) {
         let (send, recv) = tokio::sync::oneshot::channel();
-        crate::limits::send_capacity(
-            &self.sender,
-            Box::new(move |store: &mut Store| {
-                let result = f(store).inspect_err(|error| {
+        let work = Box::new(move |store: &mut Store| {
+            let result = f(store).inspect_err(|error| {
                     // Report contention even if the accepted command's reply
                     // waiter disappeared; this never authorizes mutation retry.
-                    if matches!(error.downcast_ref::<rusqlite::Error>(),
-                        Some(rusqlite::Error::SqliteFailure(failure, _))
-                        if matches!(failure.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
-                    {
-                        tracing::warn!(
-                            reason = "store_database_busy",
-                            limit_ms = 5000,
-                            setting = "hardcoded_store_busy_timeout",
-                            action = "operation_failed",
-                            "Store database contention prevented an operation"
-                        );
+                    if database_busy(error) {
+                        match disposition {
+                            FailureDisposition::Terminal => tracing::warn!(
+                                reason = "store_database_busy", limit_ms = 5000,
+                                setting = "hardcoded_store_busy_timeout", action = "operation_failed",
+                                "Store database contention prevented an operation"
+                            ),
+                            FailureDisposition::Retrying => tracing::debug!(
+                                reason = "store_database_busy", limit_ms = 5000,
+                                setting = "hardcoded_store_busy_timeout", action = "retrying",
+                                "Treasury transaction publication is waiting for database contention to clear; accepted work remains owned"
+                            ),
+                        }
                     }
                 });
-                let _ = send.send(result);
-            }) as Work,
-            "store_queue_full",
-            32,
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
-        recv.await.context("store worker stopped")?
+            let _ = send.send(result);
+        }) as Work;
+        (work, recv)
     }
 }
 

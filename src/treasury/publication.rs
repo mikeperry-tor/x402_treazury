@@ -1,79 +1,235 @@
-//! Completed SDK results stay with the existing owner until local publication.
+//! The started blocking owner retains accepted calculation through local publication.
 use super::*;
-use crate::rotation::transaction::{PreparedTransaction, TransactionFacts};
+use crate::rotation::{
+    store::FailureDisposition,
+    transaction::{PreparedTransaction, TransactionFacts},
+};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use zingolib::wallet::LightWallet;
 
 pub(super) const MAINTENANCE_SECONDS: u64 = 60;
 
-pub(super) struct CompletedPreparation {
-    pub(super) operation: String,
+struct CompletedPreparation {
+    operation: String,
     expected_revision: i64,
     raw: Zeroizing<Vec<u8>>,
     snapshot: Option<Zeroizing<Vec<u8>>>,
-    // Invalid completed bytes are retained without broadcast-ready facts.
-    facts: Option<TransactionFacts>,
+    facts: Result<TransactionFacts>,
 }
+
+pub(super) struct CalculationReturn {
+    client: LightClient,
+    revision: i64,
+    healthy: bool,
+    result: Result<PreparedTransaction>,
+}
+
+#[cfg(test)]
+pub(super) struct CalculationControl {
+    pub(super) entered: Option<tokio::sync::oneshot::Sender<String>>,
+    pub(super) before_acceptance: bool,
+    pub(super) release: std::sync::mpsc::Receiver<()>,
+    pub(super) calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) panic_calculation: bool,
+    pub(super) panic_facts: bool,
+}
+
+#[cfg(test)]
+impl CalculationControl {
+    fn wait(&mut self, operation: &str) -> Result<()> {
+        if let Some(entered) = self.entered.take() {
+            let _ = entered.send(operation.to_owned());
+        }
+        self.release
+            .recv()
+            .context("calculation fixture release missing")
+    }
+}
+
 impl Treasury {
-    pub(super) async fn retain_calculation(
+    /// Install the owner before yielding: SQL acceptance occurs only in its body.
+    pub(super) async fn calculate_owned(
         &mut self,
         operation: String,
-        raw: Zeroizing<Vec<u8>>,
-        facts: Result<TransactionFacts>,
+        accept: impl FnOnce(&mut Store) -> Result<()> + Send + 'static,
+        calculate: impl FnOnce(&mut LightWallet) -> Result<Vec<zcash_protocol::TxId>> + Send + 'static,
+        validate: impl FnOnce(&LightWallet, &zcash_protocol::TxId) -> Result<TransactionFacts>
+        + Send
+        + 'static,
     ) -> Result<PreparedTransaction> {
-        let (facts, invalid) = match facts {
-            Ok(facts) => (Some(facts), None),
-            Err(error) => (None, Some(error)),
-        };
-        self.completed = Some(CompletedPreparation {
-            operation,
-            expected_revision: self.revision,
-            raw,
-            snapshot: None,
-            facts,
-        });
-        let prepared = match self.publish_completed().await {
-            Ok(value) => value,
-            Err(error) => {
-                if self.completed.is_some() {
-                    diagnostics::report_local_retry(&error, "transaction publication");
-                }
-                return Err(error);
+        let client = self.client.take().context("treasury unavailable")?;
+        self.healthy = false;
+        let store = self.store.clone();
+        let revision = self.revision;
+        let (notify, notified) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let retry = self
+            .publication_retry_wait
+            .take()
+            .map(tokio::sync::Mutex::into_inner);
+        #[cfg(test)]
+        let mut control = self
+            .calculation_control
+            .take()
+            .map(tokio::sync::Mutex::into_inner);
+        self.running = Some(tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(control) = control.as_mut()
+                && control.before_acceptance
+            {
+                control
+                    .wait(&operation)
+                    .expect("fixture handoff release missing");
             }
-        };
-        match invalid {
-            Some(error) => {
-                Err(error.context("completed transaction retained without submission authority"))
+            let accepted = store.call_blocking(FailureDisposition::Terminal, accept);
+            if let Err(error) = accepted {
+                let id = operation.clone();
+                let unstarted = store
+                    .call_blocking(FailureDisposition::Terminal, move |s| {
+                        s.require_unstarted_preparation(&id)
+                    })
+                    .is_ok();
+                return CalculationReturn {
+                    client,
+                    revision,
+                    healthy: unstarted,
+                    result: Err(if unstarted {
+                        error.context(crate::rotation::transaction::PreparationDeferred)
+                    } else {
+                        error
+                    }),
+                };
             }
-            None => prepared
-                .ok_or_else(|| crate::rotation::transaction::PreparationAlreadyFulfilled.into()),
+            let calculated: Result<_> = catch_unwind(AssertUnwindSafe(|| {
+                #[cfg(test)]
+                let panic_facts = if let Some(mut control) = control {
+                    if !control.before_acceptance {
+                        control.wait(&operation)?;
+                    }
+                    assert!(!control.panic_calculation, "fixture calculation panic");
+                    control
+                        .calls
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    control.panic_facts
+                } else {
+                    false
+                };
+                let wallet = client.wallet();
+                let mut wallet = wallet.blocking_write();
+                let ids = calculate(&mut wallet);
+                wallet.clear_proposal();
+                let ids = ids?;
+                ensure!(ids.len() == 1, "calculation produced multiple transactions");
+                let id = ids
+                    .first()
+                    .context("calculated transaction identity missing")?;
+                let record = wallet
+                    .wallet_transactions
+                    .get(id)
+                    .context("calculated transaction missing")?;
+                let mut raw = Zeroizing::new(Vec::new());
+                record.transaction().write(&mut *raw)?;
+                // Extract bytes before the independent validation unwind boundary.
+                let facts = catch_unwind(AssertUnwindSafe(|| {
+                    #[cfg(test)]
+                    assert!(!panic_facts, "fixture facts panic");
+                    validate(&wallet, id)
+                }))
+                .unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "calculated transaction validation panicked"
+                    ))
+                });
+                Ok((raw, facts))
+            }))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("treasury calculation panicked")));
+            match calculated {
+                Ok((raw, facts)) => publish_owned(
+                    client,
+                    store,
+                    CompletedPreparation {
+                        operation,
+                        expected_revision: revision,
+                        raw,
+                        snapshot: None,
+                        facts,
+                    },
+                    notify,
+                    #[cfg(test)]
+                    retry,
+                ),
+                Err(error) => CalculationReturn {
+                    client,
+                    revision,
+                    healthy: false,
+                    result: Err(error),
+                },
+            }
+        }));
+        // Normal sender closure means success or a terminal calculation result;
+        // in either case the retained JoinHandle supplies the actual disposition.
+        match notified.await {
+            Ok(error) => Err(error),
+            Err(_) => self.finish_calculation().await,
         }
     }
 
-    /// Only this idempotent local boundary repeats; SDK calculation never does.
-    pub(super) async fn publish_completed(&mut self) -> Result<Option<PreparedTransaction>> {
-        let completed = self
-            .completed
+    /// Keep the handle installed throughout every interruptible wait.
+    pub(super) async fn finish_calculation(&mut self) -> Result<PreparedTransaction> {
+        let joined = self
+            .running
             .as_mut()
-            .context("completed result missing")?;
-        if completed.snapshot.is_none() {
-            completed.snapshot =
-                Some(snapshot(self.client.as_ref().context("treasury unavailable")?).await?);
+            .context("treasury calculation missing")?
+            .await;
+        self.running = None;
+        self.healthy = false;
+        let returned = joined.context("treasury calculation owner stopped")?;
+        self.client = Some(returned.client);
+        self.revision = returned.revision;
+        // Cancellation here leaves the actual client installed and unhealthy;
+        // existing reconstruction owns any subsequent SDK use.
+        self.client
+            .as_mut()
+            .expect("returned client")
+            .clear_proposal()
+            .await;
+        self.healthy = returned.healthy;
+        returned.result
+    }
+
+    /// A new operation drains old ownership without inheriting disclosure rights.
+    pub(super) async fn drain_calculation(&mut self) {
+        if self.running.is_some() {
+            let _ = self.finish_calculation().await;
         }
-        let id = completed.operation.clone();
-        let expected = completed.expected_revision;
-        let raw = completed.raw.clone();
-        let bytes = completed
-            .snapshot
-            .as_ref()
-            .expect("completed snapshot")
-            .clone();
-        let facts = completed.facts.clone();
-        let validated = facts.is_some();
-        let (revision, prepared) = self
-            .store
-            .call(move |store| {
+    }
+}
+
+fn publish_owned(
+    client: LightClient,
+    store: StoreHandle,
+    mut completed: CompletedPreparation,
+    notify: tokio::sync::oneshot::Sender<anyhow::Error>,
+    #[cfg(test)] retry: Option<std::sync::mpsc::Receiver<()>>,
+) -> CalculationReturn {
+    let mut notify = Some(notify);
+    loop {
+        let publication = catch_unwind(AssertUnwindSafe(|| {
+            if completed.snapshot.is_none() {
+                let wallet = client.wallet();
+                completed.snapshot = Some(snapshot_wallet(&mut wallet.blocking_write())?.0);
+            }
+            let id = completed.operation.clone();
+            let expected = completed.expected_revision;
+            let raw = completed.raw.clone();
+            let bytes = completed
+                .snapshot
+                .as_ref()
+                .expect("completed snapshot")
+                .clone();
+            let facts = completed.facts.as_ref().ok().cloned();
+            store.call_blocking(FailureDisposition::Retrying, move |store| {
                 let revision = store.prepare_with_facts(&id, expected, &bytes, &raw, facts)?;
-                // Acknowledging the durable commit is independent from projecting
-                // a still-pending disclosure capability. Only the former repeats.
                 let prepared: Result<Option<PreparedTransaction>> = (|| {
                     if store.funding_operation_fulfilled(&id)? {
                         Ok(None)
@@ -83,11 +239,107 @@ impl Treasury {
                 })();
                 Ok((revision, prepared))
             })
-            .await?;
-        self.revision = revision;
-        self.completed = None;
-        self.healthy = validated && prepared.is_ok();
-        prepared
+        }))
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("transaction publication panicked")));
+        match publication {
+            Ok((revision, prepared)) => {
+                let healthy = completed.facts.is_ok() && prepared.is_ok();
+                let result = match completed.facts {
+                    Err(error) => Err(error
+                        .context("completed transaction retained without submission authority")),
+                    Ok(_) => prepared.and_then(|value| {
+                        value.ok_or_else(|| {
+                            crate::rotation::transaction::PreparationAlreadyFulfilled.into()
+                        })
+                    }),
+                };
+                return CalculationReturn {
+                    client,
+                    revision,
+                    healthy,
+                    result,
+                };
+            }
+            Err(error) => {
+                if !crate::rotation::store::database_busy(&error) {
+                    diagnostics::report_local_retry(&error, "transaction publication");
+                }
+                if let Some(notify) = notify.take() {
+                    let _ = notify.send(error);
+                }
+                #[cfg(not(test))]
+                std::thread::sleep(Duration::from_secs(MAINTENANCE_SECONDS));
+                #[cfg(test)]
+                if !matches!(retry.as_ref().map(|retry| retry.recv()), Some(Ok(()))) {
+                    // Dropping the test waiter does not abandon accepted work.
+                    std::thread::sleep(Duration::from_secs(MAINTENANCE_SECONDS));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Treasury {
+    pub(super) fn enable_publication_retry(&mut self) {
+        let (send, recv) = std::sync::mpsc::channel();
+        self.publication_retry = Some(send);
+        self.publication_retry_wait = Some(tokio::sync::Mutex::new(recv));
+    }
+    pub(super) fn release_publication_retry(&mut self) {
+        if let Some(send) = &self.publication_retry {
+            let _ = send.send(());
+        }
+    }
+    // Existing publication fixtures supply completed bytes; they exercise the
+    // same blocking publication owner, never a second Treasury completion slot.
+    pub(super) async fn retain_calculation(
+        &mut self,
+        operation: String,
+        raw: Zeroizing<Vec<u8>>,
+        facts: Result<TransactionFacts>,
+    ) -> Result<PreparedTransaction> {
+        let client = self.client.take().context("treasury unavailable")?;
+        self.healthy = false;
+        let store = self.store.clone();
+        let revision = self.revision;
+        let (notify, notified) = tokio::sync::oneshot::channel();
+        self.enable_publication_retry();
+        let retry = self
+            .publication_retry_wait
+            .take()
+            .map(tokio::sync::Mutex::into_inner);
+        self.running = Some(tokio::task::spawn_blocking(move || {
+            publish_owned(
+                client,
+                store,
+                CompletedPreparation {
+                    operation,
+                    expected_revision: revision,
+                    raw,
+                    snapshot: None,
+                    facts,
+                },
+                notify,
+                retry,
+            )
+        }));
+        match notified.await {
+            Ok(error) => Err(error),
+            Err(_) => self.finish_calculation().await,
+        }
+    }
+    pub(super) async fn publish_completed(&mut self) -> Result<Option<PreparedTransaction>> {
+        self.release_publication_retry();
+        match self.finish_calculation().await {
+            Ok(prepared) => Ok(Some(prepared)),
+            Err(error)
+                if error.is::<crate::rotation::transaction::PreparationAlreadyFulfilled>() =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -95,6 +347,135 @@ impl Treasury {
 mod tests {
     use super::*;
     const SEED: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    #[tokio::test]
+    async fn retained_publication_busy_is_one_safe_debug_record_and_retries_identical_bytes() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::publication::tests::retained_publication_busy_is_one_safe_debug_record_and_retries_identical_bytes",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let writer = log.reopen().unwrap();
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(move || writer.try_clone().unwrap())
+            .init();
+        let mut fixture = late_fixture().await;
+        fixture.db.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let revision = fixture.owner.revision;
+        let error = fixture
+            .owner
+            .retain_calculation(
+                fixture.job.operation_id.clone(),
+                late_raw(),
+                Ok(late_facts()),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(crate::rotation::store::database_busy(&error));
+        assert!(fixture.owner.running.is_some() && !fixture.owner.healthy);
+        assert_eq!(fixture.owner.revision, revision);
+        fixture.db.execute_batch("ROLLBACK").unwrap();
+        let prepared = fixture.owner.publish_completed().await.unwrap().unwrap();
+        assert_eq!(prepared.bytes(), late_raw().as_slice());
+        assert_eq!(fixture.owner.revision, revision + 1);
+        assert!(fixture.owner.running.is_none() && fixture.owner.healthy);
+        let job = fixture.job.clone();
+        let inputs = fixture.inputs.clone();
+        let snapshot = fixture.snapshot.clone();
+        fixture
+            .owner
+            .store
+            .call(move |s| {
+                assert!(s.operation_pending(&job.operation_id)?);
+                assert_eq!(s.prepared_inputs(&job.operation_id)?, inputs);
+                assert_eq!(s.prepared_snapshot(&job.operation_id)?.as_slice(), snapshot);
+                assert_eq!(
+                    s.prepared_bytes(&job.operation_id)?.as_slice(),
+                    late_raw().as_slice()
+                );
+                assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+                assert_eq!(s.operation(&job.operation_id)?.submission, "PREPARED");
+                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert_eq!(
+                    s.funding_job(&job.id)?.unwrap().operation_id,
+                    job.operation_id
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        fixture.owner.close().await.unwrap();
+        let log = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(log.matches("store_database_busy").count(), 1, "{log}");
+        assert!(
+            log.lines().any(|line| line.contains("DEBUG")
+                && line.contains("store_database_busy")
+                && line.contains("limit_ms=5000")
+                && line.contains("retrying")),
+            "{log}"
+        );
+        assert!(!log.contains("WARN") && !log.contains("ERROR"), "{log}");
+        assert!(
+            !log.contains("local retry will continue"),
+            "the same busy failure must not produce a second retry diagnostic: {log}"
+        );
+    }
+    #[tokio::test]
+    async fn uncertain_acceptance_acknowledgment_never_starts_or_repeats_calculation() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            2_000_000,
+            Some(Zeroizing::new(SEED.into())),
+        )
+        .await
+        .unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let error = owner
+            .calculate_owned(
+                "lost-acceptance".into(),
+                |s| {
+                    s.accept_preparation("lost-acceptance", None, 60, None)?;
+                    Err(anyhow::anyhow!("fixture lost acceptance acknowledgment"))
+                },
+                move |_| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    anyhow::bail!("calculation must not run after uncertain acceptance")
+                },
+                |_, _| anyhow::bail!("validation must not run after uncertain acceptance"),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(!error.is::<crate::rotation::transaction::PreparationDeferred>());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(owner.running.is_none() && owner.client.is_some() && !owner.healthy);
+        owner
+            .store
+            .call(|s| {
+                assert!(s.require_unstarted_preparation("lost-acceptance").is_err());
+                assert!(s.prepared_bytes("lost-acceptance").is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner
+            .reconstruct_sdk(&CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(owner.healthy);
+        owner.close().await.unwrap();
+    }
     async fn fixture(valid: bool) -> (tempfile::TempDir, Treasury, rusqlite::Connection) {
         let dir = tempfile::tempdir().unwrap();
         let mut treasury = Treasury::create(
@@ -134,38 +515,39 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(treasury.completed.is_some());
+        assert!(treasury.running.is_some());
         (dir, treasury, db)
     }
     #[tokio::test]
     async fn completed_result_retries_only_identical_local_bytes_after_failure_or_lost_ack() {
         let (_dir, mut treasury, db) = fixture(true).await;
         assert!(!treasury.healthy);
-        assert!(treasury.derive_address().await.is_err());
-        let original = treasury.completed.as_ref().unwrap().raw.clone();
+        {
+            let mut derive = Box::pin(treasury.derive_address());
+            assert!(futures_util::poll!(derive.as_mut()).is_pending());
+        }
+        assert!(treasury.running.is_some());
+        let original = Zeroizing::new(crate::rotation::store::test_support::transaction_raw(100));
         let revision = treasury.revision;
-        let error = treasury
-            .reconstruct_sdk(&CancellationToken::new())
-            .await
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("completed publication still owned")
-        );
+        {
+            let stop = CancellationToken::new();
+            let mut reconstruction = Box::pin(treasury.reconstruct_sdk(&stop));
+            assert!(futures_util::poll!(reconstruction.as_mut()).is_pending());
+        }
+        assert!(treasury.running.is_some());
         assert_eq!(treasury.revision, revision);
-        assert_eq!(
-            treasury.completed.as_ref().unwrap().raw.as_slice(),
-            original.as_slice()
-        );
         db.execute_batch("DROP TRIGGER reject_completed;").unwrap();
-        let completion = treasury.completed.as_ref().unwrap();
-        let (id, revision, bytes, raw, facts) = (
-            completion.operation.clone(),
-            completion.expected_revision,
-            completion.snapshot.clone().unwrap(),
-            completion.raw.clone(),
-            completion.facts.clone(),
+        let (id, bytes, raw, facts) = (
+            "completed".to_owned(),
+            treasury.store.call(|s| Ok(s.snapshot()?.1)).await.unwrap(),
+            original.clone(),
+            Some(TransactionFacts {
+                txid: crate::rotation::store::test_support::transaction_txid(100),
+                expiry_height: 100,
+                amount_zatoshis: 50,
+                fee_zatoshis: 10,
+                deadline: None,
+            }),
         );
         // The write commits but its result is lost. Current permission may pause;
         // neither event discards the accepted completion or mints another send.
@@ -184,7 +566,7 @@ mod tests {
             crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         assert_eq!(treasury.revision, 2);
-        assert!(treasury.completed.is_none() && treasury.healthy);
+        assert!(treasury.running.is_none() && treasury.healthy);
         assert!(
             treasury
                 .store
@@ -198,13 +580,19 @@ mod tests {
     async fn invalid_completed_bytes_are_durable_without_broadcast_authority() {
         let (_dir, mut treasury, db) = fixture(false).await;
         db.execute_batch("DROP TRIGGER reject_completed;").unwrap();
-        let prepared = treasury.publish_completed().await.unwrap().unwrap();
+        let error = treasury.publish_completed().await.err().unwrap();
+        assert!(format!("{error:#}").contains("fixture validation failure"));
+        let prepared = treasury
+            .store
+            .call(|s| PreparedTransaction::load(s, "completed"))
+            .await
+            .unwrap();
         assert_eq!(
             prepared.bytes(),
             crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         assert!(prepared.facts().is_none());
-        assert!(treasury.completed.is_none() && !treasury.healthy);
+        assert!(treasury.running.is_none() && !treasury.healthy);
         assert!(
             treasury
                 .store
@@ -483,7 +871,7 @@ mod tests {
                 .unwrap();
             assert!(error.is::<PreparationAlreadyFulfilled>());
             assert!(!error.is::<PreparationDeferred>());
-            assert!(fixture.owner.completed.is_none() && fixture.owner.healthy);
+            assert!(fixture.owner.running.is_none() && fixture.owner.healthy);
             assert_eq!(fixture.owner.revision, revision + 1);
             assert_late_evidence(&fixture, false, true).await;
             let job = fixture.job.clone();
@@ -527,7 +915,7 @@ mod tests {
             .await
             .unwrap();
         assert!(prepared.bytes() == late_raw().as_slice());
-        assert!(fixture.owner.completed.is_none() && fixture.owner.healthy);
+        assert!(fixture.owner.running.is_none() && fixture.owner.healthy);
         assert_late_evidence(&fixture, true, true).await;
         let job = fixture.job.clone();
         fixture
@@ -566,7 +954,7 @@ mod tests {
         assert!(error.to_string().contains("without submission authority"));
         assert!(format!("{error:#}").contains("fixture original validation failure"));
         assert!(!error.is::<PreparationAlreadyFulfilled>());
-        assert!(fixture.owner.completed.is_none() && !fixture.owner.healthy);
+        assert!(fixture.owner.running.is_none() && !fixture.owner.healthy);
         assert_late_evidence(&fixture, false, false).await;
         fixture.owner.close().await.unwrap();
     }
@@ -586,13 +974,12 @@ mod tests {
                 .await
                 .is_err()
         );
-        let completion = fixture.owner.completed.as_ref().unwrap();
         let (id, revision, bytes, raw, facts) = (
-            completion.operation.clone(),
-            completion.expected_revision,
-            completion.snapshot.clone().unwrap(),
-            completion.raw.clone(),
-            completion.facts.clone(),
+            fixture.job.operation_id.clone(),
+            fixture.owner.revision,
+            Zeroizing::new(fixture.snapshot.clone()),
+            late_raw(),
+            Some(late_facts()),
         );
         fixture
             .db
@@ -610,7 +997,7 @@ mod tests {
         observe_delivery(&fixture, true, false).await;
         assert!(fixture.owner.publish_completed().await.unwrap().is_none());
         assert_eq!(fixture.owner.revision, revision + 1);
-        assert!(fixture.owner.completed.is_none() && fixture.owner.healthy);
+        assert!(fixture.owner.running.is_none() && fixture.owner.healthy);
         assert_late_evidence(&fixture, false, true).await;
         fixture.owner.close().await.unwrap();
     }
@@ -648,7 +1035,7 @@ mod tests {
             .err()
             .unwrap();
         assert!(!error.is::<PreparationAlreadyFulfilled>());
-        assert!(fixture.owner.completed.is_none() && !fixture.owner.healthy);
+        assert!(fixture.owner.running.is_none() && !fixture.owner.healthy);
         assert_eq!(fixture.owner.revision, revision + 1);
         fixture
             .db
@@ -723,7 +1110,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(fixture.owner.completed.is_some());
+        assert!(fixture.owner.running.is_some());
         let identity = fixture.owner.status().await.unwrap().treasury_id;
         fixture
             .db
