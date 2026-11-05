@@ -589,6 +589,12 @@ pre-handoff preparation failure. This is functional progress, not a latency clai
 Normal-runtime-drop coverage holds no external Store
 sender and observes a real async task's abort before releasing accepted CPU work.
 
+Treasury sync transition regressions use the existing observation failure state:
+a real refused offline scan announces INFO once, repeated failure preserves
+backoff, successful completion permits a later transition, and shutdown remains
+quiet. The startup SOCKS owner fixture verifies command-first failure followed
+by periodic retry shares that transition without creating financial work.
+
 Synthetic proving checks actual-fee affordability and exact saved bytes through
 failed publication, lost acknowledgement, cancellation and reopen. First-use Sapling
 parameter assertions run as exact isolated child test processes with a checked

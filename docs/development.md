@@ -317,7 +317,14 @@ individual failures at DEBUG, with fixed snapshot categories, SQLite error codes
 or I/O kinds when available. Arbitrary error prose is never logged. These
 retries preserve accepted work and do not imply an operator-required stop.
 
-Background treasury sync and shielding checks with automatic observation/retry
+The treasury scan owner emits INFO when its existing observation schedule first
+changes from successful/unattempted to failed, including scans requested through
+commands or pending jobless shielding. Repeated failures remain DEBUG; the existing
+successful-scan INFO makes recovery visible and resets the transition. This adds
+no readiness gate, scan, retry or financial authority. One-pass CLI callers can
+observe this capability transition before their terminal WARN. Shutdown cancellation
+does not announce a new recovery state or reset the existing backoff.
+Background treasury sync and shielding attempts with automatic observation/retry
 remaining log failures at DEBUG, including fixed safe categories and available
 sanitized details. Per-address shielding preparation failures must also reach
 that diagnostic while healthy SDK ownership permits trying the next address.

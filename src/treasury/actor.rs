@@ -545,6 +545,13 @@ mod tests {
         assert!(owner.observation.failed());
         assert!(owner.observation.due() > failed_at + Duration::from_secs(91));
         assert!(!owner.startup_discovery);
+        let text = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            text.matches("category=\"treasury_sync_unavailable\"")
+                .count(),
+            1,
+            "command-first failure and periodic retry share one recovery transition: {text}"
+        );
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
         for table in ["outgoing", "treasury_operations", "funding_recovery"] {
             let count: i64 = db

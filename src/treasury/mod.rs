@@ -471,8 +471,15 @@ impl Treasury {
     /// Adapter errors are sanitized; endpoints are not persisted in status.
     pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
         self.drain_calculation().await;
+        let previously_failed = self.observation.failed();
         let result = self.scan_once(stop).await;
         self.observation.complete(result.is_ok());
+        if !previously_failed
+            && !stop.is_cancelled()
+            && let Err(error) = &result
+        {
+            diagnostics::report_sync_unavailable(error);
+        }
         result
     }
     async fn scan_once(&mut self, stop: &CancellationToken) -> Result<()> {

@@ -249,6 +249,15 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
     }
 }
 
+pub(super) fn report_sync_unavailable(error: &anyhow::Error) {
+    tracing::info!(
+        category = "treasury_sync_unavailable",
+        reason = sync_failure(error),
+        detail = sync_detail(error),
+        "Zcash treasury synchronization became unavailable; accepted work remains owned"
+    );
+}
+
 /// The owner supplies its existing retry schedule; one-pass callers pass `None`.
 pub(crate) fn report_sync_failure(error: &anyhow::Error, retry_after: Option<std::time::Duration>) {
     let diagnostic = error.downcast_ref::<SyncDiagnostic>();
