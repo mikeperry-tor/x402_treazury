@@ -36,7 +36,7 @@ named above:
 | Application code | Upstream origin | Purpose of the local adapter |
 | --- | --- | --- |
 | [`src/network/indexer.rs`](../src/network/indexer.rs) | `zingo-netutils/src/lib.rs`: `GrpcIndexer` and its `Indexer` implementation; `zingo-netutils/src/globally_public.rs`: its `TransparentIndexer` implementation | Thirteen indexer and six transparent-indexer RPC delegations use the application's identity-bound SOCKS/progress transport. Upstream's private client uses tonic `Channel` and its constructors establish the SDK's transport. The adapter retains request/response conventions while the application owns network construction and inactivity handling. |
-| [`src/treasury/prover.rs`](../src/treasury/prover.rs) | `zingolib/src/wallet/utils.rs`: `LazySaplingProver` | A `OnceLock` initializes embedded Sapling parameters on first use, and `SpendProver`/`OutputProver` implementations delegate to `zcash_proofs::prover::LocalTxProver`. Upstream's adapter is crate-private; deposit and shielding calculations share this adapter when calling backend transaction creation directly, avoiding Sapling parameter parsing when no Sapling proof is requested. |
+| [`src/treasury/prover.rs`](../src/treasury/prover.rs) | `zingolib/src/wallet/utils.rs`: `LazySaplingProver` | One process-owned adapter retains a `OnceLock` that initializes embedded public Sapling parameters on first use, and `SpendProver`/`OutputProver` implementations delegate to `zcash_proofs::prover::LocalTxProver`. Upstream's adapter is crate-private; deposit and shielding calculations borrow that same static adapter when calling backend transaction creation directly. Immutable parameters stay resident for the process; compilation requires their Send/Sync contract. No Sapling parsing occurs when a Sapling proof is not requested. |
 
 Both files retain upstream copyright and revision attribution in their source
 headers. [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT) preserves the
@@ -88,7 +88,11 @@ high-level SDK calculation offline would instead choose epoch-end expiry.
 Public `clear_proposal` runs after releasing the wallet guard; no private proposal
 manager or parallel input ledger is needed. The actor reuses canonical validation
 without a redundant connection; direct preparation retains network validation.
-The lazy Sapling prover uses embedded public parameter bytes only when needed.
+The process-owned lazy Sapling prover parses embedded public parameter bytes only
+when first needed and reuses the immutable result for subsequent deposits and
+shielding. It reads no runtime parameter file and holds no keys, proposals, circuits
+or RNG state. Calculation still follows the existing serialized wallet owner;
+parameter reuse alone does not offload CPU work from the serving runtime.
 Financial authority, retained bytes, publication and recovery remain in [wallet ownership](wallet-rotation.md) and
 [lifecycle coverage](../tests/LIFECYCLE.md).
 

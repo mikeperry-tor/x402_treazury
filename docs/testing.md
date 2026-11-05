@@ -526,7 +526,16 @@ selectors. Birthday fixtures advance the tip between observations. Nonce-outage
 fixtures retain original authorizations and explicit canonical reporting proofs;
 nonce outages are not payment admission gates.
 Synthetic proving checks actual-fee affordability and exact saved bytes through
-failed publication, lost acknowledgement, cancellation and reopen. The optional synthetic-chain lifecycle exercises two
+failed publication, lost acknowledgement, cancellation and reopen. First-use Sapling
+parameter assertions run as exact isolated child test processes with a checked
+nonzero test result, so unrelated tests and future worker-thread placement cannot
+make an ambient counter pass or fail. A process AtomicUsize records the existing
+lazy initializer; concurrent callers share its instance, and two actual Sapling
+deposits check the selected Sapling pool and actual spends, with value/fee
+conservation and ordinary expiry.
+Orchard-only and actual transparent-shielding scenarios remain lazy. These checks
+use embedded public parameter bytes, not wallet secrets or runtime parameter-file
+loading; they do not measure proving latency or establish CPU offload. The optional synthetic-chain lifecycle exercises two
 managed recipients through the real treasury actor, scan reuse, confirmation depth,
 restart, cancellation after submission intent and funded same-height reorgs.
 The production funding worker also runs against local bridge/Base fixtures through
