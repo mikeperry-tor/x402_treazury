@@ -1260,6 +1260,7 @@ async fn accepted_add_commits_after_waiter_cancellation() {
     let lock = m.inner.lock().unwrap();
     let mut record = lock.state.records.values().next().unwrap().clone();
     record.id = Uuid::new_v4().to_string();
+    record.built = None;
     record.candidate.name = "second".into();
     record.candidate.spec_url = "https://api.example.com/second.json".into();
     let worker = m.clone();
@@ -3788,6 +3789,7 @@ async fn partial_registration_publishes_visible_issues_with_tools_and_restores_t
             "writer".into(),
             false,
             Record {
+                built: None,
                 id: id.clone(),
                 owner: "writer".into(),
                 candidate,
@@ -3834,3 +3836,6 @@ async fn partial_registration_publishes_visible_issues_with_tools_and_restores_t
             .contains("Cookie parameters")
     );
 }
+
+#[path = "efficiency_tests.rs"]
+mod efficiency_tests;

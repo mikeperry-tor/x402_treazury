@@ -5,7 +5,10 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::Duration;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Lifetime {
@@ -55,6 +58,7 @@ pub struct Built {
     pub base: String,
     pub instructions: Option<String>,
     pub issues: Vec<catalog::OperationIssue>,
+    tool_tags: BTreeMap<String, BTreeSet<String>>,
 }
 fn rejected(reason: &'static str) -> anyhow::Error {
     tracing::warn!(reason, "source import validation rejected");
@@ -182,7 +186,17 @@ pub(super) fn tool_prefix(name: &str) -> Result<String> {
     Ok(format!("dyn_{name}__"))
 }
 
+#[cfg(test)]
+pub(super) type BuildObserver = Box<dyn Fn(&Candidate) + Send + Sync>;
+#[cfg(test)]
+pub(super) static BUILD_OBSERVER: std::sync::OnceLock<BuildObserver> = std::sync::OnceLock::new();
+
 pub fn build(c: &Candidate, bytes: &[u8]) -> Result<Built> {
+    #[cfg(test)]
+    if let Some(observe) = BUILD_OBSERVER.get() {
+        observe(c);
+    }
+
     let spec_limit = max_spec_bytes(c.provider.as_ref());
     if bytes.len() > spec_limit {
         return Err(
@@ -220,37 +234,77 @@ pub fn build(c: &Candidate, bytes: &[u8]) -> Result<Built> {
             error.context(catalog::IncompleteCatalog(issues.clone()))
         }
     })?;
+    // Only the operation keys recognized by the catalog inventory contribute tags.
+    // Import rejects path references; schemas/annotations need no second traversal.
+    let tool_tags = tools
+        .iter()
+        .map(|tool| {
+            let method = tool.method.to_ascii_lowercase();
+            let tags = if ["get", "post", "put", "patch", "delete"].contains(&method.as_str()) {
+                paths
+                    .get(&tool.path)
+                    .and_then(|item| item.get(&method))
+                    .and_then(|op| op.get("tags"))
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
+            (tool.name.clone(), tags)
+        })
+        .collect();
     Ok(Built {
         tools,
         base,
         instructions,
         issues,
+        tool_tags,
     })
 }
 
-/// Project a fully validated catalog into a listener's visible tool inventory.
-/// Snapshot publication applies this projection after full import validation.
+/// Project current listener filters over an immutable, fully validated import.
+pub(super) fn visible_tools<'a>(
+    built: &'a Built,
+    listener: &crate::deployment::ListenerConfig,
+) -> Result<Vec<&'a ToolSpec>> {
+    let unfiltered_tags = listener.tags.is_empty() && listener.exclude_tags.is_empty();
+    built
+        .tools
+        .iter()
+        .filter_map(|tool| {
+            let tags_match = unfiltered_tags
+                || built.tool_tags.get(&tool.name).is_some_and(|tags| {
+                    (listener.tags.is_empty() || listener.tags.iter().any(|tag| tags.contains(tag)))
+                        && !listener.exclude_tags.iter().any(|tag| tags.contains(tag))
+                });
+            if !tags_match {
+                return None;
+            }
+            match matches(&tool.name, &listener.include_tools, &listener.exclude_tools) {
+                Ok(true) => Some(Ok(tool)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect()
+}
+
+// Existing component tests exercise full validation followed by projection.
+#[cfg(test)]
 pub(super) fn build_visible(
     candidate: &Candidate,
     bytes: &[u8],
     listener: &crate::deployment::ListenerConfig,
 ) -> Result<Built> {
     let mut built = build(candidate, bytes)?;
-    let document: Value = serde_json::from_slice(bytes)?;
-    let operations = catalog::operations(&document, None)?;
-    let mut visible = Vec::new();
-    for tool in built.tools {
-        if catalog::matches_operation_tags(
-            &operations,
-            &tool,
-            &listener.tags,
-            &listener.exclude_tags,
-        ) && matches(&tool.name, &listener.include_tools, &listener.exclude_tools)?
-        {
-            visible.push(tool);
-        }
-    }
-    built.tools = visible;
+    built.tools = visible_tools(&built, listener)?
+        .into_iter()
+        .cloned()
+        .collect();
     Ok(built)
 }
 

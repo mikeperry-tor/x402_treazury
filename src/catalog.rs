@@ -1525,6 +1525,9 @@ pub(crate) fn matches_operation_tags(
     include: &[String],
     exclude: &[String],
 ) -> bool {
+    if include.is_empty() && exclude.is_empty() {
+        return true;
+    }
     let tags: BTreeSet<_> = operations
         .iter()
         .filter(|op| {

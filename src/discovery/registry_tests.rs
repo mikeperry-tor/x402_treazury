@@ -171,6 +171,7 @@ async fn operator_removal_updates_only_the_selected_endpoints_file() {
 fn saved_record(number: u128, name: &str) -> Record {
     let document = spec().to_string();
     Record {
+        built: None,
         id: Uuid::from_u128(number).to_string(),
         owner: "writer".into(),
         candidate: serde_json::from_value(candidate(name, "persistent", "server")).unwrap(),

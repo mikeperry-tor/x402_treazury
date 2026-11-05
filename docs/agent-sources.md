@@ -642,6 +642,15 @@ remains generic when its URL is repeated; explicitly selecting its provider ID c
 create a separate bundled source, subject to existing name/tool collision checks.
 Busy errors can be retried with the same selector. Persistence follows operator
 configuration.
+Accepted catalog construction is retained in memory with its source record, without
+persisting a second catalog cache. It includes the exact document and accepted
+provider/selection/name inputs; changing those inputs rebuilds the result. Current
+listener filters and payer/help policy are applied at each publication, independently
+of that reusable result. Repeated publication does not reload an unchanged source
+or retain obsolete guidance. An add chooses its final source name before its one
+catalog construction in the existing blocking mutation worker; it does not build
+a provisional catalog on the serving runtime. Validation still precedes durable
+commit, and transport promotion follows successful validated publication.
 Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
 available through operator inspection; no registration-result receipt ledger is
 needed. These source records are separate from payment and financial journals.
@@ -762,11 +771,14 @@ enabled. Vendor descriptions are untrusted data and grant no additional authorit
 ## Trusted invocation and payment scope
 
 Every direct or fallback invocation captures one immutable catalog snapshot and
-its trusted `BoundTool`. Runtime price hints are scoped by the effective wallet
-group, source identity/revision, HTTP method and normalized operation path. Agent
-arguments, query values and request bodies cannot choose that scope, payer, reserve
-claim or funding authority. Removing or refreshing a source cannot rebind an
-already captured call; removal does not erase its financial obligations.
+its trusted `BoundTool`. Advisory price hints belong to the acquired static catalog
+cache generation and original HTTP method/path template. Compatible aliases,
+listeners and wallet groups share these observations. Tools without that acquired
+handle, including local catalogs and dynamic imports, do not use the shared hint
+cache. Agent arguments, query values and request bodies cannot choose the hint
+key, payer, reserve claim or funding authority. Current payer ownership and the
+actual payment offer govern signing. Removing or refreshing a source cannot rebind
+an already captured call; removal does not erase its financial obligations.
 
 Dynamic sources use the endpoint's `wallet`. Endpoints referencing the same named
 wallet share its payment identity. Registration never creates per-source funding groups.

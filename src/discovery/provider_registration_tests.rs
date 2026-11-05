@@ -355,6 +355,7 @@ async fn legacy_generic_url_repeat_wins_even_when_curated_source_coexists() {
         "writer".into(),
         false,
         Record {
+            built: None,
             id,
             owner: "writer".into(),
             candidate: c,

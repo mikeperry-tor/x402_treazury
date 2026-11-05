@@ -227,6 +227,7 @@ mod tests {
     fn record(number: u128, name: &str, document: &Value) -> Record {
         let document = document.to_string();
         Record {
+            built: None,
             id: uuid::Uuid::from_u128(number).to_string(),
             owner: "toolbox".into(),
             candidate: serde_json::from_value(json!({"name":name,"spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"})).unwrap(),

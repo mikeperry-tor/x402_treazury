@@ -122,6 +122,7 @@ async fn fixture() {
         "writer".into(),
         false,
         Record {
+            built: None,
             id: id.clone(),
             owner: "writer".into(),
             candidate,

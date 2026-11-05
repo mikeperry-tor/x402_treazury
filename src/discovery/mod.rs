@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -60,6 +60,20 @@ struct Record {
     updated_at: u64,
     removed: bool,
     disabled: Option<String>,
+    #[serde(skip)]
+    built: Option<Arc<import::Built>>,
+}
+impl Record {
+    // Candidate/document setters invalidate this process-local result before reuse.
+    fn prepare(&mut self) -> Result<()> {
+        if self.built.is_none() {
+            self.built = Some(Arc::new(import::build(
+                &self.candidate,
+                self.document.as_bytes(),
+            )?));
+        }
+        Ok(())
+    }
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -331,6 +345,7 @@ impl Manager {
         let mut state = inner.state.clone();
         for record in state.records.values_mut().filter(|r| !r.removed) {
             let c = record.candidate.clone();
+            record.built = None;
             record.disabled = if import::validate_source_name(&c.name).is_err() {
                 Some("invalid_source_name".into())
             } else if record.format != FORMAT {
@@ -344,7 +359,7 @@ impl Manager {
                             targets == record.targets,
                             "saved source scope is not endpoint-local"
                         );
-                        import::build(&record.candidate, record.document.as_bytes()).map(|_| ())
+                        record.prepare()
                     })
                     .err()
                     .map(|_| "policy_or_catalog_invalid".into())
@@ -381,10 +396,37 @@ impl Manager {
         result.registration_issues.clear();
         result.generation = generation;
         let previous = self.catalog.read();
+        let previous_names: BTreeMap<_, BTreeMap<_, _>> = previous
+            .views
+            .iter()
+            .map(|(owner, tools)| {
+                (
+                    owner.as_str(),
+                    tools
+                        .iter()
+                        .map(|tool| (tool.tool.name.as_str(), tool))
+                        .collect(),
+                )
+            })
+            .collect();
+        let mut names: BTreeMap<_, BTreeSet<_>> = result
+            .views
+            .iter()
+            .map(|(owner, tools)| {
+                (
+                    owner.clone(),
+                    tools.iter().map(|tool| tool.tool.name.clone()).collect(),
+                )
+            })
+            .collect();
         for record in live.into_iter().filter(|r| r.disabled.is_none()) {
             let target = &record.owner;
             let cfg = self.listeners.get(target).context("target_missing")?;
-            let built = import::build_visible(&record.candidate, record.document.as_bytes(), cfg)?;
+            let built = record
+                .built
+                .as_ref()
+                .context("registered catalog was not prepared")?;
+            let visible = import::visible_tools(built, cfg)?;
             result
                 .registration_issues
                 .insert(record.id.clone(), built.issues.clone());
@@ -424,13 +466,17 @@ impl Manager {
                 .public_destinations();
             let view = result.views.get_mut(target).context("target_missing")?;
             let initial_count = view.len();
-            for tool in &built.tools {
+            let help_origins = import::help_origins(record.candidate.provider.as_ref())?;
+            for tool in visible {
                 let help = Arc::new(crate::catalog_state::HelpBinding::with_origins(
                     payer.clone().public_destinations(),
-                    import::help_origins(record.candidate.provider.as_ref())?,
+                    help_origins.clone(),
                 ));
                 ensure!(
-                    !view.iter().any(|t| t.tool.name == tool.name),
+                    names
+                        .get_mut(target)
+                        .context("target_missing")?
+                        .insert(tool.name.clone()),
                     "tool_name_collision"
                 );
                 view.push(BoundTool {
@@ -438,17 +484,15 @@ impl Manager {
                     client: payer.clone(),
                     base: built.base.clone(),
                     source: Some((record.id.clone(), record.revision)),
-                    help: previous
-                        .views
-                        .get(target)
-                        .and_then(|tools| {
-                            tools.iter().find(|bound| {
-                                bound.tool.name == tool.name
-                                    && bound.tool.help_url == tool.help_url
-                                    && bound.help.compatible(&help)
-                                    && bound.source.as_ref()
-                                        == Some(&(record.id.clone(), record.revision))
-                            })
+                    help: previous_names
+                        .get(target.as_str())
+                        .and_then(|tools| tools.get(tool.name.as_str()).copied())
+                        .filter(|bound| {
+                            bound.tool.help_url == tool.help_url
+                                && bound.help.compatible(&help)
+                                && bound.source.as_ref().is_some_and(|(id, revision)| {
+                                    id == &record.id && *revision == record.revision
+                                })
                         })
                         .map(|bound| bound.help.clone())
                         .unwrap_or(help),
@@ -763,8 +807,8 @@ impl Manager {
         let document = self.source_document(owner, &candidate).await?;
         let result = async {
             let id = Uuid::new_v4().to_string();
-            document.validate(|_, _, bytes| import::build(&candidate, bytes))?;
             let record = Record {
+                built: None,
                 id,
                 owner: owner.into(),
                 candidate,
@@ -781,7 +825,8 @@ impl Manager {
             self.commit(owner.to_owned(), generated_name, record).await
         }
         .await;
-        document.with_payment_context(result)
+        // The blocking commit validates once under the final name before saving.
+        document.validate(|_, _, _| result)
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
@@ -838,13 +883,19 @@ impl Manager {
             if generated_name {
                 let base = record.candidate.name.clone();
                 let mut suffix = 1usize;
-                while this.listeners[&owner]
+                let occupied: BTreeSet<_> = this.listeners[&owner]
                     .sources
-                    .contains(&record.candidate.name)
-                    || state.records.values().any(|r| {
-                        !r.removed && r.owner == owner && r.candidate.name == record.candidate.name
-                    })
-                {
+                    .iter()
+                    .map(String::as_str)
+                    .chain(
+                        state
+                            .records
+                            .values()
+                            .filter(|r| !r.removed && r.owner == owner)
+                            .map(|r| r.candidate.name.as_str()),
+                    )
+                    .collect();
+                while occupied.contains(record.candidate.name.as_str()) {
                     suffix += 1;
                     let tail = format!("-{suffix}");
                     record.candidate.name =
@@ -858,6 +909,7 @@ impl Manager {
                 "source_name_reserved"
             );
             record.targets = this.targets(&owner, &record.candidate)?;
+            record.prepare()?;
             let id = record.id.clone();
             state.records.insert(id.clone(), record);
             state.generation = state
@@ -1083,6 +1135,7 @@ fn remove_sources(state: &mut State, source: Option<&str>) -> Result<Vec<Value>>
             let record = state.records.get_mut(&id).unwrap();
             record.removed = true;
             record.document.clear();
+            record.built = None;
             record.candidate.provider = None;
             advance_record(record)
         })
@@ -1248,6 +1301,7 @@ async fn maintain_cli_owned(
                 document.validate(|_, _, bytes| import::build(&candidate, bytes))?;
                 let bytes = (*document.body).clone();
                 candidate.spec_url = candidate.remote_spec().unwrap_or_default().to_owned();
+                record.built = None;
                 record.candidate = candidate;
                 record.hash = hash(&bytes);
                 record.document = String::from_utf8(bytes)?;

@@ -362,6 +362,18 @@ views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources. Each `tools/list` response also exposes
 listener-specific current instructions, catalog generation and publication-stop
 status in `_meta["x402_treazury/catalog"]`, alongside tools from that snapshot.
+Dynamic registry records retain one process-local immutable unbound catalog result
+for their accepted document and candidate settings. Registration validation and
+restore produce that result once; unrelated additions and static publications
+reuse it. An add chooses its final name before its one catalog construction in the
+existing blocking mutation worker. Names, authored guidance and name selectors
+therefore share the accepted identity, without a provisional build on the serving
+runtime. Validation precedes persistence and transport promotion follows successful
+publication. Listener filters, current
+payer bindings and compatible help authority are projected anew at publication.
+Derived results never enter the durable registry; explicit refresh and restart
+revalidate the accepted/current inputs under their existing contracts. Publication
+uses local name/help indexes without changing inventory order or collision policy.
 Dynamic source instructions are composed afresh from the immutable static base on
 each publication, including only enabled sources with visible tools. Refresh,
 removal, restoration and static replacement cannot accumulate or retain stale

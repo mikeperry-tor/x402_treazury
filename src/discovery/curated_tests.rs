@@ -46,6 +46,7 @@ pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
         "writer".into(),
         false,
         Record {
+            built: None,
             id: id.clone(),
             owner: "writer".into(),
             candidate,
@@ -484,6 +485,7 @@ async fn commit_curated_with(m: &Arc<Manager>, name: &str, provider: AcceptedPro
         "writer".into(),
         false,
         Record {
+            built: None,
             id: id.clone(),
             owner: "writer".into(),
             candidate,
