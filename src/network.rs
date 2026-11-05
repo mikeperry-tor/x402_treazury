@@ -5,6 +5,8 @@ mod indexer;
 pub(crate) use grpc::ConnectionDiagnostic;
 pub use indexer::GrpcIndexer;
 #[cfg(test)]
+mod http_cache_race_tests;
+#[cfg(test)]
 #[path = "network/http_queue_tests.rs"]
 mod http_queue_tests;
 #[cfg(test)]
@@ -542,11 +544,19 @@ impl NetworkContext {
             origin: parsed.origin().ascii_serialization(),
             read_timeout: timeout,
         };
+        {
+            let mut clients = self.http.lock().expect("network cache poisoned");
+            if let Some(entry) = clients.get_mut(&key) {
+                return Ok(entry.touch().clone());
+            }
+        }
+        // Construction can invoke a fallible private observer. It must neither
+        // hold the cache lock nor hide its failure behind a concurrent winner.
+        let record = self.build_http_transport(key.clone())?;
         let mut clients = self.http.lock().expect("network cache poisoned");
         if let Some(entry) = clients.get_mut(&key) {
             return Ok(entry.touch().clone());
         }
-        let record = self.build_http_transport(key.clone())?;
         // Eviction drops only cache ownership. Existing requests keep their connections.
         evict_oldest(&mut clients, "http_transport");
         clients.insert(key, CachedClient::new(record.clone()));

@@ -36,6 +36,17 @@ required. Record exact source/executable/features, commands, diagnostics and
 nonzero test counts; retain valid evidence and revalidate affected consumers.
 No live-funded, consensus or Tor qualification follows from these controls.
 
+HTTP cache race fixtures run in exact isolated children because the optional
+private scope observer is installed once per process. Two synchronous constructors
+enter the same Tokio runtime and are held by that actual pre-I/O observer; the
+coordinator checks the mutex before starting a competitor, releases callbacks and
+joins workers before assertions. Constructor errors/panics also notify completion.
+Tests preserve one canonical winner, truthful unused-scope observations, failure
+propagation despite a concurrent winner, zero pre-dispatch SOCKS requests and the
+winning scope's actual fixture disclosure. Existing promotion/key/eviction tests
+retain their separate ownership contracts; these fixtures add no production
+coalescing, timeout or scope-history framework.
+
 ## Provider regressions
 
 Shared provider-update capture/comparison/candidate regressions live in the

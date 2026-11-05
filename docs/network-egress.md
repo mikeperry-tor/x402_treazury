@@ -45,6 +45,13 @@ and effective isolation scope, keyed by `SelectionPolicy` (`Legacy` versus
 `Participating`), protocol compatibility, public-destination enforcement, owning
 Tokio runtime, canonical identity, origin and read-inactivity timeout. Legacy and
 participating lookups cannot consume or overwrite each other's cache entries.
+The cache mutex covers lookup/touch and winner publication, never client
+construction or private scope observation. Concurrent misses may construct unused
+candidates; after successful construction, a full-key recheck returns/touches the
+canonical winner instead of replacing it or evicting another entry for a loser.
+Construction/observer failure still fails that caller even if a concurrent winner
+exists. Private observations describe constructed scopes, including unused ones;
+they do not establish successful routing or grant financial authority.
 In Tor mode, `http_participating` misses and `http_candidate` retry candidates
 derive fresh owner-bound `tor-scope` isolation scopes (`IsolationId::fresh_scope`)
 with separate `reqwest::Client` pools, while `promote_http` conditionally replaces
