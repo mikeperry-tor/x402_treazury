@@ -29,7 +29,10 @@ fn operation_filters_precede_collision_counts_and_preserve_payloads() {
         exclude_tags: vec!["Blocked".into()],
         ..Default::default()
     };
-    let (selected, issues) = selected_operations(&cfg, &root, "api").unwrap();
+    let OperationSelection {
+        operations: selected,
+        issues,
+    } = selected_operations(&cfg, &root, "api").unwrap();
     assert!(issues.is_empty());
     let input = &selected[0].2;
     assert_eq!(
@@ -59,7 +62,10 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
     let suffix = json!({"path":"/a_get", "method":"get"});
     let root_op = json!({"path":"/", "method":"get"});
     let root = json!({"operations":[suffix, post, a, root_op, b]});
-    let (selected, issues) = selected_operations(&Config::default(), &root, "api").unwrap();
+    let OperationSelection {
+        operations: selected,
+        issues,
+    } = selected_operations(&Config::default(), &root, "api").unwrap();
     assert!(issues.is_empty());
     assert_eq!(
         selected
@@ -77,7 +83,10 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
         prefer_post: false,
         ..Default::default()
     };
-    let (selected, issues) = selected_operations(&both_methods, &root, "api").unwrap();
+    let OperationSelection {
+        operations: selected,
+        issues,
+    } = selected_operations(&both_methods, &root, "api").unwrap();
     assert!(issues.is_empty());
     assert_eq!(
         selected

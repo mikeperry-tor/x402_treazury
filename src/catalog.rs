@@ -1491,7 +1491,10 @@ pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<Catalog
             reason: "Provider credit-pricing settings are invalid",
         })?;
     }
-    let (selected, issues) = selected_operations(cfg, root, prefix)?;
+    let OperationSelection {
+        operations: selected,
+        issues,
+    } = selected_operations(cfg, root, prefix)?;
     // A help document cannot disguise the absence of every selected API contract.
     // Active tool-name selectors still require an actual compatible inventory.
     if selected.is_empty() && !issues.is_empty() {
@@ -1589,7 +1592,10 @@ pub(crate) fn tool_names_before_filtering(
     root: &Value,
     prefix: &str,
 ) -> Result<Vec<String>> {
-    let (selected, issues) = selected_operations(cfg, root, prefix)?;
+    let OperationSelection {
+        operations: selected,
+        issues,
+    } = selected_operations(cfg, root, prefix)?;
     if !issues.is_empty() {
         return Err(IncompleteCatalog(issues).into());
     }
@@ -1601,14 +1607,13 @@ pub(crate) fn tool_names_before_filtering(
 }
 
 // Selection and collision naming depend on the entire sorted inventory.
-fn selected_operations(
-    cfg: &Config,
-    root: &Value,
-    prefix: &str,
-) -> Result<(
-    Vec<(Value, String, input::OperationInput)>,
-    Vec<OperationIssue>,
-)> {
+// Compatible named operations and their omissions belong to the same selection.
+struct OperationSelection {
+    operations: Vec<(Value, String, input::OperationInput)>,
+    issues: Vec<OperationIssue>,
+}
+
+fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<OperationSelection> {
     let mut ops = operations_with_credits(
         root,
         cfg.pricing_key.as_deref(),
@@ -1681,7 +1686,10 @@ fn selected_operations(
     for (_, base, _) in &selected {
         *counts.entry(base.clone()).or_default() += 1;
     }
-    Ok((name_selected_operations(selected, &counts), issues))
+    Ok(OperationSelection {
+        operations: name_selected_operations(selected, &counts),
+        issues,
+    })
 }
 
 // Filters precede collision counting and retain the most specific include anchor.
