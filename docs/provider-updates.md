@@ -136,7 +136,8 @@ Reference checks visit OpenAPI Reference/Schema objects and schema-valued
 keywords; property/component names and literal examples, defaults, enum values
 and extensions are data. References inside OpenAPI Example objects still require
 closure. Local targets are checked in the referring object's context, including
-targets stored in extensions; recursive local references are supported. External
+targets stored in extensions; iterative traversal supports recursive local references
+and long reference chains without growing the call stack. External
 or unresolved references require an authored closure review. Candidates
 retain responses and vendor metadata; request-fixture reduction remains a separate
 `snapshot_spec` invocation. The packet records the destination and captured

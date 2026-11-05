@@ -27,60 +27,55 @@ enum Position {
     Collection(Object),
 }
 fn references(root: &Value) -> Result<()> {
-    visit(
-        root,
-        root,
-        Position::Node(Object::Document),
-        &mut Default::default(),
-    )
-}
-fn visit(
-    root: &Value,
-    node: &Value,
-    context: Position,
-    visited: &mut std::collections::BTreeSet<(String, Object)>,
-) -> Result<()> {
-    let kind = match context {
-        Position::Collection(kind) => {
-            for child in node
-                .as_object()
-                .into_iter()
-                .flat_map(|map| map.values())
-                .chain(node.as_array().into_iter().flatten())
-            {
-                visit(root, child, Position::Node(kind), visited)?;
+    let mut pending = vec![(root, Position::Node(Object::Document))];
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some((node, context)) = pending.pop() {
+        let kind = match context {
+            Position::Collection(kind) => {
+                for child in node
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|map| map.values())
+                    .chain(node.as_array().into_iter().flatten())
+                    .rev()
+                {
+                    pending.push((child, Position::Node(kind)));
+                }
+                continue;
             }
-            return Ok(());
+            Position::Node(kind) => kind,
+        };
+        let Some(map) = node.as_object() else {
+            continue;
+        };
+        use Object::*;
+        let mut referenced = None;
+        if matches!(
+            kind,
+            PathItem | Response | RequestBody | Parameter | Callback | Schema | Leaf
+        ) && let Some(reference) = map.get("$ref")
+        {
+            let reference = reference.as_str().context("non-string reference")?;
+            let fragment = reference
+                .strip_prefix('#')
+                .context("external reference requires authored closure")?;
+            let pointer = percent_encoding::percent_decode_str(fragment).decode_utf8()?;
+            let target = root
+                .pointer(&pointer)
+                .context("unresolved local reference")?;
+            // A reference gives even an extension-hosted target its semantic context.
+            // Include the context so a prior opaque/leaf visit cannot hide schema refs.
+            if visited.insert((pointer.into_owned(), kind)) {
+                referenced = Some((target, Position::Node(kind)));
+            }
         }
-        Position::Node(kind) => kind,
-    };
-    let Some(map) = node.as_object() else {
-        return Ok(());
-    };
-    use Object::*;
-    if matches!(
-        kind,
-        PathItem | Response | RequestBody | Parameter | Callback | Schema | Leaf
-    ) && let Some(reference) = map.get("$ref")
-    {
-        let reference = reference.as_str().context("non-string reference")?;
-        let fragment = reference
-            .strip_prefix('#')
-            .context("external reference requires authored closure")?;
-        let pointer = percent_encoding::percent_decode_str(fragment).decode_utf8()?;
-        let target = root
-            .pointer(&pointer)
-            .context("unresolved local reference")?;
-        // A reference gives even an extension-hosted target its semantic context.
-        // Include the context so a prior opaque/leaf visit cannot hide schema refs.
-        if visited.insert((pointer.into_owned(), kind)) {
-            visit(root, target, Position::Node(kind), visited)?;
+        for (key, child) in map.iter().rev() {
+            if let Some(context) = child_context(kind, key) {
+                pending.push((child, context));
+            }
         }
-    }
-    for (key, child) in map {
-        if let Some(context) = child_context(kind, key) {
-            visit(root, child, context, visited)?;
-        }
+        // Preserve depth-first source order, with a referenced target before siblings.
+        pending.extend(referenced);
     }
     Ok(())
 }
@@ -252,6 +247,28 @@ mod tests {
         root["x-other"] = json!({"type":"object", "default":{"$ref":"literal default"}});
         assert!(references(&root).is_ok());
     }
+    #[test]
+    fn long_flat_reference_chains_and_cycles_use_no_call_stack() {
+        const LINKS: usize = 20_000;
+        let mut nodes = serde_json::Map::new();
+        for index in 0..LINKS {
+            let node = if index + 1 == LINKS {
+                json!({"type":"string"})
+            } else {
+                json!({"$ref":format!("#/x-nodes/n{}", index + 1)})
+            };
+            nodes.insert(format!("n{index}"), node);
+        }
+        let mut root = json!({"openapi":"3.1.0","paths":{"/one":{"get":{"responses":{"200":{
+            "content":{"application/json":{"schema":{"$ref":"#/x-nodes/n0"}}}
+        }}}}},"x-nodes":nodes});
+        assert!(references(&root).is_ok());
+        root["x-nodes"][format!("n{}", LINKS - 1)] = json!({"$ref":"#/x-nodes/n0"});
+        assert!(references(&root).is_ok());
+        root["x-nodes"][format!("n{}", LINKS - 1)] = json!({"$ref":"#/missing"});
+        assert!(references(&root).is_err());
+    }
+
     #[test]
     fn full_copy_retains_responses_and_rejects_unclosed_references() {
         let dir = tempfile::tempdir().unwrap();
