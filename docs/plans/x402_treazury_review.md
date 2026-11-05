@@ -134,9 +134,11 @@ proving four, lifecycle 45 and codec one pass through scoped continuations.
 Failed runs remain failed and are replaced only by actual affected-case passes;
 this is not a single successful `make check`. Production/all-target warnings,
 format, exact-source complexity and unchanged high-risk chains are reviewed.
-Proving execution must reopen financial GF. Windows release build/CLI smokes pass
-at `7126f716`. Vendor preflight and both namespace API candidates pass at
-`5218fef0`; native application/test and full storage acceptance remain open.
+Proving execution must reopen financial GF. Windows release build/CLI smokes,
+vendor preflight, six native probe controls and both namespace API candidates
+pass at `5218fef0`. Later native all-target Clippy failed on C2's result tuple
+and Unix-only fixture storage; reviewed corrections need a native rerun.
+Full native test and storage acceptance remain open.
 The namespace result proves restricted-token API compatibility, collision and
 identity/byte preservation, not complete privacy, recovery or power-loss durability. No live-funded,
 consensus or live Tor qualification was run.

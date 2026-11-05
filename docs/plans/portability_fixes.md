@@ -46,11 +46,13 @@ P1 source correction is committed as `4fff946f`, with independently reviewed
 fixture/CI fixups `574e0b38` and `5251194e`. Portable `ErrorKind` replaces the
 Unix-only probe classification, and cfg-specific builder bindings remove the two
 reported Windows warnings. All six controls and production/all-target warning
-gates pass on macOS. Windows release build and CLI smoke tests passed at `7126f716`;
-Earlier Checks stopped at vendor verification before native probe controls.
-The binary stdin/working-directory correction `68a93c0b` and binary-output fixup
-`cec39403` pass native vendor preflight at `5218fef0`; the application build and
-later native test gates remain pending. Linux execution remains pending.
+gates pass on macOS. Windows release build, CLI smoke tests and all six native
+probe controls pass at `5218fef0`. The binary stdin/working-directory correction
+`68a93c0b` and binary-output fixup `cec39403` also pass native vendor preflight.
+Later all-target Clippy failed on C2's nested result tuple and two stored fixture
+fields used only by Unix crash controls. The reviewed named-selection and fixture
+storage corrections require a native rerun; full Checks and Linux execution
+remain pending.
 The standalone namespace experiment and buffer-only control `098a2397` failed
 at rename before directory flush. Absolute-path/NULL-root control `3e97d27b`
 passes both candidates at `5218fef0`: restricted-owner positive/admin-denial
