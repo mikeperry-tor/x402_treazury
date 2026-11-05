@@ -30,7 +30,6 @@ fn calculate_deposit(
         .context("missing treasury account")?
         .try_into()
         .map_err(|_| anyhow::anyhow!("treasury spend key unavailable"))?;
-    let prover = prover::LazySaplingProver::default();
     zcash_client_backend::data_api::wallet::create_proposed_transactions::<
         _,
         _,
@@ -43,8 +42,8 @@ fn calculate_deposit(
         &chain,
         &zcash_client_backend::util::SystemClock,
         &mut zingolib::utils::system_rng(),
-        &prover,
-        &prover,
+        &prover::SAPLING_PROVER,
+        &prover::SAPLING_PROVER,
         &zcash_client_backend::data_api::wallet::SpendingKeys::new(usk),
         zcash_client_backend::wallet::OvkPolicy::Sender,
         proposal,

@@ -7,30 +7,33 @@
 // See vendor/ZINGO-LICENSE-MIT for the full upstream license.
 
 #[cfg(all(test, feature = "zcash-testutils"))]
-std::thread_local! {
-    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
+static PARSES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[cfg(all(test, feature = "zcash-testutils"))]
 pub(super) fn parse_count() -> usize {
-    PARSES.with(std::cell::Cell::get)
+    PARSES.load(std::sync::atomic::Ordering::Acquire)
 }
+
+// One adapter owns immutable PUBLIC parameters for this process. The static
+// requires LocalTxProver: Send + Sync through OnceLock; no unsafe impl is used.
+pub(super) static SAPLING_PROVER: LazySaplingProver = LazySaplingProver {
+    prover: std::sync::OnceLock::new(),
+};
 
 use sapling_crypto::{
     bundle as sapling_bundle, circuit as sapling_circuit, keys as sapling_keys,
     prover as sapling_prover, value as sapling_value,
 };
 use zcash_proofs::prover;
-#[derive(Default)]
 pub(super) struct LazySaplingProver {
     prover: std::sync::OnceLock<prover::LocalTxProver>,
 }
 
 impl LazySaplingProver {
-    /// - Parses the embedded Sapling parameters on this adapter's first call.
+    /// - Parses the embedded public parameters on the process adapter's first use.
     fn prover(&self) -> &prover::LocalTxProver {
         self.prover.get_or_init(|| {
             #[cfg(all(test, feature = "zcash-testutils"))]
-            PARSES.with(|count| count.set(count.get() + 1));
+            PARSES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             prover::LocalTxProver::from_bytes(
                 zingolib::SaplingParams::SPEND,
                 zingolib::SaplingParams::OUTPUT,
@@ -64,7 +67,7 @@ impl sapling_prover::SpendProver for LazySaplingProver {
         )
     }
 
-    /// - Parses the embedded Sapling parameters if this adapter has not yet.
+    /// - Parses the embedded Sapling parameters if the process has not yet.
     fn create_proof<R: rand10::Rng>(
         &self,
         circuit: sapling_circuit::Spend,
@@ -97,7 +100,7 @@ impl sapling_prover::OutputProver for LazySaplingProver {
         )
     }
 
-    /// - Parses the embedded Sapling parameters if this adapter has not yet.
+    /// - Parses the embedded Sapling parameters if the process has not yet.
     fn create_proof<R: rand10::Rng>(
         &self,
         circuit: sapling_circuit::Output,
@@ -109,4 +112,54 @@ impl sapling_prover::OutputProver for LazySaplingProver {
     fn encode_proof(proof: Self::Proof) -> sapling_bundle::GrothProofBytes {
         <prover::LocalTxProver as sapling_prover::OutputProver>::encode_proof(proof)
     }
+}
+
+#[cfg(all(test, feature = "zcash-testutils"))]
+pub(super) fn isolated_scenario(test: &str) -> bool {
+    const CHILD: &str = "X402_TEST_SAPLING_PROVER_SCENARIO";
+    if std::env::var(CHILD).as_deref() == Ok(test) {
+        return false;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--test-threads=1", "--nocapture"])
+        .env(CHILD, test)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "isolated prover scenario failed: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
+        "isolated prover scenario did not execute its exact test"
+    );
+    true
+}
+
+#[cfg(all(test, feature = "zcash-testutils"))]
+pub(super) fn assert_concurrent_first_use() {
+    use std::sync::{Arc, Barrier};
+    assert!(SAPLING_PROVER.prover.get().is_none());
+    assert_eq!(parse_count(), 0);
+    let barrier = Arc::new(Barrier::new(2));
+    let workers: Vec<_> = (0..2)
+        .map(|_| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                SAPLING_PROVER.prover() as *const prover::LocalTxProver as usize
+            })
+        })
+        .collect();
+    let identities: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(
+        identities[0], identities[1],
+        "concurrent callers share the parsed instance"
+    );
+    assert_eq!(parse_count(), 1);
 }

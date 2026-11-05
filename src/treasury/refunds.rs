@@ -181,7 +181,6 @@ impl Treasury {
                 zip32::AccountId::ZERO,
             )
             .map_err(|_| anyhow::anyhow!("treasury key derivation failed"))?;
-            let prover = prover::LazySaplingProver::default();
             let id = operation.clone();
             self.healthy = false;
             let stop_for_acceptance = stop.clone();
@@ -220,8 +219,8 @@ impl Treasury {
                 &chain,
                 &zcash_client_backend::util::SystemClock,
                 &mut zingolib::utils::system_rng(),
-                &prover,
-                &prover,
+                &prover::SAPLING_PROVER,
+                &prover::SAPLING_PROVER,
                 &SpendingKeys::new(usk),
                 OvkPolicy::Sender,
                 &proposal,

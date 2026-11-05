@@ -437,6 +437,13 @@ async fn deposit_proposal(client: &mut zingolib::lightclient::LightClient) -> De
 
 #[tokio::test]
 async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
+    if prover::isolated_scenario(
+        "treasury::send::proving_tests::backend_deposit_expiry_before_at_nu7_and_upgrade_boundary",
+    ) {
+        return;
+    }
+    assert_eq!(prover::parse_count(), 0);
+
     use zingolib::wallet::expiry::{tx_expiry_delta, tx_expiry_height};
 
     let chain = zingolib::config::ChainType::Regtest(
@@ -457,15 +464,14 @@ async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
         let target = u32::from(proposal.min_target_height());
         assert_eq!(target, tip + 1, "backend cases must straddle activation");
         let expected_delta = if target >= nu7 { 120 } else { 40 };
-        let before = prover::parse_count();
         let ids = {
             let mut wallet = client.wallet().write().await;
             calculate_deposit(&mut wallet, &proposal).unwrap()
         };
         assert_eq!(
             prover::parse_count(),
-            before,
-            "Orchard-only work must not parse Sapling parameters"
+            0,
+            "Orchard-only work must not initialize Sapling parameters"
         );
         client.clear_proposal().await;
         assert!(
@@ -490,34 +496,13 @@ async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
 
 #[tokio::test]
 async fn backend_deposit_real_sapling_proving_and_public_failure_cleanup() {
-    let (_dir, mut client) = synthetic_deposit_client(80, 100, true).await;
-    let proposal = deposit_proposal(&mut client).await;
-    let before = prover::parse_count();
-    let ids = {
-        let mut wallet = client.wallet().write().await;
-        calculate_deposit(&mut wallet, &proposal).unwrap()
-    };
-    assert_eq!(prover::parse_count(), before + 1);
-    client.clear_proposal().await;
-    {
-        let wallet = client.wallet().read().await;
-        let transaction = wallet
-            .wallet_transactions
-            .get(&ids[0])
-            .unwrap()
-            .transaction();
-        assert!(
-            !transaction
-                .sapling_bundle()
-                .unwrap()
-                .shielded_spends()
-                .is_empty()
-        );
-        assert_eq!(
-            u32::from(transaction.expiry_height()),
-            u32::from(proposal.min_target_height()) + 40
-        );
+    use pepper_sync::wallet::OutputInterface as _;
+    if prover::isolated_scenario(
+        "treasury::send::proving_tests::backend_deposit_real_sapling_proving_and_public_failure_cleanup",
+    ) {
+        return;
     }
+    assert_eq!(prover::parse_count(), 0);
     let (_dir, mut client) = synthetic_deposit_client(80, 100, false).await;
     let proposal = deposit_proposal(&mut client).await;
     let key = {
@@ -540,4 +525,63 @@ async fn backend_deposit_real_sapling_proving_and_public_failure_cleanup() {
     // Declining the failed proposal leaves SDK selection usable.
     let _ = deposit_proposal(&mut client).await;
     client.clear_proposal().await;
+    assert_eq!(
+        prover::parse_count(),
+        0,
+        "failure before proving must stay lazy"
+    );
+    prover::assert_concurrent_first_use();
+    for _ in 0..2 {
+        let (_dir, mut client) = synthetic_deposit_client(80, 100, true).await;
+        let proposal = deposit_proposal(&mut client).await;
+        let selected = super::super::inputs::selected_inputs(&proposal).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            selected[0].pool,
+            crate::rotation::store::preparation::InputPool::Sapling
+        );
+        let ids = {
+            let mut wallet = client.wallet().write().await;
+            calculate_deposit(&mut wallet, &proposal).unwrap()
+        };
+        assert_eq!(prover::parse_count(), 1);
+        client.clear_proposal().await;
+        {
+            let wallet = client.wallet().read().await;
+            let record = wallet.wallet_transactions.get(&ids[0]).unwrap();
+            let transaction = record.transaction();
+            assert_eq!(transaction.transparent_bundle().unwrap().vout.len(), 1);
+            let sent = transaction.transparent_bundle().unwrap().vout[0]
+                .value()
+                .into_u64();
+            assert_eq!(sent, 50_000);
+            let change: u64 = record
+                .sapling_notes()
+                .iter()
+                .map(|note| note.value())
+                .chain(record.orchard_notes().iter().map(|note| note.value()))
+                .chain(record.ironwood_notes().iter().map(|note| note.value()))
+                .sum();
+            let fee = zingolib::data::proposal::total_fee(&proposal)
+                .unwrap()
+                .into_u64();
+            assert_eq!(sent + change + fee, 100_000);
+            assert!(
+                !transaction
+                    .sapling_bundle()
+                    .unwrap()
+                    .shielded_spends()
+                    .is_empty()
+            );
+            assert_eq!(
+                u32::from(transaction.expiry_height()),
+                u32::from(proposal.min_target_height()) + 40
+            );
+        }
+    }
+    assert_eq!(
+        prover::parse_count(),
+        1,
+        "two actual Sapling calculations reuse parsed public parameters"
+    );
 }
