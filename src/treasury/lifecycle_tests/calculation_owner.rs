@@ -285,6 +285,7 @@ async fn calculation_panic_terminates_before_reconstruction_and_facts_panic_reta
             .unwrap();
         assert!(owner.healthy);
         owner.close().await.unwrap();
+        no_send(&net).await;
     }
 }
 
