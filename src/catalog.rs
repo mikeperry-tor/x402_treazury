@@ -1638,6 +1638,19 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
 }
 
 pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
+    let result = build_catalog_inner(cfg, root, prefix);
+    match &result {
+        Ok(built) => diagnostics::report_omissions(&built.issues),
+        // The structural guard already owns its unconditional rejection WARN.
+        Err(error) if !error.is::<expansion::ComplexityLimit>() => {
+            diagnostics::report_build_failure(error);
+        }
+        Err(_) => {}
+    }
+    result
+}
+
+fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
             error,

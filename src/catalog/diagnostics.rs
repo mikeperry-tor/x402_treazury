@@ -1,6 +1,32 @@
 //! Only fixed, authored explanations and numeric HTTP status may enter logs.
 use super::LoadStage;
 
+pub(super) fn report_omissions(issues: &[super::OperationIssue]) {
+    if issues.is_empty() {
+        return;
+    }
+    let mut reasons = std::collections::BTreeMap::new();
+    for issue in issues {
+        *reasons.entry(issue.reason.explanation()).or_insert(0usize) += 1;
+    }
+    tracing::warn!(
+        category = "catalog_operations_omitted",
+        omitted_operations = issues.len(),
+        reasons = ?reasons,
+        "Selected API operations could not be represented; their tools are unavailable; inspect catalog omissions and document explicit operation exclusions for expected incompatibilities"
+    );
+}
+
+pub(super) fn report_build_failure(error: &anyhow::Error) {
+    let failure = Failure::from_error(error, "generation");
+    tracing::warn!(
+        category = "catalog_construction_failed",
+        failure_stage = failure.stage,
+        reason = failure.reason,
+        "Catalog construction failed; its selected API tools are unavailable"
+    );
+}
+
 #[derive(Debug)]
 pub(crate) struct Problem(pub &'static str);
 impl std::fmt::Display for Problem {
@@ -78,6 +104,114 @@ impl Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_builds_warn_for_unexpected_loss_without_private_catalog_data_or_duplicate_events() {
+        if crate::test_log_capture::run_in_child(
+            "catalog::diagnostics::tests::public_builds_warn_for_unexpected_loss_without_private_catalog_data_or_duplicate_events",
+        ) {
+            return;
+        }
+        use super::super::{Config, build_catalog, build_tools};
+        use serde_json::json;
+        let document = json!({"paths":{
+            "/healthy":{"get":{}},
+            "/private-path-token":{"post":{"description":"private prose", "parameters":[
+                {"in":"cookie", "name":"private-cookie", "schema":{"type":"string"}}
+            ]}}
+        }});
+        let capture = |call: &mut dyn FnMut()| {
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::WARN)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            tracing::subscriber::with_default(subscriber, call);
+            let text = std::fs::read_to_string(log.path()).unwrap();
+            for private in ["private", "https://"] {
+                assert!(!text.contains(private), "{text}");
+            }
+            text
+        };
+        for strict in [false, true] {
+            let text = capture(&mut || {
+                if strict {
+                    assert!(build_tools(&Config::default(), &document, "private-prefix").is_err());
+                } else {
+                    let built =
+                        build_catalog(&Config::default(), &document, "private-prefix").unwrap();
+                    assert_eq!(built.tools.len(), 1);
+                    assert_eq!(built.issues.len(), 1);
+                    assert!(built.complete().is_err());
+                }
+            });
+            assert_eq!(text.lines().count(), 1, "{text}");
+            assert!(
+                text.contains("WARN") && text.contains("catalog_operations_omitted"),
+                "{text}"
+            );
+            assert!(
+                text.contains("omitted_operations=1")
+                    && text.contains("Cookie parameters are not supported"),
+                "{text}"
+            );
+        }
+        let expected = Config {
+            exclude_operations: vec!["POST /private-path-token".into()],
+            ..Default::default()
+        };
+        assert!(
+            capture(&mut || {
+                assert_eq!(build_tools(&expected, &document, "test").unwrap().len(), 1);
+            })
+            .is_empty()
+        );
+
+        let twins = json!({"paths":{"/twins":{
+            "get":{"parameters":[{"in":"cookie", "name":"private-cookie"}]}, "post":{}
+        }}});
+        assert!(
+            capture(&mut || {
+                build_tools(&Config::default(), &twins, "test").unwrap();
+            })
+            .is_empty()
+        );
+
+        let all_unsupported =
+            json!({"paths":{"/private-path-token":document["paths"]["/private-path-token"]}});
+        let text = capture(&mut || {
+            assert!(
+                build_catalog(&Config::default(), &all_unsupported, "test")
+                    .unwrap()
+                    .tools
+                    .is_empty()
+            );
+        });
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(text.contains("catalog_operations_omitted"), "{text}");
+
+        let text = capture(&mut || {
+            assert!(build_catalog(&Config::default(), &json!({}), "test").is_err());
+        });
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(text.contains("catalog_construction_failed"), "{text}");
+
+        let mut deep = serde_json::Value::Null;
+        for _ in 0..65 {
+            deep = json!([deep]);
+        }
+        let text = capture(&mut || {
+            assert!(build_catalog(&Config::default(), &deep, "test").is_err());
+        });
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(
+            text.contains("document_complexity_limit")
+                && !text.contains("catalog_construction_failed"),
+            "{text}"
+        );
+    }
 
     #[test]
     fn reasons_are_fixed_and_never_include_untrusted_error_text() {

@@ -39,6 +39,12 @@ generated tool families and exclusions across endpoints, with an explicit final
 fallback. Distribution belongs to deployment configuration; reusable providers
 and dynamic imports cannot supply it. Providers continue to expose supported APIs,
 and listener filters can further narrow assigned tools.
+Known incompatibilities use existing source `exclude_operations`, path `exclude`
+or `exclude_tags` settings, with concrete reasons in [provider caveats](CAVEATS.md).
+They designate expected non-exposure before compatibility checks; unexpected
+selected-operation omissions WARN even if the remaining catalog is usable.
+Do not add blanket incompatibility/warning suppression or hide source omissions
+with tool-name filters. Revisit authored exclusions when converter support changes.
 
 `--provider providers/pdl.toml` runs a single provider. `--config` loads
 sources, wallets and listeners. Add `config show` to either to inspect file

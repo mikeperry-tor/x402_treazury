@@ -202,7 +202,11 @@ Local input, origin, identity and download-limit failures authorize no relay spe
 See [relay configuration](configuration.md#relay-fallback) for settings and trust.
 
 Accepted sources can expose supported operations while omitting incompatible
-siblings. Registration details include `omitted_operations` with method, path and
+siblings. Unexpected omissions WARN with safe aggregate reasons even when the
+remaining catalog succeeds. Source operation/path/tag exclusions declare expected
+non-exposure before compatibility; document known provider limitations in caveats.
+Library catalog builders share this warning contract; other library validators
+leave terminal diagnostics to their caller. Registration details include `omitted_operations` with method, path and
 fixed reason; endpoint instructions retain a concise notice even with configured
 instruction overrides. A compatible preferred POST intentionally suppresses its
 exact GET twin and that twin's omission; disabling preference exposes its actual

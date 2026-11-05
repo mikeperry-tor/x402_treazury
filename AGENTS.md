@@ -286,7 +286,8 @@ make fmt-check
 - Choose log severity by the owning capability or operation after applicable
   recovery: ERROR for required service/endpoint functionality unavailable with no
   recovery remaining in the current lifecycle; WARN for terminal agent-operation
-  failures; INFO for meaningful user-visible lifecycle, progress, delay or recovery
+  failures or unexpected loss of functionality, including omitted selected catalog
+  tools; INFO for meaningful user-visible lifecycle, progress, delay or recovery
   changes; DEBUG/TRACE for routine outcomes, individual attempts and diagnostic
   detail. Intermediate failures with retry or fallback remaining must not emit
   WARN/ERROR. Expected negative results and routine successes normally belong at

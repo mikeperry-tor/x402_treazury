@@ -278,7 +278,7 @@ operation, after its applicable retry and fallback paths:
 | Level | Use for | Examples |
 | --- | --- | --- |
 | ERROR | Required service or endpoint functionality is unavailable and has no recovery remaining in the current lifecycle. | Program failure; an MCP endpoint cannot bind or cannot publish its required catalogs. Other endpoints may remain healthy. |
-| WARN | A requested agent operation or explicit CLI operation cannot complete successfully under its existing recovery and authority. | Document retrieval fails with no usable fallback; a payment ends with an unresolved potentially chargeable authorization; one-pass wallet sync fails. |
+| WARN | A requested operation cannot complete under its existing recovery and authority, or functionality is unexpectedly lost even when the remaining operation succeeds. | Document retrieval fails with no usable fallback; a potentially chargeable payment fails; one-pass sync fails; selected catalog operations become unavailable. |
 | INFO | Meaningful user-visible lifecycle, progress, delay or recovery changes. | Program startup; catalog ready; MCP endpoint ready; funding progress; entering fallback or waiting for a retrying dependency; recovery of that dependency. |
 | DEBUG | Routine outcomes, expected negative results, individual attempts and troubleshooting details. | Ordinary successful calls; optional probes finding no document; no search matches; routine input/authentication rejection; background polling; cache activity. |
 | TRACE | Fine-grained execution or protocol detail needed for deeper diagnosis. | Internal transitions and detailed transport sequencing, subject to the same sanitization rules. |
@@ -296,6 +296,21 @@ keep repetitive attempt details at DEBUG/TRACE. Mere elapsed time or repetition
 does not promote a recoverable condition. The owner that knows the final outcome
 emits the terminal diagnostic; lower layers retain the safe facts needed to
 explain it without announcing each failed attempt as an operation failure.
+Unexpected catalog truncation or unavailable selected tools emits WARN at the
+public catalog construction boundary, including library callers and successful
+partial inventories. Log only safe aggregate omission counts and fixed reasons.
+Strict conversion of that same build does not repeat the construction warning;
+its terminal command/source/endpoint owner may separately report the broader
+impact. Internal naming reprojections and speculative parsing do not announce
+functionality loss. Ordinary library validation returns errors to its caller,
+which owns terminal severity; this does not exempt explicit resource rejection
+or public catalog construction from their diagnostic contracts.
+Authored source operation/path/tag exclusions designate expected non-exposure
+before compatibility checks. They need no loss warning; tool-name/listener filters
+cannot retrospectively hide unexpected source omissions. Document compatibility
+reasons in provider caveats and revisit exclusions when support changes. Do not add
+blanket warning suppression or suppress structural-budget rejection.
+
 An optional initial Base destination read that fails while funding continues
 logs at DEBUG; failure to publish a positive observation still defers preparation.
 Catalog structural-budget rejection is an explicit exception: the shared guard

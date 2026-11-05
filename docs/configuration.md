@@ -1117,7 +1117,13 @@ are retained and do not by themselves make an operation unsupported.
 
 Serving and registration retain usable siblings and append concise source omission
 notices after instruction overrides, including an empty override. Registration and
-operator details identify each omitted method/path with a fixed reason. Header
+public library catalog construction WARN for unexpected omitted operations using
+safe counts and fixed reasons; total construction failure also WARNs. Strict
+completeness conversion does not duplicate that diagnostic. Expected unsupported
+operations should be explicitly excluded at the source, with their rationale in
+provider caveats; no separate incompatibility suppression setting is needed.
+These exclusions precede compatibility, while structural safety guards still apply.
+Registration and operator details identify each omitted method/path with a fixed reason. Header
 issues distinguish invalid/reserved names, duplicate declarations, serialization,
 managed Idempotency-Key incompatibility and argument conflicts. A dependent
 waiting endpoint reports these fixed causes at generation failure without
