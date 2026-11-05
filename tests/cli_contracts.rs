@@ -100,6 +100,10 @@ sources=['api']
         .await);
         let wallet_dir = Path::new("configuration").join("new-wallet");
         assert!(
+            error.contains("ERROR") && error.contains("MCP serving could not start or continue"),
+            "{error}"
+        );
+        assert!(
             error.contains(&format!(
                 "wallet directory '{}' was not found",
                 wallet_dir.display()
@@ -112,6 +116,66 @@ sources=['api']
         );
         assert!(!dir.join(wallet_dir).exists());
     }
+}
+
+#[tokio::test]
+async fn terminal_cli_diagnostics_distinguish_inspection_and_unavailable_serving() {
+    let temporary = tempfile::tempdir().unwrap();
+    let directory = temporary.path();
+    let missing = bad(run(
+        directory,
+        &["config", "show", "--config", "missing.toml"],
+        &[],
+    )
+    .await);
+    assert!(
+        missing.contains("WARN") && missing.contains("requested CLI operation could not complete"),
+        "{missing}"
+    );
+
+    std::fs::write(
+        directory.join("spec.json"),
+        json!({"paths":{"/private-path":{
+            "post":{"requestBody":{"content":{"application/xml":{"schema":{"type":"string"}}}}}
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+    for (args, level, effect) in [
+        (
+            vec![
+                "serve",
+                "--spec",
+                "spec.json",
+                "--base-url",
+                "https://example.com",
+            ],
+            "ERROR",
+            "MCP serving could not start or continue",
+        ),
+        (
+            vec![
+                "catalog",
+                "tools",
+                "--spec",
+                "spec.json",
+                "--base-url",
+                "https://example.com",
+            ],
+            "WARN",
+            "requested CLI operation could not complete",
+        ),
+    ] {
+        let error = bad(run(directory, &args, &[]).await);
+        assert!(error.contains(level) && error.contains(effect), "{error}");
+        assert!(error.contains("catalog_incomplete"), "{error}");
+        assert!(error.contains("catalog_operations_omitted"), "{error}");
+    }
+    let invalid_filter = bad(run(directory, &["build-info"], &[("RUST_LOG", "[invalid")]).await);
+    assert!(
+        invalid_filter.contains("WARN") && invalid_filter.contains("invalid RUST_LOG filter"),
+        "{invalid_filter}"
+    );
 }
 
 #[tokio::test]

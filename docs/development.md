@@ -311,6 +311,16 @@ cannot retrospectively hide unexpected source omissions. Document compatibility
 reasons in provider caveats and revisit exclusions when support changes. Do not add
 blanket warning suppression or suppress structural-budget rejection.
 
+The executable reports terminal `serve` failure at ERROR and failed inspection,
+administration or other explicit CLI work at WARN. Typed command scope selects
+severity; validators do not each log the same terminal failure. Tracing carries
+only safe categories and available typed causes, never the raw error chain.
+The existing adjacent `error:` cause-chain display remains CLI output on stderr
+and is not a substitute for that severity event. Invalid logging directives use
+the default subscriber to report their failure. Clap help/usage handling remains
+unchanged. Explicit forced shutdown is WARN with unknown-outcome guidance, not an
+unexpected service ERROR, and never releases accepted financial work.
+
 An optional initial Base destination read that fails while funding continues
 logs at DEBUG; failure to publish a positive observation still defers preparation.
 Catalog structural-budget rejection is an explicit exception: the shared guard

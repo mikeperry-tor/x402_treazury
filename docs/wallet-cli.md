@@ -257,6 +257,10 @@ For either command, an optional `--treasury-id` must be the UUID shown by init/s
 not an account number such as `0`.
 Expected CLI failures print a concise error and cause chain to stderr and return
 a nonzero exit code, even when `RUST_BACKTRACE` is enabled.
+The executable additionally emits a safe terminal WARN for failed CLI work;
+failed `serve` startup/runtime emits ERROR. Raw cause chains remain separate
+CLI output, never copied into tracing fields. Routine library/input validation
+does not independently repeat the terminal event.
 Initialization refuses existing state/key paths; a partial initialization failure
 is not automatically retried over those files. Wallet data stays in memory until
 written as an authenticated encrypted snapshot. The wallet's internal path uses a

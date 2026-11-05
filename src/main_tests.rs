@@ -4,6 +4,10 @@ fn force_exit_with_blocked_worker_child() {
     let Ok(marker) = std::env::var("X402_TEST_FORCE_CHILD") else {
         return;
     };
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
     let (_hold, wait) = std::sync::mpsc::channel::<()>();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
@@ -51,4 +55,58 @@ async fn explicit_force_exits_even_with_blocking_work() {
             .unwrap()
             .contains(x402_treazury::server::FORCE_SHUTDOWN_MESSAGE)
     );
+}
+
+#[test]
+fn terminal_diagnostics_use_command_scope_and_never_log_private_error_chains() {
+    if std::env::var("TREAZURY_TERMINAL_LOG_CHILD").is_err() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::terminal_diagnostics_use_command_scope_and_never_log_private_error_chains",
+                "--nocapture",
+            ])
+            .env("TREAZURY_TERMINAL_LOG_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
+    for (error, level, category) in [
+        (
+            anyhow::anyhow!("private https://token@example.invalid/path")
+                .context(super::ServingFailure),
+            "ERROR",
+            "operation_failed",
+        ),
+        (
+            anyhow::anyhow!("private https://token@example.invalid/path"),
+            "WARN",
+            "operation_failed",
+        ),
+        (
+            anyhow::Error::new(x402_treazury::server::ForcedShutdown)
+                .context(super::ServingFailure),
+            "WARN",
+            "forced_shutdown",
+        ),
+    ] {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || super::report_terminal_failure(&error));
+        let text = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        assert!(text.contains(level) && text.contains(category), "{text}");
+        for private in ["private", "token", "example.invalid"] {
+            assert!(!text.contains(private), "{text}");
+        }
+    }
 }

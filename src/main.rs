@@ -67,6 +67,7 @@ fn finish(result: Result<()>) -> std::process::ExitCode {
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
+            report_terminal_failure(&error);
             // Display the cause chain, never anyhow's Debug backtrace.
             eprintln!("error: {error:#}");
             if error.is::<x402_treazury::server::ForcedShutdown>() {
@@ -80,21 +81,92 @@ fn finish(result: Result<()>) -> std::process::ExitCode {
         }
     }
 }
+
+#[derive(Debug)]
+struct ServingFailure;
+impl std::fmt::Display for ServingFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MCP serving unavailable")
+    }
+}
+impl std::error::Error for ServingFailure {}
+
+fn report_terminal_failure(error: &anyhow::Error) {
+    if error.is::<x402_treazury::server::ForcedShutdown>() {
+        tracing::warn!(
+            category = "forced_shutdown",
+            "{}",
+            x402_treazury::server::FORCE_SHUTDOWN_MESSAGE
+        );
+        return;
+    }
+    // CLI cause-chain display remains separate. Tracing receives only safe kinds,
+    // never upstream prose, destinations, configuration values or credentials.
+    let category = if error.is::<catalog::IncompleteCatalog>() {
+        "catalog_incomplete"
+    } else if error.is::<std::io::Error>() {
+        "io_failure"
+    } else if error.is::<serde_json::Error>() {
+        "invalid_json"
+    } else {
+        "operation_failed"
+    };
+    let io_kind = error
+        .downcast_ref::<std::io::Error>()
+        .map(|cause| cause.kind());
+    if error.is::<ServingFailure>() {
+        tracing::error!(
+            category,
+            ?io_kind,
+            "MCP serving could not start or continue; service is unavailable; see the accompanying CLI error for details"
+        );
+    } else {
+        tracing::warn!(
+            category,
+            ?io_kind,
+            "The requested CLI operation could not complete; see the accompanying CLI error for details"
+        );
+    }
+}
+
 async fn run() -> Result<()> {
     let matches = cli::Cli::command().get_matches();
     let command = cli::Cli::from_arg_matches(&matches)?.command;
+    let serving = matches!(&command, cli::Command::Serve(_));
+    let result = run_command(command, &matches).await;
+    if serving {
+        result.context(ServingFailure)
+    } else {
+        result
+    }
+}
+
+async fn run_command(command: cli::Command, matches: &clap::ArgMatches) -> Result<()> {
     let default_filter = "warn,x402_treazury=info";
     let filter = match std::env::var("RUST_LOG") {
         Ok(value) => {
-            tracing_subscriber::EnvFilter::try_new(value).context("invalid RUST_LOG filter")?
+            tracing_subscriber::EnvFilter::try_new(value).context("invalid RUST_LOG filter")
         }
-        Err(std::env::VarError::NotPresent) => tracing_subscriber::EnvFilter::new(default_filter),
-        Err(error) => return Err(error).context("invalid RUST_LOG environment value"),
+        Err(std::env::VarError::NotPresent) => {
+            Ok(tracing_subscriber::EnvFilter::new(default_filter))
+        }
+        Err(error) => Err(anyhow::Error::new(error).context("invalid RUST_LOG environment value")),
+    };
+    let (filter, filter_error) = match filter {
+        Ok(filter) => (filter, None),
+        Err(error) => (
+            tracing_subscriber::EnvFilter::new(default_filter),
+            Some(error),
+        ),
     };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
         .init();
+    // Invalid directives still get the default subscriber's terminal diagnostic.
+    if let Some(error) = filter_error {
+        return Err(error);
+    }
     let args: Args = match command {
         cli::Command::Wallet(args) => return x402_treazury::wallet_cli::run(args).await,
         cli::Command::Sources(cli::Sources::Inspect { config }) => {
@@ -165,7 +237,7 @@ async fn run() -> Result<()> {
     };
     let definition = cli::Cli::command();
     let mut leaf_definition = &definition;
-    let mut matches = &matches;
+    let mut matches = matches;
     while let Some((name, nested)) = matches.subcommand() {
         leaf_definition = leaf_definition
             .find_subcommand(name)
