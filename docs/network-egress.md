@@ -133,6 +133,15 @@ renew another response's inactivity timer or signed authority.
 | `wallet_cli.rs` | Same configured adapters as serving; local inspection stays offline |
 | `tools/providers/snapshot_spec.rs`, `tools/diagnostics/quote_near.rs` | Same factory; both accept `--network-config` |
 
+These identities do not establish timing decorrelation between shared metadata/header
+reads and wallet requests, isolation of individual transparent-address discovery
+queries within a treasury scan, or a separate Coinbase search identity. Broader
+changes in these three areas remain deferred; the catalog, transport and indexer
+recovery fixes do not implement or qualify them. Preserve the current identity
+contract unless focused privacy work establishes the intended threat model,
+required behavior and evidence. This deferral does not prohibit a concrete defect
+fix or imply that the historical privacy observations were freshly verified.
+
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient
 before calculation. Automatic shielding without a job uses the encrypted original

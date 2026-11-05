@@ -28,11 +28,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
 discovery, retained financial obligations and the choice between root recovery and
 discarding retired keys.
-The [code-review orchestration plan](plans/review_orchestration.md) coordinates
-implementation lanes, integration order and shared review gates. The
-[original review and maintainer disposition](plans/x402_treazury_review.md) are
-working reference material for those gates. Completed replacement authority and
-indexer recovery are maintained in the
+Funding/source authority and indexer recovery are maintained in the
 [funding/source contract](wallet-rotation.md#funding-and-source-safety) and
 [SDK recovery guide](zingo-integration.md). Catalog construction and faithful
 request contracts live in [architecture](architecture.md#catalog-configuration-and-execution),

@@ -723,6 +723,12 @@ See [SDK transaction identity](zingo-integration.md) for the ZIP 244 boundary.
 Completed source work is not re-audited or reopened after restart or SDK chain
 replacement. Retained source dispositions and referenced snapshots remain audit
 evidence in current stores; they do not drive a lifetime reconciliation pass.
+Outgoing operations keep their referenced encrypted snapshots after resolution,
+so retained snapshot storage can grow with transaction history. Pruning those
+references is deferred, independently of temporary preflight-copy placement.
+Any future retention change must enumerate preparation, outgoing, expiry and
+recovery-history consumers and preserve their immutable evidence; a hash alone
+is not presumed to replace the snapshot they require.
 For records reopened by an earlier implementation, the existing read-only history
 guard still forbids automatic disclosure of previously closed originals. Actual
 unfinished originals keep their existing owner and exact journals.

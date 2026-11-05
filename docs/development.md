@@ -36,6 +36,32 @@ OS confinement. Strict byte-exact vendor reconstruction and portable test fixtur
 remain in use. Automated security-advisory scanning, Linux CI and MSRV/platform
 matrices remain separately deferred.
 
+## Deferred code assessments
+
+Broader SQL/archive readability, public API visibility and shared deployment-loader
+cleanup remain deferred assessments. Similar archive statements can preserve
+different idempotency and recovery facts, public items have library/test/tooling
+consumers, and show/load/warm/bootstrap paths have distinct authority and failure
+contracts. Review those actual consumers before consolidating or removing code.
+The branch review did not complete those refactors or revalidate historical counts.
+
+Test-hook attribute counts alone do not establish production/test divergence.
+A blanket replacement of test hooks with injected traits is not selected work;
+inspect the affected production and test behavior before choosing a focused change,
+and add an abstraction only when its concrete responsibility justifies it.
+
+The earlier hygiene observations likewise need individual assessment: release
+arithmetic checks, declared versus pinned toolchains, file-lock dependencies,
+dependency pins, build identity/rebuild work, key placement and panic sites do not
+constitute one selected remediation. Follow the owning build, dependency, wallet
+and testing contracts for any concrete change. Deferral neither establishes a
+current defect nor prohibits an evidence-based fix or simplification.
+
+Provider-prose handling is tracked in the
+[tool documentation policy](agent-sources.md#tool-documentation); retained
+outgoing-snapshot growth and pruning are governed by
+[source recovery](wallet-rotation.md#funding-and-source-safety).
+
 ## Dependency vendoring
 
 Before introducing a new vendored package, tell the user the concrete need,
