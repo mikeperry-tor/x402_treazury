@@ -164,7 +164,7 @@ async fn dropped_deposit_and_shield_waiters_keep_one_owned_calculation_and_unrel
             tokio::select! {
                 result = &mut calculation => panic!("calculation returned before accepted barrier: {}", result.is_ok()),
                 result = reached => result.unwrap(),
-            }
+            };
         }
         assert!(owner.client.is_none() && owner.running.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -252,7 +252,7 @@ async fn calculation_panic_terminates_before_reconstruction_and_facts_panic_reta
             tokio::select! {
                 result = &mut calculation => panic!("unexpected early result: {}", result.is_ok()),
                 result = reached => result.unwrap(),
-            }
+            };
         }
         let id = accepted_id(dir.path());
         release.release();
@@ -300,7 +300,7 @@ async fn whole_treasury_drop_keeps_deposit_and_shield_bytes_owned_until_local_co
             tokio::select! {
                 result = &mut calculation => panic!("unexpected early result: {}", result.is_ok()),
                 result = reached => result.unwrap(),
-            }
+            };
         }
         let id = accepted_id(dir.path());
         let inputs = owner
@@ -372,7 +372,7 @@ fn normal_runtime_drop_drains_started_deposit_and_shield_without_an_external_sto
                     tokio::select! {
                         result = &mut calculation => panic!("unexpected early result: {}", result.is_ok()),
                         result = reached => result.unwrap(),
-                    }
+                    };
                 }
                 let id = accepted_id(dir.path());
                 let inputs = owner.store.call({ let id = id.clone(); move |s| s.prepared_inputs(&id) }).await.unwrap();
