@@ -682,3 +682,210 @@ async fn actual_mcp_help_completes_on_same_runtime_while_deposit_and_shield_calc
         no_send(&net).await;
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn accepted_managed_fixed_and_ranged_quotes_keep_original_authority_after_policy_change() {
+    for (reserves, floor, preferred, ceiling, changed) in [
+        (
+            crate::rotation::test_capacity::small_reserve("5"),
+            "5000000",
+            "5000000",
+            "5000000",
+            crate::rotation::test_capacity::small_reserve("9"),
+        ),
+        (
+            crate::rotation::config::ReservesConfig {
+                small: crate::rotation::config::ReserveConfig {
+                    funding_amount_usdc: None,
+                    min_funding_amount_usdc: Some("2".into()),
+                    max_funding_amount_usdc: Some("5".into()),
+                },
+                large: None,
+            },
+            "2000000",
+            "3000000",
+            "5000000",
+            crate::rotation::config::ReservesConfig {
+                small: crate::rotation::config::ReserveConfig {
+                    funding_amount_usdc: None,
+                    min_funding_amount_usdc: Some("7".into()),
+                    max_funding_amount_usdc: Some("8".into()),
+                },
+                large: None,
+            },
+        ),
+    ] {
+        let (dir, net, mut owner, _) = fixture(Kind::Deposit).await;
+        let pool = owner
+            .ensure_capacity_group("accepted_quote".into(), reserves, None, 0)
+            .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool.clone(), AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let deadline = now().unwrap() + 600;
+        let (job, original_quote, original_terms) = owner
+            .store
+            .call(move |s| {
+                let jobs = s.funding_jobs()?;
+                assert_eq!(jobs.len(), 1);
+                let job = &jobs[0];
+                let terms = s.select_quote_terms(&job.id, &job.operation_id, floor, preferred)?;
+                assert_eq!(terms.target.to_string(), preferred);
+                assert_eq!(terms.ceiling.to_string(), ceiling);
+                // As in save_quotes, bridge validation is separately covered;
+                // this actual saved quote binds the real SDK source request.
+                let quote = Quote {
+                    sizing_preview: None,
+                    request: serde_json::json!({"amount":preferred,"recipient":job.recipient}),
+                    response: serde_json::json!({}),
+                    input: 50_000,
+                    deadline,
+                    deposit: Some(DEPOSIT.into()),
+                };
+                let bytes = serde_json::to_vec(&quote)?;
+                s.save_funding_quote(&job.id, &bytes)?;
+                let terms = s.quote_terms_snapshot(&job.id)?.unwrap();
+                Ok((s.funding_job(&job.id)?.unwrap(), bytes, terms))
+            })
+            .await
+            .unwrap();
+        assert_eq!(job.target, floor);
+        assert_eq!(job.selected_output.as_deref(), Some(preferred));
+        assert_eq!(job.accepted_output.as_deref(), Some(preferred));
+        let original = request(&job, deadline);
+        let principal = original.amount_zatoshis;
+        let fee_cap = original.max_fee_zatoshis;
+        let input_cap = original.max_input_zatoshis;
+        let store = owner.store.clone();
+        let (reached, mut release, calls) = hold(&mut owner, false, false, false);
+        let (inputs, preparation_sha) = {
+            let calculation = owner.prepare(original);
+            tokio::pin!(calculation);
+            let accepted = tokio::select! {
+                result = &mut calculation => panic!("managed calculation returned before acceptance: {}", result.is_ok()),
+                result = reached => result.unwrap(),
+            };
+            assert_eq!(accepted, job.operation_id);
+            let operation = accepted.clone();
+            let before = store
+                .call(move |s| {
+                    let state = s.qualification_state()?;
+                    assert_eq!(state["source_preparations"].as_array().unwrap().len(), 1);
+                    assert_eq!(state["source_preparations"][0]["operation_id"], operation);
+                    Ok((
+                        s.prepared_inputs(&operation)?,
+                        state["source_preparations"][0]["preparation_sha256"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned(),
+                    ))
+                })
+                .await
+                .unwrap();
+            let job_id = job.id.clone();
+            let operation = job.operation_id.clone();
+            store
+                .call(move |s| {
+                    s.configure_capacity_group(&pool, None, 0, &changed)?;
+                    assert!(!s.accepted_quote_suits_current_claim(&job_id, &operation)?);
+                    s.deny_new_funding();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            // Cancel only after the real policy change. The accepted blocking
+            // owner keeps its saved quote/proposal rather than drawing again.
+            before
+        };
+        assert!(!inputs.is_empty());
+        assert!(owner.client.is_none() && owner.running.is_some());
+        release.release();
+        let prepared = owner.finish_calculation().await.unwrap();
+        drop(store);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(prepared.operation_id(), job.operation_id);
+        let facts = prepared.facts().unwrap();
+        assert_eq!(facts.amount_zatoshis, principal);
+        assert_eq!(facts.deadline, Some(deadline));
+        assert!(facts.fee_zatoshis > 0 && facts.fee_zatoshis <= fee_cap);
+        assert!(facts.amount_zatoshis + facts.fee_zatoshis <= input_cap);
+        evidence(&owner, job.operation_id.clone(), inputs.clone(), &prepared).await;
+        let raw = prepared.bytes().to_vec();
+        let snapshot = owner
+            .store
+            .call({
+                let operation = job.operation_id.clone();
+                move |s| s.prepared_snapshot(&operation)
+            })
+            .await
+            .unwrap();
+        let identity = owner.status().await.unwrap().treasury_id;
+        no_send(&net).await;
+        owner.close().await.unwrap();
+        let restored = Treasury::open_with_network(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            identity,
+            TreasuryNetwork::Synthetic,
+        )
+        .await
+        .unwrap();
+        restored
+            .store
+            .call(move |s| {
+                let status = s.status()?;
+                assert_eq!(status.funding_jobs.len(), 1);
+                assert_eq!(status.pools.len(), 1);
+                assert_eq!(status.pools[0].addresses.len(), 1);
+                let current = &status.funding_jobs[0];
+                assert_eq!(
+                    (
+                        &current.id,
+                        &current.operation_id,
+                        &current.pool_id,
+                        &current.wallet_id,
+                        &current.recipient
+                    ),
+                    (
+                        &job.id,
+                        &job.operation_id,
+                        &job.pool_id,
+                        &job.wallet_id,
+                        &job.recipient
+                    )
+                );
+                assert_eq!(current.target, floor);
+                assert_eq!(current.attempts, 0);
+                assert!(!s.accepted_quote_suits_current_claim(&job.id, &job.operation_id)?);
+                assert_eq!(current.selected_output.as_deref(), Some(preferred));
+                assert_eq!(current.accepted_output.as_deref(), Some(preferred));
+                assert_eq!(s.quote_terms_snapshot(&job.id)?, Some(original_terms));
+                assert_eq!(s.funding_quote(&job.id)?.as_slice(), original_quote);
+                assert_eq!(s.prepared_inputs(&job.operation_id)?, inputs);
+                assert_eq!(s.prepared_bytes(&job.operation_id)?.as_slice(), raw);
+                assert_eq!(
+                    s.prepared_snapshot(&job.operation_id)?.as_slice(),
+                    snapshot.as_slice()
+                );
+                assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+                assert_eq!(s.operation(&job.operation_id)?.submission, "PREPARED");
+                let state = s.qualification_state()?;
+                assert_eq!(state["source_preparations"].as_array().unwrap().len(), 1);
+                assert_eq!(
+                    state["source_preparations"][0]["preparation_sha256"],
+                    preparation_sha
+                );
+                assert!(state["payment_attempts"].as_array().unwrap().is_empty());
+                assert!(s.abandon_unprepared(&job.operation_id).is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        no_send(&net).await;
+        restored.close().await.unwrap();
+    }
+}
