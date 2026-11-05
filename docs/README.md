@@ -21,7 +21,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including artifact storage,
-[contract-error catalog refresh](plans/price_hint_caching.md),
+[stale cache expiry](plans/stale_cache_expiry.md),
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
