@@ -19,8 +19,9 @@ Current catalog G2 baseline is `4627301b`, after the unsquashed rebase onto
 `main` at `88cc7beb`. Historical implementation SHAs below identify preserved
 pre-rebase history; earlier runtime evidence carries only where source and consumer
 scope remain valid. Current catalog and renewed execution/financial acceptance are
-recorded below. Registry G1/G2 is accepted through `c0fa2c07`; R9 and final
-integration remain unfinished.
+recorded below. Registry G1/G2 is accepted through `c0fa2c07`; R9 GN/GQ1/GQ2 and
+combined integration are accepted through `b7890944`. Final whole-branch GR/GI
+remains unfinished.
 
 ## Settled decisions
 
@@ -47,7 +48,7 @@ integration remain unfinished.
    Windows runtime/storage/supervision/native acceptance is deferred by explicit
    user decision; dedicated Windows CI/experiment drivers are removed, not completed.
    Confirmed macOS ACL and unresolved Unix namespace concerns remain separate
-   unfinished follow-up, outside this milestone. R9 has its own scoped plan. Broad cover shaping
+   unfinished follow-up, outside this milestone. R9 retains its reviewed scope. Broad cover shaping
    and discovery/indexer privacy changes are excluded, except tangible direct fixes.
    Other deferred observations are not silently resolved or authorized by this table.
 
@@ -91,7 +92,7 @@ selected here; historical details not freshly checked are explicitly identified.
 | R6 | Deferred | Retained encrypted snapshots have financial provenance/recovery consumers. No snapshot-pruning implementation was selected or implied by P6. A future retention change must enumerate all required references and preserve accepted work and audit/recovery evidence; deleting rows or keeping only a hash is not automatically sufficient. [Store](../../src/rotation/store.rs), [recovery policy](../wallet-rotation.md#recovery-and-reconciliation-policy). |
 | R7 | Policy; diagnostic cleanup addressed | Do not restore an arbitrary freshness margin. Actual accepted quote deadlines and signed consensus expiry govern; external arrival/settlement details remain a separate contract question. Obsolete diagnostic arm removed. [Timer inventory](../network-egress.md#remaining-timers-and-budgets), [funding contract](../wallet-rotation.md#funding-and-source-safety). |
 | R8 | Addressed in accepted scope | Collision-safe arguments retain original wire identities; faithful body presence/compositions and selected JSON media remain intact. Unsupported operations are visible, with compatible POST preference and strict inspection completeness. The exact string/string-array query union uses the existing codec without schema/default rewriting. Generic reference normalization stays bounded and context-aware. Combined G2 independently accepted through `4627301b`; standard basic reference annotations remain opaque and defaults never insert request fields. [Input contracts](../configuration.md#openapi-inputs-and-request-bodies), [catalog architecture](../architecture.md#catalog-configuration-and-execution), [source omissions](../agent-sources.md). |
-| R9 | Planned; implementation pending | Ordinary regex compilation and HTTP cache-lock construction costs remain. Re-audit broad status consumers rather than repeat the historical 10,000-payment claim as current fact. New qualification admission scans case/run/global history, parsing payment JSON under the write transaction; that aggravation is confirmed without a latency measurement. [Qualification budget](../../src/qualification/budget.rs), [admission](../../src/qualification/payment.rs), [focused R9 plan](hot_path_efficiency.md), orchestration R0/R1 and the [source registry contract](../agent-sources.md#registration-and-tool-invocation). No cached monetary ledger, caps or pruning selected. |
+| R9 | Addressed in selected scope | P1 `8584f839` reuses exact constant regexes; N1 `00d41932` and fixup `9bed86ef` construct outside the cache mutex and retain the canonical full-key winner and fallible pre-I/O observer. Q1 `af467549` derives exact case/run/registry budgets in one strict history pass without changing raw numeric domains or uncertain charges. Q2 `b7890944` projects complete lifecycle evidence from one SQL snapshot, retaining required raw hashes, full export guards and optional receipt-failure semantics. GN/GQ1/GQ2 and combined R9 are independently accepted with current default readers and one actual managed SDK case. History scans and complete output remain necessary; keyed admission has no 10,000-row guard. No constant-time, quantitative speedup, cached monetary ledger, new cap or pruning claim. [Network ownership](../network-egress.md), [qualification authority](../../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority), [lifecycle coverage](../../tests/LIFECYCLE.md). |
 | R10 | Original premise not accepted | The implementation compares the stored transaction's computed txid with the original signed transaction's computed txid, rather than merely comparing the lookup key. Preserve ZIP-244 effects identity and original disclosed bytes. No removal selected on the report's premise. [SDK confirmation](../../src/treasury/send.rs), [identity/recovery contract](../zingo-integration.md). |
 | B1 | Windows CI removed by user; other coverage deferred | The user explicitly deferred Windows runtime and native acceptance and removed its dedicated workflows/drivers. Preserve historical partial evidence without claiming support. Portable controls and strict vendor verification remain; they do not replace automated advisory scanning. Advisory scanning, Linux CI and MSRV/platform matrices remain separately deferred. [Development](../development.md#portability), [vendor provenance](../../vendor/README.md). |
 | B2 | Addressed in selected scope with A2 | Independent complete retained-patch/SDK/application/financial recovery review and G1/G2/G3/GF accepted through `68a93c0b`; strict provenance reconstruction and actual synthetic recovery/liability regressions pass with scoped carry. [SDK contract](../zingo-integration.md), [vendor provenance and retirement](../../vendor/README.md). No upstream approval, submission, checkout retirement, consensus or live qualification is claimed. |
@@ -154,8 +155,9 @@ all-target Clippy passed; the production compiler pass retains its unchanged
 production-source scope. Current whole-source complexity review is accepted.
 
 Execution G2/financial GF is independently accepted: four proving and 53 lifecycle
-passes were executed before the rebase and retain verified unchanged financial
-SDK/prover/actor/Store source scope. Actual post-rebase public consumers passed
+passes were executed before the rebase. Their verified unchanged SDK, cryptographic,
+calculation and accepted-work ownership scope carries forward; current Store
+reporting readers are revalidated separately below. Actual post-rebase public consumers passed
 36 cases (treasury 2, treasury_sync 27, wallet_workflow 7), with one consensus case
 ignored. Source review preserves PH1 hint-sharing changes as advisory and distinct
 from financial evidence identity and signing authority. Prior accepted runtime
@@ -164,9 +166,18 @@ compact-unwind linker warning remains recorded.
 
 The complete offline provider preset preserves all 22 original reviewed requests,
 63 cases, 23 sources and the unchanged API budget; no live qualification is inferred.
-Forty other default-target paths remain unrun. No complete `make check` or final GI
-is claimed. Preserve valid scoped evidence and finish applicable stages as later
-R9 changes require. Windows runtime is deferred; macOS ACL and Unix initial
+All 61 metadata-derived default targets are now accounted for through `b7890944`:
+1,896 passes and 41 ignored cases, deduplicated by target and case. Fifty-two
+targets executed at this implementation; nine retain independently verified
+source-scoped evidence. The fresh whole library passes 1,192 cases with 21 ignored,
+superseding the earlier library unions. The current production/all-target warning
+gate, compatibility, formatting, static provenance and whole-source complexity
+review pass; all seven advisory complexity findings have explicit dispositions.
+Affected Status/lifecycle readers passed in current default suites and one actual
+managed fixed/ranged SDK calculation; the codec also passed once. Earlier four
+proving and 53 lifecycle results are not relabeled as current full-suite executions.
+This is assembled validation, not one successful `make check` invocation; final
+GR/GI remains open. Windows runtime is deferred; macOS ACL and Unix initial
 namespace concerns remain a separate unfinished follow-up, not fixed by these gates.
 Historical Windows release/help/vendor
 and six-probe results plus both namespace API candidates passed at `5218fef0`;

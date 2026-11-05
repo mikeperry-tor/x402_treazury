@@ -8,7 +8,7 @@ plan alone grants no implementation, live-funded qualification, upstream
 submission or spending authority. Starting baseline:
 `d557d82a70c6ef9bbe8a9936f696d12bf2cd2404`, including randomized funding and
 qualification changes from `main` at `a626b99898d21c91552813a8b2413f48d3a1fede`.
-The current integration baseline is `c0fa2c07a539f69cb2a40116044058da9cbb5d6f`,
+The current implementation baseline is `b78909442d9ae78064ca42ed2c12fc2673edc6ad`,
 after an unsquashed rebase onto `main` at `88cc7bebef364e9dfaaff9197596df3df438a424`.
 Reconfirm the actual integration baseline before each implementation milestone.
 
@@ -19,7 +19,8 @@ are complete, including the publisher-consumer correction accepted below. Catalo
 expansion G1 and indexer recovery G1/G2/G3 are complete. Catalog combined G2
 is independently accepted through `4627301b`; execution G2 and financial GF are
 accepted with the source-scoped evidence below. Registry D1/G1 and combined
-D1/D2 G2 are independently accepted through `c0fa2c07`. R9 child work and
+D1/D2 G2 are independently accepted through `c0fa2c07`. R9 GN, GQ1, GQ2 and
+combined integration are independently accepted through `b7890944`;
 whole-branch GR/GI remain unfinished. Historical F1/F2 and portable-benefit SHA
 references below identify preserved pre-rebase commits; their earlier runs retain
 only the verified unchanged source scope, not a claimed rerun on the rebased SHA.
@@ -92,8 +93,8 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | F3 / financial | T1 `6a4ea635`, T2 `dbf51979` and reviewed fixups implement lazy public parameter reuse and one retained blocking calculation/publication owner. Contracts live in [SDK boundaries](../zingo-integration.md#application-sdk-boundaries), [wallet authority](../wallet-rotation.md#funding-limits-and-fees), [runtime architecture](../architecture.md) and [lifecycle tests](../../tests/LIFECYCLE.md). | T2G2/GF independently accepted: original fixed/ranged quote authority, same-runtime MCP progress and cancellation/panic/runtime-drop/restart chains reviewed. Four proving and 53 lifecycle passes retain verified unchanged source scope across rebase; actual post-rebase treasury/sync/CLI consumers add 36 passes and one ignored consensus case. Missing results never authorize replay. |
 | P1 / portable benefits | Retain `4fff946f`, `574e0b38`/`5251194e` portable ErrorKind classification and unfunded native control wiring, generic fixture improvements and strict binary vendor reconstruction. | Existing scoped evidence remains valid where unchanged. Windows runtime/native acceptance is deferred, not complete; historical partial results grant no storage, recovery or confinement claim. |
 | Storage / separate follow-up | [macOS ACL and Unix storage](portability_fixes.md) remain unfinished outside this milestone. Windows P2/P3/P4 runtime, storage, supervision and native gates are deferred by user decision. | No shared-filesystem framework or native GS/lifecycle gate is required before the remaining important lanes. GR must retain the confirmed macOS gap and unresolved Unix namespace risk explicitly. |
-| R0 / R9 follow-up | [Focused R9 plan](hot_path_efficiency.md) prepared in this separate R0 documentation boundary before implementation. Scoping proceeds independently. | Fresh consumer/query audit separates qualification budget/status work from ordinary regex/client-cache work; ordered commits, authority-preserving tests and review gates agreed. Do not presume a cached monetary ledger or measured speedup. |
-| R1 / R9 implementation | Execute [R9 child commits](hot_path_efficiency.md); normally integrate code after financial F2 and catalog C1 correctness gates, coordinating overlapping catalog/network/Store owners. | Child gates pass; exact budget arithmetic, concurrent admission, rollback/restart and uncertain charges preserved. Ordinary optimizations retain transport isolation and live-I/O ownership. Assess remaining history-dependent work before claiming it solved. |
+| R0 / R9 design | Complete: independent consumer/query design separated naming/client-cache work from qualification budgets and lifecycle evidence before implementation. | Ordered commits and authority-preserving acceptance agreed; no monetary cache, new cap or measured speedup presumed. |
+| R1 / R9 implementation | Complete: P1 `8584f839`, N1 `00d41932` and fixup `9bed86ef`, Q1 `af467549`, Q2 `b7890944`. Maintained contracts live in [network policy](../network-egress.md) and the [qualification reference](../../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority). | GN, GQ1, GQ2 and combined R9 independently accepted. Exact raw parser domains, atomic budgets, rollback/uncertain charges, canonical transport ownership and complete transaction-consistent lifecycle output remain intact. Required history scans and export guards remain; no constant-time or live qualification claim. |
 | O1 / final integration | Assemble reviewed completed milestones, fixups and maintained-guide handoff. Windows work and optional qualification backends remain deferred/excluded; focused macOS/Unix storage follow-up stays unfinished separately. | Complete GR against the tracked review before GI and cleanup, then exact cleanup/final combined review. Unfinished required financial, catalog, registry or R9 milestones keep this orchestration active. |
 
 These are chosen integration orders, not universal technical dependencies. A2
@@ -190,8 +191,9 @@ all-target Clippy passed; the production compiler pass retains its unchanged
 production-source scope. Current whole-source complexity review is accepted.
 
 Execution G2/financial GF is independently accepted: four proving and 53 lifecycle
-passes were executed before the rebase and retain verified unchanged financial
-SDK/prover/actor/Store source scope. Actual post-rebase public consumers passed
+passes were executed before the rebase. Their verified unchanged SDK, cryptographic,
+calculation and accepted-work ownership scope carries forward; current Store
+reporting readers are revalidated separately below. Actual post-rebase public consumers passed
 36 cases (treasury 2, treasury_sync 27, wallet_workflow 7), with one consensus case
 ignored. Source review preserves PH1 hint-sharing changes as advisory and distinct
 from financial evidence identity and signing authority. Prior accepted runtime
@@ -200,9 +202,18 @@ compact-unwind linker warning remains recorded.
 
 The complete offline provider preset preserves all 22 original reviewed requests,
 63 cases, 23 sources and the unchanged API budget; no live qualification is inferred.
-Forty other default-target paths remain unrun. No complete `make check` or final GI
-is claimed. Preserve valid scoped evidence and finish applicable stages as later
-R9 changes require. Windows runtime is deferred; macOS ACL and Unix initial
+All 61 metadata-derived default targets are now accounted for: 1,896 passes and
+41 ignored cases, deduplicated by target and case. Of these, 52 targets executed
+at `b7890944`; nine retain independently verified source-scoped evidence. The fresh
+whole library passes 1,192 cases with 21 ignored, superseding the earlier library
+unions. Current production/all-target warning gates, compatibility, formatting,
+static provenance and whole-source complexity review pass. The selected managed
+fixed/ranged SDK reader and codec each passed once on the current implementation.
+Historical four proving and 53 lifecycle passes retain only their verified unchanged
+cryptographic, calculation and accepted-work ownership scope; affected Status and
+lifecycle readers were revalidated through current default consumers and that SDK
+case. This is assembled validation, not one successful `make check` invocation;
+final GR/GI remains open. Windows runtime is deferred; macOS ACL and Unix initial
 namespace concerns remain a separate unfinished follow-up, not fixed by these gates.
 
 ## Independent review gates and completion

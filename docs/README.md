@@ -43,8 +43,9 @@ and [wallet guide](wallet-rotation.md#funding-limits-and-fees).
 Dynamic registry build reuse, publication and read contracts live in
 [registration guidance](agent-sources.md#registration-and-tool-invocation) and
 [runtime architecture](architecture.md#catalog-configuration-and-execution).
-The remaining child plan covers
-[hot-path and qualification history](plans/hot_path_efficiency.md).
+HTTP cache ownership is maintained in [network policy](network-egress.md), and
+qualification budgets and complete lifecycle snapshots in the
+[technical reference](../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority).
 Separate unfinished work covers
 [macOS ACL and Unix storage](plans/portability_fixes.md); Windows runtime work is
 deferred by user decision.

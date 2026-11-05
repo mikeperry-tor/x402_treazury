@@ -562,6 +562,14 @@ The total budget need not cover every declared case reservation in advance; an
 actual authorization that exceeds it fails visibly without financial admission or disclosure. Funding does
 not consume this budget and has no `source_exposure_zec` setting.
 
+Exact cumulative budget validation and complete evidence exports still include
+`O(history)` scans; removing redundant passes does not make them constant-time.
+Keyed payment admission has no 10,000-row guard. Full `qualification_state` exports
+retain separate existing 10,000-row guards for payment attempts, source operations,
+source preparation bindings and wallet observations, used by baseline, permit,
+preparation and restart consumers. These export guards remain separate from ordinary
+serving and keyed admission; they do not erase charges or grant replay authority.
+
 New registries use schema 2. Schema-1 ZEC-budget registries remain read-only;
 `report` shows their historical authorization units and counts without interpreting
 ZEC as USDC or enabling execution. Preserve the original private registry for its
