@@ -1337,6 +1337,7 @@ fn openapi_operation(
     // Operation parameters override inherited parameters by (location, name),
     // not by name alone. Resolve references before comparing their identities.
     let mut params: Vec<Value> = Vec::new();
+    let mut positions = std::collections::HashMap::new();
     for parameter_source in root["paths"][path]["parameters"]
         .as_array()
         .into_iter()
@@ -1346,18 +1347,23 @@ fn openapi_operation(
         let Some(parameter) = openapi_parameter(root, parameter_source, budget)? else {
             continue;
         };
-        if let Some(previous) = params.iter_mut().find(|p| {
-            p["in"] == parameter["in"]
-                && if p["in"] == "header" {
-                    p["name"]
-                        .as_str()
-                        .unwrap_or("")
-                        .eq_ignore_ascii_case(parameter["name"].as_str().unwrap_or(""))
-                } else {
-                    p["name"] == parameter["name"]
-                }
-        }) {
-            *previous = parameter;
+        let name = if parameter["in"] == "header" {
+            Value::String(
+                parameter["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_ascii_lowercase(),
+            )
+        } else {
+            parameter["name"].clone()
+        };
+        // Keep the first position and last definition, including original wire
+        // spelling. The transient index avoids rescanning all prior parameters.
+        let position = positions
+            .entry((parameter["in"].clone(), name))
+            .or_insert(params.len());
+        if *position < params.len() {
+            params[*position] = parameter;
         } else {
             params.push(parameter);
         }

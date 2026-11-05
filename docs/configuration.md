@@ -1021,8 +1021,10 @@ sources whose operations span origins, as the bundled Lonestar provider does.
 ## OpenAPI inputs and request bodies
 
 Path, query, JSON-body and business-header inputs retain distinct identities.
-Inherited parameters override only the same location/name (header names compare
-case-insensitively). Unique argument names keep their spelling. A cross-location
+Operation parameters override inherited definitions only at the same location/name
+(header names compare case-insensitively). Merging keeps the first position and last resolved definition,
+including its wire spelling, using a transient identity index rather than scanning
+prior parameters for each entry. Unique argument names keep their spelling. A cross-location
 collision adds `_query`, `_body` or `_header`, with numeric suffixes when an authored
 or generated name already occupies that spelling. Original wire names persist in
 routing metadata; a query `id_query` alias still sends the declared query key `id`.

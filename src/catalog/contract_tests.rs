@@ -8,6 +8,61 @@ fn partial() -> Value {
 }
 
 #[test]
+fn parameter_merge_keeps_first_position_and_last_resolved_definition() {
+    let document = json!({"components":{"parameters":{"Shared":{"name":"id","in":"query","schema":{"type":"string"}}}},
+    "paths":{"/{id}":{
+        "parameters":[{"$ref":"#/components/parameters/Shared"},
+            {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+            {"name":"X-Trace","in":"header","schema":{"type":"string"}},
+            {"name":"ID","in":"query","schema":{"type":"string"}}],
+        "get":{"parameters":[
+            {"name":"id","in":"query","schema":{"type":"number"}},
+            {"name":"x-trace","in":"header","schema":{"type":"string","minLength":2}},
+            {"name":"id","in":"query","schema":{"type":"integer"}},
+            {"name":"added","in":"query","schema":{"type":"boolean"}}]}
+    }}});
+    let operations = operations(&document, None).unwrap();
+    let parameters = operations[0]["params"].as_array().unwrap();
+    assert_eq!(parameters.len(), 5);
+    assert_eq!(
+        parameters
+            .iter()
+            .map(|p| (p["in"].as_str().unwrap(), p["name"].as_str().unwrap()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("query", "id"),
+            ("path", "id"),
+            ("header", "x-trace"),
+            ("query", "ID"),
+            ("query", "added")
+        ]
+    );
+    assert_eq!(parameters[0]["schema"]["type"], "integer");
+    assert_eq!(parameters[2]["schema"]["minLength"], 2);
+    let tool = build_tools(&Config::default(), &document, "api")
+        .unwrap()
+        .remove(0);
+    let request = tool
+        .route(
+            "https://example.com",
+            json!({"id":"path", "id_query":7,"ID":"case","x-trace":"trace","added":true})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(request.url, "https://example.com/path");
+    assert_eq!(
+        request.query,
+        BTreeMap::from([
+            ("id".into(), json!(7)),
+            ("ID".into(), json!("case")),
+            ("added".into(), json!(true))
+        ])
+    );
+    assert_eq!(request.headers["x-trace"], "trace");
+}
+
+#[test]
 fn explicit_unencodable_scalar_shapes_omit_only_the_affected_operations() {
     let mut paths = Map::from_iter([("/healthy".into(), json!({"get":{}}))]);
     for (index, schema) in [
