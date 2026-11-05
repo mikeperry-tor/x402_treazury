@@ -509,8 +509,9 @@ pub fn arg_text(value: &Value) -> String {
 }
 
 pub fn slug(text: &str) -> String {
-    let re = Regex::new("[^0-9a-z]+").expect("constant regex");
-    re.replace_all(&text.to_lowercase(), "_")
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new("[^0-9a-z]+").expect("constant regex"));
+    RE.replace_all(&text.to_lowercase(), "_")
         .trim_matches('_')
         .to_string()
 }
@@ -1573,10 +1574,9 @@ fn money(value: &Value) -> Option<String> {
         return None;
     }
     let value = arg_text(value).trim().to_owned();
-    if !Regex::new(r"^\d+(?:\.\d+)?$")
-        .expect("constant regex")
-        .is_match(&value)
-    {
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"^\d+(?:\.\d+)?$").expect("constant regex"));
+    if !RE.is_match(&value) {
         return None;
     }
     Some(if let Some((a, b)) = value.split_once('.') {

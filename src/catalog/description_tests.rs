@@ -207,3 +207,23 @@ fn only_new_pricing_fragment_opt_in_requires_a_string_and_paired_description() {
     );
     assert_eq!(legacy.description, "Read. Cost: unknown.");
 }
+
+#[test]
+fn naming_and_display_keep_unicode_lowercase_and_value_kind_boundaries() {
+    assert_eq!(slug("Straße İSTANBUL café"), "stra_e_i_stanbul_caf");
+    assert_eq!(slug("__A---B...09__"), "a_b_09");
+    // Display pricing retains the existing Unicode regex and textual formatting;
+    // it is not financial amount validation or signing authority.
+    for (value, expected) in [
+        (json!(" 001.23000 "), Some("001.23")),
+        (json!("１２.３０"), Some("１２.３０")),
+        (json!(u64::MAX), Some("18446744073709551615")),
+        (json!(-1), None),
+        (json!(1.0), None),
+        (json!(true), None),
+        (json!("1e3"), None),
+        (json!(".50"), None),
+    ] {
+        assert_eq!(money(&value).as_deref(), expected);
+    }
+}
