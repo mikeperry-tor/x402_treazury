@@ -9,6 +9,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
 | [Development](development.md) | Local checks, coverage and complexity tooling |
+| [Planning workflow](planning-workflow.md) | Active plans, independent review evidence, handoffs and completion with preserved Git history |
 | [Zingo integration](zingo-integration.md) | SDK boundaries, Pepper patches and adapted-code attribution |
 | [Architecture](architecture.md) | Catalog generation, [MCP output](architecture.md#mcp-and-output-boundaries), execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
 | [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, [automatic retirement](wallet-rotation.md#automatic-retirement), funding and recovery |
@@ -72,7 +73,9 @@ Plans grant no execution or spending authority.
 
 When implemented, move useful explanations into maintained guides, retain concrete
 unfinished work in a focused plan, fix links and remove the completed plan. Do not
-keep an implemented-plan archive. Generated reports, audit inventories and metrics
+keep an implemented-plan archive. Preserve plans in Git history through integration;
+the [planning workflow](planning-workflow.md) describes their lifecycle and review.
+Generated reports, audit inventories and metrics
 belong in ignored local or private external storage. Commit durable findings rather
 than dated logs, balances, handoffs or report copies. Financial ledgers remain private
 and unchanged regardless of documentation cleanup.

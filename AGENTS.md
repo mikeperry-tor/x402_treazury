@@ -118,76 +118,109 @@ before changing estimation, polling, payment, funding or recovery behavior.
 
 ## Independent subagent workflows
 
-Use independent subagents for design, audits and review as a normal part of the
+Use independent subagents for design, audits, and review as a normal part of the
 workflow; do not wait for the user to request delegation each time.
 
-- Before substantive implementation, have an independent design reviewer challenge
-  the approach, necessity of checks and opportunities to delete responsibilities.
-  Resolve material design findings before building on the affected decision.
-- For audits, assign distinct concerns that can be investigated independently.
-  Inspect surrounding consumers, failure paths and test coverage, not just changed
-  lines. Report concrete findings and evidence, including where no issue was found.
-- Independently review every exact committed SHA and its relevant consumers. The
-  reviewer must not be the author of the change.
-- Address findings with `git commit --fixup=<introducing-SHA>` and independently
-  review each fixup. Preserve unsquashed history through final integration review.
-- At meaningful architecture gates, independently review the combined implementation
-  and full call chains, especially financial ownership, concurrency, network policy
-  and documentation handoffs. Review all prior fixups in the branch or plan alongside
-  surrounding code for recurring anti-patterns, hazards and testing gaps. Add
-  regression coverage for gaps exposed by fixes, resolve additional findings and
-  assess whether recurring patterns call for a wider audit, simplification or design
-  change. Per-commit approval does not replace this review of the accumulated work.
-- Use CogC/CycC in substantive Rust refactors and architecture gates. Compare the
-  agreed baseline with changed functions and complete call chains; examine relevant
-  warnings and unchanged high-risk hotspots. Favor simpler representations of
-  state, ownership and control flow that preserve required behavior. Necessary
-  responsibilities and passing tests alone do not justify the current organization;
-  evaluate concrete simplifications before explaining why a hotspot should remain.
-  Advisory scores require review, not automatic rejection or silent dismissal.
-  Follow the [complexity review discipline](tests/COMPLEXITY.md#review-discipline);
-  do not extract helpers merely to lower a score.
-- Give reviewers the user intent, scope, baseline and validation evidence. Ask them
-  to verify claims and question unnecessary enforcement, not merely confirm the
-  author's approach. The coordinating agent integrates findings and owns completion.
+### Independence and coordination
+
+Independent reviewers and auditors must not be authors of the work being
+reviewed and start in fresh conversations without inherited history where
+supported by the agent framework. These requirements apply to all design
+reviews, audits and implementation reviews below, including those required by
+the planning workflow.
+
+Give reviewers self-contained briefs with the user intent, scope, baseline,
+preserved invariants, owning guides, reviewed SHAs or snapshot, and validation
+evidence, plus access to relevant repository state, planning documents and Git
+history. Ask them to verify claims, question unnecessary enforcement, and look
+for simpler approaches, not merely confirm the author's approach.
+
 - Keep review/audit agents read-only by default. Parallelize independent analysis;
   coordinate delegated edits with explicit file ownership and avoid competing
   builds or source changes during validation. Do not impose a fixed reviewer count
   or duplicate identical checks without a concrete reason.
+- The coordinating agent integrates findings and owns completion. If subagent
+  tooling or fresh conversations are unavailable, the coordinating agent must tell
+  the user which requirement could not be met when reporting review results.
+  Perform the available checks, identify their scope and limitations, and do not
+  claim that the required independent review occurred.
 
-Resolve material findings before declaring completion. If subagent tooling is
-unavailable, disclose that limitation and perform the available checks without
-claiming an independent review occurred.
+### Required reviews
+
+- Before substantive implementation, arrange an independent design review.
+  Resolve material design findings before building on the affected decision.
+- For audits, assign distinct concerns that can be investigated independently.
+- Independently review every exact committed SHA and its relevant consumers. The
+  reviewer must not be the author of the change. Identify uncommitted review
+  snapshots by base SHA and exact contents, including new files, and review the
+  resulting exact SHA when committed.
+- Address findings with `git commit --fixup=<introducing-SHA>` and independently
+  review each fixup. Preserve unsquashed history through final integration review
+  and subsequent user review rounds.
+- Before completion and at meaningful architecture gates, independently review
+  the combined implementation, all accumulated commits and fixups, and complete
+  affected call chains. Per-commit approval does not replace this combined review.
+  Scale review to the change; one review may cover both an exact SHA and the final
+  combined state when it examines both scopes.
+- For substantive Rust refactors and architecture gates, complete the CogC/CycC
+  review required by the
+  [complexity review discipline](tests/COMPLEXITY.md#review-discipline). Use
+  complexity hotspots as focus points for simplification review.
+- Resolve material findings and evaluate compelling simplifications before
+  declaring completion.
+
+### Review method
+
+- For design reviews, challenge the scope, approach, necessity of checks, and
+  opportunities to remove responsibilities, or otherwise simplify the deisgn.
+  Verify assumptions against the current implementation and relevant pinned
+  dependencies; check that proposed behavior, implementation detail, tests,
+  validation and permanent documentation agree. Verify the applicability of
+  reference checkouts before relying on them. Look for redundant enforcement or
+  responsibilities already owned by components or dependencies for further
+  opportunities to simplify the design.
+- Inspect surrounding consumers, complete affected call chains, failure paths,
+  test coverage and relevant unchanged high-risk code. Examine financial ownership,
+  concurrency, network policy and documentation handoffs where affected. Each audit
+  agent should assess its assigned scope and method and flag gaps.
+- Choose concrete failure scenarios relevant to the affected contracts, such as
+  concurrent agent calls, competing wallet state resolution, cancellation, crash
+  and restart, blockchain reorgs or offline/online transitions. Trace progress,
+  ownership, recovery and forbidden side effects and assess regression coverage.
+  Do not require scenarios unrelated to the change.
+- For implementation reviews, record an initial assessment before consulting the
+  author's rationale and prior findings, then reconcile it with all prior findings
+  and fixups. Supply required contracts and security context, known limitations
+  and validation failures from the outset.
+- For planned work, use the retained plan to check intended scope, implementation,
+  acceptance evidence and documented deviations. Flag missing implemented portions,
+  unsupported completion claims and unexplained departures. Assess correctness
+  independently; agreement with the plan does not establish correctness.
+- Use fixup and prior finding history to investigate recurring causes, repeated
+  assumptions, hazards and testing gaps elsewhere in the affected call chains.
+  Add regression coverage for gaps exposed by fixes and assess whether
+  recurring patterns require a wider audit, simplification, or design change.
+- A compelling simplification removes demonstrated fragility, redundant enforcement
+  or unnecessary state and responsibilities while preserving required contracts.
+  Investigate actual dependency contracts and recurring causes where relevant,
+  rather than expanding into speculative redesign.
+- Report concrete findings and evidence, the examined areas where no issue was
+  found, and review limits. Focused checks do not establish repository-wide assurance.
 
 ### Implementation plan structure
 
-When creating or revising an implementation plan, make the independent workflows
-above concrete in the plan itself:
+Use a plan when requested or when staged work needs explicit decisions, commit
+boundaries and review gates. Small changes can use the independent review
+workflow above without requiring a plan file, a separate review record, or
+architecture gates.
 
-- State the user intent, scope, starting baseline, preserved invariants and owning
-  guides. Distinguish proposed behavior from the current implementation.
-- Define explicit, ordered commit boundaries with stable identifiers, coherent
-  behavior, relevant consumers and acceptance evidence. Include applicable tests and
-  affected permanent documentation with each implementation commit. Do not split
-  removal of an existing behavior from its necessary replacement or recovery path.
-- Name wider review gates, place them at specified commit boundaries and state their
-  combined scope and exit criteria. Choose meaningful ownership/architecture
-  boundaries and a final integration gate; scale the structure to the work rather
-  than imposing a fixed number of commits, gates or reviewers.
-- Require each gate to examine all prior plan commits and fixups alongside complete
-  call chains. Analyze fixup causes, repeated assumptions, hazards and testing gaps;
-  decide whether they require a wider audit, regression coverage, simplification
-  or design change. Earlier per-commit approvals do not exempt code from this review.
-- Specify the evidence and ordering needed for the exact-SHA/fixup, complexity and
-  integration reviews above. Material later changes reopen affected gate concerns
-  and receive appropriate revalidation; do not build on unresolved material findings.
-- Identify permanent documentation destinations and required AGENTS.md links for
-  enduring rules. Verify that handoff before removing the completed plan; review
-  the exact cleanup SHA and final combined branch after removal as well. Do not
-  retain a completed-plan archive or defer all documentation to the final commit.
-
-These requirements govern plans when one is needed or requested; they do not
-require a new plan or redundant review stages for every small change.
+Before creating or revising an implementation plan, executing planned work or
+removing a completed plan, read and follow the
+[planning workflow](docs/planning-workflow.md). It owns plan structure, review
+evidence, handoffs and completion. Commit and evolve active plans; remove completed
+plans from the current tree while preserving them in Git history. Small changes
+still use the independent review requirements above without requiring a plan or
+redundant review stages.
 
 ## Read the relevant guide before editing
 
