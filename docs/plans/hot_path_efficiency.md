@@ -38,6 +38,14 @@ DNS and no direct fallback. Catalog names, display pricing, state/evidence forma
 `auto_v1_` names and `X402_*` contracts remain stable. Quantitative speedup or
 constant-time admission claims require separate evidence; none is presumed here.
 
+The completed dynamic-source registry work has separate
+[registration/publication contracts](../agent-sources.md#registration-and-tool-invocation)
+and [catalog ownership](../architecture.md#catalog-configuration-and-execution).
+Its reusable unbound catalog builds and published source metadata are not a cache
+of qualification payment history or lifecycle evidence. Preserve those contracts
+when changing shared catalog naming; qualification budget/status work below retains
+its own SQL transaction and financial authority boundaries.
+
 ## Current implementation and selected approach
 
 - `catalog::slug` and `money` compile constant regexes repeatedly. Reuse identical

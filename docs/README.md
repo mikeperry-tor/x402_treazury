@@ -40,8 +40,11 @@ request contracts live in [architecture](architecture.md#catalog-configuration-a
 [provider maintenance](provider-updates.md). Calculation ownership and lazy public
 proving parameters live in the [SDK boundary](zingo-integration.md#application-sdk-boundaries)
 and [wallet guide](wallet-rotation.md#funding-limits-and-fees).
-The remaining child plans cover [registry efficiency](plans/registry_efficiency.md)
-and [hot-path and qualification history](plans/hot_path_efficiency.md).
+Dynamic registry build reuse, publication and read contracts live in
+[registration guidance](agent-sources.md#registration-and-tool-invocation) and
+[runtime architecture](architecture.md#catalog-configuration-and-execution).
+The remaining child plan covers
+[hot-path and qualification history](plans/hot_path_efficiency.md).
 Separate unfinished work covers
 [macOS ACL and Unix storage](plans/portability_fixes.md); Windows runtime work is
 deferred by user decision.
