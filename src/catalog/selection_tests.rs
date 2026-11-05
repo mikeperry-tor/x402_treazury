@@ -45,12 +45,17 @@ fn operation_filters_precede_collision_counts_and_preserve_payloads() {
     assert_eq!(body.name, "body");
     assert!(!body.required);
     assert_eq!(input.schema["properties"]["body"], json!({"type":"object"}));
+    assert_eq!(input.json_media_type.as_deref(), Some("application/json"));
+    // The digest adds the implicit JSON representation; all authored payload
+    // fields still participate in the complete equality below.
+    let mut expected = kept;
+    expected["body"]["media_type"] = json!("application/json");
     assert_eq!(
         selected
             .into_iter()
             .map(|(op, name, _)| (op, name))
             .collect::<Vec<_>>(),
-        vec![(kept, "api_root".into())]
+        vec![(expected, "api_root".into())]
     );
 }
 

@@ -47,11 +47,12 @@ fn openapi_conversion_preserves_complete_parameter_metadata_and_operation_scope(
             json!({"path":"/a","method":"get","summary":"Summary","description":"Vendor prose.\nStill whole.","tags":null,
             "pricing":{"amount":"2"},"credit_pricing":{"credits":3},"body":null,
                 "params":[
-                    {"name":"path_level","in":"query","required":false,"description":null,"schema":{}},
+                    {"name":"path_level","in":"query","required":false,"description":null,"schema":{"type":"string"}},
                 {"name":"count","in":"query","required":true,"description":"Schema prose","schema":{"type":"integer","minimum":0,"exclusiveMinimum":0,"description":"Schema prose","example":4}},
                 {"name":"empty","in":"query","required":false,"description":"","schema":{"description":"Not used","type":"string"}},
                 {"name":"fallback","in":null,"required":false,"description":"Fallback","schema":{"description":"Fallback"}},
-                {"name":"bare","in":null,"required":false,"description":null,"schema":{}}
+                {"name":"bare","in":null,"required":false,"description":null,"schema":{"type":"string"}},
+                {"name":null,"in":null,"issue":Unsupported::InputReference}
             ]}),
             json!({"path":"/b","method":"post","summary":null,"description":null,"tags":[],"pricing":null,"credit_pricing":null,"params":[],"body":null})
         ]
