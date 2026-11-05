@@ -36,8 +36,11 @@ template for both description lookup and invocation. Relay and explicit direct-w
 provenance travel with the raw document through binding. Fresh get/list/search results render the applicable hint
 without mutating catalogs, ranking or generation-bound cursors. Curated rebinding
 updates both the canonical text and retained base; serialized registrations rebuild
-metadata on import. Provider files in `providers/` carry selections,
-help URLs, pricing settings and explicitly reviewed response mappings. Curated
+metadata on import. Listener selection reuses accepted tools; it projects source
+operations for tag matching only when that listener configures tag filters.
+Tag-free publication and selector diagnostics need no schema projection.
+Provider files in `providers/` carry selections, help URLs, pricing settings and
+explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
 fixture utility is `tools/providers/snapshot_spec.rs`. Tests pin generated contracts
 against `tests/fixtures/`. Operation validation and stable sorting precede path,

@@ -273,8 +273,19 @@ mod tests {
                 .contains("already removed by source filters")
         );
         assert!(!actual[0].explanation.contains("recommended_tools"));
-        let sources = BTreeMap::from([("alias".into(), source("exclude=['/hidden']"))]);
         server.tags.clear();
+        server.exclude_tags = vec!["private".into()];
+        let selected = sources["alias"].listener_tools("main", &server).unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|tool| tool.path.as_str())
+                .collect::<Vec<_>>(),
+            ["/read"]
+        );
+        assert_eq!(warnings("main", &server, &sources).unwrap().len(), 1);
+        let sources = BTreeMap::from([("alias".into(), source("exclude=['/hidden']"))]);
+        server.exclude_tags.clear();
         // The sibling remains selected, so narrow the listener to the removed path.
         server.include_tools = vec!["vendor_hidde?".into()];
         let actual = warnings("main", &server, &sources).unwrap();

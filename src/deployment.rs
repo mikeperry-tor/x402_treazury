@@ -1619,7 +1619,11 @@ impl Source {
     }
     // One transient assignment/tag view feeds publication and selector diagnostics.
     fn listener_tools(&self, name: &str, listener: &ListenerConfig) -> Result<Vec<&ToolSpec>> {
-        let operations = catalog::operations(&self.document, None)?;
+        let operations = if listener.tags.is_empty() && listener.exclude_tags.is_empty() {
+            Vec::new()
+        } else {
+            catalog::operations(&self.document, None)?
+        };
         let routing = self
             .send_tools
             .as_ref()
