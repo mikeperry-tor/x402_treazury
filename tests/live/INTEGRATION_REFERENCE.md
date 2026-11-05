@@ -538,7 +538,16 @@ loading wallet state or fetching catalogs.
 `cumulative_test_budget_usdc` authorizes their combined total across registry runs.
 Both use exact micro-USDC units. Each potentially payable authorization is charged
 atomically before financial admission commits or disclosure; missing responses, retries and concurrent cases cannot
-reuse its budget. Per-case `reserve_usdc` still bounds one case's authorizations.
+reuse its budget. Admission validates complete payment JSON once under the
+existing IMMEDIATE transaction and derives exact case/run/registry totals without
+a durable aggregate. Every event amount keeps its original u64 string parse;
+same-case history additionally keeps its original U256 string parse. These parser
+domains differ: do not normalize prefixes, underscores or plus signs through an
+integer conversion. Missing/non-string/out-of-range amounts and malformed required
+history refuse new work rather than reset totals. All payment rows remain charged,
+including unknown stages, failed outcomes and absent receipts. Run-scoped usage
+inspection retains its existing row scope; global admission/authority accounting
+still validates the complete payment history. Per-case `reserve_usdc` still bounds one case's authorizations.
 The total budget need not cover every declared case reservation in advance; an
 actual authorization that exceeds it fails visibly without financial admission or disclosure. Funding does
 not consume this budget and has no `source_exposure_zec` setting.

@@ -246,32 +246,7 @@ impl PaymentContext {
             10,
         )?;
         let (reservation,state,start,end): (i64,String,i64,i64) = tx.query_row("SELECT reservation,execution,window_start,window_end FROM cases WHERE run=?1 AND id=?2", params![self.guard.binding.run,self.case], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
-        let mut previous = U256::ZERO;
-        let mut payments =
-            tx.prepare("SELECT detail FROM events WHERE run=?1 AND kind='application_payment'")?;
-        for detail in
-            payments.query_map([&self.guard.binding.run], |row| row.get::<_, String>(0))?
-        {
-            let detail: Value =
-                serde_json::from_str(&detail?).context("malformed qualification payment event")?;
-            if detail["case"] == self.case {
-                let value: U256 = detail["amount"]
-                    .as_str()
-                    .context("recorded attempt amount missing")?
-                    .parse()?;
-                previous = previous
-                    .checked_add(value)
-                    .context("qualified attempt total overflow")?;
-            }
-        }
-        drop(payments);
-        let total = previous
-            .checked_add(amount)
-            .context("qualified attempt total overflow")?;
-        ensure!(
-            amount > U256::ZERO && total <= U256::from(u64::try_from(reservation)?),
-            "payment exceeds reserved case budget"
-        );
+        ensure!(amount > U256::ZERO, "payment exceeds reserved case budget");
         ensure!(
             state == "DISPATCHING" && at >= start && at < end,
             "payment case is outside its execution window"
@@ -294,7 +269,12 @@ impl PaymentContext {
             params![self.guard.binding.run, Value::Object(event).to_string(), at],
         )
         .context("qualification payment already recorded or evidence journal unavailable")?;
-        super::budget::check(&tx, &self.guard.binding.run)?;
+        let totals = super::budget::admission_totals(&tx, &self.guard.binding.run, &self.case)?;
+        ensure!(
+            totals.case <= U256::from(u64::try_from(reservation)?),
+            "payment exceeds reserved case budget"
+        );
+        super::budget::check(&tx, &manifest, &totals)?;
         tx.commit()?;
         Ok(end.min(self.guard.binding.expires_at))
     }
@@ -1162,5 +1142,117 @@ mod tests {
         );
         origin_task.abort();
         relay_task.abort();
+    }
+
+    #[tokio::test]
+    async fn raw_attempt_numeric_domain_refusals_leave_no_charge_and_leading_zeros_survive() {
+        let (_dir, guard, db) = fixture(true);
+        let claim = claim(guard).await;
+        claim
+            .invoke(async {
+                let context = payment_context().unwrap().unwrap();
+                for (index, amount) in [
+                    "+1",
+                    "1_0",
+                    "0x1",
+                    "0o1",
+                    "0b1",
+                    "",
+                    "_",
+                    "18446744073709551616",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let mut bad = attempt(amount);
+                    bad["attempt_id"] = json!(format!("invalid-{index}"));
+                    assert!(
+                        context.record(&bad).is_err(),
+                        "raw attempt {amount:?} must not gain authority via U256 conversion"
+                    );
+                }
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM events WHERE kind='application_payment'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                    0
+                );
+                let mut accepted = attempt("0001");
+                accepted["attempt_id"] = json!("leading-zero");
+                context.record(&accepted).unwrap();
+            })
+            .await;
+        let raw: String = db
+            .query_row(
+                "SELECT detail FROM events WHERE kind='application_payment'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&raw).unwrap()["amount"],
+            "0001",
+            "accepted raw evidence is not rewritten"
+        );
+        assert_eq!(super::super::budget::used(&db, None).unwrap(), 1);
+        claim.finish(false, None).await.unwrap();
+        assert_eq!(
+            super::super::budget::used(&db, None).unwrap(),
+            1,
+            "failed case does not release accepted charge"
+        );
+    }
+
+    #[tokio::test]
+    async fn historical_plus_domain_depends_on_original_case_scope_and_rolls_back_refusals() {
+        for (run, case, accepted) in [
+            (Some("run"), "case", false),
+            (Some("run"), "other", true),
+            (Some("other"), "case", true),
+            (None, "case", true),
+        ] {
+            let (_dir, guard, db) = fixture(true);
+            let claim = claim(guard).await;
+            let history =
+                json!({"case":case,"amount":"+1","attempt_id":"previous","stage":"unknown"});
+            db.execute(
+                "INSERT INTO events(run,kind,detail,at) VALUES(?1,'application_payment',?2,1)",
+                params![run, history.to_string()],
+            )
+            .unwrap();
+            claim
+                .invoke(async {
+                    assert_eq!(
+                        payment_context()
+                            .unwrap()
+                            .unwrap()
+                            .record(&attempt("1"))
+                            .is_ok(),
+                        accepted
+                    );
+                })
+                .await;
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM events WHERE kind='application_payment'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1 + i64::from(accepted)
+            );
+            assert_eq!(
+                super::super::budget::used(&db, None).unwrap(),
+                1 + u64::from(accepted)
+            );
+            claim.finish(false, None).await.unwrap();
+            assert_eq!(
+                super::super::budget::used(&db, None).unwrap(),
+                1 + u64::from(accepted)
+            );
+        }
     }
 }

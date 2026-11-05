@@ -78,7 +78,12 @@ admissions check and record that total atomically before disclosure, including
 concurrent admissions from distinct runs sharing a registry. Reopening retains
 accepted charges and rolls back refused admissions; uncertain and failed attempts
 remain charged across restart. Per-case limits bound each case,
-and cumulative registry authority spans runs. Budget refusal emits WARN and a
+and cumulative registry authority spans runs. Admission derives all three totals
+from one complete strict JSON history pass inside its existing write transaction;
+each original payment amount retains its u64 budget parse, and same-case history
+also retains its original U256 parse. Converting or normalizing numeric text must
+not widen accepted evidence. Scoped usage reads retain their own SQL scope rather
+than acquiring unrelated-run validation requirements. Budget refusal emits WARN and a
 clear test error. A PaidClient regression covers run and registry budget refusals
 before signed dispatch: payment journals and admission evidence remain absent,
 balance estimates and reserve ownership remain unchanged, and sufficient authority
