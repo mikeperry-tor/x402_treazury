@@ -64,7 +64,13 @@ pub struct Treasury {
     worker: tokio::task::JoinHandle<()>,
     revision: i64,
     healthy: bool,
-    completed: Option<publication::CompletedPreparation>,
+    running: Option<tokio::task::JoinHandle<publication::CalculationReturn>>,
+    #[cfg(test)]
+    calculation_control: Option<tokio::sync::Mutex<publication::CalculationControl>>,
+    #[cfg(test)]
+    publication_retry: Option<std::sync::mpsc::Sender<()>>,
+    #[cfg(test)]
+    publication_retry_wait: Option<tokio::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
     sync_settings: Option<SyncSettings>,
     automatic_shielding_fee: Option<u64>,
     reusable_sync_revision: Option<i64>,
@@ -120,6 +126,11 @@ async fn snapshot(client: &LightClient) -> Result<Zeroizing<Vec<u8>>> {
 async fn snapshot_with_height(client: &LightClient) -> Result<(Zeroizing<Vec<u8>>, Option<u64>)> {
     let wallet = client.wallet();
     let mut wallet = wallet.write().await;
+    snapshot_wallet(&mut wallet)
+}
+fn snapshot_wallet(
+    wallet: &mut zingolib::wallet::LightWallet,
+) -> Result<(Zeroizing<Vec<u8>>, Option<u64>)> {
     wallet.mark_dirty();
     let height = wallet.sync_state.fully_scanned_height().map(u64::from);
     let bytes = Zeroizing::new(
@@ -197,7 +208,13 @@ impl Treasury {
             worker,
             revision: 1,
             healthy: true,
-            completed: None,
+            running: None,
+            #[cfg(test)]
+            calculation_control: None,
+            #[cfg(test)]
+            publication_retry: None,
+            #[cfg(test)]
+            publication_retry_wait: None,
             sync_settings: None,
             automatic_shielding_fee: None,
             reusable_sync_revision: None,
@@ -281,7 +298,13 @@ impl Treasury {
             worker,
             revision,
             healthy: true,
-            completed: None,
+            running: None,
+            #[cfg(test)]
+            calculation_control: None,
+            #[cfg(test)]
+            publication_retry: None,
+            #[cfg(test)]
+            publication_retry_wait: None,
             sync_settings: None,
             automatic_shielding_fee: None,
             reusable_sync_revision: None,
@@ -301,7 +324,7 @@ impl Treasury {
         address_info(
             self.client
                 .as_ref()
-                .context("treasury sync interrupted; reopen required")?,
+                .context("treasury SDK view unavailable")?,
         )
         .await
     }
@@ -344,6 +367,7 @@ impl Treasury {
         Ok(SnapshotBalances::read(&*client.wallet().read().await))
     }
     pub async fn derive_address(&mut self) -> Result<serde_json::Value> {
+        self.drain_calculation().await;
         ensure!(
             self.healthy,
             "treasury requires reopen after failed persistence"
@@ -351,14 +375,14 @@ impl Treasury {
         self.healthy = false;
         self.client
             .as_mut()
-            .context("treasury sync interrupted; reopen required")?
+            .context("treasury SDK view unavailable")?
             .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("address derivation failed"))?;
         let bytes = snapshot(
             self.client
                 .as_ref()
-                .context("treasury sync interrupted; reopen required")?,
+                .context("treasury SDK view unavailable")?,
         )
         .await?;
         let expected = self.revision;
@@ -372,6 +396,7 @@ impl Treasury {
     /// Persist a shielded receive address and its job binding before a quote
     /// can expose it. Existing transparent refund bindings remain unchanged.
     pub async fn refund_address(&mut self, job: String) -> Result<String> {
+        self.drain_calculation().await;
         let lookup = job.clone();
         if let Some(address) = self.store.call(move |s| s.refund_address(&lookup)).await? {
             return Ok(address);
@@ -405,10 +430,6 @@ impl Treasury {
         cap: Option<alloy_primitives::U256>,
         retirement_atomic: u64,
     ) -> Result<String> {
-        ensure!(
-            self.healthy,
-            "treasury requires reopen after failed persistence"
-        );
         self.store
             .call(move |s| s.ensure_capacity_group(&name, &reserves, cap, retirement_atomic))
             .await
@@ -420,10 +441,6 @@ impl Treasury {
         kind: crate::rotation::store::AllocationKind,
         auto_fund: bool,
     ) -> Result<Option<String>> {
-        ensure!(
-            self.healthy,
-            "treasury requires reopen after failed persistence"
-        );
         self.store
             .call(move |s| s.allocate_capacity_kind(&pool, kind, auto_fund))
             .await
@@ -440,7 +457,7 @@ impl Treasury {
         let bytes = snapshot(
             self.client
                 .as_ref()
-                .context("treasury sync interrupted; reopen required")?,
+                .context("treasury SDK view unavailable")?,
         )
         .await?;
         let expected = self.revision;
@@ -453,6 +470,7 @@ impl Treasury {
     /// Cancellation must be requested through `stop`, then this future awaited.
     /// Adapter errors are sanitized; endpoints are not persisted in status.
     pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
+        self.drain_calculation().await;
         let result = self.scan_once(stop).await;
         self.observation.complete(result.is_ok());
         result
@@ -472,7 +490,7 @@ impl Treasury {
             let wallet = self
                 .client
                 .as_mut()
-                .context("treasury sync interrupted; reopen required")?
+                .context("treasury SDK view unavailable")?
                 .wallet();
             let mut wallet = wallet.write().await;
             wallet.wallet_settings.min_confirmations = settings.confirmations;
@@ -512,7 +530,7 @@ impl Treasury {
             client: self
                 .client
                 .take()
-                .context("treasury sync interrupted; reopen required")?,
+                .context("treasury SDK view unavailable")?,
             store: self.store.clone(),
             revision: self.revision,
         };
@@ -567,19 +585,16 @@ impl Treasury {
             .context("treasury close owner stopped")?
     }
     async fn close_owned(mut self) -> Result<()> {
-        let mut projection_error = None;
-        while self.completed.is_some() {
-            if let Err(error) = self.publish_completed().await {
-                if self.completed.is_some() {
-                    diagnostics::report_local_retry(&error, "transaction publication");
-                    tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)).await;
-                } else {
-                    // Bytes are durable. Finish physical shutdown before returning
-                    // the failed submission view; there is no publication to retry.
-                    projection_error = Some(error);
-                }
-            }
-        }
+        #[cfg(test)]
+        self.release_publication_retry();
+        let projection_error = if self.running.is_some() {
+            self.finish_calculation().await.err().filter(|error| {
+                !error.is::<crate::rotation::transaction::PreparationAlreadyFulfilled>()
+                    && !error.is::<crate::rotation::transaction::PreparationDeferred>()
+            })
+        } else {
+            None
+        };
         // Serving can keep the serialized store alive for Base admission after
         // funding stops. Release the poisoned wallet before waiting for it.
         drop(self.client.take());

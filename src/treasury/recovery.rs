@@ -144,6 +144,7 @@ impl Treasury {
                 Waiting("swap_fulfilled_waiting_for_credit")
             });
         }
+        self.drain_calculation().await;
         ensure!(self.healthy, "treasury requires reopen");
         if crate::qualification::active() {
             return Ok(OperatorRequired("qualification_recovery_requires_review"));

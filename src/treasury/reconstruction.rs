@@ -3,10 +3,7 @@ use super::*;
 
 impl Treasury {
     pub(super) async fn reconstruct_sdk(&mut self, stop: &CancellationToken) -> Result<()> {
-        ensure!(
-            self.completed.is_none(),
-            "completed publication still owned"
-        );
+        self.drain_calculation().await;
         ensure!(!stop.is_cancelled(), "treasury stopping");
         self.healthy = false;
         self.reusable_sync_revision = None;

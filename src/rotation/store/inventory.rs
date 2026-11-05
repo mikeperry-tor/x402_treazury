@@ -3,9 +3,7 @@
 use super::*;
 
 pub(crate) fn transient_read(error: &anyhow::Error) -> bool {
-    matches!(error.downcast_ref::<rusqlite::Error>(),
-        Some(rusqlite::Error::SqliteFailure(failure, _))
-        if matches!(failure.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+    super::database_busy(error)
 }
 
 // Only read-only inventory acquisition uses this retry classifier. Financial

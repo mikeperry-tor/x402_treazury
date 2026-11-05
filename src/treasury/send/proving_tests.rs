@@ -179,7 +179,7 @@ async fn qualify_preparation(case: PreparationCase) {
             Some(address.0.as_str()),
             treasury.addresses().await.unwrap()[0]["encoded_address"].as_str()
         );
-        assert!(treasury.healthy && treasury.completed.is_none());
+        assert!(treasury.healthy && treasury.running.is_none());
         assert!(!treasury.status().await.unwrap().outgoing_pending);
         treasury.close().await.unwrap();
         server.abort();
@@ -190,7 +190,7 @@ async fn qualify_preparation(case: PreparationCase) {
         let error = treasury.prepare(request()).await.err().unwrap();
         assert_eq!(error.to_string(), "missing treasury account");
         assert!(!error.is::<crate::rotation::transaction::PreparationDeferred>());
-        assert!(!treasury.healthy && treasury.completed.is_none());
+        assert!(!treasury.healthy && treasury.running.is_none());
         assert_eq!(treasury.revision, revision);
         assert!(matches!(
             treasury
@@ -248,6 +248,7 @@ async fn qualify_preparation(case: PreparationCase) {
     let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
     db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
     let revision = treasury.revision;
+    treasury.enable_publication_retry();
     let error = treasury.prepare(request()).await.err().unwrap();
     assert!(format!("{error:#}").contains("fixture prepared commit failure"));
     assert!(!treasury.healthy);
@@ -258,7 +259,7 @@ async fn qualify_preparation(case: PreparationCase) {
         "failed insert publishes no raw bytes"
     );
     assert!(
-        treasury.completed.is_some(),
+        treasury.running.is_some(),
         "the live owner retains its calculation"
     );
     assert!(status.treasury_operations.is_empty());
@@ -273,15 +274,11 @@ async fn qualify_preparation(case: PreparationCase) {
         .await
         .unwrap();
     assert_eq!(accepted_inputs.len(), 1);
-    assert!(
-        treasury
-            .prepare(request())
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("requires reopen")
-    );
+    {
+        let mut queued = Box::pin(treasury.prepare(request()));
+        assert!(futures_util::poll!(queued.as_mut()).is_pending());
+    }
+    assert!(treasury.running.is_some());
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
@@ -290,7 +287,7 @@ async fn qualify_preparation(case: PreparationCase) {
     db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
     drop(db);
     let prepared = treasury.publish_completed().await.unwrap().unwrap();
-    assert!(treasury.healthy && treasury.completed.is_none());
+    assert!(treasury.healthy && treasury.running.is_none());
     assert_eq!(treasury.revision, revision + 1);
     assert_eq!(
         calls.load(Ordering::SeqCst),

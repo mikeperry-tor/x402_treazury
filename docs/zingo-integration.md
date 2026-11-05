@@ -216,9 +216,17 @@ fixture coverage does not require dependency patches. See
 backup obligations. Server protocol 0.5.0 capability requirements are distinct from
 the Rust protocol crate version.
 
-SDK calculation is offline; only an atomically committed outgoing journal can
-supply submission authority. Successful exclusive offline reconstruction, with no
-completed result awaiting publication, closes a funding calculation whose outgoing
+SDK calculation is offline and runs in one started blocking owner with the actual
+LightClient, accepted proposal and same Store queue. That owner accepts inputs,
+calculates once, extracts exact bytes and retries only local publication. It survives
+caller/Treasury drop and normal runtime teardown; no async publisher or nested
+runtime is needed. LightWallet's public synchronous clear/mark_dirty/save produce
+the existing snapshot codec. A surviving Treasury joins without removing the handle,
+installs client/revision while unhealthy and then calls the public async client
+clear to release its private pause guard. Entire-owner drop releases the real client
+after publication. Calculation/save never use its temporary scratch wallet path.
+Only an atomically committed outgoing journal can supply submission authority. Successful exclusive offline reconstruction, with no
+live calculation or completed result awaiting publication, closes a funding calculation whose outgoing
 and factual transaction journals are both absent. Existing recovery archival
 preserves its encrypted accepted inputs; the next calculation needs a fresh
 operation and current authority. The persisted `funding_quote_refreshes` table also

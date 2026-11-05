@@ -389,7 +389,13 @@ spending authority. Shutdown drains accepted relay work before financial owners.
 Local authored catalogs remain validated before serving; strict inspection and
 qualification still require complete discovery. Exact accepted calculations/inputs and prepared/submission journals outlive waiters.
 The SDK owns current Zcash funds and chain corrections; local refund credits and
-historical source monetary equality do not gate publication. Completed SDK bytes
+historical source monetary equality do not gate publication. Deposit and shielding
+calculations run in a retained blocking task that owns the original offline SDK
+client and a Store handle. Its started body accepts inputs, calculates once and
+publishes the exact result; caller cancellation or normal runtime teardown does
+not discard that work. The treasury joins it before another SDK mutation,
+reconstruction or shutdown; [SDK integration](zingo-integration.md) owns the details.
+Completed SDK bytes
 and their snapshot stay with the existing owner until identical local publication
 succeeds; cancelled close waiters do not abandon this drain. Irrecoverable storage
 failure or forced process death can lose unpublished bytes, leaving the accepted
