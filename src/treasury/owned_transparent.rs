@@ -69,7 +69,10 @@ impl Treasury {
                 }
                 // No calculation has been accepted while the SDK is healthy.
                 // A bad/empty address must not starve another independent one.
-                Err(_) if self.healthy => continue,
+                Err(error) if self.healthy => {
+                    diagnostics::report_shielding_preparation_failure(&error);
+                    continue;
+                }
                 Err(error) => return Err(error),
             }
         }

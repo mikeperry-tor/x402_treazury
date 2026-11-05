@@ -319,7 +319,14 @@ retries preserve accepted work and do not imply an operator-required stop.
 
 Background treasury sync and shielding checks with automatic observation/retry
 remaining log failures at DEBUG, including fixed safe categories and available
-sanitized details. Explicit one-pass sync failures remain WARN because that
+sanitized details. Per-address shielding preparation failures must also reach
+that diagnostic while healthy SDK ownership permits trying the next address.
+Preparation diagnostics identify the preparation stage and a fixed safe reason,
+separate from pending-transaction observation. Empty/uneconomic selection,
+fee-limit and fee-only proposals remain expected DEBUG outcomes; typed SDK
+proposal failures retain only safe categories, never private SDK prose or sources.
+Proposal fee refusals retain numeric fee/limit detail at DEBUG; the caller owns
+any terminal failure report. Explicit one-pass sync failures remain WARN because that
 command has no automatic retry. Unreconstructible original transaction/input
 records requiring operator review remain WARN. Current SDK spendability and unfinished transaction observation remain separate.
 Missing, moved or spent old inputs cannot veto buried finite expiry of the exact

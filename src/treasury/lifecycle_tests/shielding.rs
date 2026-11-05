@@ -236,6 +236,12 @@ fn selected_and_owned(tx: &PreparedTransaction, principal: u64) {
 #[tokio::test]
 async fn automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_unattributed_funds()
 {
+    if crate::test_log_capture::run_in_child(
+        "treasury::lifecycle_tests::shielding::automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_unattributed_funds",
+    ) {
+        return;
+    }
+    use tracing::instrument::WithSubscriber;
     let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 4).await;
     let funding = faucet_funding_transaction(vec![
@@ -261,19 +267,49 @@ async fn automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_u
         .await
         .unwrap();
     owner.configure_automatic_shielding(1); // Actual fee rejection cannot accept an input owner.
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
     owner
         .maintain_owned_transparent(&mut NoSubmission, &stop)
+        .with_subscriber(subscriber)
         .await
         .unwrap();
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    assert!(
+        text.contains("Automatic Zcash shielding preparation unavailable"),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"category="shielding_preparation_unavailable""#),
+        "{text}"
+    );
+    assert!(text.contains("fee_zatoshis="), "{text}");
+    for reason in ["no_eligible_funds", "fee_limit"] {
+        assert!(text.contains(&format!("reason=\"{reason}\"")), "{text}");
+    }
+    assert!(text.contains(r#"stage="preparation""#), "{text}");
+    assert!(!text.contains("sync_internal_or_storage_failure"), "{text}");
+    assert!(!text.contains("WARN") && !text.contains("ERROR"), "{text}");
+    for address in &addresses {
+        assert!(!text.contains(address), "{text}");
+    }
     assert!(owner.status().await.unwrap().treasury_operations.is_empty());
     // The SDK permits a proposal consuming exactly its standard fee. Reject it
     // before accepting inputs, so it cannot block useful recovery elsewhere.
-    assert!(
-        owner
-            .shield_address(addresses[1].clone(), None, 30_000, &stop)
-            .await
-            .is_err()
-    );
+    let fee_only = owner
+        .shield_address(addresses[1].clone(), None, 30_000, &stop)
+        .await
+        .err()
+        .expect("fee-only shielding must not accept inputs");
+    assert!(matches!(
+        fee_only.downcast_ref::<super::super::refunds::ShieldingPreparationFailure>(),
+        Some(super::super::refunds::ShieldingPreparationFailure::NoShieldedOutput)
+    ));
     assert!(owner.healthy);
     assert!(owner.status().await.unwrap().treasury_operations.is_empty());
     owner.configure_automatic_shielding(30_000);

@@ -24,6 +24,65 @@ impl std::fmt::Display for NoShieldingRequired {
 }
 impl std::error::Error for NoShieldingRequired {}
 
+/// Value-free SDK boundary: never retain the proposal error's private prose.
+#[derive(Debug)]
+pub(super) enum ShieldingPreparationFailure {
+    NoEligibleFunds,
+    ScanRequired,
+    WalletRead,
+    FeeCalculation,
+    InvalidProposal,
+    FeeLimit,
+    NoShieldedOutput,
+    ProposalFailed,
+}
+impl ShieldingPreparationFailure {
+    pub(super) fn reason(&self) -> &'static str {
+        match self {
+            Self::NoEligibleFunds => "no_eligible_funds",
+            Self::ScanRequired => "scan_required",
+            Self::WalletRead => "wallet_read_failed",
+            Self::FeeCalculation => "fee_calculation_failed",
+            Self::InvalidProposal => "invalid_proposal",
+            Self::FeeLimit => "fee_limit",
+            Self::NoShieldedOutput => "no_shielded_output",
+            Self::ProposalFailed => "proposal_failed",
+        }
+    }
+}
+impl std::fmt::Display for ShieldingPreparationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reason = match self {
+            Self::NoEligibleFunds => "no eligible transparent funds cover the network fee",
+            Self::ScanRequired => "the wallet needs a chain scan",
+            Self::WalletRead => "the wallet could not read its funds",
+            Self::FeeCalculation => "the wallet could not calculate change or fees",
+            Self::InvalidProposal => "the wallet returned an invalid proposal",
+            Self::FeeLimit => "the proposed fee exceeds max_refund_shielding_fee_zec",
+            Self::NoShieldedOutput => "the proposed transaction recovers no shielded funds",
+            Self::ProposalFailed => "the wallet could not construct a shielding proposal",
+        };
+        write!(f, "Zcash shielding preparation unavailable: {reason}")
+    }
+}
+impl std::error::Error for ShieldingPreparationFailure {}
+
+fn proposal_failure<D, C, S, F, E, N>(
+    error: zcash_client_backend::data_api::error::Error<D, C, S, F, E, N>,
+) -> ShieldingPreparationFailure {
+    use zcash_client_backend::{data_api::error::Error, fees::ChangeError};
+    match error {
+        Error::InsufficientFunds { .. } | Error::Change(ChangeError::InsufficientFunds { .. }) => {
+            ShieldingPreparationFailure::NoEligibleFunds
+        }
+        Error::ScanRequired => ShieldingPreparationFailure::ScanRequired,
+        Error::DataSource(_) => ShieldingPreparationFailure::WalletRead,
+        Error::Change(_) => ShieldingPreparationFailure::FeeCalculation,
+        Error::Proposal(_) => ShieldingPreparationFailure::InvalidProposal,
+        _ => ShieldingPreparationFailure::ProposalFailed,
+    }
+}
+
 impl Treasury {
     /// Operator requested, one job/address per transaction. No broadcast here.
     pub async fn shield_refund(
@@ -125,7 +184,7 @@ impl Treasury {
                 CoinbaseFilter::AllTransparentOutputs,
                 None,
             )
-            .map_err(|_| anyhow::anyhow!("refund shielding proposal failed"))?;
+            .map_err(proposal_failure)?;
             ensure!(
                 proposal.steps().len() == 1,
                 "multi-step shielding unsupported"
@@ -137,12 +196,12 @@ impl Treasury {
             );
             let fee = step.balance().fee_required().into_u64();
             if fee == 0 || fee > max_fee {
-                tracing::warn!(
+                tracing::debug!(
                     fee_zatoshis = fee,
                     limit_zatoshis = max_fee,
                     "refund shielding proposal exceeds max_refund_shielding_fee_zec; standard network fee was not overridden"
                 );
-                anyhow::bail!("refund shielding fee exceeds max_refund_shielding_fee_zec");
+                return Err(ShieldingPreparationFailure::FeeLimit.into());
             }
             let input = step
                 .transparent_inputs()
@@ -154,7 +213,7 @@ impl Treasury {
             let shielded_value = input
                 .checked_sub(fee)
                 .filter(|value| *value > 0)
-                .context("shielding proposal has no shielded output")?;
+                .context(ShieldingPreparationFailure::NoShieldedOutput)?;
             ensure!(
                 step.transparent_inputs()
                     .iter()
@@ -314,5 +373,60 @@ impl Treasury {
             },
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zcash_client_backend::{data_api::error::Error, fees::ChangeError};
+
+    #[test]
+    fn shielding_proposal_errors_keep_safe_typed_reasons_without_private_sources() {
+        type ProposalError = Error<&'static str, (), (), (), &'static str, ()>;
+        let insufficient = || ChangeError::InsufficientFunds {
+            available: Zatoshis::ZERO,
+            required: Zatoshis::from_u64(10_000).unwrap(),
+        };
+        for (error, reason) in [
+            (
+                ProposalError::InsufficientFunds {
+                    available: Zatoshis::ZERO,
+                    required: Zatoshis::from_u64(10_000).unwrap(),
+                },
+                "no_eligible_funds",
+            ),
+            (ProposalError::Change(insufficient()), "no_eligible_funds"),
+            (ProposalError::ScanRequired, "scan_required"),
+            (
+                ProposalError::Proposal(
+                    zcash_client_backend::proposal::ProposalError::ShieldingInvalid,
+                ),
+                "invalid_proposal",
+            ),
+            (
+                ProposalError::DataSource("private wallet error"),
+                "wallet_read_failed",
+            ),
+            (
+                ProposalError::Change(ChangeError::StrategyError("private fee error")),
+                "fee_calculation_failed",
+            ),
+            (ProposalError::AccountCannotSpend, "proposal_failed"),
+        ] {
+            let safe = anyhow::Error::new(proposal_failure(error));
+            assert_eq!(
+                safe.downcast_ref::<ShieldingPreparationFailure>()
+                    .unwrap()
+                    .reason(),
+                reason
+            );
+            assert_eq!(
+                safe.chain().count(),
+                1,
+                "private SDK source must be discarded"
+            );
+            assert!(!format!("{safe:#}").contains("private"));
+        }
     }
 }

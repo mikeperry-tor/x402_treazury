@@ -320,6 +320,18 @@ pub(crate) fn report_local_retry(error: &anyhow::Error, operation: &'static str)
     );
 }
 
+pub(super) fn report_shielding_preparation_failure(error: &anyhow::Error) {
+    let reason = error
+        .downcast_ref::<super::refunds::ShieldingPreparationFailure>()
+        .map_or("preparation_failed", |failure| failure.reason());
+    tracing::debug!(
+        category = "shielding_preparation_unavailable",
+        stage = "preparation",
+        reason,
+        "Automatic Zcash shielding preparation unavailable; continuing with other owned addresses"
+    );
+}
+
 pub(crate) fn report_shielding_failure(error: &anyhow::Error, operation_id: Option<&str>) {
     use super::recovery::RecoveryOutcome;
     let outcome = super::recovery::evidence_outcome(error);
@@ -419,6 +431,66 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shielding_preparation_diagnostics_keep_stage_and_reason_without_private_prose() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::diagnostics::tests::shielding_preparation_diagnostics_keep_stage_and_reason_without_private_prose",
+        ) {
+            return;
+        }
+        use super::super::refunds::ShieldingPreparationFailure;
+        for (error, reason) in [
+            (
+                anyhow::Error::new(ShieldingPreparationFailure::NoEligibleFunds),
+                "no_eligible_funds",
+            ),
+            (
+                anyhow::Error::new(ShieldingPreparationFailure::FeeLimit),
+                "fee_limit",
+            ),
+            (
+                anyhow::Error::new(ShieldingPreparationFailure::NoShieldedOutput),
+                "no_shielded_output",
+            ),
+            (
+                anyhow::anyhow!("private preparation error"),
+                "preparation_failed",
+            ),
+        ] {
+            let error = error.context("https://private-token@example.invalid/private-address");
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::DEBUG)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            tracing::subscriber::with_default(subscriber, || {
+                report_shielding_preparation_failure(&error)
+            });
+            let text = std::fs::read_to_string(log.path()).unwrap();
+            assert_eq!(text.lines().count(), 1, "{text}");
+            for expected in [
+                "DEBUG",
+                "shielding_preparation_unavailable",
+                r#"stage="preparation""#,
+                reason,
+                "continuing with other owned addresses",
+            ] {
+                assert!(text.contains(expected), "{text}");
+            }
+            for forbidden in [
+                "private",
+                "example.invalid",
+                "WARN",
+                "ERROR",
+                "sync_internal_or_storage_failure",
+            ] {
+                assert!(!text.contains(forbidden), "{text}");
+            }
+        }
+    }
 
     #[test]
     fn local_retries_report_typed_causes_without_private_prose_or_terminal_severity() {
