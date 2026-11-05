@@ -39,8 +39,9 @@ The remaining child plans cover
 [catalog expansion and schema correctness](plans/catalog_safety_and_schema.md),
 [registry efficiency](plans/registry_efficiency.md),
 [hot-path and qualification history](plans/hot_path_efficiency.md),
-[proving execution](plans/proving_execution.md) and
-[portability/private storage](plans/portability_fixes.md).
+[proving execution](plans/proving_execution.md). Separate unfinished work covers
+[macOS ACL and Unix storage](plans/portability_fixes.md); Windows runtime work is
+deferred by user decision.
 The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.

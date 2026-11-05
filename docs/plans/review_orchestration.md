@@ -58,6 +58,14 @@ owning gates and reconcile every finding at GR and GI, including intentionally
 retained behavior and deferred work. Preserve the original report body while
 annotating.
 
+Windows runtime, storage, supervision and native acceptance work is explicitly
+deferred by user decision. Its dedicated workflows and experiment drivers are
+removed; portable Rust and strict vendor-verification improvements remain.
+[macOS ACL and Unix storage concerns](portability_fixes.md) remain separate,
+unfinished follow-up outside this remaining milestone. They are not marked fixed
+and impose no new shared-storage or platform lifecycle gate on the financial,
+catalog, registry and R9 lanes. Normal Unix financial/lifecycle checks still apply.
+
 ## Lanes and ordered integration boundaries
 
 Rows identify integration milestones, not replacement implementation commits.
@@ -74,11 +82,11 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | F2 / financial | Complete: I1 `0baed039`, I2 `8fa105fa` and reviewed fixups, I3 `7e5648be`. Contracts live in [SDK recovery](../zingo-integration.md) and [wallet reconciliation](../wallet-rotation.md#recovery-and-reconciliation-policy). | G1/G2/G3 and wider GF accepted through `68a93c0b`. Stale-only tips preserve observations; future completion metadata cannot block current SDK funds. Actual disclosed originals retain exact liabilities through cancellation, restart and genuine replacement. F3 reopens GF. |
 | C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, integrated after catalog C1 settles construction contracts. | Correct invalidation, atomic durable publication and progressing readers; no caching around expansion safety. Child gates pass. |
 | F3 / financial | [Proving execution](proving_execution.md), T1 then T2, integrated after financial F2. | Accepted principal/fee authority, proposal exclusion and owned calculation completion survive cancellation/restart; complete GF again for execution changes. |
-| P1 / portability | [Portability](portability_fixes.md): `4fff946f` plus `574e0b38`/`5251194e` implement portable classification and native control wiring; shared-storage/lifecycle design proceeds independently. | macOS six controls pass; Windows release build/CLI smoke tests, vendor preflight and six native probe controls pass at `5218fef0`. Later all-target Clippy stopped on C2's nested result tuple and Unix-only fixture storage; reviewed corrections need a native rerun. Namespace buffer-only control still failed before flush; absolute-path control `3e97d27b` passes both API candidates at `5218fef0`, including restricted-token/collision/identity/byte/flush checks. This is compatibility evidence, not P2 privacy, recovery or power-loss acceptance. Native P1/Linux/storage gates remain open. |
-| P2 / portability | Child P2 shared storage, then P3/P4 lifecycle/native workflows. Schedule shared-storage edits after financial F3 and catalog C2 by default. | Child native storage/recovery and ordinary-platform gates pass; complete GS below. Coordinate earlier integration only after affected owners settle their contracts. |
+| P1 / portable benefits | Retain `4fff946f`, `574e0b38`/`5251194e` portable ErrorKind classification and unfunded native control wiring, generic fixture improvements and strict binary vendor reconstruction. | Existing scoped evidence remains valid where unchanged. Windows runtime/native acceptance is deferred, not complete; historical partial results grant no storage, recovery or confinement claim. |
+| Storage / separate follow-up | [macOS ACL and Unix storage](portability_fixes.md) remain unfinished outside this milestone. Windows P2/P3/P4 runtime, storage, supervision and native gates are deferred by user decision. | No shared-filesystem framework or native GS/lifecycle gate is required before the remaining important lanes. GR must retain the confirmed macOS gap and unresolved Unix namespace risk explicitly. |
 | R0 / R9 follow-up | [Focused R9 plan](hot_path_efficiency.md) prepared in this separate R0 documentation boundary before implementation. Scoping proceeds independently. | Fresh consumer/query audit separates qualification budget/status work from ordinary regex/client-cache work; ordered commits, authority-preserving tests and review gates agreed. Do not presume a cached monetary ledger or measured speedup. |
 | R1 / R9 implementation | Execute [R9 child commits](hot_path_efficiency.md); normally integrate code after financial F2 and catalog C1 correctness gates, coordinating overlapping catalog/network/Store owners. | Child gates pass; exact budget arithmetic, concurrent admission, rollback/restart and uncertain charges preserved. Ordinary optimizations retain transport isolation and live-I/O ownership. Assess remaining history-dependent work before claiming it solved. |
-| O1 / final integration | Assemble reviewed completed milestones, fixups and maintained-guide handoff. Optional portability P5 qualification backends remain separately selected work under their child plan. | Complete GR against the tracked review before GI and cleanup, then exact cleanup/final combined review. Unfinished required milestones keep this orchestration active. |
+| O1 / final integration | Assemble reviewed completed milestones, fixups and maintained-guide handoff. Windows work and optional qualification backends remain deferred/excluded; focused macOS/Unix storage follow-up stays unfinished separately. | Complete GR against the tracked review before GI and cleanup, then exact cleanup/final combined review. Unfinished required financial, catalog, registry or R9 milestones keep this orchestration active. |
 
 These are chosen integration orders, not universal technical dependencies. A2
 investigation/reproducers and A4 parameter-reuse design can begin earlier. R9 may
@@ -94,8 +102,8 @@ Assign one author/worktree per active implementation scope; keep audit/review
 agents read-only by default. Distinct worktrees permit independent edits, not
 competing ownership of the same call chain. Before launching work, name overlap
 owners for funding/Store/treasury, catalog/import/discovery, network transport,
-qualification registry, shared TLS fixtures and owning guides. Shared-storage P2
-affects both financial and source/cache stores. Agree any ownership transfer;
+qualification registry, shared TLS fixtures and owning guides. Any future separate
+storage follow-up must coordinate financial and source/cache owners. Agree any ownership transfer;
 refresh downstream branches after predecessor integration and inspect semantic
 changes even if Git reports no conflict. Reopened concerns receive revalidation.
 
@@ -152,18 +160,17 @@ spendability and persisted restart state. Independent recurrence audits found no
 additional material gaps. G3 and financial GF accepted full SDK/Store/publisher/
 funding/qualification call chains; execution changes in F3 reopen that review.
 
-Windows release build, CLI smoke tests, vendor preflight and all six native
-probe controls pass at `5218fef0`. Later all-target Clippy failed on the C2 result
-tuple and two fixture fields stored only for existing Unix crash controls.
-The reviewed corrections need a native rerun; the failed Checks stage remains
-failed. At that SHA, the absolute-path namespace experiment passes both directory-flush candidates,
-including ordinary restricted-token controls, no-replace collision preservation,
-identical file identities and exact public bytes. Earlier failures remain failed,
-and the hosted image changed, so no sole-variable cause is inferred. This permits
-P2 to use the simpler Win32 candidate in its design; it does not establish complete
-storage privacy, recovery or power-loss durability. Linux preparation is not native test acceptance.
+Historical Windows evidence includes release/help/vendor/probe successes and
+both namespace API candidates at `5218fef0`, alongside failed/unfinished native
+all-target checks and earlier failed experiments. Preserve those results in Git
+and private evidence; hosted-image changes prevent a sole-variable causal claim.
+The user has now deferred Windows work and removed its dedicated execution tools.
+No complete Windows privacy, recovery, supervision or power-loss acceptance is
+claimed, and no further native rerun is required for this milestone. Portable
+improvements and existing guarded fallbacks remain. The separate macOS ACL gap
+and Unix initial-alias concern remain unfinished, not silently resolved.
 No live-funded, consensus or live Tor qualification ran. Later changes reopen
-affected checks and combined concerns.
+affected required checks and combined concerns.
 
 ## Independent review gates and completion
 
@@ -184,11 +191,6 @@ reopen affected gates. Earlier per-commit approval does not exempt code.
   these paths, including durable publication completion versus pending disclosure
   projections and all prior fixup causes. Exit with allowed work progressing, no duplicate accepted I/O or
   new financial authority, and applicable child acceptance evidence complete.
-- **GS, after orchestration/P2 shared-storage integration:** review financial, source/cache and qualification
-  create/open/replace/backup/recovery chains together, including budget admission,
-  historical evidence and platform-specific protections. Exit with no privacy,
-  durability, alias, ownership or replay gap and native evidence for each support
-  claim. Later lifecycle changes reopen relevant concerns at the child gates.
 - **GR, at orchestration/O1 before GI and removal of working review material:**
   have an independent read-only subagent review the **whole accumulated branch**
   against the [original review and maintainer disposition](x402_treazury_review.md).
@@ -198,6 +200,8 @@ reopen affected gates. Earlier per-commit approval does not exempt code.
   paths across lanes, including changes inherited from `main`; reviewing the
   latest diff or relying on child approvals is insufficient. Reconcile every one
   of the 42 finding IDs with current code, tests, documentation and its disposition.
+  Explicitly assess the deferred Windows scope and separate unfinished B8/macOS
+  ACL/Unix namespace follow-up; do not claim all storage issues fixed.
   Check for missed, incompletely addressed or newly aggravated issues and
   unsupported claims of resolution; distinguish justified policy/deferred scope
   from required work. Original recommendations do not override settled decisions.

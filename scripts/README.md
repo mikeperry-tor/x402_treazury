@@ -2,9 +2,8 @@
 
 The root Makefile is the entrypoint for common operations. It requires GNU Make
 3.81+ (including macOS's installed Make), a POSIX shell and standard shell tools.
-Windows can use a GNU Make/POSIX shell environment such as MSYS2 or the
-[native PowerShell validation entrypoint](#native-windows-validation). Neither
-entrypoint alone establishes platform or qualification support. Install Rust/Cargo
+The documented engineering scope is Linux and macOS; Windows runtime and native
+validation work is deferred by user decision. Install Rust/Cargo
 matching `rust-toolchain.toml`; Make verifies both versions before application
 Cargo commands, including under Homebrew. Protoc comes from the locked Cargo
 helper, not a system installation. The application and normal Rust tests do not
@@ -22,8 +21,7 @@ Test commands use `scripts/test-runner.sh`. On macOS it supplies a Cargo runner
 that copies each test executable without extended attributes into a private
 temporary directory, ad-hoc signs the copy, and executes it. The original Cargo
 artifact stays intact. Copies remain in the system temporary directory so
-`current_exe()` child fixtures can reuse them. Linux and Windows POSIX-shell
-entrypoints execute the usual command directly. This also applies to the analyzer
+`current_exe()` child fixtures can reuse them. Linux entrypoints execute the usual command directly. This also applies to the analyzer
 and compatibility test stages; ordinary build/run, coverage and release
 qualification commands retain their existing execution paths.
 
@@ -236,65 +234,12 @@ analysis compilers, features, profiles or coverage modes. Follow
 setup consolidation and deterministic synchronization. Existing optional coverage
 commands are separate capabilities, not additional evaluation requirements.
 
-## Native Windows validation
+## Vendor source verification
 
-The standard-runner [Windows workflow](../.github/workflows/windows.yml) runs
-ordinary native validation on public-repository branch pushes and manual dispatch.
-It uses the exact Rust/Cargo pin, locked host protoc and native
-`x86_64-pc-windows-msvc` toolchain. Standard public runners are free; jobs skip
-private repositories rather than authorizing paid execution. Skips do not count
-as acceptance. No Actions caches, artifact uploads, paid APIs or live-funded
-qualification are selected. Console logs retain source/compiler/image identities,
-commands, diagnostics and test results.
-
-From a Windows checkout with PowerShell 7, Rustup, Python 3.11+, Git for Windows
-and Visual Studio C++ build tools (including required native CMake/LLVM tools):
-
-```powershell
-./scripts/windows-ci.ps1 -Stage Vendor
-$pin = (Select-String rust-toolchain.toml '^channel = "([^"]+)"$').Matches.Groups[1].Value
-rustup toolchain install $pin --profile minimal --component rustfmt --component clippy
-./scripts/windows-ci.ps1 -Stage Release
-./scripts/windows-ci.ps1 -Stage Checks
-```
-
-Vendor runs byte-exact source/patch reconstruction without requiring Rust. The
-build job runs it before installing Rust; Checks repeats verification on its own
-fresh VM. Patch bytes are supplied through binary stdin with the restored tree as
-the working directory, avoiding platform path arguments. GNU patch uses
-`--binary` to preserve source bytes on hosts with text-mode I/O; failures retain
-the patch utility's stdout/stderr and exit status. Original-source hash mismatches
-report expected/actual digests and whether CRLF-to-LF conversion would match for
-diagnostics only; every mismatch remains fatal and no source is normalized.
-
-Release builds the ordinary release executable, runs root/wallet/catalog help
-smokes and prints its hash. Cargo metadata supplies the artifact directory,
-including inherited CARGO_TARGET_DIR; cross-target overrides are rejected. Checks
-runs format and byte-exact vendor reconstruction, the production warning gate,
-focused library probe controls, full all-target Clippy, compatibility/default
-remainder, then synthetic proving/lifecycle/codec
-phases sequentially. Git for Windows supplies the patch utility used by existing
-provenance verifiers. Missing prerequisites and native failures return errors.
-The focused controls emit a CI notice with their actual nonzero passing count;
-later all-target failures still fail Checks and do not qualify storage or lifecycle.
-The two CI jobs use fresh VMs so release and dev/test output profiles do not share
-the standard runner's limited disk. This is not the full POSIX tooling selection
-of check-static; coordinated source-matched complexity and shell-tooling evidence
-still apply. These commands do not implement release reproducibility or Tor
-confinement. See [native evidence scope](../docs/testing.md#native-windows-evidence).
-
-### Windows namespace primitive probe
-
-Run `./scripts/windows-namespace-probe.ps1` in native x64 Windows PowerShell 7.
-The separate public standard-runner workflow runs it after probe-source changes
-or manual dispatch, independently of application compilation. It installs no
-packages and uses no wallet state, live funding or persistent test account.
-
-The isolated child uses an actual restricted ordinary-rights token, verifies its
-privilege/group/integrity state and access controls, then reports local fixed
-NTFS identity, no-clobber and native flush results as JSON. Failed candidate APIs
-retain their exact status; at least one complete candidate and all prerequisite
-controls are required for a successful probe. The script hash and exact Git/host
-provenance accompany the result. A successful probe establishes API compatibility
-for that environment; it does not establish hardware power-loss durability,
-Windows private-storage support or completion of the portability gates.
+Vendor verification reconstructs byte-exact sources and patches without requiring
+Rust. Patch bytes are supplied through binary stdin with the restored tree as the
+working directory, avoiding platform path arguments. GNU patch uses `--binary` to
+preserve source bytes on hosts with text-mode I/O; failures retain its stdout,
+stderr and exit status. Original-source hash mismatches report expected/actual
+digests and whether CRLF-to-LF conversion would match for diagnostics only. Every
+mismatch remains fatal and no source is normalized.

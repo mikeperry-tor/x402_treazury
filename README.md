@@ -183,10 +183,10 @@ cp examples/deployments/comprehensive.toml examples/deployments/comprehensive.lo
 ```
 
 The Makefile verifies the pinned Rust/Cargo toolchain and supplies protoc.
-Make builds require GNU Make 3.81+ and a POSIX shell. The native Windows
-PowerShell entrypoint and standard-runner CI are described in the
-[development entrypoints](scripts/README.md#native-windows-validation); their
-results must establish the measured support scope before use with real wallets.
+Make builds require GNU Make 3.81+ and a POSIX shell. The engineering scope is
+Linux and macOS; Windows runtime and native validation work is deferred. See
+[portability guidance](docs/development.md#portability) for support and evidence
+boundaries.
 Zcash is always included; static-wallet deployments omit treasury configuration.
 Only synthetic proving and local consensus tests use opt-in Cargo features.
 See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.

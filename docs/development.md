@@ -5,40 +5,36 @@ Commands run from the repository root.
 
 ## Portability
 
-Target Linux, macOS and Windows. Prefer standard Rust or existing cross-platform
-dependencies over native OS calls. When platform behavior is necessary, put it
-behind a small shared abstraction with implementations for all three systems.
-Define the required behavior first: filesystem privacy and durability, cancellation,
-process ownership and network confinement need equivalent guarantees, not merely
-matching function signatures. Avoid adding abstraction layers for behavior that
-can simply be removed.
+Target Linux and macOS. Prefer standard Rust or existing cross-platform
+dependencies over native OS calls. Isolate necessary platform behavior behind a
+small shared abstraction with equivalent correctness and security contracts.
+Remove unnecessary responsibilities before adding abstraction layers.
 
 Do not hide missing implementations behind successful no-ops or silently weaker
 permission, recovery or network checks. An unavailable required capability must
-produce an explicit error scoped to that operation. Such an error documents an
-unfinished port; it does not establish platform support. Prefer portable test
-fixtures and verify native behavior on each OS before claiming support. Cross-target
-compilation alone does not validate filesystem or process semantics.
+produce an explicit error scoped to that operation. Prefer portable fixtures and
+verify native behavior before claiming support; compilation alone does not
+validate filesystem or process semantics.
 
-These are engineering targets, not a claim that the current tree supports all
-three systems. The [portability fixes plan](plans/portability_fixes.md) tracks known
-gaps and removal options. Ordinary application support and optional qualification
-are separate: [release reproducibility](reproducible-builds.md) and
-[real-Tor confinement](../tests/TOR.md) currently have macOS-specific evidence.
-Keep those claims narrow until equivalent backends are implemented and qualified.
+Windows runtime, storage, supervision and native acceptance work is deferred by
+explicit user decision. Its dedicated CI and experiment drivers have been removed;
+existing guarded platform fallbacks and portable improvements remain, without a
+Windows support claim. Do not make Windows validation a prerequisite for the
+remaining financial, catalog, registry or R9 work.
 
-The [native Windows entrypoint](../scripts/README.md#native-windows-validation)
-and standard public-runner CI provide a repeatable route for exact pinned builds,
-warnings, ordinary tests and synthetic recovery. Their presence is not evidence
-that compilation, ACL/storage or process-lifecycle gaps are resolved. Record the
-exact committed SHA and completed native stages before making a support claim;
-[testing guidance](testing.md#native-windows-evidence) defines the scope.
-The explicit qualification connectivity probe classifies native permission denials
-through Rust ErrorKind, keeping refusal and timeout distinct; that
-compilation/classification fix does not implement Windows storage or supervision
-semantics, nor an OS-confinement qualification backend. Automated
-security-advisory scanning and an MSRV/platform matrix remain separately deferred;
-this selected native route does not implement those review recommendations.
+The separate [macOS ACL and Unix storage follow-up](plans/portability_fixes.md)
+remains unfinished. A public disposable-file reproduction confirms that inherited
+macOS ACLs can defeat a mode-only privacy check. Original Unix namespace authority
+also needs focused assessment; neither issue is resolved by deferring Windows.
+Ordinary application support and optional qualification are separate:
+[release reproducibility](reproducible-builds.md) and
+[real-Tor confinement](../tests/TOR.md) have macOS-specific evidence.
+
+Qualification connectivity probes use Rust ErrorKind to distinguish permission
+denial, refusal and timeout. These portable reporting controls do not establish
+OS confinement. Strict byte-exact vendor reconstruction and portable test fixtures
+remain in use. Automated security-advisory scanning, Linux CI and MSRV/platform
+matrices remain separately deferred.
 
 ## Dependency vendoring
 

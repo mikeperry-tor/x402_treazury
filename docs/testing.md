@@ -10,47 +10,31 @@ assertions; do not trim documentation or loosen expectations to obtain a pass.
 Discovery tests inject public-URL documents and localhost fixtures only under
 `cfg(test)`. Never add a production loopback bypass for fixture convenience.
 
-## Native Windows evidence
+## Portable connectivity controls and platform scope
 
 Focused `network::qualification_probe_tests` classify permission denials using
 production reporting and native OS-code mappings, including exact refusal
 classification, then exercise real loopback TCP/UDP positive controls, a held
-non-listening TCP endpoint (native refusal or timeout), received-request reply timeout
-and destination preflight. These unfunded controls require no firewall changes
-and do not establish actual OS confinement. The runner EgressProbe command
-consumes this classifier; the legacy standalone live-Tor socket controls are a
-separate implementation and do not validate it. The accompanying builder-binding
-changes remove non-Unix unused-mut warnings
-without changing their existing platform-specific behavior. Native
-all-target/storage and parent-lifecycle gaps remain open until their actual tests
-pass; compiler cleanliness does not establish Windows privacy or durability.
+non-listening TCP endpoint (native refusal or timeout), received-request reply
+timeout and destination preflight. These unfunded controls require no firewall
+changes and do not establish actual OS confinement. The runner EgressProbe command
+consumes this classifier; legacy standalone live-Tor socket controls are a separate
+implementation and do not validate it. Unix-only builder mutation remains scoped
+to Unix without changing other platform behavior.
 
-The [standard-runner Windows workflow](../.github/workflows/windows.yml) and
-[PowerShell entrypoint](../scripts/README.md#native-windows-validation) select
-ordinary native build/help smokes, format/vendor checks, the production and full
-all-target compiler-warning gates, compatibility/default remainder, and synthetic
-proving/lifecycle/codec phases. They use temporary state/public unfunded keys;
-ignored live-funded or consensus qualification is not selected. Windows ACL,
-reparse/alias, publication/restart and process-control tests must actually run
-through their owning selected modules before their semantics are claimed.
+The engineering scope is Linux and macOS. Windows runtime, private-storage,
+supervision and native acceptance work is explicitly deferred by the user; the
+Windows-only workflows and probe drivers have been removed. Preserve historical
+successes and failures in Git/private evidence, without treating partial native
+build or API results as complete privacy, recovery or power-loss qualification.
+Existing portable controls and guarded fallbacks remain, without a Windows support
+claim or a Windows rerun requirement for the remaining milestones.
 
-Record exact Git SHA, Rust/Cargo host/compiler, lock/pin hashes, hosted image,
-commands, diagnostic review and nonzero test counts from CI console evidence.
-A compile failure, skipped private-repository job or unfinished runtime stage is
-unfinished acceptance. Cross-compilation does not replace native execution, and
-this workflow's existence does not establish Windows support. Preserve failures
-without masking native tests or weakening warning/provenance checks. POSIX
-shell-tooling checks and source-matched complexity review retain their separate
-coordinated evidence; this route does not claim full check-static execution or
-extend the existing macOS release/Tor qualification scope.
-
-The [namespace primitive probe](../scripts/README.md#windows-namespace-primitive-probe)
-has a separate standard public-runner workflow and emits exact token, filesystem,
-identity, collision and flush evidence. It runs independently of application
-compilation with public disposable bytes. Keep candidate failures and unsupported
-scope explicit; a successful API experiment does not establish complete storage,
-ACL/sidecar behavior or hardware power-loss durability. Production storage and
-ordinary native acceptance remain separate portability gates.
+The [macOS ACL and Unix storage follow-up](plans/portability_fixes.md) is separate,
+unfinished work. Normal Unix financial, lifecycle and compiler checks remain
+required. Record exact source/executable/features, commands, diagnostics and
+nonzero test counts; retain valid evidence and revalidate affected consumers.
+No live-funded, consensus or Tor qualification follows from these controls.
 
 ## Provider regressions
 
@@ -641,8 +625,8 @@ retained input claims/payment journals, atomic estimate updates, exact committed
 provider dispatch after a failed payment journal acknowledgement. A sync error is
 allowed to leave an entire recoverable commit; it never proves no work occurred.
 
-The SIGKILL and test-VFS scenarios above are currently Unix-only; native Windows
-crash and SQLite-I/O recovery coverage remains unfinished. Shared payment-admission
+The SIGKILL and test-VFS scenarios above are Unix-only; native Windows crash
+and SQLite-I/O recovery work is deferred by user decision. Shared payment-admission
 and canceled-waiter ownership fixtures remain enabled on all platforms.
 
 Offline refill fixtures compare exact prepared bytes and transaction facts before

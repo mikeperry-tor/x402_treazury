@@ -36,8 +36,11 @@ maintainer decisions here and the owning guides govern the selected work.
    ownership. No new ordinary ZEC spending budgets, credited-output floor, top-ups,
    whole-work deadlines or abandonment of accepted work. Randomized reserve bounds
    authorize nominal sizing only. Qualification's API budget is separate authority.
-6. **Scope:** Orchestration's remaining focused plans plus portability own unfinished implementation.
-   R9 receives a separate scoped plan under orchestration R0/R1. Broad cover shaping
+6. **Scope:** Remaining financial, catalog, registry and R9 work stays selected.
+   Windows runtime/storage/supervision/native acceptance is deferred by explicit
+   user decision; dedicated Windows CI/experiment drivers are removed, not completed.
+   Confirmed macOS ACL and unresolved Unix namespace concerns remain separate
+   unfinished follow-up, outside this milestone. R9 has its own scoped plan. Broad cover shaping
    and discovery/indexer privacy changes are excluded, except tangible direct fixes.
    Other deferred observations are not silently resolved or authorized by this table.
 
@@ -83,14 +86,14 @@ selected here; historical details not freshly checked are explicitly identified.
 | R8 | Planned; composed-body claim needs qualification | Path/query collisions, unsupported cookie routing and truthful media/serialization need focused coverage. Composed-body support already exists in parts: fix demonstrated gaps, preserve alternatives, do not blindly flatten exclusive schemas. [Catalog safety/schema plan](catalog_safety_and_schema.md). |
 | R9 | Planned; implementation pending | Ordinary regex compilation and HTTP cache-lock construction costs remain. Re-audit broad status consumers rather than repeat the historical 10,000-payment claim as current fact. New qualification admission scans case/run/global history, parsing payment JSON under the write transaction; that aggravation is confirmed without a latency measurement. [Qualification budget](../../src/qualification/budget.rs), [admission](../../src/qualification/payment.rs), [focused R9 plan](hot_path_efficiency.md), orchestration R0/R1 and the [R2 scope boundary](registry_efficiency.md). No cached monetary ledger, caps or pruning selected. |
 | R10 | Original premise not accepted | The implementation compares the stored transaction's computed txid with the original signed transaction's computed txid, rather than merely comparing the lookup key. Preserve ZIP-244 effects identity and original disclosed bytes. No removal selected on the report's premise. [SDK confirmation](../../src/treasury/send.rs), [identity/recovery contract](../zingo-integration.md). |
-| B1 | Native Windows CI selected; other coverage deferred | The user selected a standard/free public-repository Windows workflow for pinned ordinary native builds, warnings and relevant tests. It is an execution route, not proof of Windows support or vulnerability resolution; require exact-SHA native results. Automated advisory scanning, Linux CI and MSRV/platform matrices remain separately deferred. Existing vendor verifiers and maintained advisory notes do not replace advisory scanning. [Development](../development.md#portability), [native validation](../../scripts/README.md#native-windows-validation), [vendor provenance](../../vendor/README.md). |
+| B1 | Windows CI removed by user; other coverage deferred | The user explicitly deferred Windows runtime and native acceptance and removed its dedicated workflows/drivers. Preserve historical partial evidence without claiming support. Portable controls and strict vendor verification remain; they do not replace automated advisory scanning. Advisory scanning, Linux CI and MSRV/platform matrices remain separately deferred. [Development](../development.md#portability), [vendor provenance](../../vendor/README.md). |
 | B2 | Addressed in selected scope with A2 | Independent complete retained-patch/SDK/application/financial recovery review and G1/G2/G3/GF accepted through `68a93c0b`; strict provenance reconstruction and actual synthetic recovery/liability regressions pass with scoped carry. [SDK contract](../zingo-integration.md), [vendor provenance and retirement](../../vendor/README.md). No upstream approval, submission, checkout retirement, consensus or live qualification is claimed. |
 | B3 | Policy plus plan review work | Mandatory complexity review and simplification at child architecture gates remain; no numerical complexity budget or automatic helper extraction. Review unchanged high-risk financial chains as well as changed functions. [Complexity discipline](../../tests/COMPLEXITY.md#review-discipline), [orchestration gates](review_orchestration.md). No blanket refactor completed. |
 | B4 | Deferred broader cleanup | S4 reviewed archive/reconfirmation consumers and distinguished active expiry authority from retained historical evidence. Superficially similar SQL can carry distinct ownership/history behavior. No general SQL-format/archive-helper rewrite completed, and historical counts are not newly verified. [Recovery policy](../wallet-rotation.md#recovery-and-reconciliation-policy), [Store funding](../../src/rotation/store/funding.rs). |
 | B5 | Partial | Known obsolete diagnostic arms removed and new owner diagnostics use typed safe context. Broader string-based classification remains; no repository-wide conversion claimed. Prefer typed causes when changing owning paths without logging raw upstream prose. [Funding diagnostics](../../src/rotation/funding.rs), [logging contract](../development.md#logging-and-diagnostics). |
 | B6 | Deferred assessment / policy | Attribute counts alone do not establish a production defect. No blanket test-hook-to-trait rewrite selected; inspect changed financial boundaries and their production/test equivalence through owning reviews and production compiler evidence. Original hook inventory is not newly verified. [Testing policy](../testing.md). |
 | B7 | Deferred | Public-surface pruning was not implemented here. Re-audit actual library, integration-test and tooling consumers before narrowing visibility; historical counts are not current acceptance evidence. [Library surface](../../src/lib.rs), [development](../development.md). |
-| B8 | Planned | Shared private-storage contracts require equivalent Linux/macOS/Windows protection, native evidence and explicit refusal where unavailable. Compilation alone is insufficient. Include source/cache stores, financial journals and version-2 qualification authority without silently upgrading historical registries. [Portability plan](portability_fixes.md), [permanent policy](../development.md#portability). |
+| B8 | Unfinished macOS/Unix follow-up; Windows deferred | A non-root disposable macOS reproduction confirms inherited Everyone READ can bypass mode-only privacy; chmod 0600 retains the ACL. Private creation, reopen and SQLite sidecars need focused repair. Original Unix namespace authority remains an unresolved source/design concern, not a demonstrated breach of the normal private-parent case. These are separate unfinished work outside this milestone. Windows storage/runtime/native gates are deferred by user decision, not complete. [Focused follow-up](portability_fixes.md), [permanent policy](../development.md#portability). |
 | B9 | Deferred | No shared deployment-loader refactor completed. Inspect current show/load/warm/bootstrap ordering and failure contracts before selecting a simplification; the original literal/field counts are not reverified. [Deployment](../../src/deployment.rs), [configuration](../configuration.md). |
 | B10 | Deferred item-by-item | This bundles distinct build, dependency, locking, key-storage and panic observations. No blanket remediation or fresh inventory claimed. Dependency/toolchain changes retain the existing pin/reproducibility policy. Release arithmetic, lock replacement and other items require targeted assessment and tests in their owning area. [Development](../development.md), [reproducible builds](../reproducible-builds.md), [wallet CLI](../wallet-cli.md). |
 
@@ -134,14 +137,14 @@ proving four, lifecycle 45 and codec one pass through scoped continuations.
 Failed runs remain failed and are replaced only by actual affected-case passes;
 this is not a single successful `make check`. Production/all-target warnings,
 format, exact-source complexity and unchanged high-risk chains are reviewed.
-Proving execution must reopen financial GF. Windows release build/CLI smokes,
-vendor preflight, six native probe controls and both namespace API candidates
-pass at `5218fef0`. Later native all-target Clippy failed on C2's result tuple
-and Unix-only fixture storage; reviewed corrections need a native rerun.
-Full native test and storage acceptance remain open.
-The namespace result proves restricted-token API compatibility, collision and
-identity/byte preservation, not complete privacy, recovery or power-loss durability. No live-funded,
-consensus or live Tor qualification was run.
+Proving execution must reopen financial GF. Historical Windows release/help/vendor
+and six-probe results plus both namespace API candidates passed at `5218fef0`;
+later native all-target checks and earlier experiments include failures. Preserve
+that scoped evidence without inferring full privacy, recovery or power-loss
+acceptance. Windows work is now explicitly deferred by the user and its dedicated
+execution tools are removed; no Windows rerun gates the remaining selected work.
+The macOS ACL finding and Unix initial-alias concern remain separate unfinished
+follow-up. No live-funded, consensus or live Tor qualification was run.
 
 ---
 
