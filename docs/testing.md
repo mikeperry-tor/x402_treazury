@@ -641,6 +641,10 @@ retained input claims/payment journals, atomic estimate updates, exact committed
 provider dispatch after a failed payment journal acknowledgement. A sync error is
 allowed to leave an entire recoverable commit; it never proves no work occurred.
 
+The SIGKILL and test-VFS scenarios above are currently Unix-only; native Windows
+crash and SQLite-I/O recovery coverage remains unfinished. Shared payment-admission
+and canceled-waiter ownership fixtures remain enabled on all platforms.
+
 Offline refill fixtures compare exact prepared bytes and transaction facts before
 and after reopening the store. Restart qualification also binds transaction facts
 and the SHA-256 digest of the immutable encrypted prepared record across observed,

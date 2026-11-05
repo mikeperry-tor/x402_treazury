@@ -15,7 +15,9 @@ struct Fixture {
     payer: PaymentCandidateHandle,
     url: String,
     signed: Arc<AtomicUsize>,
+    #[cfg(unix)]
     received: Arc<tokio::sync::Notify>,
+    #[cfg(unix)]
     release: Arc<tokio::sync::Semaphore>,
     worker: tokio::task::JoinHandle<()>,
     server: tokio::task::JoinHandle<()>,
@@ -241,7 +243,9 @@ async fn fixture_with_held_response(hold: bool) -> Fixture {
         payer: PaymentCandidateHandle { wallet, address },
         url,
         signed,
+        #[cfg(unix)]
         received,
+        #[cfg(unix)]
         release,
         worker,
         server,
