@@ -65,7 +65,13 @@ impl RetirementAccounting {
 
 pub(super) fn runtime_status(store: &Store) -> Result<Status> {
     let mut status = read_status(&store.db)?;
-    for wallet in status.pools.iter_mut().flat_map(|pool| &mut pool.addresses) {
+    enrich_runtime_pools(store, &mut status.pools)?;
+    Ok(status)
+}
+
+// The caller may already own a read/write transaction on this Store connection.
+pub(super) fn enrich_runtime_pools(store: &Store, pools: &mut [PoolStatus]) -> Result<()> {
+    for wallet in pools.iter_mut().flat_map(|pool| &mut pool.addresses) {
         let Some((_, certificate)) = store.evidence_cache.get(&wallet.id) else {
             continue;
         };
@@ -91,7 +97,7 @@ pub(super) fn runtime_status(store: &Store) -> Result<Status> {
             unavailable_reason,
         });
     }
-    Ok(status)
+    Ok(())
 }
 
 // Persisted projections use the caller's connection and preserve its snapshot.
@@ -224,25 +230,23 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
 }
 
 pub(super) fn read_operations(db: &Connection) -> Result<Vec<OperationStatus>> {
-    let mut stmt =
-        db.prepare("SELECT id,facts,submission,attempts FROM treasury_operations ORDER BY id")?;
+    let mut stmt = db.prepare("SELECT o.id,o.facts,o.submission,o.attempts,EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id) FROM treasury_operations o ORDER BY o.id")?;
     let rows = stmt.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
+            r.get::<_, bool>(4)?,
         ))
     })?;
     rows.map(|row| -> Result<OperationStatus> {
-        let (operation_id, facts, mut submission, attempts) = row?;
-        if db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
-            [&operation_id],
-            |r| r.get::<_, bool>(0),
-        )? {
-            submission = "EXPIRED".into();
-        }
+        let (operation_id, facts, submission, attempts, expired) = row?;
+        let submission = if expired {
+            "EXPIRED".into()
+        } else {
+            submission
+        };
         Ok(OperationStatus {
             operation_id,
             facts: serde_json::from_str(&facts)?,

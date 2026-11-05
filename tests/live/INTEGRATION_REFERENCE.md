@@ -390,7 +390,17 @@ database schema 23; nested `treasury_status` in qualification snapshots uses the
 status contract. Bootstrap summaries remain version 3. Schema 2 includes the stable
 group generation, independent reserve-slot generations, ACTIVE/READY/RETAINED/RETIRED
 roles, funding-job identities/phases and source-operation submission states, without keys, signed
-bytes, quote bodies or upstream error prose. Response observation failure retains
+bytes, quote bodies or upstream error prose. Lifecycle retains complete pool,
+funding-job and source-operation collections in their existing order; it does not
+filter history to selected or pending work. Source identities include SHA256 of the
+exact encrypted outgoing record, with required missing records reported as failure.
+Each observation reads one financial SQL snapshot. Admission sees its existing
+uncommitted journal/reserve changes; later response observations are fresh, and
+runtime observations preserve this owner's compatible certificate evidence rather
+than substituting a saved estimate. Narrow lifecycle omits only unused Status and
+scheduling diagnostics; full Status and full qualification exports retain their
+own complete fields, strictness and guards. Required pool/phase/facts/health failures
+cannot become healthy or empty evidence. Response observation failure retains
 the seller receipt with an explicit unavailable marker and warning. Pending-state
 bracketing measures the signed-request future through final headers, not the full
 MCP response-body interval. Rotation and lifecycle execution use these observations;

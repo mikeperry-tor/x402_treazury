@@ -685,6 +685,18 @@ a private conversion or live migration.
 Funded lifecycle, privacy and combined cover/payment acceptance retain the limits
 listed under [qualification status](#qualification-status).
 
+Lifecycle projection tests compare every published field with an independent
+baseline assembly over small synthetic Store states, including complete pools,
+claim generations, job order/phase/health, retirement facts, source history and
+exact encrypted-record hashes. Direct persisted and runtime-cache observations
+retain their different evidence fields. A pinned read-transaction fixture commits
+another writer's changes between collections and rejects mixed snapshots. Required
+phase/facts/raw-record/health errors remain failures; corruption only in diagnostics
+not exported by narrow lifecycle cannot obstruct it, while full Status/export keep
+their required contracts. Existing real-certificate and receipt fixtures verify
+compatible/unavailable runtime evidence and retained receipts/charges after actual
+lifecycle failure. No offline projection fixture qualifies live settlement.
+
 Bootstrap readiness tests pass current Store-produced status 6 and lifecycle 2
 through readiness and restart consumers independently of database schema 23 and
 bootstrap summary 3. Eligible funded READY inventory needs no ACTIVE predecessor.

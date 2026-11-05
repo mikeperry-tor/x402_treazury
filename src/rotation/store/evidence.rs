@@ -177,6 +177,21 @@ mod tests {
         assert_eq!(evidence.confirmed.hash, saved.confirmed.anchor.hash);
         assert_eq!(evidence.latest.hash, saved.latest.anchor.hash);
         assert!(evidence.confirmed.block_timestamp.is_none());
+        let lifecycle = store.qualification_lifecycle().unwrap();
+        let projected = lifecycle["pools"][0]["addresses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == wallet)
+            .unwrap();
+        assert_eq!(
+            projected["runtime_balance_evidence"],
+            json!({
+                "confirmed":{"amount_atomic":saved.confirmed.amount.to_string(),"height":saved.confirmed.anchor.height,"hash":saved.confirmed.anchor.hash,"block_timestamp":null},
+                "latest":{"amount_atomic":saved.latest.amount.to_string(),"height":saved.latest.anchor.height,"hash":saved.latest.anchor.hash,"block_timestamp":null},
+                "network":saved.network,"asset":saved.asset,"endpoint":saved.endpoint,"confirmations":saved.confirmations,"compatible":true,"unavailable_reason":null
+            })
+        );
         let expired = crate::rotation::store::reporting::runtime_status(&store).unwrap();
         let evidence = expired.pools[0].addresses[0]
             .runtime_balance_evidence
@@ -202,6 +217,18 @@ mod tests {
             hash: format!("0x{height:064x}"),
         };
         advance_checkpoint(&store.db, &wallet, &anchor(110), false).unwrap();
+        let lifecycle = store.qualification_lifecycle().unwrap();
+        let projected = lifecycle["pools"][0]["addresses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == wallet)
+            .unwrap();
+        assert_eq!(projected["runtime_balance_evidence"]["compatible"], false);
+        assert_eq!(
+            projected["runtime_balance_evidence"]["unavailable_reason"],
+            "evidence_compatibility_required"
+        );
         assert_eq!(
             store
                 .publish_scoped_evidence(&pool, raced.clone())

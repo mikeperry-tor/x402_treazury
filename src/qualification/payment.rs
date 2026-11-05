@@ -709,13 +709,29 @@ mod tests {
                         .body("")
                         .unwrap(),
                 );
+                let state = tempfile::tempdir().unwrap();
+                let store = crate::rotation::store::Store::create(
+                    &state.path().join("state"),
+                    &state.path().join("key"),
+                    1,
+                    b"fixture",
+                )
+                .unwrap();
+                let corrupt =
+                    rusqlite::Connection::open(state.path().join("state/state.sqlite")).unwrap();
+                corrupt.execute_batch("PRAGMA user_version=22").unwrap();
+                let lifecycle = store.qualification_lifecycle();
+                assert!(
+                    lifecycle.is_err(),
+                    "fixture must exercise an actual lifecycle projection failure"
+                );
                 let started = context.elapsed_micros();
                 context
                     .record_response(
                         "attempt".into(),
                         started,
                         context.elapsed_micros(),
-                        Err(anyhow::anyhow!("fixture state read failed")),
+                        lifecycle,
                         &Ok(response),
                     )
                     .await
@@ -731,6 +747,11 @@ mod tests {
                 assert_eq!(event["receipt"]["classification"], "seller_success");
                 assert_eq!(event["receipt"]["transaction"], transaction);
                 assert_eq!(event["receipt"]["lifecycle"]["status"], "unavailable");
+                assert_eq!(
+                    super::super::budget::used(&db, None).unwrap(),
+                    1,
+                    "unavailable lifecycle cannot release the admitted charge"
+                );
             })
             .await;
     }

@@ -992,6 +992,10 @@ consensus tests separately exercise preparation, refunds, expiry and recovery;
 see [testing](testing.md), [LIFECYCLE.md](../tests/LIFECYCLE.md) and
 [REGTEST.md](../tests/REGTEST.md).
 
+Qualification's complete lifecycle snapshots, narrow/full evidence boundaries and
+receipt retention when observation fails are specified in the
+[technical reference](../tests/live/INTEGRATION_REFERENCE.md#planning-and-concurrency-assertions).
+
 Public-swap live exercises have observed funding, promotion/refill, service during
 pending deposits, cross-listener concurrency and restart. These do not establish
 confidential swaps, managed Permit2/upto, all provider routes or a full automated

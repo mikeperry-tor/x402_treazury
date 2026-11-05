@@ -26,15 +26,24 @@ impl Store {
         ))
     }
     pub fn qualification_payment(&self, attempt: &str) -> Result<Value> {
-        payment_evidence(&self.db, attempt)
+        let tx = self.db.unchecked_transaction()?;
+        let value = payment_evidence(&tx, attempt)?;
+        tx.commit()?;
+        Ok(value)
     }
     /// Public structural state for case-correlated lifecycle observations. No
     /// seeds, signatures, quote bodies, upstream error prose or wallet bytes.
     pub fn qualification_lifecycle(&self) -> Result<Value> {
-        lifecycle(&self.db, &self.status()?)
+        let tx = self.db.unchecked_transaction()?;
+        let value = read_lifecycle(&tx, Some(self))?;
+        tx.commit()?;
+        Ok(value)
     }
     pub fn qualification_state(&self) -> Result<Value> {
-        read(&self.db)
+        let tx = self.db.unchecked_transaction()?;
+        let value = read(&tx)?;
+        tx.commit()?;
+        Ok(value)
     }
 }
 pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> {
@@ -105,47 +114,169 @@ pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> 
         payment["ownership_evidence_version"] = json!(1);
         crate::qualification::validate_admission_balance(&payment)?;
     }
-    payment["lifecycle"] = read_status(db)
-        .and_then(|status| lifecycle(db, &status))
+    payment["lifecycle"] = read_lifecycle(db, None)
         .unwrap_or_else(|_| json!({"available":false,"reason":"status_observation_unavailable"}));
     Ok(payment)
 }
-// Lifecycle versioning is independent of status JSON and database formats.
-fn lifecycle(db: &Connection, status: &Status) -> Result<Value> {
-    let jobs: Vec<_> = status
-        .funding_jobs
-        .iter()
-        .map(|j| {
-            json!({
-                "id":j.id,"pool_id":j.pool_id,"pool_name":j.pool_name,
-                "wallet_id":j.wallet_id,"recipient":j.recipient,"target":j.target,
-                "operation_id":j.operation_id,"phase":j.phase
-            })
+// The same projection fields adapt either complete Status or narrow SQL rows.
+#[derive(serde::Serialize)]
+struct LifecycleJob {
+    id: String,
+    pool_id: String,
+    pool_name: String,
+    wallet_id: String,
+    recipient: String,
+    target: String,
+    operation_id: String,
+    phase: funding::FundingPhase,
+    #[serde(skip)]
+    timed_out: bool,
+}
+impl From<&funding::FundingJob> for LifecycleJob {
+    fn from(job: &funding::FundingJob) -> Self {
+        Self {
+            id: job.id.clone(),
+            pool_id: job.pool_id.clone(),
+            pool_name: job.pool_name.clone(),
+            wallet_id: job.wallet_id.clone(),
+            recipient: job.recipient.clone(),
+            target: job.target.clone(),
+            operation_id: job.operation_id.clone(),
+            phase: job.phase.clone(),
+            timed_out: job.timed_out,
+        }
+    }
+}
+
+fn lifecycle_jobs(db: &Connection) -> Result<Vec<LifecycleJob>> {
+    let mut query = db.prepare("SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,j.operation_id,j.phase,h.job_id,h.timed_out FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id LEFT JOIN funding_health h ON h.job_id=f.id ORDER BY f.rowid")?;
+    let rows = query.query_map([], |row| {
+        let health_present = row.get::<_, Option<String>>(8)?.is_some();
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            if health_present {
+                row.get::<_, bool>(9)
+            } else {
+                Ok(false)
+            },
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, pool_id, pool_name, wallet_id, recipient, target, operation_id, phase, timed_out) =
+            row.context("missing or invalid funding operation journal")?;
+        let phase = serde_json::from_str(&phase).context(scheduling::FundingDecodeFailure)?;
+        let timed_out = timed_out.context(scheduling::FundingDecodeFailure)?;
+        Ok(LifecycleJob {
+            id,
+            pool_id,
+            pool_name,
+            wallet_id,
+            recipient,
+            target,
+            operation_id,
+            phase,
+            timed_out,
         })
-        .collect();
-    let operations: Vec<_> = status
-        .treasury_operations
-        .iter()
-        .map(|o| -> Result<Value> {
-            use sha2::{Digest, Sha256};
-            // Hash the immutable encrypted record without opening wallet keys or
-            // exporting signed bytes. This proves record continuity, not validity.
-            let raw: Vec<u8> = db.query_row(
-                "SELECT raw FROM outgoing WHERE id=?1",
-                [&o.operation_id],
-                |r| r.get(0),
-            )?;
-            Ok(json!({
-                "operation_id":o.operation_id,"submission":o.submission,"attempts":o.attempts,
-                "facts":o.facts,"prepared_record_sha256":format!("{:x}", Sha256::digest(&raw))
-            }))
-        })
-        .collect::<Result<_>>()?;
-    Ok(
-        json!({"schema_version":2,"state_schema_version":status.state_schema_version,"treasury_id":status.treasury_id,"pools":status.pools,
-            "funding_jobs":jobs,"source_operations":operations}),
+    })
+    .collect()
+}
+
+// Callers supply the SAME connection's existing transaction. Runtime enrichment
+// uses only this owner's immutable-in-command cache and this physical connection.
+fn read_lifecycle(db: &Connection, runtime: Option<&Store>) -> Result<Value> {
+    let version: u32 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    ensure!(
+        version == 23,
+        "unsupported state schema; stopped-service conversion required"
+    );
+    let (id, instance_version): (String, u32) =
+        db.query_row("SELECT id,version FROM instance", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+    ensure!(instance_version == 1, "unsupported state schema");
+    let mut pools = reporting::read_pools(db)?;
+    let jobs = lifecycle_jobs(db)?;
+    for pool in &mut pools {
+        pool.funding_degraded = pool
+            .reserve_claims
+            .iter()
+            .any(|claim| claim.blocked_funding_job_id.is_some())
+            || jobs.iter().any(|job| {
+                job.pool_id == pool.id
+                    && (job.timed_out
+                        || matches!(
+                            job.phase,
+                            funding::FundingPhase::RecoveryRequired
+                                | funding::FundingPhase::RefundPending
+                        ))
+            });
+    }
+    if let Some(store) = runtime {
+        reporting::enrich_runtime_pools(store, &mut pools)?;
+    }
+    lifecycle_parts(
+        db,
+        version,
+        &id,
+        &pools,
+        &jobs,
+        &reporting::read_operations(db)?,
     )
 }
+
+fn prepared_record_hashes(db: &Connection) -> Result<std::collections::BTreeMap<String, String>> {
+    use sha2::{Digest, Sha256};
+    let mut query = db.prepare("SELECT o.id,x.raw FROM treasury_operations o LEFT JOIN outgoing x ON x.id=o.id ORDER BY o.id")?;
+    let rows = query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(1)?))
+    })?;
+    rows.map(|row| {
+        let (id, raw) = row?;
+        let raw = raw.context("source operation prepared record missing")?;
+        Ok((id, format!("{:x}", Sha256::digest(&raw))))
+    })
+    .collect()
+}
+
+// Lifecycle versioning is independent of status JSON and database formats.
+// Full export reuses its already-required Status fields; it never rereads pools,
+// decodes funding scheduling twice or hashes records in ordinary Status.
+fn lifecycle(db: &Connection, status: &Status) -> Result<Value> {
+    let jobs: Vec<_> = status.funding_jobs.iter().map(LifecycleJob::from).collect();
+    lifecycle_parts(
+        db,
+        status.state_schema_version,
+        &status.treasury_id,
+        &status.pools,
+        &jobs,
+        &status.treasury_operations,
+    )
+}
+fn lifecycle_parts(
+    db: &Connection,
+    version: u32,
+    treasury: &str,
+    pools: &[PoolStatus],
+    jobs: &[LifecycleJob],
+    metadata: &[OperationStatus],
+) -> Result<Value> {
+    let hashes = prepared_record_hashes(db)?;
+    let operations = metadata.iter().map(|operation| -> Result<Value> {
+        let digest = hashes.get(&operation.operation_id).context("source operation prepared record missing")?;
+        Ok(json!({"operation_id":operation.operation_id,"submission":operation.submission,"attempts":operation.attempts,"facts":operation.facts,"prepared_record_sha256":digest}))
+    }).collect::<Result<Vec<_>>>()?;
+    Ok(
+        json!({"schema_version":2,"state_schema_version":version,"treasury_id":treasury,"pools":pools,"funding_jobs":jobs,"source_operations":operations}),
+    )
+}
+
 pub fn qualification_state(dir: &Path) -> Result<Value> {
     directory(dir)?;
     database_paths(dir)?;
@@ -692,3 +823,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "qualification_projection_tests.rs"]
+mod projection_tests;
