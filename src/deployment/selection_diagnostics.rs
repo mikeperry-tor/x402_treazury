@@ -147,7 +147,7 @@ fn source_filter_removals(id: &str, source: &Source) -> Result<BTreeMap<String, 
         return Ok(BTreeMap::new());
     }
     // Reuse path/tag selection, POST preference and collision suffixes. This
-    // derives names only, without rebuilding schemas, descriptions or prices.
+    // derives names through compatibility projection, without generating descriptions or prices.
     let names = catalog::tool_names_before_filtering(
         cfg,
         &source.document,

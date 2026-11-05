@@ -38,7 +38,7 @@ without mutating catalogs, ranking or generation-bound cursors. Curated rebindin
 updates both the canonical text and retained base; serialized registrations rebuild
 metadata on import. Listener selection reuses accepted tools; it projects source
 operations for tag matching only when that listener configures tag filters.
-Tag-free publication and selector diagnostics need no schema projection.
+Building a tag-free listener inventory needs no schema projection.
 Provider files in `providers/` carry selections, help URLs, pricing settings and
 explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
