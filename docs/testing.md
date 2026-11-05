@@ -98,6 +98,25 @@ omissions, representable scalar/tuple alternatives, ignored protocol declaration
 and managed Idempotency-Key diagnostics. Static checks stay limited to explicit
 type domains; runtime codecs retain their actual-value guards.
 
+## Dynamic registry publication
+
+Registry efficiency fixtures observe actual import builds under isolated child
+execution, verify reuse across unrelated additions/static replacement, and rebuild
+only invalidated candidate/document/name inputs. Small synthetic schemas retain
+POST preference, listener tag/name filtering, C2 omission reasons, compatible help
+ownership and instruction replacement; no provider inventory snapshots are needed.
+
+Publication fixtures hold an actual accepted commit at a deterministic test-only
+boundary, remove its completed optional fetch-cache entry, and start a duplicate
+add at the actual missing-registration recheck. Known registration and source-filtered
+search readers must continue on the prior complete snapshot while the duplicate
+waits before acquisition. Releasing the commit must produce identical results
+without a second document request. Tests release held callbacks and join owned
+workers before reporting failure. Existing cancellation, persistence refusal and
+crash/restart controls remain necessary; a fixture watchdog establishes no runtime
+deadline, freshness or spending authority. Snapshot source metadata, tools,
+instructions, omission diagnostics and cursor generation must switch together.
+
 ## Testing efficiency
 
 Keep ordinary validation on the pinned production compiler and maintained named

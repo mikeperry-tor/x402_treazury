@@ -44,7 +44,7 @@ fn payer() -> PaidClient {
 
 async fn manager_with(listeners: BTreeMap<String, ListenerConfig>) -> Arc<Manager> {
     let snapshot = CatalogSnapshot {
-        registration_issues: Default::default(),
+        registrations: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: listeners.keys().map(|k| (k.clone(), vec![])).collect(),
@@ -994,7 +994,7 @@ async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
     let shared = payer();
     let other = payer();
     let snapshot = CatalogSnapshot {
-        registration_issues: Default::default(),
+        registrations: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
@@ -1150,7 +1150,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     )
     .await;
     let snapshot = CatalogSnapshot {
-        registration_issues: Default::default(),
+        registrations: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
@@ -1191,7 +1191,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         ls.clone(),
         BTreeMap::from([("shared".into(), managed)]),
         Arc::new(CatalogState::new(CatalogSnapshot {
-            registration_issues: Default::default(),
+            registrations: Default::default(),
             instructions: Default::default(),
             generation: 0,
             views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
@@ -1399,6 +1399,16 @@ async fn saved_nonlocal_bindings_stay_disabled_and_duplicate_add_is_readable() {
     assert!(result["reason"].is_string());
     assert_eq!(result["tool_count"], 0);
     assert!(m.catalog.read().views.values().all(Vec::is_empty));
+    let searched = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"old"}),
+        )
+        .unwrap();
+    assert_eq!(searched["available"], 0);
+    assert_eq!(searched["total"], 0);
+    assert!(searched["items"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -3112,6 +3122,16 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         register_spec(&m, "writer", "Filtered", "filtered.json", spec())
             .await
             .unwrap();
+        let filtered = m
+            .search_tools(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"source_name":"Filtered"}),
+            )
+            .unwrap();
+        assert_eq!(filtered["available"], 0);
+        assert_eq!(filtered["total"], 0);
+        assert!(filtered["items"].as_array().unwrap().is_empty());
         let description = endpoint
             .get_tool("x402_treazury_tools_search")
             .unwrap()
@@ -3207,6 +3227,16 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         drop(endpoint);
         drop(m);
         let restored = manager_with(configured.clone()).await;
+        let filtered = restored
+            .search_tools(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"source_name":"Filtered"}),
+            )
+            .unwrap();
+        assert_eq!(filtered["available"], 0);
+        assert_eq!(filtered["total"], 0);
+        assert!(filtered["items"].as_array().unwrap().is_empty());
         let result = restored
             .search_tools(
                 "writer",
@@ -3702,8 +3732,10 @@ async fn complete_inventory_preserves_definitions_and_search_pagination() {
             };
             assert_eq!(searched["items"].as_array().unwrap().len(), count.min(25));
             for limit in [101, u32::MAX as u64 + 1, u64::MAX] {
+                let captured = m.catalog.read();
                 let result = search_catalog_query(
-                    &m.catalog,
+                    &captured,
+                    m.catalog.instance(),
                     owner,
                     "x402_treazury_tools_search",
                     serde_json::from_value(json!({"limit":limit})).unwrap(),
@@ -3815,7 +3847,14 @@ async fn partial_registration_publishes_visible_issues_with_tools_and_restores_t
     let text = server(&m, "writer").get_info().instructions.unwrap();
     assert!(text.contains("API operations are omitted"));
     assert!(text.contains("Cookie parameters"));
-    assert!(m.catalog.read().registration_issues.contains_key(&id));
+    assert_eq!(
+        m.existing_registration(
+            "writer",
+            import::RegistrationKey::Specification("https://api.example.com/openapi.json")
+        )
+        .unwrap()["omitted_operations"][0]["path"],
+        "/unsupported"
+    );
     assert!(
         !server(&m, "reader")
             .get_info()
@@ -3826,7 +3865,15 @@ async fn partial_registration_publishes_visible_issues_with_tools_and_restores_t
     drop(m);
     let reopened = manager_with(configured).await;
     let snapshot = reopened.catalog.read();
-    assert_eq!(snapshot.registration_issues[&id][0].path, "/unsupported");
+    assert_eq!(
+        published_registration(
+            &snapshot,
+            "writer",
+            import::RegistrationKey::Specification("https://api.example.com/openapi.json")
+        )
+        .unwrap()["omitted_operations"][0]["path"],
+        "/unsupported"
+    );
     assert_eq!(snapshot.views["writer"].len(), 2);
     assert!(
         server(&reopened, "writer")
@@ -3839,3 +3886,6 @@ async fn partial_registration_publishes_visible_issues_with_tools_and_restores_t
 
 #[path = "efficiency_tests.rs"]
 mod efficiency_tests;
+
+#[path = "publication_read_tests.rs"]
+mod publication_read_tests;

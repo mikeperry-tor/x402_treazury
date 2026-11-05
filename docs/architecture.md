@@ -374,6 +374,22 @@ payer bindings and compatible help authority are projected anew at publication.
 Derived results never enter the durable registry; explicit refresh and restart
 revalidate the accepted/current inputs under their existing contracts. Publication
 uses local name/help indexes without changing inventory order or collision policy.
+Published registration names, exact selectors and complete result metadata share
+the same immutable snapshot as tools, omission notices and instructions. Known
+registration lookups and source-filtered search capture that one generation without
+waiting on registry construction or storage. Durable mutation stays serialized and
+persistence precedes the single snapshot publication. Same-registration adds retain one
+authenticated-owner/registration-identity mutex from the final duplicate check
+through acquisition, validation and publication; completed-fetch eviction and payer
+replacement cannot reopen that work. Mutex ownership lasts only for live owners
+and waiters; later missing adds remove dead weak entries. Unrelated identities
+remain independent. Static bases never retain copied dynamic
+metadata; only current source records contribute it to the composed snapshot.
+The commit worker retains its registry-identity check for lower-level public
+`CatalogState::publish` callers: if they replace the composed registration view
+while accepted records remain, adding that identity fails rather than duplicating
+stored records. This compatibility fallback is separate from ordinary add
+coalescing. `Manager::replace_static` preserves registry composition.
 Dynamic source instructions are composed afresh from the immutable static base on
 each publication, including only enabled sources with visible tools. Refresh,
 removal, restoration and static replacement cannot accumulate or retain stale

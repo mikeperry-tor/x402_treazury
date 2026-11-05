@@ -651,6 +651,17 @@ or retain obsolete guidance. An add chooses its final source name before its one
 catalog construction in the existing blocking mutation worker; it does not build
 a provisional catalog on the serving runtime. Validation still precedes durable
 commit, and transport promotion follows successful validated publication.
+Known registration results and source-filtered search read the same published
+generation as visible tools and instructions, including disabled or fully filtered
+registrations. These reads continue while a registry mutation is pending. A missing
+add owns its authenticated owner and resolved registration identity before the final
+duplicate check, through document acquisition, initial validation and publication.
+Same-identity adds wait for that owner and reuse its published registration even
+after completed-fetch eviction or payer replacement. Caller cancellation retains
+the accepted add; unrelated identities proceed independently. Mutex ownership lasts
+only while owners or waiters remain; the next missing add removes dead weak map
+entries. There is no separate admission cap or registration-result ledger. Durable
+commit and publication ordering are unchanged.
 Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
 available through operator inspection; no registration-result receipt ledger is
 needed. These source records are separate from payment and financial journals.

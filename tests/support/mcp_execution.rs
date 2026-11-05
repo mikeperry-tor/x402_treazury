@@ -65,7 +65,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
         vendor,
     )]);
     m.catalog.publish(CatalogSnapshot {
-        registration_issues: Default::default(),
+        registrations: Default::default(),
         instructions: Default::default(),
         generation: 1,
         views: BTreeMap::from([("writer".into(), bound)]),

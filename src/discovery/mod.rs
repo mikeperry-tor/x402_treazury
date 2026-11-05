@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
 };
 use tokio::sync::{OnceCell, Semaphore};
@@ -75,6 +75,47 @@ impl Record {
         Ok(())
     }
 }
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum RegistrationIdentity {
+    Provider(String),
+    Specification(String),
+}
+impl RegistrationIdentity {
+    fn borrowed(&self) -> import::RegistrationKey<'_> {
+        match self {
+            Self::Provider(id) => import::RegistrationKey::Provider(id),
+            Self::Specification(url) => import::RegistrationKey::Specification(url),
+        }
+    }
+}
+impl From<import::RegistrationKey<'_>> for RegistrationIdentity {
+    fn from(key: import::RegistrationKey<'_>) -> Self {
+        match key {
+            import::RegistrationKey::Provider(id) => Self::Provider(id.into()),
+            import::RegistrationKey::Specification(url) => Self::Specification(url.into()),
+        }
+    }
+}
+#[derive(Clone)]
+pub(crate) struct PublishedRegistration {
+    name: String,
+    identity: RegistrationIdentity,
+    result: Value,
+}
+fn published_registration<'a>(
+    snapshot: &'a CatalogSnapshot,
+    owner: &str,
+    key: import::RegistrationKey<'_>,
+) -> Option<&'a Value> {
+    snapshot
+        .registrations
+        .owners
+        .get(owner)?
+        .iter()
+        .find(|row| row.identity.borrowed() == key)
+        .map(|row| &row.result)
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct State {
@@ -92,6 +133,9 @@ struct Fetched {
     result: std::result::Result<Arc<Document>, SharedFailure>,
 }
 type FetchCell = Arc<OnceCell<Fetched>>;
+type AdditionOwners = BTreeMap<(String, RegistrationIdentity), Weak<tokio::sync::Mutex<()>>>;
+#[cfg(test)]
+type CommitBarrier = (tokio::sync::oneshot::Sender<()>, Arc<Semaphore>);
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -102,7 +146,9 @@ enum DirectoryFixture {
 
 pub struct Manager {
     #[cfg(test)]
-    commit_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    recheck_started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    #[cfg(test)]
+    commit_barrier: Mutex<Option<CommitBarrier>>,
     #[cfg(test)]
     fixture_endpoint: Mutex<Option<String>>,
     #[cfg(test)]
@@ -119,6 +165,7 @@ pub struct Manager {
     catalog: Arc<CatalogState>,
     inner: Mutex<Inner>,
     fetches: Mutex<BTreeMap<FetchKey, FetchCell>>,
+    additions: Mutex<AdditionOwners>,
     mutations: Arc<Semaphore>,
 }
 #[derive(Deserialize, Serialize)]
@@ -311,7 +358,11 @@ impl Manager {
             Ok((stores, state))
         })
         .await??;
+        let mut base = (*catalog.read()).clone();
+        base.registrations = Default::default();
         let manager = Arc::new(Self {
+            #[cfg(test)]
+            recheck_started: Mutex::new(None),
             #[cfg(test)]
             fixture_endpoint: Mutex::new(None),
             #[cfg(test)]
@@ -328,12 +379,13 @@ impl Manager {
             listeners,
             payers,
             inner: Mutex::new(Inner {
-                base: (*catalog.read()).clone(),
+                base,
                 state,
                 stores,
             }),
             catalog,
             fetches: Mutex::new(BTreeMap::new()),
+            additions: Mutex::new(BTreeMap::new()),
             mutations: Arc::new(Semaphore::new(16)),
         });
         let m = manager.clone();
@@ -393,7 +445,7 @@ impl Manager {
             "hardcoded_registry_document_bytes",
         )?;
         let mut result = base.clone();
-        result.registration_issues.clear();
+        result.registrations = Default::default();
         result.generation = generation;
         let previous = self.catalog.read();
         let previous_names: BTreeMap<_, BTreeMap<_, _>> = previous
@@ -419,7 +471,16 @@ impl Manager {
                 )
             })
             .collect();
-        for record in live.into_iter().filter(|r| r.disabled.is_none()) {
+        for record in live {
+            if record.disabled.is_some() {
+                result
+                    .registrations
+                    .owners
+                    .entry(record.owner.clone())
+                    .or_default()
+                    .push(Self::registration(record, 0));
+                continue;
+            }
             let target = &record.owner;
             let cfg = self.listeners.get(target).context("target_missing")?;
             let built = record
@@ -427,9 +488,7 @@ impl Manager {
                 .as_ref()
                 .context("registered catalog was not prepared")?;
             let visible = import::visible_tools(built, cfg)?;
-            result
-                .registration_issues
-                .insert(record.id.clone(), built.issues.clone());
+            let visible_count = visible.len();
             let wallet = cfg
                 .wallet
                 .as_deref()
@@ -517,17 +576,16 @@ impl Manager {
                 &record.candidate.name,
                 &built.issues,
             );
+            result
+                .registrations
+                .owners
+                .entry(record.owner.clone())
+                .or_default()
+                .push(Self::registration(record, visible_count));
         }
         Ok(result)
     }
-    fn result(&self, r: &Record, caller: &str, snapshot: &CatalogSnapshot) -> Value {
-        let tool_count = snapshot
-            .views
-            .get(caller)
-            .into_iter()
-            .flatten()
-            .filter(|t| t.source.as_ref().is_some_and(|s| s.0 == r.id))
-            .count();
+    fn registration(r: &Record, tool_count: usize) -> PublishedRegistration {
         let next = if r.disabled.is_some() {
             "This registration is disabled. Ask the operator to inspect its reason, repair its configuration and refresh the source where applicable. Repeating registration returns the same disabled registration. Use tools_search without source_name to look for other available tools on this MCP endpoint."
         } else if tool_count == 0 {
@@ -542,10 +600,12 @@ impl Manager {
             "status": if r.disabled.is_some() { "disabled" } else { "available" },
             "next": next
         });
-        if let Some(issues) = snapshot
-            .registration_issues
-            .get(&r.id)
-            .filter(|issues| !issues.is_empty())
+        if r.disabled.is_none()
+            && let Some(issues) = r
+                .built
+                .as_ref()
+                .map(|built| &built.issues)
+                .filter(|issues| !issues.is_empty())
         {
             result["omitted_operations"] = json!(issues);
         }
@@ -556,7 +616,11 @@ impl Manager {
         if let Some(reason) = &r.disabled {
             result["reason"] = json!(reason);
         }
-        result
+        PublishedRegistration {
+            name: r.candidate.name.clone(),
+            identity: r.candidate.registration_key().into(),
+            result,
+        }
     }
 
     #[cfg(test)]
@@ -719,17 +783,35 @@ impl Manager {
         owner: &str,
         key: import::RegistrationKey<'_>,
     ) -> Option<Value> {
-        let inner = self.inner.lock().unwrap();
-        inner
-            .state
-            .records
-            .values()
-            .find(|record| {
-                !record.removed
-                    && record.owner == owner
-                    && record.candidate.registration_key() == key
-            })
-            .map(|record| self.result(record, owner, &self.catalog.read()))
+        let snapshot = self.catalog.read();
+        published_registration(&snapshot, owner, key).cloned()
+    }
+
+    // Registration identity outlives optional fetch retention and payer replacement.
+    // Keep only live add owners/waiters; publication itself stays serialized by inner.
+    async fn addition_owner(
+        &self,
+        owner: &str,
+        key: import::RegistrationKey<'_>,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let gate = {
+            let mut additions = self.additions.lock().unwrap();
+            additions.retain(|_, gate| gate.strong_count() > 0);
+            let slot = additions.entry((owner.into(), key.into())).or_default();
+            match slot.upgrade() {
+                Some(gate) => gate,
+                None => {
+                    let gate = Arc::new(tokio::sync::Mutex::new(()));
+                    *slot = Arc::downgrade(&gate);
+                    gate
+                }
+            }
+        };
+        #[cfg(test)]
+        if let Some(started) = self.recheck_started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
+        gate.lock_owned().await
     }
 
     async fn add_source(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
@@ -798,6 +880,9 @@ impl Manager {
                 Lifetime::Process
             },
         };
+        let _addition = self
+            .addition_owner(owner, candidate.registration_key())
+            .await;
         if let Some(result) = self.existing_registration(owner, candidate.registration_key()) {
             return Ok(result);
         }
@@ -831,20 +916,19 @@ impl Manager {
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
         let query: Query = serde_json::from_value(args)?;
-        if let Some(name) = &query.source_name {
-            import::validate_source_name(name)?;
+        let snapshot = self.catalog.read();
+        if let Some(source) = &query.source_name {
+            import::validate_source_name(source)?;
             ensure!(
-                self.inner
-                    .lock()
-                    .unwrap()
-                    .state
-                    .records
-                    .values()
-                    .any(|r| !r.removed && r.owner == owner && &r.candidate.name == name),
+                snapshot
+                    .registrations
+                    .owners
+                    .get(owner)
+                    .is_some_and(|rows| rows.iter().any(|row| &row.name == source)),
                 "source_name_unknown"
             );
         }
-        search_catalog_query(&self.catalog, owner, name, query)
+        search_catalog_query(&snapshot, self.catalog.instance(), owner, name, query)
     }
 
     async fn commit(
@@ -855,11 +939,14 @@ impl Manager {
     ) -> Result<Value> {
         #[cfg(test)]
         {
-            let barrier = self.commit_barrier.lock().unwrap().clone();
-            if let Some(barrier) = barrier {
-                tokio::time::timeout(Duration::from_secs(10), barrier.wait())
+            let barrier = self.commit_barrier.lock().unwrap().take();
+            if let Some((entered, release)) = barrier {
+                let _ = entered.send(());
+                release
+                    .acquire()
                     .await
-                    .context("test commit barrier deadline")?;
+                    .context("test commit gate closed")?
+                    .forget();
             }
         }
         let permit = self
@@ -877,7 +964,10 @@ impl Manager {
                     && r.owner == owner
                     && r.candidate.registration_key() == record.candidate.registration_key()
             }) {
-                return Ok(this.result(r, &owner, &this.catalog.read()));
+                let snapshot = this.catalog.read();
+                return published_registration(&snapshot, &owner, r.candidate.registration_key())
+                    .cloned()
+                    .context("registered source publication missing");
             }
             let mut state = inner.state.clone();
             if generated_name {
@@ -918,7 +1008,13 @@ impl Manager {
                 .checked_add(1)
                 .context("generation exhausted")?;
             let snapshot = this.snapshot(&state, &inner.base, state.generation)?;
-            let result = this.result(&state.records[&id], &owner, &snapshot);
+            let result = published_registration(
+                &snapshot,
+                &owner,
+                state.records[&id].candidate.registration_key(),
+            )
+            .cloned()
+            .context("registered source publication missing")?;
             if let Some(store) = inner.stores.get_mut(&owner) {
                 let mut saved = state.clone();
                 saved.records.retain(|_, record| {
@@ -968,17 +1064,18 @@ pub(crate) fn search_catalog(
     )?;
     let q: Query = serde_json::from_value(args)?;
     ensure!(q.source_name.is_none(), "source_name_unknown");
-    search_catalog_query(catalog, owner, name, q)
+    let snapshot = catalog.read();
+    search_catalog_query(&snapshot, catalog.instance(), owner, name, q)
 }
 
 // Resolve source names before projection without reserializing the caller's request.
 fn search_catalog_query(
-    catalog: &CatalogState,
+    snapshot: &CatalogSnapshot,
+    instance: &str,
     owner: &str,
     name: &str,
     q: Query,
 ) -> Result<Value> {
-    let snapshot = catalog.read();
     let candidates: Vec<_> = snapshot
         .views
         .get(owner)
@@ -1004,9 +1101,7 @@ fn search_catalog_query(
         available,
         &format!(
             "{}:{owner}:{name}:{:?}:{:?}",
-            catalog.instance(),
-            q.source_name,
-            q.query
+            instance, q.source_name, q.query
         ),
     )
 }

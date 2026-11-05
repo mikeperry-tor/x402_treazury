@@ -250,9 +250,16 @@ impl BoundTool {
         }
     }
 }
+/// Opaque process-local source metadata published with the tools it describes.
+/// Default preserves construction of static-only snapshots by library consumers.
+#[derive(Clone, Default)]
+pub struct RegisteredSources {
+    pub(crate) owners: BTreeMap<String, Vec<crate::discovery::PublishedRegistration>>,
+}
+
 #[derive(Clone, Default)]
 pub struct CatalogSnapshot {
-    pub registration_issues: BTreeMap<String, Vec<crate::catalog::OperationIssue>>,
+    pub registrations: RegisteredSources,
     pub generation: u64,
     pub instructions: BTreeMap<String, Option<String>>,
     pub views: BTreeMap<String, Vec<BoundTool>>,

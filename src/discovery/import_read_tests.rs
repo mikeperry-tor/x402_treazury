@@ -70,6 +70,8 @@ async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
             assert!(cell.get().is_none());
         }
     }
+    let (entered, entry) = tokio::sync::oneshot::channel();
+    *m.recheck_started.lock().unwrap() = Some(entered);
     let alias = tokio::spawn({
         let m = m.clone();
         async move {
@@ -81,19 +83,13 @@ async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
             .await
         }
     });
-    // Confirm the alias has joined the active cell before releasing origin I/O.
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let key = fetch_key(&m, "https://api.example.com/import0");
-        let (_, cell) = active
-            .iter()
-            .find(|(active_key, _)| *active_key == key)
-            .unwrap();
-        while Arc::strong_count(cell) < 4 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    // Same-registration aliases wait at their owner before touching fetch cells.
+    // Observe that actual boundary before releasing the original acquisition.
+    tokio::time::timeout(Duration::from_secs(5), entry)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!alias.is_finished());
     assert_eq!(calls.load(Ordering::SeqCst), IMPORTS + 12);
     release.add_permits(IMPORTS);
     for add in adds {
@@ -424,7 +420,7 @@ async fn paid_import_fixture() {
     );
     let configured = listeners(false);
     let snapshot = CatalogSnapshot {
-        registration_issues: Default::default(),
+        registrations: Default::default(),
         instructions: Default::default(),
         generation: 0,
         views: configured.keys().map(|key| (key.clone(), vec![])).collect(),

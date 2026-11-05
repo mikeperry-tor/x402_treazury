@@ -34,6 +34,8 @@ impl Manager {
                 "static_revision_changed"
             );
             validate_static(&base, &this.listeners)?;
+            // Caller-supplied dynamic metadata never belongs to the static base.
+            base.registrations = Default::default();
             let revision = expected_revision
                 .checked_add(1)
                 .context("static revision exhausted")?;
