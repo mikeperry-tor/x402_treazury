@@ -16,16 +16,15 @@ produce an explicit error scoped to that operation. Prefer portable fixtures and
 verify native behavior before claiming support; compilation alone does not
 validate filesystem or process semantics.
 
-Windows runtime, storage, supervision and native acceptance work is deferred by
-explicit user decision. Its dedicated CI and experiment drivers have been removed;
-existing guarded platform fallbacks and portable improvements remain, without a
-Windows support claim. Do not make Windows validation a prerequisite for the
-remaining financial, catalog, registry or R9 work.
+Windows has no support claim. Runtime, storage, supervision and native acceptance
+remain explicitly deferred in the [release follow-ups](plans/deferred/release_followups.md).
+Preserve existing portable improvements; Windows validation is not a prerequisite
+for the selected Linux/macOS cleanup.
 
-The separate [macOS ACL and Unix storage follow-up](plans/portability_fixes.md)
-remains unfinished. A public disposable-file reproduction confirms that inherited
-macOS ACLs can defeat a mode-only privacy check. Original Unix namespace authority
-also needs focused assessment; neither issue is resolved by deferring Windows.
+Inherited macOS ACLs can defeat a mode-only privacy check. Supported-platform ACL
+repair is selected in [review cleanup](plans/review_findings_cleanup.md); the
+[storage plan](plans/portability_fixes.md) retains its concrete evidence and the
+separate Unix namespace-authority assessment. Neither is resolved by deferring Windows.
 Ordinary application support and optional qualification are separate:
 [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) have macOS-specific evidence.
@@ -33,33 +32,43 @@ Ordinary application support and optional qualification are separate:
 Qualification connectivity probes use Rust ErrorKind to distinguish permission
 denial, refusal and timeout. These portable reporting controls do not establish
 OS confinement. Strict byte-exact vendor reconstruction and portable test fixtures
-remain in use. Automated security-advisory scanning, Linux CI and MSRV/platform
-matrices remain separately deferred.
+remain in use. Current dependency-security evaluation belongs to
+[NU7 release readiness](plans/nu7_release_readiness.md); Linux CI automation and
+future platform acceptance belong to the [deferred release plan](plans/deferred/release_followups.md).
 
-## Deferred code assessments
+## Review decisions and unfinished assessments
 
-Broader SQL/archive readability, public API visibility and shared deployment-loader
-cleanup remain deferred assessments. Similar archive statements can preserve
-different idempotency and recovery facts, public items have library/test/tooling
-consumers, and show/load/warm/bootstrap paths have distinct authority and failure
-contracts. Review those actual consumers before consolidating or removing code.
-The branch review did not complete those refactors or revalidate historical counts.
+No blanket SQL/archive, public-visibility or deployment-loader refactor is planned.
+Archive INSERT differences preserve one-time versus idempotent transitions and
+actual reauthorization; public Rust items have library/test/tooling consumers and
+do not themselves expose MCP capabilities; loader differences follow their distinct
+authority and failure contracts. Counts and duplication alone do not establish a
+functional defect. Inspect real consumers before any future focused change.
 
 Test-hook attribute counts alone do not establish production/test divergence.
 A blanket replacement of test hooks with injected traits is not selected work;
 inspect the affected production and test behavior before choosing a focused change,
 and add an abstraction only when its concrete responsibility justifies it.
 
-The earlier hygiene observations likewise need individual assessment: release
-arithmetic checks, declared versus pinned toolchains, file-lock dependencies,
-dependency pins, build identity/rebuild work, key placement and panic sites do not
-constitute one selected remediation. Follow the owning build, dependency, wallet
-and testing contracts for any concrete change. Deferral neither establishes a
-current defect nor prohibits an evidence-based fix or simplification.
+The [cleanup plan](plans/review_findings_cleanup.md) selects the supported compiler
+baseline and release overflow checks. Current settings below remain authoritative
+until implementation. Other hygiene observations require individual evidence;
+their presence alone does not establish a functional defect.
 
-Provider-prose handling is tracked in the
-[tool documentation policy](agent-sources.md#tool-documentation); retained
-outgoing-snapshot growth and pruning are governed by
+No replacement of `fs2` based solely on age, blanket dependency unpinning, source-hash
+removal or count-driven `unwrap`/`expect` rewrite is planned. File locks protect
+exclusive ownership; dependency pins preserve a reviewed compatible cohort; source
+hashes identify release inputs; panic counts alone establish no reachable failure.
+Actual dependency-security updates have their own owner below, and concrete bugs
+remain ordinary maintenance. The default adjacent wallet key is an explicit
+[storage threat boundary](wallet-cli.md), with separate-key storage supported; it
+is not a promise of protection from theft of the entire default wallet directory.
+The [deferred release plan](plans/deferred/release_followups.md) owns the specific
+correction of archive builds' unknown-versus-dirty provenance.
+
+Provider-output assessment and snapshot visibility have concrete owners in the
+deferred release plan. Snapshot pruning is not selected work. Current contracts remain in
+[tool documentation](agent-sources.md#tool-documentation) and
 [source recovery](wallet-rotation.md#funding-and-source-safety).
 
 ## Dependency vendoring
@@ -315,6 +324,10 @@ The executable reports terminal `serve` failure at ERROR and failed inspection,
 administration or other explicit CLI work at WARN. Typed command scope selects
 severity; validators do not each log the same terminal failure. Tracing carries
 only safe categories and available typed causes, never the raw error chain.
+Matching fixed local messages solely to choose a safe diagnostic label does not
+grant financial authority. No blanket rewrite of diagnostic-label matching is
+planned; permission and recovery decisions must retain their actual typed facts
+and established blockchain/SDK evidence.
 The existing adjacent `error:` cause-chain display remains CLI output on stderr
 and is not a substitute for that severity event. Invalid logging directives use
 the default subscriber to report their failure. Clap help/usage handling remains
@@ -663,6 +676,9 @@ upstream signing-cohort migration or a separately reviewed backport. Do not forc
 the incompatible version through a manifest override or treat dependency presence
 alone as proof of application exploitability. Reassess the complete signing chain
 when upstream support changes; retain exact signature/address and state contracts.
+The near-term release assessment is owned by
+[NU7 release readiness](plans/nu7_release_readiness.md); upgrading the Zcash cohort
+alone does not resolve an EVM signing-cohort advisory.
 
 ### TLS security updates
 

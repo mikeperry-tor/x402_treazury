@@ -134,13 +134,14 @@ renew another response's inactivity timer or signed authority.
 | `tools/providers/snapshot_spec.rs`, `tools/diagnostics/quote_near.rs` | Same factory; both accept `--network-config` |
 
 These identities do not establish timing decorrelation between shared metadata/header
-reads and wallet requests, isolation of individual transparent-address discovery
-queries within a treasury scan, or a separate Coinbase search identity. Broader
-changes in these three areas remain deferred; the catalog, transport and indexer
-recovery fixes do not implement or qualify them. Preserve the current identity
-contract unless focused privacy work establishes the intended threat model,
-required behavior and evidence. This deferral does not prohibit a concrete defect
-fix or imply that the historical privacy observations were freshly verified.
+reads and wallet requests or isolation of individual transparent-address discovery
+queries within a treasury scan. [Review cleanup](plans/review_findings_cleanup.md)
+selects wallet-owned metadata/header routing and removal of unnecessary fresh-wallet
+transparent probing; those changes are not yet implemented. Coinbase already uses
+the wallet documentation identity, while participating HTTP transports at different
+origins have distinct scopes. Another shared discovery identity would not itself
+remove timing, content or common-credential correlation. Remaining legacy scan
+privacy assessment belongs to the [deferred release plan](plans/deferred/release_followups.md).
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient
@@ -855,7 +856,7 @@ financial or qualification authority.
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
 | Shared catalog/price retention: seven days by default | `catalog_cache_ttl_seconds` controls both; zero disables the shared cache. Reads, restart and observations never renew expiry. Successful unchanged catalog revalidation renews the joint entry. Changed bytes/configuration or eviction discard hints too. Memory follows live catalog bindings; SQLite writes are disposable and generation-conditional. No independent price timer, capacity, probe or refresh scheduler. See [local resource limits](local-resource-limits.md). |
 | NEAR sizing retries | No independent attempt cutoff. Each recognized USDC minimum must strictly raise the floor within the authorized nominal ceiling; every replacement draw persists before the next request. The original quote deadline is checked before each request and never renewed by retries. Existing response-inactivity guards and scheduler backoff remain independent. |
-| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund contract remains unresolved; broadcast acceptance is not settlement. |
+| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. [Review cleanup](plans/review_findings_cleanup.md) selects a one-hour requested default; the chain-specific 1Click arrival/confirmation/late-refund assessment is owned by [NU7 release readiness](plans/nu7_release_readiness.md). Broadcast acceptance is not settlement. |
 | x402 authorization validity | New static v1/v2 exact/upto and managed exact signatures expire at the shorter of the provider's requested lifetime or 300 seconds after signing. This bounds transfer authority, independently of HTTP progress. Original accepted offers, actual journaled expiries and existing signatures are preserved; expiry never grants replay. |
 | Payment challenge bodies | One collection under the provider's `max_response_bytes` (16 MiB default); direct low-level managed body-only challenges use the default. V1 body normalization adds no second cap or deadline. |
 | Funding observation owner | Per store: four credit reads, four status reads, four prerequisite-complete unsigned quotes, one serialized source step and one pending quote prerequisite. Each of the four traversal lanes (credit, status, source and quote prerequisite) retains at most 64 acquired rows; independent cursors have no inventory-count cutoff. These bounds protect acquired work, not funding capital. Saturated lane deferrals emit aggregate DEBUG events with static capacities and the active source operation, retaining all pending work. Candidates may not yet be due. Source-step start/finish emit DEBUG with the operation, wallet, starting phase, elapsed seconds and step success; these identify the holder, not its internal wait or swap outcome. |

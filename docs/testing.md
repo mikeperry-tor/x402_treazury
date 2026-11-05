@@ -22,17 +22,16 @@ consumes this classifier; legacy standalone live-Tor socket controls are a separ
 implementation and do not validate it. Unix-only builder mutation remains scoped
 to Unix without changing other platform behavior.
 
-The engineering scope is Linux and macOS. Windows runtime, private-storage,
-supervision and native acceptance work is explicitly deferred by the user; the
-Windows-only workflows and probe drivers have been removed. Preserve historical
-successes and failures in Git/private evidence, without treating partial native
-build or API results as complete privacy, recovery or power-loss qualification.
-Existing portable controls and guarded fallbacks remain, without a Windows support
-claim or a Windows rerun requirement for the remaining milestones.
+The engineering scope is Linux and macOS. Windows implementation/native acceptance
+is owned by the [deferred release plan](plans/deferred/release_followups.md), with
+no Windows support claim or rerun requirement for the selected cleanup. Preserve
+historical Git/private evidence; partial native builds or API results do not
+qualify privacy, recovery or power-loss behavior.
 
-The [macOS ACL and Unix storage follow-up](plans/portability_fixes.md) is separate,
-unfinished work. Normal Unix financial, lifecycle and compiler checks remain
-required. Record exact source/executable/features, commands, diagnostics and
+Supported-platform ACL repair is selected in [review cleanup](plans/review_findings_cleanup.md);
+the [storage plan](plans/portability_fixes.md) retains its evidence and the separate
+Unix namespace assessment. Normal Unix financial, lifecycle and compiler checks
+remain required. Record exact source/executable/features, commands, diagnostics and
 nonzero test counts; retain valid evidence and revalidate affected consumers.
 No live-funded, consensus or Tor qualification follows from these controls.
 

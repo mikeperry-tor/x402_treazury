@@ -3,16 +3,16 @@
 ## Intent, scope and baseline
 
 This focused unfinished plan preserves two storage concerns from the review work
-at `51549a453b5612b02332fa91625358e1ec568c72`. They are separate follow-up work,
-not prerequisites for the remaining financial, catalog, registry and R9 milestone.
-No storage repair described here is implemented or qualified by this plan.
+at `51549a453b5612b02332fa91625358e1ec568c72`. U1 is now selected production work
+owned by C07 of [review findings cleanup](review_findings_cleanup.md); its detailed
+evidence and acceptance contract remain below until implementation handoff. U2
+remains a separate unfinished namespace-authority assessment. No storage repair
+described here is implemented or qualified by either plan.
 
-The user explicitly deferred Windows runtime, private-storage, supervision and
-native acceptance work and removed its dedicated CI/experiment drivers. Windows
-work is deferred, not complete. Portable ErrorKind reporting, unfunded connectivity
-controls, generic fixtures and strict binary vendor verification remain. Existing
-guarded platform fallbacks do not establish Windows support. Optional qualification
-backends and live-funded qualification are outside this work.
+Windows implementation and native acceptance have a separate owner in the
+[deferred release plan](deferred/release_followups.md); supported-platform storage
+repair does not imply Windows support. Portable reporting and fixtures remain.
+Optional qualification backends and live-funded qualification are outside this work.
 
 Preserve existing state formats, locks, exact accepted inputs and bytes, encrypted
 snapshots, financial evidence and SDK-owned spendability. Storage cleanup grants
@@ -58,8 +58,9 @@ review must inspect complete create/open/sidecar/replace/backup/recovery consume
 and accepted financial ownership after the affected corrections. Review recurring
 fixup causes and simpler representations; resolve material findings before
 claiming completion. Evidence must name actual source, host, commands and nonzero
-execution counts. No additional platform lifecycle gate is imposed on the current
-financial/catalog/registry/R9 milestone by this unfinished follow-up.
+execution counts. U1 participates in the cleanup plan's combined storage/network/
+financial gate; U2 requires its own demonstrated scope before additional
+implementation is selected.
 
 ## Owning guidance and primary references
 

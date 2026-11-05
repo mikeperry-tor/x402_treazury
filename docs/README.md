@@ -25,6 +25,11 @@ and CLI usage. Maintained implementation and operational explanations live here:
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
+The [review findings cleanup plan](plans/review_findings_cleanup.md) owns selected
+production fixes and their review gates. [NU7 release readiness](plans/nu7_release_readiness.md)
+owns near-term consensus/dependency security and bridge qualification;
+[deferred release follow-ups](plans/deferred/release_followups.md) own Windows,
+Linux CI and the remaining focused review assessments.
 The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
 discovery, retained financial obligations and the choice between root recovery and
 discarding retired keys.
@@ -42,9 +47,9 @@ Dynamic registry build reuse, publication and read contracts live in
 HTTP cache ownership is maintained in [network policy](network-egress.md), and
 qualification budgets and complete lifecycle snapshots in the
 [technical reference](../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority).
-Separate unfinished work covers
-[macOS ACL and Unix storage](plans/portability_fixes.md); Windows runtime work is
-deferred by user decision.
+The [storage assessment](plans/portability_fixes.md) supplies the macOS ACL work
+selected by review cleanup and retains the separate Unix namespace-authority
+assessment. Windows runtime work remains deferred by user decision.
 The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
@@ -71,3 +76,13 @@ keep an implemented-plan archive. Generated reports, audit inventories and metri
 belong in ignored local or private external storage. Commit durable findings rather
 than dated logs, balances, handoffs or report copies. Financial ledgers remain private
 and unchanged regardless of documentation cleanup.
+
+Accepted-valid unfinished review findings belong in focused active or deferred
+plans with a concrete next action and acceptance evidence, not lingering backlog
+paragraphs in maintained guides. Guides retain truthful current behavior and
+limitations with concise links until those findings are resolved. A rejected
+proposal needs durable rationale rather than a perpetual future-fix note. Moving
+work to a plan does not fix it, waive its release conditions or erase evidence.
+Plans describe work we intend to perform, including bounded assessments with a
+required decision. A hypothetical promise to revisit behavior only if a future bug
+appears is ordinary maintenance, not planned work.

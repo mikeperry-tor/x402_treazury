@@ -269,12 +269,11 @@ Review new and changed help together with its parameter descriptions. Prune
 unnecessary internal details and repetition before delivery; preserve information
 needed for valid requests and correct interpretation of results.
 
-Provider-supplied descriptions, control characters and unfamiliar raw pricing prose
-remain a separate deferred output assessment. Catalog expansion guards do not
-certify that prose. No blanket description cap or sanitization policy was selected;
-future transformations need concrete caller/output evidence and must preserve
-useful API meaning. Historical review observations are not a current inventory of
-affected providers.
+Provider descriptions and pricing prose remain untrusted content; catalog expansion
+guards do not certify their meaning or presentation. The focused output assessment
+belongs to [deferred release work](plans/deferred/release_followups.md). No blanket
+description cap or sanitization policy is selected; transformations need concrete
+caller/output evidence and must preserve useful API meaning.
 
 ## Endpoint instruction placement
 

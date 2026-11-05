@@ -724,8 +724,10 @@ Completed source work is not re-audited or reopened after restart or SDK chain
 replacement. Retained source dispositions and referenced snapshots remain audit
 evidence in current stores; they do not drive a lifetime reconciliation pass.
 Outgoing operations keep their referenced encrypted snapshots after resolution,
-so retained snapshot storage can grow with transaction history. Pruning those
-references is deferred, independently of temporary preflight-copy placement.
+so retained snapshot storage can grow with transaction history. Operator visibility
+is planned in the [deferred release plan](plans/deferred/release_followups.md),
+independently of temporary preflight-copy placement. Pruning is not selected:
+referenced snapshots remain immutable recovery evidence.
 Any future retention change must enumerate preparation, outgoing, expiry and
 recovery-history consumers and preserve their immutable evidence; a hash alone
 is not presumed to replace the snapshot they require.
@@ -907,6 +909,8 @@ pending observation, not a manual-repair warning. The [1Click quote contract](ht
 defines its deadline as the start of refund handling; the [status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
 provides no terminal EXPIRED result. Neither a local deadline nor additional Zcash
 blocks can manufacture that service's final delivery outcome.
+The remaining service-contract and bridge qualification work is owned by
+[NU7 release readiness](plans/nu7_release_readiness.md).
 
 ## Refunds, state and recovery
 
@@ -1308,6 +1312,12 @@ restart. The amount cap applies to each authorization, so one call can incur
 multiple charges. Qualification uses its existing case permit for the sum of all
 attempts, retains every receipt/proof, and checks current run authority before
 starting another unsigned attempt. A later success does not erase earlier unknowns.
+
+This traversal is accepted policy: existing eligible wallets can finish a call
+without waiting for balance reconciliation or funding. Normal operation is expected
+to have roughly two or three sufficiently funded wallets, potentially fewer without
+large wallets. This expectation is not an enforced attempt bound: low/unknown
+estimates remain eligible fallbacks and every signed attempt can still charge.
 
 The first positive initial credit permanently consumes that funding claim, even
 below its nominal minimum. No later debit, partial return, disablement or restart
