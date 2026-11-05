@@ -2,6 +2,7 @@
 use super::{contracts, expansion};
 use anyhow::Result;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 pub(crate) fn json_type(value: &str) -> Result<mime::Mime> {
     let media: mime::Mime = value
@@ -52,6 +53,23 @@ pub(super) fn body(root: &Value, source: &Value, budget: &mut expansion::Budget)
                 .map(|media| (name, media, value))
         })
         .collect();
+    // Mime parsing canonicalizes the essence/type casing. Keep global ordinals
+    // because equally specific declarations previously selected the last key.
+    let mut exact = BTreeMap::<&str, Vec<usize>>::new();
+    let mut type_wildcards = BTreeMap::<&str, Vec<usize>>::new();
+    let mut any_type = Vec::new();
+    for (ordinal, (_, media, _)) in offers.iter().enumerate() {
+        if media.type_() == mime::STAR {
+            any_type.push(ordinal);
+        } else if media.subtype() == mime::STAR {
+            type_wildcards
+                .entry(media.type_().as_str())
+                .or_default()
+                .push(ordinal);
+        } else {
+            exact.entry(media.essence_str()).or_default().push(ordinal);
+        }
+    }
     let mut candidates = Vec::new();
     for (name, media, _) in &offers {
         if media.type_() == mime::STAR || media.subtype() == mime::STAR {
@@ -84,17 +102,31 @@ pub(super) fn body(root: &Value, source: &Value, budget: &mut expansion::Budget)
         let Ok(actual) = json_type(&candidate) else {
             continue;
         };
-        let selected = offers
-            .iter()
-            .filter(|(_, range, _)| matches(range, &actual))
-            .max_by_key(|(_, range, _)| {
+        // Only ranges that can match this essence need consideration. Parameter
+        // subset matching within these buckets remains part of media precedence.
+        let selected = exact
+            .get(actual.essence_str())
+            .into_iter()
+            .flatten()
+            .chain(
+                type_wildcards
+                    .get(actual.type_().as_str())
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(any_type.iter())
+            .copied()
+            .map(|ordinal| (ordinal, &offers[ordinal]))
+            .filter(|(_, (_, range, _))| matches(range, &actual))
+            .max_by_key(|(ordinal, (_, range, _))| {
                 (
                     usize::from(range.type_() != mime::STAR),
                     usize::from(range.subtype() != mime::STAR),
                     range.params().count(),
+                    *ordinal,
                 )
             });
-        let Some((_, _, offer)) = selected else {
+        let Some((_, (_, _, offer))) = selected else {
             continue;
         };
         let projected = match contracts::schema(root, offer.get("schema").unwrap_or(&empty), budget)

@@ -589,3 +589,68 @@ fn used_schema_resource_bases_are_explicitly_unsupported_without_changing_harmle
     assert_eq!(opaque_schema["properties"]["$id"]["type"], "string");
     assert_eq!(opaque_schema["properties"]["v"]["type"], "number");
 }
+
+#[test]
+fn media_buckets_preserve_mixed_case_parameter_ties_and_duplicate_specificity() {
+    let first = "Application/Example+Json; profile=a; level=b";
+    let last = "application/example+json; level=b; profile=a";
+    let mut document = json!({"paths":{"/body":{"post":{"requestBody":{"content":{
+        (first):{"schema":{"type":"number"}},
+        (last):{"schema":{"type":"string"}},
+        "application/*":{"schema":{"$ref":"#/missing"}},
+        "*/*":{"schema":{"$ref":"#/missing"}}
+    }}}}}});
+    let tool = build_tools(&Config::default(), &document, "api")
+        .unwrap()
+        .remove(0);
+    assert_eq!(tool.json_media_type.as_deref(), Some(first));
+    assert_eq!(tool.input_schema["properties"]["body"]["type"], "string");
+    document["paths"]["/body"]["post"]["requestBody"]["content"]["application/example+json; profile=a; profile=a; profile=a"] =
+        json!({"schema":{"type":"array"}});
+    let tool = build_tools(&Config::default(), &document, "api")
+        .unwrap()
+        .remove(0);
+    assert_eq!(tool.json_media_type.as_deref(), Some(first));
+    assert_eq!(tool.input_schema["properties"]["body"]["type"], "array");
+    // Keep parser-accepted any-type ranges with a concrete subtype too.
+    document["paths"]["/body"]["post"]["requestBody"]["content"] = json!({
+        "*/*":{"schema":{"type":"number"}},
+        "*/json":{"schema":{"type":"array"}}
+    });
+    let tool = build_tools(&Config::default(), &document, "api")
+        .unwrap()
+        .remove(0);
+    assert_eq!(tool.json_media_type.as_deref(), Some("application/json"));
+    assert_eq!(tool.input_schema["properties"]["body"]["type"], "array");
+}
+
+#[test]
+fn unrelated_json_essences_do_not_hide_a_later_usable_representation() {
+    let mut content = serde_json::Map::new();
+    for index in 0..32 {
+        content.insert(
+            format!("application/a{index:02}+json"),
+            json!({"schema":{"$ref":"#/missing"}}),
+        );
+    }
+    let selected = "text/z-example+json";
+    content.insert(
+        selected.into(),
+        json!({"schema":{"type":"array","items":{"type":"string"}}}),
+    );
+    content.insert("text/*".into(), json!({"schema":{"type":"number"}}));
+    let document =
+        json!({"paths":{"/body":{"post":{"requestBody":{"required":true,"content":content}}}}});
+    let tool = build_tools(&Config::default(), &document, "api")
+        .unwrap()
+        .remove(0);
+    assert_eq!(tool.json_media_type.as_deref(), Some(selected));
+    let request = tool
+        .route(
+            "https://example.com",
+            json!({"body":["kept"]}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(request.body, Some(json!(["kept"])));
+    assert_eq!(request.json_media_type.as_deref(), Some(selected));
+}
