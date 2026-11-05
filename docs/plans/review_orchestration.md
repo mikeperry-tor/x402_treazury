@@ -8,21 +8,28 @@ plan alone grants no implementation, live-funded qualification, upstream
 submission or spending authority. Starting baseline:
 `d557d82a70c6ef9bbe8a9936f696d12bf2cd2404`, including randomized funding and
 qualification changes from `main` at `a626b99898d21c91552813a8b2413f48d3a1fede`.
+The current integration baseline is `4627301b123ea6773b68f142aa4e73b0098a9528`,
+after an unsquashed rebase onto `main` at `88cc7bebef364e9dfaaff9197596df3df438a424`.
 Reconfirm the actual integration baseline before each implementation milestone.
 
 O0 and the selected replacement-authority milestone started from
 `d220eb95f766f98afe95dd8c2551778d993f5e6b`. Their replacement-authority implementation
 and scoped child gates
 are complete, including the publisher-consumer correction accepted below. Catalog
-expansion G1 and indexer recovery G1/G2/G3 are complete. Financial GF is accepted
-through `68a93c0b` and reopens after F3; remaining child work and whole-branch
-GR/GI are unfinished. The completed children have yielded the maintained
+expansion G1 and indexer recovery G1/G2/G3 are complete. Catalog combined G2
+is independently accepted through `4627301b`; execution G2 and financial GF are
+accepted with the source-scoped evidence below. Registry/R9 child work and
+whole-branch GR/GI remain unfinished. Historical F1/F2 and portable-benefit SHA
+references below identify preserved pre-rebase commits; their earlier runs retain
+only the verified unchanged source scope, not a claimed rerun on the rebased SHA.
+The completed children have yielded the maintained
 [funding/source contract](../wallet-rotation.md#funding-and-source-safety) and
 [SDK recovery guide](../zingo-integration.md), with
 [lifecycle coverage](../../tests/LIFECYCLE.md). The fixture validation foundation
 below is complete through focused continuations.
 The inherited publisher-completion finding is corrected without changing settled
-replacement authority. Execution changes in financial F3 require renewed GF.
+replacement authority. Execution acceptance is recorded at F3 below; later
+material execution/authority changes reopen the affected financial concerns.
 
 The child plans own implementation commits, tests and permanent documentation;
 this document owns ordering, shared ownership and integration. It introduces no
@@ -77,11 +84,11 @@ acceptance evidence and documentation updates. Qualify references explicitly:
 | Milestone / lane | Child commits and default order | Integration acceptance |
 | --- | --- | --- |
 | O0 / coordination | Complete for the selected replacement scope: tracked baseline, preserved local changes, shared-worktree ownership, serialized builds and independent design review recorded in private evidence. | Material design findings resolved before implementation. O0 is preparation, not another application feature commit. |
-| F1 / financial | Replacement authority and publisher-consumer correction complete. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`; publisher fixups `e9d3dcb4`, `9fd610ce`, `2ef9dcc0`. Contracts live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 and the scoped publisher-consumer gate accepted exact authority, archive/reconfirmation and actual publication/actor/funding/close chains. Confirmed deposit plus FAILED/REFUNDED grants no replacement; late fulfillment retains original liabilities. Wider GF is accepted after F2 and reopens after F3. |
-| C1 / catalog | [Expansion/schema safety](catalog_safety_and_schema.md): C1 and its G1 accepted through `a50d4f7a`; C2 remains next in this child. | All ingestion/direct-Value paths protected. C2 must preserve faithful generated schemas/outbound serialization and reopen affected expansion concerns at combined G2. |
-| F2 / financial | Complete: I1 `0baed039`, I2 `8fa105fa` and reviewed fixups, I3 `7e5648be`. Contracts live in [SDK recovery](../zingo-integration.md) and [wallet reconciliation](../wallet-rotation.md#recovery-and-reconciliation-policy). | G1/G2/G3 and wider GF accepted through `68a93c0b`. Stale-only tips preserve observations; future completion metadata cannot block current SDK funds. Actual disclosed originals retain exact liabilities through cancellation, restart and genuine replacement. F3 reopens GF. |
-| C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, integrated after catalog C1 settles construction contracts. | Correct invalidation, atomic durable publication and progressing readers; no caching around expansion safety. Child gates pass. |
-| F3 / financial | [Proving execution](proving_execution.md), T1 then T2, integrated after financial F2. | Accepted principal/fee authority, proposal exclusion and owned calculation completion survive cancellation/restart; complete GF again for execution changes. |
+| F1 / financial | Replacement authority and publisher-consumer correction complete. funding/F1 `47b30aa8` with fixups `fdb71bba`, `625d6d6b`; funding/F2 `ba368fe6` with fixup `88213cab`; publisher fixups `e9d3dcb4`, `9fd610ce`, `2ef9dcc0`. Contracts live in the [funding guide](../wallet-rotation.md#funding-and-source-safety). | G1/G2 and the scoped publisher-consumer gate accepted exact authority, archive/reconfirmation and actual publication/actor/funding/close chains. Confirmed deposit plus FAILED/REFUNDED grants no replacement; late fulfillment retains original liabilities. Historical wider GF was accepted after F2; renewed execution G2/GF is recorded at F3. |
+| C1 / catalog | Catalog C1/C2 and reviewed fixups implement checked expansion and faithful schema/request projection. Contracts live in [architecture](../architecture.md#catalog-configuration-and-execution), [OpenAPI inputs](../configuration.md#openapi-inputs-and-request-bodies), [source guidance](../agent-sources.md) and [provider maintenance](../provider-updates.md). | Combined G2 independently accepted through `4627301b`: all prior commits/fixups and ingestion→selection→MCP→route→payment consumers, iterative raw-candidate closure, override parity, partial readiness/strict completeness and consumer-visible omissions reviewed. Current and carried evidence is scoped below; no live provider qualification. |
+| F2 / financial | Complete: I1 `0baed039`, I2 `8fa105fa` and reviewed fixups, I3 `7e5648be`. Contracts live in [SDK recovery](../zingo-integration.md) and [wallet reconciliation](../wallet-rotation.md#recovery-and-reconciliation-policy). | G1/G2/G3 and wider GF accepted through `68a93c0b`. Stale-only tips preserve observations; future completion metadata cannot block current SDK funds. Actual disclosed originals retain exact liabilities through cancellation, restart and genuine replacement. Execution G2/GF was renewed at F3. |
+| C2 / catalog | [Registry efficiency](registry_efficiency.md), D1 then D2, remains unfinished. Integrate after catalog combined G2 settles construction and acquired-hint/canonical-description contracts. | Correct invalidation, endpoint principal/payer authority, durable atomic publication and progressing readers; no caching around expansion safety or rendered price hints. Each child gate remains required. |
+| F3 / financial | T1 `6a4ea635`, T2 `dbf51979` and reviewed fixups implement lazy public parameter reuse and one retained blocking calculation/publication owner. Contracts live in [SDK boundaries](../zingo-integration.md#application-sdk-boundaries), [wallet authority](../wallet-rotation.md#funding-limits-and-fees), [runtime architecture](../architecture.md) and [lifecycle tests](../../tests/LIFECYCLE.md). | T2G2/GF independently accepted: original fixed/ranged quote authority, same-runtime MCP progress and cancellation/panic/runtime-drop/restart chains reviewed. Four proving and 53 lifecycle passes retain verified unchanged source scope across rebase; actual post-rebase treasury/sync/CLI consumers add 36 passes and one ignored consensus case. Missing results never authorize replay. |
 | P1 / portable benefits | Retain `4fff946f`, `574e0b38`/`5251194e` portable ErrorKind classification and unfunded native control wiring, generic fixture improvements and strict binary vendor reconstruction. | Existing scoped evidence remains valid where unchanged. Windows runtime/native acceptance is deferred, not complete; historical partial results grant no storage, recovery or confinement claim. |
 | Storage / separate follow-up | [macOS ACL and Unix storage](portability_fixes.md) remain unfinished outside this milestone. Windows P2/P3/P4 runtime, storage, supervision and native gates are deferred by user decision. | No shared-filesystem framework or native GS/lifecycle gate is required before the remaining important lanes. GR must retain the confirmed macOS gap and unresolved Unix namespace risk explicitly. |
 | R0 / R9 follow-up | [Focused R9 plan](hot_path_efficiency.md) prepared in this separate R0 documentation boundary before implementation. Scoping proceeds independently. | Fresh consumer/query audit separates qualification budget/status work from ordinary regex/client-cache work; ordered commits, authority-preserving tests and review gates agreed. Do not presume a cached monetary ledger or measured speedup. |
@@ -171,6 +178,31 @@ improvements and existing guarded fallbacks remain. The separate macOS ACL gap
 and Unix initial-alias concern remain unfinished, not silently resolved.
 No live-funded, consensus or live Tor qualification ran. Later changes reopen
 affected required checks and combined concerns.
+
+Catalog combined G2 is independently accepted through `4627301b`: the focused
+catalog stage passed 69 cases, provider catalogs 41, integration preparation 251
+with eight ignored, startup 19 with one ignored, and compatibility 30. Library
+evidence is an independently checked union of 1,171 passes and 21 ignored cases
+(1,192 listed), assembled from source-matched stages and corrected affected cases,
+not a claim that one fresh complete library run produced that union. Current full
+all-target Clippy passed; the production compiler pass retains its unchanged
+production-source scope. Current whole-source complexity review is accepted.
+
+Execution G2/financial GF is independently accepted: four proving and 53 lifecycle
+passes were executed before the rebase and retain verified unchanged financial
+SDK/prover/actor/Store source scope. Actual post-rebase public consumers passed
+36 cases (treasury 2, treasury_sync 27, wallet_workflow 7), with one consensus case
+ignored. Source review preserves PH1 hint-sharing changes as advisory and distinct
+from financial evidence identity and signing authority. Prior accepted runtime
+results are not relabeled as executions on the new baseline. The known macOS
+compact-unwind linker warning remains recorded.
+
+The complete offline provider preset preserves all 22 original reviewed requests,
+63 cases, 23 sources and the unchanged API budget; no live qualification is inferred.
+Forty other default-target paths remain unrun. No complete `make check` or final GI
+is claimed. Preserve valid scoped evidence and finish applicable stages as later
+registry/R9 changes require. Windows runtime is deferred; macOS ACL and Unix initial
+namespace concerns remain a separate unfinished follow-up, not fixed by these gates.
 
 ## Independent review gates and completion
 

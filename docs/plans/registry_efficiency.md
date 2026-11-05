@@ -11,7 +11,12 @@ Read [agent source authority/publication](../agent-sources.md),
 [source distribution](../configuration.md#source-tool-distribution),
 [resource policy](../local-resource-limits.md), [testing](../testing.md) and
 [discovery improvements](discovery_improvements.md). Coordinate shared snapshot
-work with that plan and [catalog safety](catalog_safety_and_schema.md).
+work with that plan and the maintained
+[catalog construction contract](../architecture.md#catalog-configuration-and-execution).
+[Provider maintenance](../provider-updates.md) uses the same production compiler;
+accepted source bytes/configuration remain the registry inputs. Reuse canonical
+unbound builds; acquired cache-hint handles and current rendered descriptions
+remain with bound runtime views.
 Preserve listener principal ownership, original accepted document/payment context,
 generation-bound search, stable names, persistence-before-publication, crash/restart
 recovery and help-cache compatibility. Registration allocates/funds no wallet.

@@ -34,12 +34,15 @@ implementation lanes, integration order and shared review gates. The
 working reference material for those gates. Completed replacement authority and
 indexer recovery are maintained in the
 [funding/source contract](wallet-rotation.md#funding-and-source-safety) and
-[SDK recovery guide](zingo-integration.md).
-The remaining child plans cover
-[catalog expansion and schema correctness](plans/catalog_safety_and_schema.md),
-[registry efficiency](plans/registry_efficiency.md),
-[hot-path and qualification history](plans/hot_path_efficiency.md),
-[proving execution](plans/proving_execution.md). Separate unfinished work covers
+[SDK recovery guide](zingo-integration.md). Catalog construction and faithful
+request contracts live in [architecture](architecture.md#catalog-configuration-and-execution),
+[OpenAPI inputs](configuration.md#openapi-inputs-and-request-bodies) and
+[provider maintenance](provider-updates.md). Calculation ownership and lazy public
+proving parameters live in the [SDK boundary](zingo-integration.md#application-sdk-boundaries)
+and [wallet guide](wallet-rotation.md#funding-limits-and-fees).
+The remaining child plans cover [registry efficiency](plans/registry_efficiency.md)
+and [hot-path and qualification history](plans/hot_path_efficiency.md).
+Separate unfinished work covers
 [macOS ACL and Unix storage](plans/portability_fixes.md); Windows runtime work is
 deferred by user decision.
 The maintained
