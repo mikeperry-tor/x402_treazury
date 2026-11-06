@@ -1339,7 +1339,7 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
                 TransactionPresence::Confirmed { height } => {
                     TransactionPresence::Confirmed { height: *height }
                 }
-                _ => TransactionPresence::Unknown,
+                _ => anyhow::bail!("fixture lookup unavailable"),
             })
         }
     }
@@ -1601,6 +1601,20 @@ async fn expired_original_closes_after_another_canonical_transaction_spends_its_
 
 #[tokio::test]
 async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_new_deposit() {
+    struct UncertainLookup {
+        unavailable: bool,
+        calls: usize,
+    }
+    impl TransactionSubmission for UncertainLookup {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("source observation must not submit");
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            self.calls += 1;
+            ensure!(!self.unavailable, "fixture lookup unavailable");
+            Ok(TransactionPresence::Unknown)
+        }
+    }
     struct NoLookup;
     impl TransactionSubmission for NoLookup {
         async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
@@ -1643,6 +1657,61 @@ async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_n
         .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
         .await
         .unwrap();
+    owner.sync_once(&stop).await.unwrap();
+    let operation = job.operation_id.clone();
+    let original_inputs = store
+        .call(move |s| s.prepared_inputs(&operation))
+        .await
+        .unwrap();
+    // Below expiry, lookup failures remain failures despite a healthy shared
+    // scan. No endpoint is available to a mistaken rescan or tip probe here.
+    let settings = owner.sync_settings.take();
+    tokio::time::pause();
+    let revision = owner.revision;
+    let due = owner.observation.due();
+    let mut lookup = UncertainLookup {
+        unavailable: true,
+        calls: 0,
+    };
+    for unavailable in [true, false] {
+        lookup.unavailable = unavailable;
+        let result = owner
+            .recover_funding_observed(job.id.clone(), 3, true, &mut lookup, &stop, true)
+            .await;
+        if unavailable {
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "fixture lookup unavailable"
+            );
+        } else {
+            assert_eq!(
+                result.unwrap().outcome,
+                recovery::RecoveryOutcome::Waiting("waiting_for_transaction_expiry")
+            );
+        }
+        assert_eq!(owner.revision, revision);
+        assert_eq!(owner.observation.due(), due);
+        let (id, operation, inputs, bytes) = (
+            job.id.clone(),
+            job.operation_id.clone(),
+            original_inputs.clone(),
+            prepared.bytes().to_vec(),
+        );
+        store
+            .call(move |s| {
+                assert_eq!(s.funding_recovery_count(&id)?, 0);
+                assert_eq!(s.operation(&operation)?.attempts, 1);
+                assert!(s.operation_pending(&operation)?);
+                assert_eq!(s.prepared_inputs(&operation)?, inputs);
+                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), bytes);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(lookup.calls, 2);
+    tokio::time::resume();
+    owner.sync_settings = settings;
     {
         let mut chain = net.chain.write().await;
         let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();

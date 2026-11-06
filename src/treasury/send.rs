@@ -518,11 +518,13 @@ impl Treasury {
             // proof. Unknown grants no absence, release or submission authority.
             return Ok(TransactionPresence::Unknown);
         }
+        // Failed lookup acquisition/validation must retain Source error backoff;
+        // SDK proofs above remain independent of this optional observation.
         let presence = tokio::select! {
             biased;
-            _ = stop.cancelled() => TransactionPresence::Unknown,
-            result = sender.lookup(&prepared) => result.unwrap_or(TransactionPresence::Unknown),
-        };
+            _ = stop.cancelled() => Ok(TransactionPresence::Unknown),
+            result = sender.lookup(&prepared) => result,
+        }?;
         if let TransactionPresence::Confirmed { height } = presence {
             let wallet = self
                 .client

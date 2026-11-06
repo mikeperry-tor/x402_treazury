@@ -598,11 +598,12 @@ Qualification has no separate ZEC spending budget. Its `total_test_budget_usdc`
 limits API authorizations using a running durable total, independently of funding.
 
 `funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
-local funding inventory/owner scheduling and existing per-job jitter. Each
-recurring source, provider-status or Base credit observation starts at least
-60 seconds after the previous observation for that work completes; configured
-polling does not shorten that floor or delay successful local preparation and
-submission handoffs. `funding.swap_timeout_seconds` defaults to 1,800 seconds
+local funding inventory/owner scheduling and successful recurring source and
+provider-status observations after completion, plus existing per-job jitter.
+Failed observations retain independent error backoff with a 60-second floor,
+bounded by 300 seconds before jitter. Base credit acquisitions retain their
+independent 60-second completion floor and backoff. Successful local preparation
+and submission handoffs remain immediate. `funding.swap_timeout_seconds` defaults to 1,800 seconds
 from the first durable broadcast intent and reports degraded health without
 abandoning accepted work or granting replay authority. See the
 [wallet observation policy](wallet-rotation.md#wallet-observation-policy) for
@@ -643,10 +644,12 @@ amounts are separate. Offline inspection cannot infer migration cost or usable
 capacity.
 None of these inspection commands allocates keys or funds.
 
-`funding.quote_deadline_seconds` defaults to 3,600 seconds and preserves explicit
+`funding.quote_deadline_seconds` defaults to 1,800 seconds and preserves explicit
 operator overrides. It requests a quote window; the returned deadline governs
 preparation/disclosure independently of the SDK's consensus-derived signed block
-expiry. Existing accepted deadlines and signatures remain unchanged on restart.
+expiry. Existing accepted deadlines and signatures remain unchanged on restart. A shorter
+requested window does not guarantee settlement, refund completion or abandonment
+within an hour; unresolved provider work remains owned.
 
 ### Reserve sizing and fragmentation
 
@@ -2085,8 +2088,10 @@ obtains a fresh challenge and enforces its spend cap before signing.
 Remove these keys even if their old values were zero. Balances are advisory; SDK
 input selection and protocol deadlines govern spending. Treasury discovery is
 requested at available-capability startup, explicit sync, enabled funding demand
-and validated pending source/shielding work. Recurring observations have a
-60-second completion floor and independent error backoff up to 300 seconds; idle
-treasury performs no balance polling. Local configured polling/health thresholds do
-not shorten network cadence or delay valid preparation/submission handoffs. See the
+and validated pending source/shielding work. Successful treasury scans use the
+SDK consensus block interval at the next established scanned height; failures
+retain 90/180/300-second backoff. Successful source/provider observations use
+configured polling plus jitter, with independent failure backoff; Base acquisitions
+retain their 60-second completion floor. Idle treasury performs no balance polling.
+Health thresholds do not change these schedules or delay valid handoffs. See the
 [wallet observation policy](wallet-rotation.md#wallet-observation-policy).

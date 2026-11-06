@@ -84,8 +84,8 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
             }
         }
         "GetTransaction" => {
-            if mode == 6 {
-                status = "5";
+            if mode == 6 || mode == 15 {
+                status = if mode == 6 { "5" } else { "14" };
                 vec![]
             } else {
                 [
@@ -108,7 +108,7 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
             let call = s.blocks.fetch_add(1, Ordering::SeqCst);
             // Fork during lookup, absent tx, wrong height, malformed hash,
             // and a failed canonical recheck must all remain unresolved.
-            if mode == 13 && call > 0 {
+            if mode == 16 || (mode == 13 && call > 0) {
                 status = "14";
             }
             [
@@ -257,17 +257,11 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
         );
     }
     assert_eq!(state.sends.lock().unwrap().len(), 3);
+    let attempts = store.operation("op").unwrap().attempts;
     for (mode, want) in [
         (0, TransactionPresence::Mempool),
         (6, TransactionPresence::Absent),
-        (7, TransactionPresence::Unknown),
         (8, TransactionPresence::Confirmed { height: 490 }),
-        (9, TransactionPresence::Unknown),
-        (10, TransactionPresence::Unknown),
-        (11, TransactionPresence::Unknown),
-        (12, TransactionPresence::Unknown),
-        (13, TransactionPresence::Unknown),
-        (14, TransactionPresence::Unknown),
     ] {
         state.mode.store(mode, Ordering::SeqCst);
         state.blocks.store(0, Ordering::SeqCst);
@@ -276,6 +270,23 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
             store.operation_pending("op").unwrap(),
             "lookup alone never settles accounting"
         );
+    }
+    for mode in [4, 7, 9, 10, 11, 12, 13, 14, 15, 16] {
+        state.mode.store(mode, Ordering::SeqCst);
+        state.blocks.store(0, Ordering::SeqCst);
+        let error = sender.lookup(&prepared).await.unwrap_err();
+        assert!(!format!("{error:#}").contains("DUMMY_SUBMISSION_SECRET"));
+        if mode == 15 {
+            assert!(
+                error
+                    .to_string()
+                    .contains("lookup unavailable (Unavailable)")
+            );
+        }
+        assert!(store.operation_pending("op").unwrap());
+        assert_eq!(store.operation("op").unwrap().attempts, attempts);
+        assert_eq!(store.prepared_bytes("op").unwrap().as_slice(), raw);
+        assert_eq!(state.sends.lock().unwrap().len(), 3);
     }
     state.mode.store(3, Ordering::SeqCst);
     let intent =

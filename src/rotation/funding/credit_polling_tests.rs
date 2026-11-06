@@ -139,6 +139,10 @@ async fn accepted_work_resumes_credit_immediately_then_waits_a_minute_despite_si
             1,
             "{stage}: first observation is immediate"
         );
+        if stage != "preparation" {
+            assert_eq!(status_events.try_recv().unwrap(), job.id);
+            assert!(status_events.try_recv().is_err());
+        }
         for epoch in [1002, 1010, 1030, 1059] {
             worker.tick(epoch).await.unwrap();
             assert_eq!(
@@ -146,13 +150,12 @@ async fn accepted_work_resumes_credit_immediately_then_waits_a_minute_despite_si
                 1,
                 "{stage}: credit polling must retain its own due time"
             );
-        }
-        if stage != "preparation" {
-            let mut statuses = 0;
-            while status_events.try_recv().is_ok() {
-                statuses += 1;
+            if stage != "preparation" {
+                // Polling is one second plus at most one second of jitter.
+                // Each tick is due for status while Base retains its minute.
+                assert_eq!(status_events.try_recv().unwrap(), job.id);
+                assert!(status_events.try_recv().is_err());
             }
-            assert_eq!(statuses, 1, "provider status retains its own minute floor");
         }
         worker.tick(1061).await.unwrap();
         assert_eq!(

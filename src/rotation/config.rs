@@ -47,7 +47,7 @@ fn deadline() -> u64 {
     1800
 }
 fn quote_window() -> u64 {
-    3600
+    1800
 }
 const DEFAULT_SMALL_MINIMUM_USDC: &str = "2.00";
 const DEFAULT_SMALL_MAXIMUM_USDC: &str = "5.00";
@@ -568,7 +568,7 @@ pub struct FundingConfig {
     pub slippage_bps: u32,
     #[serde(default = "poll")]
     pub poll_seconds: u64,
-    /// Health warning only: reconciliation continues with a 60-second polling floor.
+    /// Health reporting only; reconciliation and its independent polling continue.
     #[serde(default = "deadline")]
     pub swap_timeout_seconds: u64,
     #[serde(default = "quote_window")]

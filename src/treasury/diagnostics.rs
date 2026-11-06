@@ -574,7 +574,7 @@ mod tests {
         }
         let mut schedule = crate::treasury::observation::Schedule::default();
         for seconds in [90, 180, 300, 300, 300] {
-            schedule.complete(false);
+            schedule.complete(false, std::time::Duration::from_secs(75));
             let remaining = schedule
                 .due()
                 .saturating_duration_since(tokio::time::Instant::now());

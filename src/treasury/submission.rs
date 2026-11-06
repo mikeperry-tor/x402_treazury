@@ -139,72 +139,67 @@ impl TransactionSubmission for GrpcSubmission {
         let _identity = transaction.network_identity()?;
         let raw = decode(transaction.bytes())?;
         let hash = raw.txid().as_ref().to_vec();
-        let result: Result<_> = async {
-            let mut client = self
-                .connect(&self.indexer, &transaction.network_identity()?)
-                .await?;
-            let found = match client
-                .get_transaction(
-                    TxFilter {
-                        hash: hash.clone(),
-                        ..Default::default()
-                    },
-                    request_timeout(),
-                )
-                .await
-            {
-                Ok(found) => found,
-                Err(error) if error.code() == tonic::Code::NotFound => {
-                    return Ok(TransactionPresence::Absent);
-                }
-                Err(_) => return Ok(TransactionPresence::Unknown),
-            };
-            ensure!(
-                found.data == transaction.bytes(),
-                "lookup returned conflicting bytes"
-            );
-            if found.height == 0 {
-                return Ok(TransactionPresence::Mempool);
+        let mut client = self
+            .connect(&self.indexer, &transaction.network_identity()?)
+            .await?;
+        let found = match client
+            .get_transaction(
+                TxFilter {
+                    hash: hash.clone(),
+                    ..Default::default()
+                },
+                request_timeout(),
+            )
+            .await
+        {
+            Ok(found) => found,
+            Err(error) if error.code() == tonic::Code::NotFound => {
+                return Ok(TransactionPresence::Absent);
             }
-            ensure!(
-                found.height <= u64::from(u32::MAX),
-                "transaction is not on the main chain"
-            );
-            let block = client
-                .get_block(
-                    BlockId {
-                        height: found.height,
-                        hash: vec![],
-                    },
-                    request_timeout(),
-                )
-                .await
-                .map_err(|_| anyhow::anyhow!("confirmation block unavailable"))?;
-            ensure!(
-                block.height == found.height
-                    && block.hash.len() == 32
-                    && block.vtx.iter().any(|t| t.txid == hash),
-                "transaction absent from confirmation block"
-            );
-            let check = client
-                .get_block(
-                    BlockId {
-                        height: found.height,
-                        hash: vec![],
-                    },
-                    request_timeout(),
-                )
-                .await
-                .map_err(|_| anyhow::anyhow!("confirmation recheck unavailable"))?;
-            ensure!(check.hash == block.hash, "confirmation block changed");
-            Ok(TransactionPresence::Confirmed {
-                height: found.height,
-            })
+            Err(error) => {
+                anyhow::bail!("transaction lookup unavailable ({:?})", error.code());
+            }
+        };
+        ensure!(
+            found.data == transaction.bytes(),
+            "lookup returned conflicting bytes"
+        );
+        if found.height == 0 {
+            return Ok(TransactionPresence::Mempool);
         }
-        .await;
-        Ok(match result {
-            Ok(presence) => presence,
-            _ => TransactionPresence::Unknown,
+        ensure!(
+            found.height <= u64::from(u32::MAX),
+            "transaction is not on the main chain"
+        );
+        let block = client
+            .get_block(
+                BlockId {
+                    height: found.height,
+                    hash: vec![],
+                },
+                request_timeout(),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("confirmation block unavailable"))?;
+        ensure!(
+            block.height == found.height
+                && block.hash.len() == 32
+                && block.vtx.iter().any(|t| t.txid == hash),
+            "transaction absent from confirmation block"
+        );
+        let check = client
+            .get_block(
+                BlockId {
+                    height: found.height,
+                    hash: vec![],
+                },
+                request_timeout(),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("confirmation recheck unavailable"))?;
+        ensure!(check.hash == block.hash, "confirmation block changed");
+        Ok(TransactionPresence::Confirmed {
+            height: found.height,
         })
     }
 }

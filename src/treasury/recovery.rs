@@ -798,8 +798,8 @@ mod tests {
             })
             .await
             .unwrap();
-        owner.observation.complete(false);
-        owner.observation.complete(false);
+        owner.observation.complete(false, Duration::ZERO);
+        owner.observation.complete(false, Duration::ZERO);
         let due = owner.observation.due();
         let retained = recovery_rows(dir.path(), true);
         for seconds in [60, 59] {

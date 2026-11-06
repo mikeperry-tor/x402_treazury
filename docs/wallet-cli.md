@@ -350,8 +350,9 @@ local testing. Account 0's shielded funds are used, with `confirmations` (defaul
 
 Available treasury serving requests one background ZEC scan after listeners bind.
 Further scans need enabled unfilled funding claims or validated pending source or
-shielding transactions. Each recurring scan starts at least 90 seconds after the
-previous scan completes, with independent failure backoff bounded by 300 seconds.
+shielding transactions. After success, the next scan uses the SDK consensus block
+interval at the next established scanned height (75 seconds before NU7, 25 after),
+without another tip query. Failures retain independent 90/180/300-second backoff.
 New reserve demand wakes discovery; idle serving does not watch for deposits.
 The [wallet observation policy](wallet-rotation.md#wallet-observation-policy)
 describes the Store-only exception when the SDK/source capability is unavailable.
@@ -527,10 +528,10 @@ Fresh allocations and unsigned funding quotes do not start Base credit polling.
 Actual preparation reads its exact destination once after the SDK provides a valid
 spendable proposal. Accepted preparation and signed or previously submitted work
 retain their own credit lane across restart, using the recipient acquisition's
-existing due time without another credit backoff or jitter. Each recurring Base,
-source or NEAR status observation starts at
-least 60 seconds after the previous observation for that work completes, plus
-existing jitter where applicable. With default `poll_seconds = 5`, per-job jitter
+existing due time without another credit backoff or jitter. Recurring Base reads
+retain their 60-second completion floor. Successful source and NEAR status checks
+use `poll_seconds` after completion, plus existing jitter; failures retain the
+independent 60-second floor and backoff. With default `poll_seconds = 5`, per-job jitter
 is at most five seconds. The floor is not a settlement deadline; canonical
 confirmation/expiry and first-positive credit retain their separate stop rules.
 
@@ -599,8 +600,8 @@ It accepts one mainnet transparent recipient, uses account 0's
 shielded inputs, rejects multi-step transactions, and verifies the resulting
 recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
 operation UUID, source/fee safeguards and quote deadline.
-`funding.quote_deadline_seconds` requests a 3,600-second window by default;
-the returned quote can be shorter and remains authoritative. Preparation and the
+`funding.quote_deadline_seconds` requests a 1,800-second window by default;
+the returned quote can differ and remains authoritative. Preparation and the
 first submission require an unexpired returned deadline, without an extra local
 margin. The requested window is a preference. The chain-specific 1Click watcher
 arrival/confirmation and late-refund contract remains unresolved; local broadcast
@@ -800,10 +801,11 @@ existing Base wallets remain usable. Background funding observations retain inde
 failure backoff bounded by five minutes, with existing per-job jitter for source
 and provider checks. Base credit uses the shared recipient acquisition schedule;
 cached errors do not count as new recurring observations. Successful observations
-reset only their own error streak. Each recurring source, provider
-status or Base credit check starts at least one minute after that work's previous
-check completes. `poll_seconds` controls local inventory/owner scheduling and
-jitter; it cannot authorize faster network observations. Successful local quote,
+reset only their own error streak. Successful recurring source and provider
+status checks use `poll_seconds` after completion, plus jitter; failed checks
+retain their independent minute floor and backoff. Base credit keeps its shared
+recipient acquisition's 60-second floor. `poll_seconds` also controls local
+inventory/owner scheduling. Successful local quote,
 preparation and submission handoffs remain immediate. Failed checks retain pending
 ownership. Saved estimates never grant payment authority or prohibit an otherwise
 authorized signing attempt.

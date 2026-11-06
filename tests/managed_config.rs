@@ -610,7 +610,7 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
     let funding = roundtrip::<FundingConfig>("");
     assert_eq!(funding["auto_fund"], true);
     assert_eq!(funding["base_confirmations"], 12);
-    assert_eq!(funding["quote_deadline_seconds"], 3600);
+    assert_eq!(funding["quote_deadline_seconds"], 1800);
     let overridden = roundtrip::<FundingConfig>("quote_deadline_seconds=7200");
     assert_eq!(overridden["quote_deadline_seconds"], 7200);
 }

@@ -2691,11 +2691,13 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                 })
                 .await
                 .unwrap();
-                // Inventory recovery does not shorten the provider's minute
-                // interval. Its next due read still progresses independently of
-                // the held source and credit acquisitions.
-                assert!(status_events.try_recv().is_err());
+                // Healthy status reads may already be due during real Store
+                // fault recovery. Observe fresh progress after it, independently
+                // of the retained source and credit acquisitions.
+                while status_events.try_recv().is_ok() {}
                 tokio::time::pause();
+                // Cross the independent credit window too: held acquisitions
+                // must not duplicate even while provider status progresses.
                 tokio::time::advance(std::time::Duration::from_secs(61)).await;
                 tokio::time::resume();
                 let observed = event(&mut status_events).await;
@@ -3055,7 +3057,7 @@ mod credit_polling;
 mod diagnostics;
 
 #[test]
-fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
+fn source_and_status_polling_and_failed_source_backoff_survive_local_wakes() {
     let dir = tempfile::tempdir().unwrap();
     let mut raw = Store::create(
         &dir.path().join("state"),
@@ -3075,7 +3077,7 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
     let job = raw.funding_jobs().unwrap().remove(0);
     let mut state = State::default();
     let active = BTreeSet::new();
-    for kind in [Kind::Source, Kind::Status, Kind::Quote] {
+    for kind in [Kind::Source, Kind::Status, Kind::Credit, Kind::Quote] {
         let key = Key {
             operation: job.operation_id.clone(),
             kind,
@@ -3088,20 +3090,27 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
             (&job.id, &job.operation_id),
             kind,
             1000,
-            RetrySchedule::Poll(1, false),
+            RetrySchedule::Poll(5, true),
             None,
             None,
         );
-        if kind != Kind::Quote {
-            assert_eq!(
-                state.admit(&key, Some(&job.phase), 1059, &active),
-                Admission::NotDue
-            );
-            assert_eq!(
-                state.admit(&key, Some(&job.phase), 1061, &active),
-                Admission::Ready
-            );
-        }
+        let jitter = job.id.bytes().map(u64::from).sum::<u64>() % 6;
+        // Quote timeout remains independent of faster successful source/status polls.
+        let due =
+            1000 + if matches!(kind, Kind::Credit | Kind::Quote) {
+                60
+            } else {
+                5
+            } + jitter;
+        assert_eq!(state.records[&key].due, due);
+        assert_eq!(
+            state.admit(&key, Some(&job.phase), due - 1, &active),
+            Admission::NotDue
+        );
+        assert_eq!(
+            state.admit(&key, Some(&job.phase), due, &active),
+            Admission::Ready
+        );
     }
     let source = Key {
         operation: job.operation_id.clone(),
@@ -3111,11 +3120,13 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
         (&job.id, &job.operation_id),
         Kind::Source,
         1100,
-        RetrySchedule::Poll(100, false),
+        RetrySchedule::Poll(5, false),
         Some("source observation unavailable".into()),
         None,
     );
     let due = state.records[&source].due;
+    let jitter = job.id.bytes().map(u64::from).sum::<u64>() % 6;
+    assert_eq!(due, 1160 + jitter);
     state.complete(
         (&job.id, &job.operation_id),
         Kind::Status,
@@ -3143,6 +3154,18 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
         state.admit(&source, Some(&job.phase), due - 1, &active),
         Admission::NotDue
     );
+    state.complete(
+        (&job.id, &job.operation_id),
+        Kind::Source,
+        due,
+        RetrySchedule::Poll(5, false),
+        Some("source observation unavailable".into()),
+        None,
+    );
+    // The second exponential step is still below the existing 60-second floor.
+    assert_eq!(state.records[&source].due, due + 60 + jitter);
+    assert_eq!(state.records[&source].streak, 2);
+    let due = state.records[&source].due;
     // Only a successful completion of this exact source clears its failure.
     state.complete(
         (&job.id, &job.operation_id),
@@ -3280,13 +3303,13 @@ async fn successful_quote_prepare_submit_handoffs_do_not_wait_for_observation_co
         ["prerequisite", "prepare", "submit"]
     );
     let before = events.lock().unwrap().len();
-    worker.tick(1059).await.unwrap();
-    assert_eq!(
-        events.lock().unwrap().len(),
-        before,
-        "accepted source waits at least a minute"
-    );
-    worker.tick(1061).await.unwrap();
+    let poll = worker.poll_seconds.max(1);
+    let due = 1000 + poll + job.id.bytes().map(u64::from).sum::<u64>() % (poll + 1);
+    for epoch in [1000, due - 1] {
+        worker.tick(epoch).await.unwrap();
+        assert_eq!(events.lock().unwrap().len(), before);
+    }
+    worker.tick(due).await.unwrap();
     assert_eq!(events.lock().unwrap().last(), Some(&"source"));
     let operation = job.operation_id.clone();
     store
@@ -3302,7 +3325,7 @@ async fn successful_quote_prepare_submit_handoffs_do_not_wait_for_observation_co
 }
 
 #[tokio::test]
-async fn successful_no_progress_keeps_the_source_observation_floor() {
+async fn successful_no_progress_keeps_configured_source_polling_due() {
     for blocked_by_owner in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let mut raw = Store::create(
@@ -3347,6 +3370,8 @@ async fn successful_no_progress_keeps_the_source_observation_floor() {
             },
             1,
         );
+        let poll = worker.poll_seconds.max(1);
+        let due = 1000 + poll + job.id.bytes().map(u64::from).sum::<u64>() % (poll + 1);
         worker.tick(1000).await.unwrap();
         if blocked_by_owner {
             store
@@ -3381,13 +3406,13 @@ async fn successful_no_progress_keeps_the_source_observation_floor() {
                 operation: job.operation_id.clone(),
                 kind: Kind::Source,
             };
-            assert!(state.records[&key].due >= 1060);
+            assert_eq!(state.records[&key].due, due);
         }
-        for epoch in [1000, 1059] {
+        for epoch in [1000, due - 1] {
             worker.tick(epoch).await.unwrap();
             assert_eq!(*events.lock().unwrap(), expected);
         }
-        worker.tick(1061).await.unwrap();
+        worker.tick(due).await.unwrap();
         if blocked_by_owner {
             assert_eq!(*events.lock().unwrap(), expected);
         } else {

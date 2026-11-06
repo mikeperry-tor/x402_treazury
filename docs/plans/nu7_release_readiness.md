@@ -67,6 +67,65 @@ qualification require their actual runbooks; unavailable evidence stays missing.
   Release notes and source cohort must agree before migration.
 - N5 authority and actual refund evidence remain outstanding; N6 is conditional.
 
+### Follow-up validation and timing audit
+
+The local source checkpoint at `21b5b961` includes independently reviewed SDK
+fixture fixup `63e1c544`, native parity fixup `096fd1af`, timing fixture fixup
+`83648b0a`, and notes fixups `7a39cd20`/`21b5b961` after inspector
+`58a11493` and its CLI fixture `85cedd7b`. All exact SHAs have non-author review.
+The original compiler failures exposed removed digest formatting, native recovery
+conversion and SDK test APIs; fixes preserve original contracts rather than weaken
+assertions. Production compilation passes in
+`target/nu7-readiness/check-clippy-after7a39.log`; full all-target
+`zcash-regtest` Clippy and emitted-dependency-warning checks pass in
+`target/nu7-readiness/clippy-all-targets-after21b5.log`. The latter is a focused
+continuation after test-only copy fixes; unchanged production evidence carries
+forward. No runtime compatibility pass is claimed yet.
+
+Final-batch static checks passed all 96 Python tests, ten Syn-3 analyzer
+qualification tests and transport/Pepper provenance checks. The refreshed
+`target/complexity/report.json` at `21b5b961` includes all 467 application Rust
+files, matching hashes, no exclusions and no regression warnings; independent
+source/complexity review found no new material issue. Supplementary same-analyzer
+vendor coverage now covers 58 changed Pepper/Hyper/h2 files under
+`target/nu7-readiness/vendor-complexity-final-batch/`, with four before/after
+serialization/witness grammar errors still explicitly untrusted and manually
+reviewed. Native consensus, live-funded, real-Tor and reproducibility claims remain
+outside this evidence.
+
+Advisory replay at the same checkpoint is retained under
+`target/nu7-readiness/security-assessment-after21b5/`: root eight vulnerability
+matches and five unmaintained notices, protoc and normalized nonregistry inventory
+zero matches. Exit 1 means findings, not clean. The active lockfiles and pinned
+database/tool versions remain recorded in that report; maintained exposure
+assessments still apply.
+
+A further independent timing audit found no other demonstrated pre-NU7 wall-time
+assumption, but identified one material source-observation gap: gRPC lookup
+acquisition/validation failures were collapsed twice into healthy `Unknown`.
+Faster successful source polls would therefore bypass existing failure backoff
+during lookup-only outages. The reviewed minimal fix propagates errors through the
+existing Result contract, preserves sanitized diagnostics, explicit healthy unknown
+and cancellation outcomes, and leaves fulfilled-source, SDK-confirmation and
+buried-expiry proof precedence intact. No counter, timer, replay or new financial
+guard is added. Existing transport, scheduler and synthetic-expiry fixtures cover
+failure versus unknown, scoped backoff, retained bytes/inputs/attempts and proof
+completion without lookup. Compiler/Clippy, refreshed complexity review and actual
+fixture execution for this correction remain pending. The compatibility build was
+interrupted before runtime execution to keep source/executable evidence coherent;
+its completed dependency artifacts are retained for resumption.
+
+### C2 implementation status
+
+C2 `469179d8` implements the supported libsecp256k1 secret-signing path and
+source-aware offline advisory replay. Independent security assessment identified
+actual secret arithmetic in the previous k256 path and the SDK's public
+`SignerLike` adapter as the smallest migration. No dependency checkout was added.
+Three mocked advisory-tool tests pass; complete pinned-database assessment,
+compiler/Clippy, signature/payment execution and independent exact-SHA review
+remain outstanding. Cargo's compatible update retains `generic-array` 0.14.7
+because `crypto-common` 0.1.7 requires it exactly; forcing 0.14.9 is incompatible.
+
 ### Added timing scope
 
 The operator additionally requests review of Zcash polling, expiry, confirmations,
@@ -107,7 +166,7 @@ recovery, reorg retention, offline/send/expiry and original-work ownership.
 | N6 — retire wallet-owned transparent support | Use N3's deployed receiver contract and N5's actual refund evidence to establish whether this upgrade can fully disable wallet-owned transparent address generation/publication, refund selection, discovery/scanning and shielding. Audit fresh wallets, imports, reopened snapshots, SDK defaults, CLI paths and recovery consumers. Select the smallest supported SDK configuration or code removal that achieves shielded-only operation; improving isolation of transparent queries is not the objective. Preserve accepted refund bindings, original signed work and recoverable owned funds through an explicit migration/recovery path for legacy transparent obligations. Exit with implemented retirement and focused acceptance evidence, or concrete blockers and remaining work; accepting shared-indexer clustering does not complete this track. |
 
 N1 and N2 inform any coherent dependency update; N3 and N4 inform bridge behavior
-and N5's test cases. The cleanup plan's one-hour requested quote preference never
+and N5's test cases. The requested half-hour quote preference never
 rewrites old quotes or signed bytes and is not a guaranteed refund completion time.
 SDK block expiry and the provider's returned wall deadline remain separate.
 

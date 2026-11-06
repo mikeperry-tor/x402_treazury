@@ -14,8 +14,8 @@ use std::{
 const CREDIT_READS: usize = 4;
 const STATUS_READS: usize = 4;
 const QUOTE_READS: usize = 4;
-// Recurring source, provider and destination observations each retain their own
-// minute floor. Successful local preparation/submission handoffs remain immediate.
+// Base credit and failed observations retain their minute floor. Successful
+// source/provider observations follow configured polling; local handoffs stay immediate.
 const OBSERVATION_POLL_SECONDS: u64 = 60;
 // Bounds only cached scheduling metadata. Expired, inactive records can be
 // forgotten; in-flight ownership and an unelapsed backoff cannot be evicted.
@@ -1315,13 +1315,15 @@ impl State {
                 let delay = poll
                     .saturating_mul(1u64 << record.streak.min(6))
                     .min(300)
-                    .max(if kind != Kind::Quote {
-                        OBSERVATION_POLL_SECONDS
-                    } else if timed_out {
-                        60
-                    } else {
-                        1
-                    });
+                    .max(
+                        if kind == Kind::Credit || (kind != Kind::Quote && error.is_some()) {
+                            OBSERVATION_POLL_SECONDS
+                        } else if kind == Kind::Quote && timed_out {
+                            60
+                        } else {
+                            1
+                        },
+                    );
                 let jitter =
                     identity.0.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
                 now.saturating_add(delay).saturating_add(jitter)
