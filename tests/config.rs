@@ -776,3 +776,71 @@ relays.GET=["missing-local-provider.toml"]
     std::fs::write(&path, format!("{text}search=\"yes\"\n")).unwrap();
     assert!(Deployment::show_config(&path).await.is_err());
 }
+
+#[test]
+fn toml_value_roundtrip_preserves_overrides_header_aliases_and_managed_idempotency() {
+    use x402_treazury::catalog::{Config, build_tools};
+    let text = r#"
+spec = 'fixture.json'
+prefix = 'fixture'
+read_timeout_seconds = 0.5
+max_help_bytes = 42
+prefer_post = false
+[overrides.fixture_purchase]
+description = 'Purchase with an authored description'
+[overrides.fixture_purchase.params]
+shared_header = 'Exact quote identifier'
+"#;
+    let direct: Config = toml::from_str(text).unwrap();
+    let value: toml::Value = toml::from_str(text).unwrap();
+    let restored: Config = value.clone().try_into().unwrap();
+    let serialized: Config = toml::from_str(&toml::to_string(&value).unwrap()).unwrap();
+    let document = json!({"paths":{"/purchase":{"post":{
+        "operationId":"purchase",
+        "parameters":[
+            {"name":"shared","in":"query","schema":{"type":"string"}},
+            {"name":"shared","in":"header","required":true,"schema":{"type":"string"}},
+            {"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","format":"uuid"}}
+        ]
+    }}}});
+    for cfg in [direct, restored, serialized] {
+        assert_eq!(cfg.read_timeout_seconds, Some(0.5));
+        assert_eq!(cfg.max_help_bytes, 42);
+        assert!(!cfg.prefer_post);
+        let tool = build_tools(&cfg, &document, "fixture").unwrap().remove(0);
+        assert_eq!(tool.description, "Purchase with an authored description");
+        assert_eq!(
+            tool.input_schema["properties"]["shared_header"]["description"],
+            "Exact quote identifier"
+        );
+        assert!(
+            tool.input_schema["properties"]
+                .get("Idempotency-Key")
+                .is_none()
+        );
+        let args = json!({"shared":"query value","shared_header":"quote value"});
+        let first = tool
+            .route("https://example.com", args.as_object().unwrap())
+            .unwrap();
+        let second = tool
+            .route("https://example.com", args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(first.query["shared"], "query value");
+        assert_eq!(first.headers["shared"], "quote value");
+        assert!(uuid::Uuid::parse_str(&first.headers["idempotency-key"]).is_ok());
+        assert_ne!(
+            first.headers["idempotency-key"],
+            second.headers["idempotency-key"]
+        );
+    }
+    for invalid in [
+        "spec='fixture.json'\nunknown_setting=true",
+        "spec='fixture.json'\nprefer_post='false'",
+        "spec='fixture.json'\nread_timeout_seconds='0.5'",
+    ] {
+        assert!(toml::from_str::<Config>(invalid).is_err());
+        let value: toml::Value = toml::from_str(invalid).unwrap();
+        assert!(value.try_into::<Config>().is_err());
+    }
+    assert!(toml::from_str::<Config>("spec='one'\nspec='two'").is_err());
+}

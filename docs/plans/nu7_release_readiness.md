@@ -521,6 +521,44 @@ compiler/all-target Clippy, executed core/aggregate compatibility, financial run
 checks, source-matched complexity and exact/combined reviews remain open. This is
 implemented advisory removal, not completed release validation.
 
+C1a major updates now resolve together: ChaCha20Poly1305 0.11.0, direct rand
+0.10.3 (redundant rand10 alias removed), TOML 1.2.0+spec-1.1.0 and rusqlite
+0.41.1 with libsqlite3-sys 0.39.1/SQLite 3.54.1. The actual resolved SQLite patch
+source retains the reviewed callback signatures; VFS code is unchanged. Existing
+AAD builders and state schema remain unchanged. Source adaptations use supported
+randomness APIs and independently seeded equal test streams. Added public,
+independent Python/OpenSSL old-layout ciphertexts cover six AAD families, damage,
+new writes and real Store backup/reopen; a focused TOML regression covers typed /
+Value / serialized roundtrips, authored headers and strict rejection. These fixtures
+are wired into root modules; Rust execution, compiler/Clippy, all compatibility
+checks and the final combined gate remain pending. No dependency-resolution blocker
+requires deferring any of the four requested major updates.
+
+Ordered validation at `34801de4` passed static96 Python/10 analyzer checks,
+production compiler/all-target Clippy without diagnostics, SDK core5/aggregate6,
+independent state codec2, focused TOML1, VFS3 and compatibility31. The default
+stage stopped after 1,233 passing lib tests and 22 ignored tests on a single stale
+assertion that TOML rejects `usize::MAX`. TOML1.2 typed decoding accepts unsigned
+integers while `toml::Value` retains i64 representation. The existing documented
+`usize` attempt-count contract and checked addition remain unchanged. A test/docs
+fixup checks typed TOML acceptance plus the same overflow rejection as JSON,
+maximum valid count, oversized-number rejection and Value's narrower range; no
+production cap, parser fallback or retry behavior is added. Revalidate this test
+and all-target Clippy, refresh affected metrics and resume default/proving/lifecycle/
+codec stages. Unchanged static Python/analyzer, SDK and earlier contract evidence
+remains valid within its recorded scope.
+
+The next default run passed all 1,234 library tests (22 ignored) and advanced to
+startup integration, where a fixture used `String::parse::<toml::Value>` for a
+whole document. TOML1.2 Value FromStr uses its standalone-value parser; the fixture
+now explicitly uses `toml::from_str`, retaining all inventory/progress/output
+assertions. Independent audit of Value/Table aliases, inferred/indirect FromStr
+and production provider/deployment/network/discovery readers finds this sole
+affected call; production already selects document parsing explicitly. Record the
+API distinction in the owning development guide, validate the focused startup
+case and affected Clippy scope, then resume the unfinished named stages. No
+production parser fallback or acceptance weakening is introduced.
+
 The two proposed checkouts, alternatives and maintenance costs were explained
 before vendoring. Preserve exact published archives, licenses, complete file
 inventory and authored patches; wire reconstruction into executed vendor checks

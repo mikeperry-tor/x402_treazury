@@ -117,7 +117,7 @@ fn exponential_and_weibull_shape_one_have_identical_quantiles() {
     let a = dist("distribution='exponential'\nmean_ms=100.0\nmin_ms=5\nmax_ms=500");
     let b = dist("distribution='weibull'\nscale_ms=100.0\nshape=1.0\nmin_ms=5\nmax_ms=500");
     let mut r1 = StdRng::seed_from_u64(99);
-    let mut r2 = r1.clone();
+    let mut r2 = StdRng::seed_from_u64(99);
     for _ in 0..1000 {
         assert_eq!(
             a.sample(Unit::Milliseconds, &mut r1).unwrap(),

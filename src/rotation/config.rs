@@ -2,6 +2,7 @@
 use crate::payment::SpendPolicy;
 use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 pub const DEFAULT_ZCASH_INDEXER: &str = "https://zec.rocks:443";

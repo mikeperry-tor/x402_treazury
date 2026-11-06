@@ -80,20 +80,38 @@ fn isolation_retry_configuration_defaults_counts_and_representation() {
         ))
         .is_err()
     );
-    // TOML integers are signed 64-bit; JSON can express all usize values.
+    // Typed TOML accepts the same unsigned range; policy validation still
+    // protects the extra initial attempt from overflowing.
+    let overflow: NetworkPolicy =
+        toml::from_str(&format!("tor_isolation_retries={}", usize::MAX)).unwrap();
+    assert!(
+        overflow
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("overflows total attempt count")
+    );
+    let largest: NetworkPolicy =
+        toml::from_str(&format!("tor_isolation_retries={}", usize::MAX - 1)).unwrap();
+    largest.validate().unwrap();
+    assert_eq!(largest.tor_attempts().unwrap(), usize::MAX);
+    assert!(
+        toml::from_str::<NetworkPolicy>(&format!("tor_isolation_retries={}0", usize::MAX)).is_err()
+    );
+    // Value has a narrower signed representation than typed deserialization.
     let toml_max = format!("tor_isolation_retries={}", i64::MAX);
     if usize::BITS == 64 {
         let policy: NetworkPolicy = toml::from_str(&toml_max).unwrap();
         policy.validate().unwrap();
+        let value: toml::Value = toml::from_str(&toml_max).unwrap();
+        let policy: NetworkPolicy = value.try_into().unwrap();
+        policy.validate().unwrap();
         assert!(
-            toml::from_str::<NetworkPolicy>(&format!("tor_isolation_retries={}", usize::MAX))
+            toml::from_str::<toml::Value>(&format!("tor_isolation_retries={}", usize::MAX))
                 .is_err()
         );
     } else {
         assert!(toml::from_str::<NetworkPolicy>(&toml_max).is_err());
-        let policy: NetworkPolicy =
-            toml::from_str(&format!("tor_isolation_retries={}", usize::MAX)).unwrap();
-        assert!(policy.validate().is_err());
     }
 }
 

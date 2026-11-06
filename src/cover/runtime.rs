@@ -8,7 +8,9 @@ use super::{
     sampling::Unit,
 };
 use anyhow::Result;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+#[cfg(test)]
+use rand::SeedableRng;
+use rand::{RngExt, rngs::StdRng};
 use std::{
     collections::BTreeSet,
     sync::{Arc, Mutex},
@@ -74,7 +76,7 @@ impl Engine {
     }
     fn random<T>(&self, f: impl FnOnce(&mut StdRng) -> Result<T>) -> Result<T> {
         let mut rng = self.rng.lock().unwrap();
-        f(rng.get_or_insert_with(StdRng::from_os_rng))
+        f(rng.get_or_insert_with(rand::make_rng))
     }
     pub fn metrics(&self) -> super::metrics::Metrics {
         self.metrics.lock().unwrap().clone()

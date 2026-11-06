@@ -3,6 +3,8 @@ mod backup;
 pub(crate) mod balances;
 mod capacity;
 #[cfg(test)]
+mod codec_compatibility_tests;
+#[cfg(test)]
 mod io_failure_tests;
 pub(crate) mod observation;
 mod preflight;
@@ -40,7 +42,7 @@ use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use chacha20poly1305::{
     ChaCha20Poly1305, KeyInit, Nonce,
-    aead::{Aead, AeadCore, OsRng, Payload, rand_core::RngCore},
+    aead::{Aead, Generate, Payload},
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -295,7 +297,7 @@ fn amount(s: &str) -> Result<U256> {
 }
 fn seal(key: &[u8; 32], aad: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(key.into());
-    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let nonce = Nonce::generate();
     let encrypted = cipher
         .encrypt(
             &nonce,
@@ -373,7 +375,7 @@ impl Store {
         crate::private_fs::create_dir(dir)?;
         let owner = lock(dir)?;
         let mut key = Zeroizing::new([0u8; 32]);
-        OsRng.fill_bytes(key.as_mut());
+        rand::fill(key.as_mut());
         let mut file = private_file(key_file, true)?;
         use std::io::Write;
         file.write_all(key.as_ref())?;

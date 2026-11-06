@@ -1474,7 +1474,9 @@ tor_isolation_retries = 2
 `tor_isolation_retries` defaults to 2 and counts fresh owner-bound scopes after
 an initial unsigned Tor attempt. Zero allows one origin attempt. Nonnegative
 values are accepted when their total attempt count fits the platform's `usize`;
-overflow is rejected. Inspection exposes the effective value. Direct mode and
+overflow is rejected. Typed TOML 1.2 deserialization and JSON support that unsigned
+range. An intermediate `toml::Value` represents integers as signed 64-bit values
+and rejects larger numbers. Inspection exposes the effective value. Direct mode and
 explicit direct warming use one origin attempt (Base's existing direct transport
 recovery remains separate). This is an attempt count, not a timer or permission
 to replay a signed request. Whole-section network-file replacement also resets

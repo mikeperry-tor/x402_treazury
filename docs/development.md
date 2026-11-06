@@ -683,6 +683,18 @@ its independent graph separately; provenance-only vendor lockfiles are unchanged
 The development analyzer retains its qualified Tree-sitter 0.20.9/grammar cohort
 because its analyzer API is incompatible with an independently selected 0.27.
 
+The state codec uses ChaCha20Poly1305 0.11 with its supported nonce generator;
+key32, nonce12/ciphertext/tag16 and all existing v1 AAD bindings remain stable.
+The application uses rand 0.10 while dependency-owned RNG cohorts retain their
+own versions. Configuration uses TOML 1.2's typed parsing and Value conversion;
+strict unknown-field/type handling remains required. Parse whole documents with
+`toml::from_str`; `toml::Value::from_str` / string `parse` now use the standalone
+value parser. Rusqlite 0.41.1 bundles
+SQLite 3.54.1 through libsqlite3-sys 0.39.1. Existing custom VFS callbacks require
+no casts or adapters; WAL, FULL synchronization, foreign keys, busy handling,
+backup and reopen contracts remain unchanged. Independent ciphertext fixtures and
+storage/configuration regressions are required when changing these cohorts.
+
 ### Security update boundaries
 
 The root lockfile selects Tokio 1.54.1 and ctutils 0.4.8, containing the fixes for

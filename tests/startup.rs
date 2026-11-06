@@ -410,7 +410,8 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
         r#"{"servers":[{"url":"https://api.example"}],"paths":{"/local":{"get":{}}}}"#,
     )
     .unwrap();
-    let mut deployment: toml::Value = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    let mut deployment: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     deployment["sources"]["s02"]["spec"] =
         toml::Value::String(local.to_string_lossy().into_owned());
     std::fs::write(&path, toml::to_string(&deployment).unwrap()).unwrap();

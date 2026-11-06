@@ -68,7 +68,7 @@ impl sapling_prover::SpendProver for LazySaplingProver {
     }
 
     /// - Parses the embedded Sapling parameters if the process has not yet.
-    fn create_proof<R: rand10::Rng>(
+    fn create_proof<R: rand::Rng>(
         &self,
         circuit: sapling_circuit::Spend,
         rng: &mut R,
@@ -101,7 +101,7 @@ impl sapling_prover::OutputProver for LazySaplingProver {
     }
 
     /// - Parses the embedded Sapling parameters if the process has not yet.
-    fn create_proof<R: rand10::Rng>(
+    fn create_proof<R: rand::Rng>(
         &self,
         circuit: sapling_circuit::Output,
         rng: &mut R,

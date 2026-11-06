@@ -1,6 +1,6 @@
 //! Bounded application-byte/timer sampling, never packet-level shaping.
 use anyhow::{Result, bail, ensure};
-use rand::{Rng, distr::Open01};
+use rand::{Rng, RngExt, distr::Open01};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
