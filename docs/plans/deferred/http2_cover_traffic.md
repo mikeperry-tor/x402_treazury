@@ -4,6 +4,119 @@ The pooled MVP is documented in [cover traffic](../../cover-traffic.md). Retain 
 identity, bounded-resource, unsigned-only, scoped-evidence and no-paid-replay
 invariants in every follow-up. These items are not implemented settings.
 
+## Sustained activity and episode renewal
+
+Current cover scheduling groups calls with the same owner into one episode. The
+owner includes the runtime, wallet identity, effective transport scope and origin;
+it is not a process-wide episode. The episode's deadline starts with its first
+call (ten seconds in the default profile). Later calls share its remaining volume
+and request allowances without extending the deadline or replenishing those
+allowances. A stopped episode remains attached while any real calls or cover
+streams are active, so a later call can join an episode whose range scheduler has
+already finished. A fresh episode requires a subsequent attachment after the old
+episode is exhausted and its calls and stream cleanup have ended. See the
+[current scheduling contract](../../cover-traffic.md#identity-scheduling-and-payment-safety)
+and its implementation in [the owner registry](../../../src/cover/registry.rs),
+[episode accounting](../../../src/cover/episode.rs) and
+[range scheduler](../../../src/cover/runtime.rs).
+
+For example, overlapping calls can keep the owner continuously active beyond the
+first ten seconds. The original episode then expires, but new calls keep joining
+it rather than obtaining another range-cover window. Exhausting its volume or
+request allowance can stop range scheduling even sooner. Sustained activity can
+therefore outlast the additional response traffic intended to obscure it. Separate
+owners have separate episodes, so load elsewhere does not by itself cause this
+failure. This describes missing range cover, not a claim that every form of header
+padding stops at the same boundary.
+
+Assess a supported way to renew bounded episodes during sustained activity rather
+than require a fully idle owner. Compare renewal with a simpler scheduling change
+before selecting an implementation. Do not merely extend a deadline indefinitely
+or reset allowances on every attachment: that would change the operator's overhead
+contract. Determine how old streams finish, how new calls select the current
+episode, and how qualification knowledge and existing process budgets carry across
+renewal without duplicate schedulers or cross-owner state. Renewal alone is not
+sufficient if overlapping requests keep the scheduler paused as described below.
+
+## Response-linked timing and qualification patterns
+
+Every real physical request takes priority over range cover: outstanding cover
+streams are canceled and their local cleanup is awaited before dispatch. Cover
+then stays paused through the request/payment handshake until final response
+headers. With overlapping requests, a pending request can keep the shared owner's
+cover paused even after another request has received headers. This favors real
+request progress, but associates cover suppression and resumption with real-call
+events; it does not provide continuous cover through challenge/sign/retry.
+
+The episode clock continues while cover is paused. If response headers arrive
+after its deadline, that call gets no range-cover window from the episode. If
+headers arrive just before expiry, little time remains for qualification, body
+cover or a tail. The sampled successful-call tail is clamped to the original
+episode deadline, rather than guaranteed to run for its sampled duration after
+completion. When the last call drops without being marked complete, its tail ends
+immediately. Failure and success can consequently produce different traffic endings.
+These are range-scheduling behaviors; optional request-header padding does not
+provide equivalent response timing or volume concealment.
+
+The sampled `start_delay` is also measured from episode creation, not from response
+headers or the first unpaused scheduling opportunity. It is enforced, but can
+already have elapsed by the time headers arrive. Increasing it alone does not
+decouple cover onset from response timing. Initial resource qualification has a
+recognizable request shape: the default bounded range is `bytes=0-1023`. This is
+a qualification read, not a full-resource download, and successfully cached
+capability can be reused; it is not necessarily repeated for every call or episode.
+Interrupted qualification and fresh transport scopes can require another probe.
+
+Observers able to see encrypted traffic timing and volume may use cover gaps,
+onsets and endings as clues to real-call boundaries, slow responses or failures.
+The destination can additionally recognize the actual range requests. Neither
+random sampling nor more bytes establishes that these clues are concealed; a
+predictable qualification pattern can itself identify the cover mechanism.
+Actual inference depends on the observer's position, workload, physical connection
+reuse and Tor multiplexing. The current implementation is experimental and makes
+no same-connection or traffic-analysis-resistance guarantee. Circuit separation
+also does not conceal application identities disclosed to a destination.
+
+Assess scheduling less tightly coupled to response events, including how renewal,
+start-delay origin, successful and unsuccessful tails, and qualification reuse
+interact. Compare supported alternatives at equal overhead before choosing changes;
+do not assume moving the clock to response headers or adding rolling episodes
+solves handshake visibility. Preserve real-request priority, accepted-work ownership,
+identity isolation and no signed-request replay. Any intentional delay of real
+traffic requires the separate combined-response shaping decision below. Do not
+randomize qualification blindly: preserve range validation, resource permissions
+and faithful capability detection.
+
+### Scheduling assessment and acceptance
+
+Use a controlled HTTP/2 fixture to exercise isolated calls and sustained overlapping
+calls beyond multiple episode windows; deadline, volume and request exhaustion;
+headers before, near and after expiry; overlapping pending headers; completed and
+unsuccessful final calls; and waiter cancellation. Include fresh, cached,
+interrupted and replaced-scope qualification, plus cover cleanup during renewal
+and shutdown. Assert actual dispatches and retained ownership, with no duplicate
+active scheduler, cross-owner state reuse or paid replay. Distinguish intended
+operator-budget exhaustion from scheduling-induced absence of cover.
+
+Compare uncovered traffic, current scheduling and selected alternatives using the
+same real workload and equal finite overhead budgets. Measure achieved coverage
+over time, gaps around real headers/completion/failure, qualification frequency,
+physical connection reuse, encrypted wire patterns and real-call latency. Include
+held-out call-boundary and outcome inference where making a privacy claim, and
+report shortfalls and failed samples rather than infer protection from increased
+variance. Direct fixtures establish scheduling correctness; actual Tor and
+observer-specific privacy claims need their own measurements under the
+qualification section below.
+
+Exit this assessment with an evidence-backed scheduling decision and focused
+implementation/regression boundaries, or explicit acceptance of the measured
+limitations. Hand current behavior and supported claims back to the cover guide.
+This track owns episode renewal and response-linked timing; the PING, volume and
+flow-control tracks below do not substitute for this assessment. Complete the
+independent design, exact-SHA/fixup and combined reviews required by the
+[planning workflow](../../planning-workflow.md) before declaring selected work
+complete. This plan grants no live-funded or real-Tor execution authority.
+
 ## Pooled transport failure investigation
 
 The [qualification scope](../../testing.md#qualification-status)
