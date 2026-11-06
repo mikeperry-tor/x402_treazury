@@ -115,6 +115,21 @@ fixture execution for this correction remain pending. The compatibility build wa
 interrupted before runtime execution to keep source/executable evidence coherent;
 its completed dependency artifacts are retained for resumption.
 
+### Bridge evidence and qualification status
+
+N3/N4 public-source assessment found no demonstrated production bridge-code gap.
+Maintained network guidance now distinguishes requested refund-start preference,
+returned address deadline and transaction confirmation; current public sources
+still do not establish the deployed ZEC watcher's arrival timestamp, confirmation
+requirement, late-deposit outcome, refund minimum or unused-request terminalization.
+The live reference now retains the phased shielded-refund evidence recipe, including
+exact immutable fields and missing per-note inspection/submission-disabled scan
+capabilities. Ordinary quote-input equality remains intact. No production artifacts,
+keys or wallets have been inspected, and no funded test is authorized/executed.
+Next action after recipe review: obtain the operator-selected treasury/state mapping
+and explicit bounded retained-evidence inspection authority before deciding whether
+an existing refund qualifies or a focused excess-deposit owner harness is needed.
+
 ### C2 implementation status
 
 C2 `469179d8` implements the supported libsecp256k1 secret-signing path and
@@ -122,8 +137,20 @@ source-aware offline advisory replay. Independent security assessment identified
 actual secret arithmetic in the previous k256 path and the SDK's public
 `SignerLike` adapter as the smallest migration. No dependency checkout was added.
 Three mocked advisory-tool tests pass; complete pinned-database assessment,
-compiler/Clippy, signature/payment execution and independent exact-SHA review
-remain outstanding. Cargo's compatible update retains `generic-array` 0.14.7
+compiler/Clippy and signature/payment execution remain outstanding. Exact-SHA
+review found missing owned-key erasure in Alloy's opaque native credential and
+possible suppressed informational findings in advisory replay. Independently
+reviewed fixup `8a7b983e` uses direct native key ownership with in-place best-effort
+erasure and complete advisory settings/warning validation. Fixup `1a272ba9`
+accepts only Cargo's root `.cargo-ok` cache marker while still rejecting changed
+or extra Git source; review requested focused negative coverage, now added.
+The full offline assessment uses cargo-audit 0.22.2 and RustSec
+`26fd2d43f7280a1fb925a3743ec463017afe7119`: root has eight vulnerability
+matches (mitigated crypto-bigint secret-signing path and seven build-only legacy
+TLS matches) plus five maintenance notices; protoc and normalized nonregistry
+inventory have no matches. Artifacts are under ignored
+`target/nu7-readiness/security-assessment/`; final-source replay and permanent
+exposure dispositions remain required. Cargo's compatible update retains `generic-array` 0.14.7
 because `crypto-common` 0.1.7 requires it exactly; forcing 0.14.9 is incompatible.
 
 ### Added timing scope

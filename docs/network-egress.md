@@ -890,21 +890,66 @@ canonical proofs, amount caps and signed-work no-replay rules remain enforced.
 ### Source contract and upload limits
 
 The 1Click [quote request contract](https://docs.near-intents.org/api-reference/oneclick/request-a-swap-quote)
-and [returned Quote model](https://github.com/defuse-protocol/one-click-sdk-typescript/blob/main/src/models/Quote.ts)
-distinguish the requested window from the returned deposit deadline. The SDK's
-notification accelerates detection; notification or local broadcast acceptance
-proves neither required confirmations nor timely settlement. No inspected public
-contract establishes the `nep141:zec.omft.near` watcher's arrival event, compared
-timestamp, confirmation policy or late-deposit/refund behavior.
+describes the requested `deadline` as the start of refund handling if the swap
+has not completed, allowing time for the deposit to be mined. The
+[returned Quote model](https://github.com/defuse-protocol/one-click-sdk-typescript/blob/main/src/models/Quote.ts)
+separately defines `quote.deadline` as address inactivity, after which funds may
+be lost; `timeWhenInactive` means the address becomes cold and processing slows.
+`timeEstimate` begins after deposit confirmation. The requested 1,800-second
+default is a preference, not a guarantee of sub-hour settlement, refund or
+abandonment. Preserve both deadlines and the exact accepted quote. Neither
+notification nor local broadcast acceptance proves timely arrival or settlement.
 
-Pinned investigation pointers remain Zodl iOS `6a7dc6b39cb8` (`Near1Click.swift` and
-swap coordinator), Android `9f4e719e3eee` (`NearSwapDataSource.kt` and swap/status
-use cases), Swift SDK `cf07eb228c1b`, Android SDK `ae538fc5b39f`, Near-One
-`bridge-sdk-rs` `d1361ac1c68f`, `omni-bridge` `3f0349044938`,
-`omni-bridge-services` `00ccb5d1dd89`, and
-[btc-bridge deposit verification](https://github.com/Near-One/btc-bridge/blob/7740fae0ed8dc56571adfe2aaf36bd4edee0d441/contracts/satoshi-bridge/src/btc_light_client/deposit.rs).
-Their UI heuristics and other bridge paths do not establish the deployed 1Click
-Zcash route contract. No live spending or settlement qualification follows.
+Published [EXACT_OUTPUT behavior](https://docs.near-intents.org/integration/distribution-channels/1click-api/swap-types)
+processes a deposit above `amountIn` and returns the excess to `refundTo` after
+the swap. This supports considering one deliberate excess deposit for refund
+qualification; it does not establish that a second deposit after completion can
+reuse the quote. The returned `refundFee` is in origin-asset base units. No
+inspected public contract establishes the deployed `nep141:zec.omft.near`
+watcher's first-observation event, compared timestamp, confirmation requirement,
+late-arrival outcome or ZEC refund minimum. The
+[status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
+provides no terminal EXPIRED status or terminal disposition for an unused
+`PENDING_DEPOSIT` request. A local deadline, signed block expiry or observed refund
+cannot manufacture that missing provider outcome. Existing exact-operation
+source, credit and status owners continue independently under the
+[reconciliation policy](wallet-rotation.md#recovery-and-reconciliation-policy).
+
+Reference source evidence must remain distinct from deployment evidence:
+
+- Near-One `bridge-sdk-rs` at
+  [`ed0bf23fbcb50b93481803fa6369b799b7c44c67`](https://github.com/Near-One/bridge-sdk-rs/tree/ed0bf23fbcb50b93481803fa6369b799b7c44c67):
+  `omni_connector.rs::get_orchard_mode` selects shielded handling for an
+  Orchard-only UA, transparent for transparent-only, and configurable/default-transparent for
+  mixed receivers. `zcash.rs::build_refund_chain_specific_data` extracts the
+  Orchard receiver, pays the saved refund request's amount less its gas fee and
+  constructs no transparent change. Its shielded output pool follows the active
+  consensus branch; the UA receiver alone does not establish the actual pool.
+  This establishes source capability, not that
+  1Click's selected ZEC route uses that code or deployed receiver selection.
+- Near-One `omni-bridge` at `9738d61384e6d915d269eb90250f5d8294b3fca0`
+  and `omni-bridge-services` at `00ccb5d1dd893428024b6708f2ef1e21bed980dd`
+  are adjacent bridge references, not an attestation for the `zec.omft.near`
+  watcher. Do not transfer another bridge's deposit or refund rules to this route.
+- Zodl iOS at
+  [`bfce63e808f595f716db56d3e2c87cb4f002c259`](https://github.com/zodl-inc/zodl-ios/tree/bfce63e808f595f716db56d3e2c87cb4f002c259)
+  sends `privateUnifiedAddress` through `SwapAndPayStore`/`Near1Click`; Android at
+  [`2beecca837bed599623a167947f5ab96cd1025e7`](https://github.com/zodl-inc/zodl-android/tree/2beecca837bed599623a167947f5ab96cd1025e7)
+  requests a shielded UA in `RequestSwapQuoteUseCase`/`AccountDataSource` and passes
+  it through `NearSwapDataSource`. Both request two hours. Their address choices
+  and UI timing heuristics are precedent, not funded-refund qualification or
+  provider guarantees. SDK reference revisions are Swift
+  `1e632565b2d8ce1779453114b94a8a959894cda3` and Android
+  `c137875396efe1fdb58916827adc34f5f1c003cb`; these are separate from the
+  application's pinned Zingolib cohort.
+
+Dry quotes with public unfunded addresses establish only current input acceptance;
+the documented dry response omits the executable address/deadline. A mixed UA
+accepted by a quote does not establish a shielded refund. Actual receiver/pool,
+transaction and SDK spendability need the separately authorized
+[shielded-refund evidence recipe](../tests/live/INTEGRATION_REFERENCE.md#shielded-refund-evidence-and-qualification).
+Keep transparent source-deposit validation and existing refund bindings unchanged;
+no automatic transparent fallback or local expiry is justified by these limits.
 
 The gRPC response-header inactivity timer includes request upload because the
 transport exposes no supported per-request upload-consumption signal. A progressing

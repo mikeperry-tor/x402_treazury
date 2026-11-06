@@ -535,6 +535,118 @@ run/phase deadline. It logs progress and recorded funding errors, refuses dispat
 on cancellation or missing readiness, and never manufactures balances or retries
 API payments. Production wallet supervision still checkpoints sync on parent loss.
 
+## Shielded-refund evidence and qualification
+
+This recipe scopes native ZEC to Base USDC refund evidence. It is a reviewable
+sequence, not an executable runner scenario or spending authority. The provider
+runner does not implement the per-note inspection or controlled excess-deposit
+path below. Do not substitute invented CLI commands, a second financial ledger,
+an ad hoc signer or changes to ordinary recovery. Follow the
+[bridge contract limits](../../docs/network-egress.md#source-contract-and-upload-limits)
+and [refund/reconciliation policy](../../docs/wallet-rotation.md#refunds-state-and-recovery).
+
+### Bind the inspection before accessing private state
+
+The operator must select the actual treasury and provide its treasury UUID,
+deployment/configuration path, state directory, key reference, retained evidence
+paths and intended inspection destination. An EVM wallet or group label such as
+`research_desk` does not identify a ZEC treasury. Pin the application/runner binary
+copies, build hashes, source SHA and complete SDK cohort, schema versions and
+network policy. Independently review the exact paths, permitted reads and
+inspection method before obtaining separate authority to access production
+state or keys. This document supplies neither that authority nor those missing
+operator choices. Never print secrets or put private evidence in Git.
+
+### Inspect retained artifacts first
+
+With inspection authority, inspect only the named saved artifacts before opening
+a wallet or making network requests. Prefer an existing refund, including a
+previous duplicate-deposit experiment, when its provenance is sufficient. Preserve
+original artifacts and correlate their immutable identities; missing evidence
+remains missing. Retain privately:
+
+| Evidence | Required binding |
+| --- | --- |
+| Execution identity | Treasury UUID, exact state/snapshot revision and backup provenance, application/runner hashes, SDK revisions, route/asset IDs, network and observation scope |
+| Quote | Complete exact request and response, response signature/correlation identity, swap type, deposit address/memo, original refund UA and decoded receiver set, USDC recipient, requested and returned deadlines, cold-address time, atomic amounts, slippage and returned network/refund fees |
+| Source work | Every job/operation identity and source transaction, its selected inputs, exact signed bytes and txid, principal/fee, accepted deadline and consensus expiry, disclosure and confirmation evidence; preserve each intentionally distinct deposit |
+| Provider/destination | Bound status responses and times, reported deposited/swapped/refunded amounts, origin/destination/NEAR transaction identities, actual Base USDC result, pending or conflicting outcomes |
+| Refund receipt | Refund transaction identity/raw transaction where available, decrypted owned note identity, actual pool/receiver, amount, confirmation height/hash and count, SDK spent/reserved state and spendability at the inspected snapshot |
+
+The public UA string, quote acceptance, aggregate shielded balance or provider
+`REFUNDED` label alone does not establish refund receipt. A mixed UA can receive
+transparently. Correlate the returned transaction/note to the exact bound refund
+receiver and source experiment without treating advisory provider totals as a
+spendability gate. Spending recovered funds later does not erase historical
+receipt evidence; current spendability must be reported separately.
+
+### Qualify discovery on an isolated copy
+
+The missing offline inspection capability must be implemented and independently
+reviewed before opening production snapshots: read a consistent owner-produced
+backup/copy, report per-note pool/ownership/confirmation/spent-reserved facts using
+the selected SDK, and expose no seeds or signing material. `wallet status` has
+aggregate balances and is insufficient for note attribution. `wallet sync` can
+perform recovery and is not a read-only substitute. Preserve originals, SQLite
+sidecars and accepted work; do not run a copied funded owner concurrently with
+production serving.
+
+If offline artifacts do not prove selected-SDK discovery/recovery, separately
+review and authorize an isolated copy scan. Disable transparent discovery, retain
+the configured identity-bound indexer/Tor policy and prevent all submission,
+funding, automatic shielding and calculation execution. No such inspection mode
+is currently supplied by this recipe. Its implementation must enforce those
+boundaries before use; disabling `auto_fund` alone does not prevent every accepted
+operation from being observed or submitted by an ordinary owner.
+
+Acceptance needs the actual refund note's pool and receiver, chain confirmation
+and selected-SDK recognition/spendability, then reopen/restart recovery of the
+same receipt. Record negative RPC evidence showing no transparent known-address
+queries or gap probing, and no new transparent receive/refund address publication.
+For seed recovery, use an isolated separately authorized recovery state with the
+correct birthday and compare the same receipt against the retained snapshot;
+seed-only recovery does not reconstruct undisclosed issuance frontiers or
+off-chain liabilities. A snapshot and seed recovery are distinct evidence. Report
+unsupported recovery/settings or unavailable negative-RPC instrumentation as gaps,
+not shielded-only acceptance. None of this authorizes a spend to prove spendability.
+
+### Only if retained evidence is insufficient, prepare a controlled refund
+
+The published EXACT_OUTPUT excess rule is the simpler candidate: one deliberately
+authorized deposit above returned `amountIn`, with the excess directed to the
+quote's shielded-only refund UA after the swap. It avoids relying on reuse after
+SUCCESS. This is a candidate, not a guarantee for the deployed ZEC route; resolve
+route-specific refund fees/minimums and actual receiver behavior before choosing
+the amount. A second deposit to a completed quote remains an unqualified
+experiment and needs its own authority rather than an automatic retry.
+
+Prepare a concrete proposal with the selected treasury, one quote, exact output,
+principal/excess and source/refund fee allowances, recipient, decoded shielded-only
+UA and intended deposit count of one. Ordinary funding binds source principal
+exactly to `quote.input`; preserve that check and existing job/operation ownership.
+A focused production treasury-owner harness capable of representing the separately
+authorized excess and its exact quote binding must be designed, implemented and
+independently reviewed before execution. The current runner/CLI is not presumed
+to provide it. Use the existing durable owner and journal-before-disclosure path;
+do not rewrite quote amounts, signed bytes or original identities.
+
+Only after that path and concrete proposal are reviewed may separate operator
+spending authority permit quote allocation/key loading/submission. Retain all
+fields above, including the forward USDC result and excess-refund transaction/note;
+a successful swap can still require separate refund evidence. Unknown, pending,
+failed or uneconomic refund outcomes leave qualification incomplete and preserve
+accepted liabilities. They never authorize another deposit, a replacement quote
+or spending recovered funds. Near-deadline/late-arrival tests are separate reviewed
+experiments: neither the 30-minute requested preference nor any local timer
+proves sub-hour refund completion or abandonment of `PENDING_DEPOSIT` work.
+
+The next actions are therefore operator/state/evidence selection, independent
+review and inspection authority, implementation/review of the offline per-note
+inspector, then any separately authorized scan capability. Only a demonstrated
+remaining funded-evidence gap justifies implementing and authorizing the controlled
+excess-deposit path. No private inspection or funded qualification is claimed by
+this runbook.
+
 ## Registry authorization and preparation
 
 Use the command sequence in [the walkthrough](INTEGRATION.md). Authorization and

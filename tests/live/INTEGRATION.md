@@ -202,6 +202,9 @@ bespoke scripts. Retain exact evidence links and manual gaps. Private financial 
   concurrency, rotation, lifecycle and treasury-only runs.
 - [Reference](INTEGRATION_REFERENCE.md): content/cache assertions, evidence
   limits, accounting and production supervision.
+- [Shielded-refund evidence and qualification](INTEGRATION_REFERENCE.md#shielded-refund-evidence-and-qualification):
+  inspect retained evidence first; private wallet inspection and any controlled
+  refund need their reviewed authority and the missing owner/inspection tooling.
 - [Tor re-audit and receipt recovery](INTEGRATION_REFERENCE.md#offline-tor-re-audit):
   inspect retained evidence without authorizing new paid calls.
 - [Keyless outage](INTEGRATION_REFERENCE.md#owned-tor-qualification) and
