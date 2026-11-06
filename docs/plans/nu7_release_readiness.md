@@ -371,6 +371,40 @@ Submission-disabled copy-scan can qualify discovery but cannot explain provider
 accounting; it and any funded qualification remain separate missing capabilities
 and authority.
 
+### C5a operator-directed discovery and refund policy
+
+The operator now explicitly requests disabling transparent refund use and transparent
+recovery scanning, accepting shielded-refund support as the working assumption.
+This supersedes the proposed explicit legacy discovery mode for this narrower step;
+full removal of SDK transparent key derivation/output recognition remains a separate
+N6 boundary. No funded experiment, production state mutation or further private
+network request is authorized by this source change.
+
+Starting snapshot: `e0b70223a3b2d32bdd4c15fe3d8a2c8f229ebf58`. Independent read-only
+design review verifies the pinned SDK and selects supported settings overrides,
+without new vendoring or schema conversion. Generated/imported wallets persist
+transparent discovery disabled. Runtime open and SDK reconstruction override saved
+discovery settings; all known-address queries and gap recovery are disabled.
+Read-only evidence keeps original saved facts. Current storage already accepts only
+schema23; dependency-owned historical SDK snapshot parsing is not an application
+pre-seed migration path and will not be forked for this settings change.
+
+Enforce shielded-only Orchard-capable unified refunds before new outbound quote
+requests and before new managed financial input acceptance, including cached quotes.
+The existing Store binding check follows accepted-work detection, so accepted
+calculations, signed bytes, exact historical quotes and status/recovery can finish.
+Do not silently replace a previously disclosed transparent/mixed binding or rewrite
+its quote. Existing owned-fund recognition/shielding does not enable address recovery.
+No separate legacy mode, recovery ledger, timer or extra state is introduced.
+
+Commit boundary C5a includes these policies, focused negative-RPC/new-request/
+cached-preparation regressions, seed-only shielded discovery/reopen coverage, and
+owning wallet/SDK/CLI/network guidance. Independent exact-SHA and combined review
+must include all affected call chains and source-matched CogC/CycC. Complete compiler
+and all-target Clippy before broad suites, reuse unchanged dependency/security
+coverage, then run affected default/SDK and synthetic lifecycle consumers with
+sources frozen. Record actual counts and limitations; no live qualification claim.
+
 ### N6 selected-cohort retirement assessment
 
 Independent read-only audit of v8 `81d799775f11e882896e8710e8af12d6d4d29a41`
