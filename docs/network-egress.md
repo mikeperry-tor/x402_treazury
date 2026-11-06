@@ -144,7 +144,8 @@ transports at different origins have distinct scopes. Common credentials, conten
 and timing can still correlate service-visible requests. Treasury scans share one
 identity. New shielded-only wallets disable transparent address probing; legacy and
 imported wallets retain their discovery settings and late-receipt recovery. Remaining
-legacy scan privacy assessment belongs to the [deferred release plan](plans/deferred/release_followups.md).
+retirement of wallet-owned transparent support and scanning belongs to N6 in
+[NU7 release readiness](plans/nu7_release_readiness.md).
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient

@@ -9,7 +9,8 @@ change behavior remain in their owning guides. No item authorizes spending, secr
 access, deployment, a broad refactor or a new resource limit.
 
 Near-term consensus/cohort compatibility, B1 dependency-security evaluation and
-bridge refund/deadline evidence belong to [NU7 release readiness](../nu7_release_readiness.md).
+bridge refund/deadline evidence and retirement of wallet-owned transparent support
+belong to [NU7 release readiness](../nu7_release_readiness.md).
 Current Linux/macOS private-storage contracts belong in
 [development](../../development.md#portability) and
 [wallet administration](../../wallet-cli.md). The separate
@@ -26,7 +27,6 @@ its own concrete threat question. Vendor retirement remains in its existing
 | D3 — Provider-output assessment / R3 | Examine descriptions, control characters and unfamiliar pricing JSON through actual MCP output and consumers, using small synthetic cases. Identify harmful rendering, loss of useful meaning or avoidable output amplification, then decide which focused transformations are warranted. Exit with supported output policy in the agent-source guide and regressions for any selected changes, or explicit evidence-backed acceptance of current behavior. A generic description cap is not presumed necessary and does not solve instruction injection. This assessment is planned work, not contingent on receiving a new report. |
 | D4 — Snapshot visibility / R6 | Add derived operator visibility for database/WAL sizes, unique snapshot count/bytes, current snapshot size and reference reasons separating unresolved work from resolved history without double counting. Validate actual shared references with small fixtures and explain results in wallet administration. Use existing metadata; add no permanent accounting ledger, quota or implicit deletion. Snapshot pruning is not selected work: retention remains the current recovery contract. |
 | D6 — Archive provenance / B10 | Correct unknown-versus-dirty reporting for builds without Git metadata. Define honest provenance using the existing versioned build-identity contract and inspect qualification/reproducibility consumers before choosing a compatible representation. Validate clean, dirty and repository-free inputs with faithful fixtures and update development/release guidance. Preserve hashes and do not fabricate a clean revision. Other B10 observations have documented non-action dispositions, not a deferred catchall refactor. |
-| D7 — Legacy transparent discovery assessment / P4 | Assess isolation for necessary known/issued legacy transparent queries, including what the indexer sees, current SDK transport hooks and the cost/correctness of per-address isolation or another supported discovery method. Preserve late receipts, issuance coverage and complete recovery. Exit with a concrete supported correction and focused regression plan, or an explicit evidence-backed acceptance of the shared-indexer boundary in network/wallet guidance. Fresh-wallet probing removal does not close this assessment; separate circuits alone do not guarantee timing unlinkability. |
 
 Track identifiers retain gaps when a proposed track is removed rather than
 renumbering existing work. Non-action decisions belong in owning guides, not this
