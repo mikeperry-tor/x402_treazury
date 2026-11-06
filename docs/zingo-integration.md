@@ -334,6 +334,25 @@ Mnemonic imports retain discovery defaults; reconstruction and reopening load th
 saved settings without changing address history. Legacy transparent bindings keep
 their discovery and shielding path. Shielded trial decryption remains enabled.
 
+The v8 SDK has no verified complete transparent-retirement setting.
+`LightWallet::new` still derives and stores the first external transparent address
+for a spending wallet. `TransparentAddressDiscovery::disabled()` suppresses both
+known-address discovery RPCs and gap probing, but deliberately preserves recognition
+of owned transparent outputs in shielded-relevant full/pending transactions.
+Pepper can also process compact transparent data after its discovery floor.
+Clearing the public address map is insufficient: construction already derived an
+address, and deleting legacy identities could prevent recovery of late receipts.
+
+Full retirement therefore needs a supported upstream change or reviewed SDK source
+change covering construction/reconstruction and ordinary output recognition, plus
+an explicit legacy recovery mode. Pepper-only changes cannot prevent Zingolib's
+constructor derivation. Existing fresh-wallet negative-RPC tests qualify disabled
+discovery, not absence of derivation or recognition. Imported/reopened wallets,
+archived mixed/transparent bindings and pending shielding need separate migration
+evidence; the [active readiness plan](plans/nu7_release_readiness.md) owns that work.
+Bridge-owned transparent outbound deposits remain valid and require their existing
+destination and output validation independently of receive/scanning retirement.
+
 The requested NEAR quote window defaults to 1,800 seconds. Returned quote deadlines
 and consensus-derived signed block expiry remain independent, including across NU7;
 existing accepted deadlines and bytes survive restart unchanged.

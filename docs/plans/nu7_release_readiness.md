@@ -130,6 +130,33 @@ Next action after recipe review: obtain the operator-selected treasury/state map
 and explicit bounded retained-evidence inspection authority before deciding whether
 an existing refund qualifies or a focused excess-deposit owner harness is needed.
 
+### N6 selected-cohort retirement assessment
+
+Independent read-only audit of v8 `81d799775f11e882896e8710e8af12d6d4d29a41`
+found no complete transparent-retirement configuration. Zingolib
+`wallet.rs::LightWallet::new` unconditionally derives/stores external taddr zero;
+older wallet decoding can derive it too. Pepper disabled discovery returns before
+known-address RPCs/gap probing but full/pending scan paths still recognize owned
+transparent outputs, and compact scanning can process them after discovery's floor.
+Ordinary serving still shields eligible owned transparent outputs. No such
+behavior was removed: current settings cannot establish N6's literal acceptance.
+
+Technical next action: assess a supported upstream no-transparent construction/
+recognition option or narrowly reviewed SDK source change, with explicit legacy-only
+recovery rather than clearing address maps. A new Zingolib checkout requires the
+vendoring discussion; Pepper alone cannot fix constructor derivation. Acceptance
+must separately inspect internal maps, known/gap RPCs, compact/full/pending/calculated
+recognition, fresh/import/reopen/seed+snapshot restore and original late obligations.
+Existing shielded fresh/RPC and seed-refund tests are useful but insufficient.
+
+Evidence/authority next action: under the reviewed recipe, identify current and
+archived transparent/mixed refund bindings, disclosed quotes, original outgoing
+records, owned funds and pending shielding. No private inventory or funded receiver
+qualification has occurred. N3/N5 deployed receiver/pool/spendability evidence and
+legacy ownership remain release blockers; N6 is explicitly incomplete. Current
+SDK limitations are maintained in the integration guide, without claiming that
+query isolation or disabled discovery retires transparent support.
+
 ### C2 implementation status
 
 C2 `469179d8` implements the supported libsecp256k1 secret-signing path and
