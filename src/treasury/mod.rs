@@ -142,6 +142,11 @@ fn snapshot_wallet(
     );
     Ok((bytes, height))
 }
+fn disable_transparent_discovery(settings: &mut WalletSettings) {
+    settings.sync_config.transparent_address_discovery =
+        pepper_sync::config::TransparentAddressDiscovery::disabled();
+}
+
 impl Treasury {
     pub async fn create(
         dir: PathBuf,
@@ -167,23 +172,20 @@ impl Treasury {
             import = mnemonic.is_some(),
             "wallet init: creating offline wallet"
         );
+        let mut settings = WalletSettings::default();
+        disable_transparent_discovery(&mut settings);
         let wallet = match mnemonic {
             Some(seed) => WalletConfig::MnemonicPhrase {
                 mnemonic_phrase: seed.trim().to_owned(),
                 no_of_accounts: NonZeroU32::new(1).unwrap(),
                 birthday,
-                wallet_settings: WalletSettings::default(),
+                wallet_settings: settings,
             },
-            None => {
-                let mut settings = WalletSettings::default();
-                settings.sync_config.transparent_address_discovery =
-                    pepper_sync::config::TransparentAddressDiscovery::disabled();
-                WalletConfig::NewSeed {
-                    no_of_accounts: NonZeroU32::new(1).unwrap(),
-                    chain_height: birthday,
-                    wallet_settings: settings,
-                }
-            }
+            None => WalletConfig::NewSeed {
+                no_of_accounts: NonZeroU32::new(1).unwrap(),
+                chain_height: birthday,
+                wallet_settings: settings,
+            },
         };
         let scratch = crate::private_fs::tempdir()?;
         let mut client = LightClient::new(config(scratch.path(), wallet, network)?, false)
@@ -288,6 +290,7 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "offline treasury must not connect to an indexer"
         );
+        disable_transparent_discovery(&mut client.wallet().write().await.wallet_settings);
         // No prior SDK capability or completed publisher exists here. A missing
         // outgoing AND factual operation is proof no result could be disclosed.
         let store = tokio::task::spawn_blocking(move || {
@@ -401,11 +404,12 @@ impl Treasury {
         self.addresses().await
     }
     /// Persist a shielded receive address and its job binding before a quote
-    /// can expose it. Existing transparent refund bindings remain unchanged.
+    /// can expose it. Stored bindings are preserved but transparent reuse is rejected.
     pub async fn refund_address(&mut self, job: String) -> Result<String> {
         self.drain_calculation().await;
         let lookup = job.clone();
         if let Some(address) = self.store.call(move |s| s.refund_address(&lookup)).await? {
+            crate::rotation::near::require_shielded_refund(&self.network.chain(), &address)?;
             return Ok(address);
         }
         ensure!(self.healthy, "treasury requires reopen");

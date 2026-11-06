@@ -49,7 +49,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             destination: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near".into(),
         },
         &job.recipient,
-        "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+        crate::rotation::near::PUBLIC_REFUND_UA,
         &job.target,
         "public",
         100,

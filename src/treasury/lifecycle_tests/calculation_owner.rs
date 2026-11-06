@@ -62,9 +62,12 @@ async fn fixture(kind: Kind) -> (tempfile::TempDir, MockNet, Treasury, String) {
                 .unwrap();
             let address =
                 zcash_keys::address::Address::Transparent(receiver).encode(&owner.network.chain());
-            let credit = net
-                .funding_transaction(vec![(&address, 1_000_000, None)])
-                .await;
+            let credit = super::transparent_fixtures::transparent_fixture(
+                &net,
+                &owner,
+                vec![(&address, 1_000_000, None)],
+            )
+            .await;
             {
                 let mut chain = net.chain.write().await;
                 chain.mine_block(vec![credit]);
@@ -1084,7 +1087,7 @@ async fn accepted_managed_fixed_and_ranged_quotes_keep_original_authority_after_
                 // this actual saved quote binds the real SDK source request.
                 let quote = Quote {
                     sizing_preview: None,
-                    request: serde_json::json!({"amount":preferred,"recipient":job.recipient}),
+                    request: serde_json::json!({"amount":preferred,"recipient":job.recipient,"refundTo":crate::rotation::near::test_shielded_refund(&s.network().chain())}),
                     response: serde_json::json!({}),
                     input: 50_000,
                     deadline,

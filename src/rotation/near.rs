@@ -119,6 +119,31 @@ pub struct NearClient {
     origin: String,
     address_network: AddressNetwork,
 }
+#[cfg(test)]
+pub(crate) const PUBLIC_REFUND_UA: &str = "u1twhzfnwvps8vlv20jak2lud8x3j5y9p42unjrq69kvhlsu3yp88e8m4jn9r53369su3mx2e9hjan5kl4pwqkfgetam7v7rzwfduu2q6dp90um6al5zjyk3akns2923va5xyn92f6f5neq9amdshzpj67n2e9ez94qj36hgagpv5ltwk7";
+
+#[cfg(test)]
+pub(crate) fn test_shielded_refund(chain: &zingolib::config::ChainType) -> String {
+    zcash_keys::address::Address::decode(&zcash_protocol::consensus::MAIN_NETWORK, PUBLIC_REFUND_UA)
+        .unwrap()
+        .encode(chain)
+}
+
+/// Current operator policy for new quote disclosure and new financial input ownership.
+/// Ordinary stored-quote decoding retains its original receiver binding.
+pub(crate) fn require_shielded_refund(
+    chain: &zingolib::config::ChainType,
+    address: &str,
+) -> Result<()> {
+    ensure!(
+        matches!(zcash_keys::address::Address::decode(chain, address),
+            Some(zcash_keys::address::Address::Unified(ua))
+                if ua.orchard().is_some() && ua.transparent().is_none()),
+        "Zcash refunds require a shielded-only unified address with an Orchard receiver"
+    );
+    Ok(())
+}
+
 // Production bridge routes are mainnet-only. The synthetic chain is available
 // solely in opted-in unit tests, and is scoped to one client (never global).
 #[derive(Clone, Copy)]
@@ -146,19 +171,7 @@ impl AddressNetwork {
         Ok(())
     }
     fn refund(self, address: &str) -> Result<()> {
-        use zcash_keys::address::Address;
-        let supported = match Address::decode(&self.chain(), address) {
-            Some(Address::Transparent(_)) => true,
-            Some(Address::Unified(address)) => {
-                address.orchard().is_some() || address.transparent().is_some()
-            }
-            _ => false,
-        };
-        ensure!(
-            supported,
-            "Zcash refund requires a transparent or Orchard receiver on the configured network"
-        );
-        Ok(())
+        require_shielded_refund(&self.chain(), address)
     }
 }
 impl NearClient {
@@ -380,6 +393,12 @@ impl NearClient {
         )
     }
     pub async fn quote(&self, request: Value, limits: &Limits, now: u64) -> Result<Quote> {
+        require_shielded_refund(
+            &self.address_network.chain(),
+            request["refundTo"]
+                .as_str()
+                .context("missing refund binding")?,
+        )?;
         let started = std::time::Instant::now();
         let response = self
             .response(
@@ -856,7 +875,6 @@ mod tests {
 
     // Public abandon...about BIP39 mnemonic, account 0/address 1. The current
     // unified-address encoding retains both Orchard and Sapling refund receivers.
-    const PUBLIC_REFUND_UA: &str = "u1twhzfnwvps8vlv20jak2lud8x3j5y9p42unjrq69kvhlsu3yp88e8m4jn9r53369su3mx2e9hjan5kl4pwqkfgetam7v7rzwfduu2q6dp90um6al5zjyk3akns2923va5xyn92f6f5neq9amdshzpj67n2e9ez94qj36hgagpv5ltwk7";
 
     #[tokio::test]
     async fn direct_near_timeouts_log_debug_without_private_url() {
@@ -936,12 +954,13 @@ mod tests {
         let synthetic = NearClient::synthetic_at("http://127.0.0.1:1").unwrap();
         let ordinary = NearClient::test_at("http://127.0.0.1:1").unwrap();
         let recipient = "0x0000000000000000000000000000000000000003";
-        let refund = "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8";
+        let refund =
+            test_shielded_refund(&crate::rotation::store::TreasuryNetwork::Synthetic.chain());
         let request = synthetic
             .request(
                 &assets,
                 recipient,
-                refund,
+                &refund,
                 "5000000",
                 "public",
                 100,
@@ -954,7 +973,7 @@ mod tests {
                 .request(
                     &assets,
                     recipient,
-                    refund,
+                    &refund,
                     "5000000",
                     "public",
                     100,
@@ -967,7 +986,7 @@ mod tests {
             super::request(
                 &assets,
                 recipient,
-                refund,
+                &refund,
                 "5000000",
                 "public",
                 100,
@@ -976,7 +995,7 @@ mod tests {
             )
             .is_err()
         );
-        let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":"5000000","amountInUsd":"5","depositAddress":refund,"deadline":request["deadline"]}});
+        let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":"5000000","amountInUsd":"5","depositAddress":"t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8","deadline":request["deadline"]}});
         let limits = Limits {
             max_output: 5_000_000,
             max_fee_bps: 500,
@@ -1129,7 +1148,7 @@ mod tests {
         let request = request(
             &assets,
             "0x0000000000000000000000000000000000000001",
-            "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+            PUBLIC_REFUND_UA,
             "5000000",
             "basic",
             100,
@@ -1529,27 +1548,37 @@ mod tests {
             };
             assert_eq!(decoded.transparent(), Some(&t));
         }
-        for refund in [
-            transparent,
-            orchard_only.as_str(),
-            shielded,
-            &mixed_orchard,
-            &mixed_sapling,
-        ] {
+        for refund in [orchard_only.as_str(), shielded] {
             let (mut request, mut response, limits) = fixture(false);
             request["refundTo"] = json!(refund);
             response["quoteRequest"] = request.clone();
-            let quote = validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000)
-                .unwrap_or_else(|error| panic!("public refund fixture {refund}: {error}"));
+            let quote =
+                validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000).unwrap();
             assert_eq!(quote.request, request);
             let mut mismatched = response.clone();
             mismatched["quoteRequest"]["refundTo"] = json!("different refund");
             assert!(validate_quote(request.clone(), mismatched, &limits, 2_000_000_000).is_err());
             response["quote"]["depositAddress"] = json!(shielded);
+            assert!(validate_quote(request, response, &limits, 2_000_000_000).is_err());
+        }
+        for refund in [transparent, mixed_orchard.as_str(), mixed_sapling.as_str()] {
+            let (mut request, mut response, limits) = fixture(false);
+            request["refundTo"] = json!(refund);
+            response["quoteRequest"] = request.clone();
             assert!(
-                validate_quote(request, response, &limits, 2_000_000_000).is_err(),
-                "shielded refund support cannot widen source deposits"
+                validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000).is_err()
             );
+            let stored = Quote {
+                request,
+                response,
+                sizing_preview: None,
+                input: 100_000,
+                deadline: 2_000_001_000,
+                deposit: Some(transparent.into()),
+            };
+            let decoded: Quote =
+                serde_json::from_slice(&serde_json::to_vec(&stored).unwrap()).unwrap();
+            assert_eq!(decoded.request["refundTo"], refund);
         }
         let sapling_only =
             UnifiedAddress::from_receivers(None, ua.sapling().cloned(), None, None, None)
@@ -1567,6 +1596,22 @@ mod tests {
             assert!(validate_quote(request, response, &limits, 2_000_000_000).is_err());
         }
     }
+    #[tokio::test]
+    async fn transparent_refunds_fail_before_new_quote_http() {
+        let client = NearClient::test_at("http://127.0.0.1:1").unwrap();
+        let (mut request, _, limits) = fixture(false);
+        request["refundTo"] = json!("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F");
+        assert!(
+            client
+                .quote(request, &limits, 2_000_000_000)
+                .await
+                .err()
+                .expect("transparent refund must fail before HTTP")
+                .to_string()
+                .contains("shielded-only")
+        );
+    }
+
     #[test]
     fn quotes_fail_closed_on_cost_route_and_binding_changes() {
         for dry in [true, false] {

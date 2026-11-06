@@ -142,9 +142,11 @@ read still uses its actual wallet; no sibling is selected to own shared work.
 Coinbase already uses the wallet documentation identity, while participating HTTP
 transports at different origins have distinct scopes. Common credentials, content
 and timing can still correlate service-visible requests. Treasury scans share one
-identity. New shielded-only wallets disable transparent address probing; legacy and
-imported wallets retain their discovery settings and late-receipt recovery. Remaining
-retirement of wallet-owned transparent support and scanning belongs to N6 in
+identity. Generated, mnemonic-imported, reopened and reconstructed wallets disable
+transparent known-address queries and gap recovery regardless of saved settings.
+Historical bindings do not enable an address-recovery mode; accepted transactions
+and incidentally recognized owned funds retain their ordinary handling. Remaining
+removal of SDK transparent key derivation/output recognition belongs to N6 in
 [NU7 release readiness](plans/nu7_release_readiness.md).
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or

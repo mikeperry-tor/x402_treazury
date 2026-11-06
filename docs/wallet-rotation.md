@@ -932,10 +932,13 @@ The remaining service-contract and bridge qualification work is owned by
 
 ## Refunds, state and recovery
 
-New seed wallets persist disabled transparent discovery and publish shielded-only
-receive addresses: the SDK's initial Orchard-only address and an additional
-Sapling+Orchard address. Imports and reopened snapshots preserve their discovery settings and issued
-addresses. This does not remove legacy transparent late-receipt recovery.
+Generated and mnemonic-imported wallets persist disabled transparent address
+discovery and publish shielded-only receive addresses. Runtime opens and SDK
+reconstruction override any saved discovery setting, so ordinary operation and
+recovery do not query known transparent addresses or probe address gaps. Issued
+identities and historical financial records remain intact; there is no legacy
+transparent-discovery mode. The SDK may still recognize already-owned transparent
+outputs in transactions encountered through shielded scanning.
 The requested quote window defaults to 1,800 seconds; explicit overrides, returned
 quote deadlines and the SDK's signed block expiry retain their separate authority.
 
@@ -957,17 +960,18 @@ does not promise a fresh address for every HTTP request.
 Distinct refund receivers prevent address-reuse linkage, not correlation through
 other request, session or network metadata.
 
-Existing transparent refund bindings and accepted quotes remain unchanged.
-Snapshot recovery retains their address ranges; mnemonic-only transparent discovery
-can miss later receipts across unused address gaps, so the seed alone does not
-replace the complete backup or recover off-chain obligations. A mnemonic-only
-rescan also cannot recover the issuance frontier of disclosed addresses that never
-received funds; recovering coins does not establish safe continuation of address
-issuance from an old or missing snapshot. The refund codec
-accepts network-correct transparent addresses and unified addresses with a
-transparent or Orchard receiver. A mixed unified address may receive transparently;
-new generation omits the transparent receiver to avoid that fallback. Source
-deposit addresses retain their separate transparent-only contract.
+Saved transparent or mixed refund bindings and accepted quotes remain exact
+historical evidence. They are rejected for new quote requests and new managed
+input acceptance, including when a quote was cached before this policy changed.
+Selection fails explicitly rather than silently substituting a different refund
+receiver. Already accepted calculations, signed bytes and source/provider status
+observations retain their original binding and authority. This compatibility is
+financial ownership, not a wallet-format migration or transparent recovery scan.
+New refunds require a network-correct shielded-only unified address containing an
+Orchard receiver. Source deposit addresses retain their transparent-only contract.
+Mnemonic recovery discovers shielded receipts through viewing keys without address
+gap scanning; a seed does not recover off-chain liabilities or undisclosed issuance
+frontiers, so retain the complete encrypted state and key backup.
 
 Refund visibility does not make funds automatically spendable for another deposit.
 For legacy or other owned transparent funds, serving and bootstrap with

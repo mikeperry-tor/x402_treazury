@@ -477,6 +477,15 @@ impl Store {
                     && quote.deadline == deadline,
                 "persisted funding source binding mismatch"
             );
+            // This boundary follows require_unstarted_preparation: accepted work
+            // keeps its original authority, while cached quotes cannot grant new
+            // financial input ownership to a transparent refund receiver.
+            crate::rotation::near::require_shielded_refund(
+                &self.network().chain(),
+                quote.request["refundTo"]
+                    .as_str()
+                    .context("missing refund binding")?,
+            )?;
         }
         Ok(())
     }
@@ -2464,7 +2473,7 @@ mod completion_tests {
         let (_dir, mut store, job) = fixture();
         let quote = crate::rotation::near::Quote {
             sizing_preview: None,
-            request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
+            request: serde_json::json!({"amount":job.target,"recipient":job.recipient,"refundTo":crate::rotation::near::test_shielded_refund(&store.network().chain())}),
             response: serde_json::json!({}),
             input: 50,
             deadline: 1000,
@@ -2490,6 +2499,103 @@ mod completion_tests {
             );
         }
         assert!(store.status().unwrap().treasury_operations.is_empty());
+    }
+
+    #[test]
+    fn cached_transparent_refund_cannot_start_inputs_but_accepted_bytes_remain_owned() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+        let chain = TreasuryNetwork::Mainnet.chain();
+        let transparent = "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F";
+        let Address::Transparent(t) = Address::decode(&chain, transparent).unwrap() else {
+            panic!()
+        };
+        let Address::Unified(shielded) =
+            Address::decode(&chain, &crate::rotation::near::test_shielded_refund(&chain)).unwrap()
+        else {
+            panic!()
+        };
+        let mixed =
+            UnifiedAddress::from_receivers(shielded.orchard().cloned(), None, Some(t), None, None)
+                .unwrap()
+                .encode(&chain);
+        for refund in [transparent, mixed.as_str()] {
+            let (_dir, mut store, job) = fixture();
+            let quote = crate::rotation::near::Quote {
+                sizing_preview: None,
+                request: serde_json::json!({"amount":job.target,"recipient":job.recipient,"refundTo":refund}),
+                response: serde_json::json!({}),
+                input: 50,
+                deadline: 1000,
+                deposit: Some("deposit".into()),
+            };
+            let saved = serde_json::to_vec(&quote).unwrap();
+            store.save_funding_quote(&job.id, &saved).unwrap();
+            store
+                .require_unstarted_preparation(&job.operation_id)
+                .unwrap();
+            let revision = store.snapshot().unwrap().0;
+            assert!(
+                store
+                    .require_preparation_binding(
+                        &job.operation_id,
+                        Some(&job.pool_id),
+                        "deposit",
+                        50,
+                        1000
+                    )
+                    .unwrap_err()
+                    .to_string()
+                    .contains("shielded-only")
+            );
+            assert!(store.status().unwrap().treasury_operations.is_empty());
+            assert!(!store.status().unwrap().outgoing_pending);
+            assert_eq!(store.snapshot().unwrap().0, revision);
+            assert_eq!(
+                store
+                    .funding_quote_for_operation(&job.id, &job.operation_id)
+                    .unwrap()
+                    .as_slice(),
+                saved.as_slice()
+            );
+            // Model work already accepted under the prior policy; publication and
+            // later observation keep its immutable original instead of re-admitting inputs.
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .unwrap();
+            assert!(
+                store
+                    .require_unstarted_preparation(&job.operation_id)
+                    .is_err()
+            );
+            let raw = crate::rotation::store::test_support::transaction_raw(100);
+            store
+                .prepare_with_facts(
+                    &job.operation_id,
+                    revision,
+                    b"snapshot",
+                    &raw,
+                    Some(TransactionFacts {
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
+                        expiry_height: 100,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: Some(1000),
+                    }),
+                )
+                .unwrap();
+            assert_eq!(
+                store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                raw
+            );
+            assert_eq!(
+                store
+                    .funding_quote_for_operation(&job.id, &job.operation_id)
+                    .unwrap()
+                    .as_slice(),
+                saved.as_slice()
+            );
+            assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
+        }
     }
 
     #[test]

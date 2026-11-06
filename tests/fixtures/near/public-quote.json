@@ -24,7 +24,7 @@
     "depositType": "ORIGIN_CHAIN",
     "destinationAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
     "amount": "5000000",
-    "refundTo": "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+    "refundTo": "u1twhzfnwvps8vlv20jak2lud8x3j5y9p42unjrq69kvhlsu3yp88e8m4jn9r53369su3mx2e9hjan5kl4pwqkfgetam7v7rzwfduu2q6dp90um6al5zjyk3akns2923va5xyn92f6f5neq9amdshzpj67n2e9ez94qj36hgagpv5ltwk7",
     "refundType": "ORIGIN_CHAIN",
     "recipient": "0x0000000000000000000000000000000000000001",
     "recipientType": "DESTINATION_CHAIN",

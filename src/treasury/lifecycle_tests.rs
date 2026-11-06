@@ -10,6 +10,7 @@ mod sapling;
 mod scan_bounds;
 mod shielding;
 mod terminal;
+mod transparent_fixtures;
 mod worker;
 use super::*;
 use crate::rotation::{
@@ -52,7 +53,7 @@ async fn save_quotes(store: &StoreHandle, jobs: Vec<FundingJob>, deadline: u64) 
                 // remains independently covered. The owner checks this exact binding.
                 let quote = Quote {
                     sizing_preview: None,
-                    request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
+                    request: serde_json::json!({"amount":job.target,"recipient":job.recipient,"refundTo":crate::rotation::near::test_shielded_refund(&s.network().chain())}),
                     response: serde_json::json!({}),
                     input: 50_000,
                     deadline,

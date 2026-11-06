@@ -28,9 +28,11 @@ x402_treazury wallet sync --config examples/deployments/managed.local.toml
 ```
 
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
-it. New seed wallets expose shielded-only receive addresses and persist disabled
-transparent address discovery. Mnemonic imports retain SDK discovery defaults;
-reopening preserves the saved settings and legacy receive/refund bindings.
+it. Generated and mnemonic-imported wallets expose shielded-only receive addresses
+and persist disabled transparent address discovery. Runtime reopening and SDK
+reconstruction disable known-address queries and gap recovery regardless of saved
+settings. Historical receive/refund identities and accepted work remain intact;
+transparent/mixed refunds cannot authorize new quotes or managed deposits.
 The SDK's initial receive address is Orchard-only; initialization also derives a
 Sapling+Orchard receive address. `wallet sync` and `wallet status` show readable summaries by default, with
 saved balance observations distinguished from current spending authority.
@@ -273,8 +275,8 @@ funding: use `wallet bootstrap` first when warming needs a managed paid relay wa
 
 Build or test the embedded wallet with the shell wrapper, which supplies a
 Cargo-managed protoc compiler. First builds may download public proving
-parameters. The wallet dependency is pinned upstream at zingolib v7.0.0 commit
-`bfb0a2156819ea7f75a9b09b1724abfd06c8925e`; no reference checkout is needed.
+parameters. The wallet dependency is pinned upstream at zingolib v8.0.0 commit
+`81d799775f11e882896e8710e8af12d6d4d29a41`; no reference checkout is needed.
 
 ```sh
 make build
@@ -357,7 +359,7 @@ Missing data, RPC failures, and timeouts fail closed. This checks server
 capability; it does not independently prove that a server supplies honest or
 complete chain data. No check is required before activation.
 
-The v7 SDK also requires the sync server to advertise lightwallet protocol
+The pinned SDK also requires the sync server to advertise lightwallet protocol
 version 0.5.0 or newer in `GetLightdInfo`. A missing, malformed or older version
 fails the scan with `indexer_protocol_unsupported`; it does not select another
 endpoint or permit a direct connection outside the configured transport. This
@@ -448,7 +450,7 @@ original and restored copies simultaneously. A Zcash mnemonic alone cannot resto
 random EVM keys, pending payment authorizations or the rotation journal.
 
 The application maintains encrypted save/reopen and address continuity coverage
-for the embedded Zingolib v7 SDK's current wallet format 45, including current
+for the embedded Zingolib v8 SDK's current wallet format 45, including current
 finite-sync and transparent-scan state. SDK roundtrip coverage preserves a newly
 inserted scan target and the next derived address; dependency-owned historical
 readers remain upstream implementation.

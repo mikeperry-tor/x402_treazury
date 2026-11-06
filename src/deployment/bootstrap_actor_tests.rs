@@ -79,7 +79,7 @@ fn quote(job: &crate::rotation::store::funding::FundingJob, now: u64) -> Quote {
             destination: crate::rotation::near::USDC.into(),
         },
         &job.recipient,
-        "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+        crate::rotation::near::PUBLIC_REFUND_UA,
         &job.target,
         "public",
         100,

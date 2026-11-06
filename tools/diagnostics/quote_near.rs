@@ -49,7 +49,7 @@ async fn run() -> Result<()> {
     let mut request = request(
         &assets,
         "0x0000000000000000000000000000000000000001",
-        "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+        "u1twhzfnwvps8vlv20jak2lud8x3j5y9p42unjrq69kvhlsu3yp88e8m4jn9r53369su3mx2e9hjan5kl4pwqkfgetam7v7rzwfduu2q6dp90um6al5zjyk3akns2923va5xyn92f6f5neq9amdshzpj67n2e9ez94qj36hgagpv5ltwk7",
         &amount.to_string(),
         "public",
         100,

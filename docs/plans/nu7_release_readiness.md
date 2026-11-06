@@ -392,10 +392,27 @@ pre-seed migration path and will not be forked for this settings change.
 Enforce shielded-only Orchard-capable unified refunds before new outbound quote
 requests and before new managed financial input acceptance, including cached quotes.
 The existing Store binding check follows accepted-work detection, so accepted
-calculations, signed bytes, exact historical quotes and status/recovery can finish.
+calculations, signed bytes and status/recovery can finish. New-work quote validators
+reject transparent/mixed receivers; ordinary journal deserialization retains exact
+old bindings without a permissive historical refund validator.
 Do not silently replace a previously disclosed transparent/mixed binding or rewrite
 its quote. Existing owned-fund recognition/shielding does not enable address recovery.
 No separate legacy mode, recovery ledger, timer or extra state is introduced.
+
+History check at `d0e05a288b78be5e2dffeaaf6c7491b74c074e04` confirms new refunds
+were already shielded, and the pruning plan explicitly left current refund
+ownership plus dependency-owned snapshot codecs intact. The approved saved-state
+inspection shows no outstanding transparent source transaction: associated current
+jobs are complete and retained source transactions confirmed. Do not infer an
+active liability merely from the presence of a historical transparent binding.
+Generic accepted-work journaling remains shared infrastructure, not a new
+transparent compatibility mode.
+The P4/C06 linkability finding removed with
+`556865ab42e93758f70324aff7c4ee5570f3b15a` originally disabled probing only for
+newly generated seeds and retained import/reopen discovery. The current operator
+direction removes that exception: no known-address queries or gap probing on
+imports, reopening or recovery either. This is independent of the outstanding
+provider amount discrepancy and requires no new funded qualification first.
 
 Commit boundary C5a includes these policies, focused negative-RPC/new-request/
 cached-preparation regressions, seed-only shielded discovery/reopen coverage, and
@@ -405,7 +422,7 @@ and all-target Clippy before broad suites, reuse unchanged dependency/security
 coverage, then run affected default/SDK and synthetic lifecycle consumers with
 sources frozen. Record actual counts and limitations; no live qualification claim.
 
-### N6 selected-cohort retirement assessment
+### N6 full-retirement assessment (beyond C5a discovery policy)
 
 Independent read-only audit of v8 `81d799775f11e882896e8710e8af12d6d4d29a41`
 found no complete transparent-retirement configuration. Zingolib
@@ -413,12 +430,15 @@ found no complete transparent-retirement configuration. Zingolib
 older wallet decoding can derive it too. Pepper disabled discovery returns before
 known-address RPCs/gap probing but full/pending scan paths still recognize owned
 transparent outputs, and compact scanning can process them after discovery's floor.
-Ordinary serving still shields eligible owned transparent outputs. No such
-behavior was removed: current settings cannot establish N6's literal acceptance.
+Ordinary serving still shields eligible already-owned transparent outputs. C5a
+disables address recovery and new transparent refund use; it does not remove SDK
+key derivation or incidental output recognition, so N6's original full-retirement
+acceptance remains separate.
 
 Technical next action: assess a supported upstream no-transparent construction/
-recognition option or narrowly reviewed SDK source change, with explicit legacy-only
-recovery rather than clearing address maps. A new Zingolib checkout requires the
+recognition option or narrowly reviewed SDK source change preserving original
+accepted work and owned funds rather than clearing address maps. The operator's
+C5a direction supersedes the earlier proposal for a legacy discovery mode. A new Zingolib checkout requires the
 vendoring discussion; Pepper alone cannot fix constructor derivation. Acceptance
 must separately inspect internal maps, known/gap RPCs, compact/full/pending/calculated
 recognition, fresh/import/reopen/seed+snapshot restore and original late obligations.
@@ -429,8 +449,8 @@ bindings, saved original outgoing identities and shielded-note facts. It does no
 qualify live legacy transparent funds, late obligations or deployed refund delivery.
 Next action: complete provider attribution and separately review submission-disabled
 copy-scan/legacy recovery evidence before selecting any SDK retirement patch.
-N3/N5 deployed receiver/pool/spendability evidence and complete legacy ownership
-remain release blockers; N6 is explicitly incomplete. Current
+N3/N5 deployed receiver/pool/spendability evidence remains a full-retirement
+release condition; N6 is explicitly incomplete. Current
 SDK limitations are maintained in the integration guide, without claiming that
 query isolation or disabled discovery retires transparent support.
 

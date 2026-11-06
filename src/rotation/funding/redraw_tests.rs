@@ -98,7 +98,7 @@ fn tokens(app: axum::Router) -> axum::Router {
 fn request(job: &FundingJob, target: u64, max_output: u64, sizing: SizingPolicy) -> QuoteRequest {
     QuoteRequest {
         job: job.clone(),
-        refund: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+        refund: crate::rotation::near::PUBLIC_REFUND_UA.into(),
         target: target.to_string(),
         limits: crate::rotation::near::Limits {
             max_output,

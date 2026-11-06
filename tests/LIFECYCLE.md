@@ -330,3 +330,13 @@ Fresh receive-policy coverage:
 uses the actual SDK and synthetic indexer to verify shielded receipt spendability,
 zero transparent-address queries, safe receive output and persisted restart policy.
 Imported seed-only recovery and legacy transparent binding tests remain independent.
+
+Transparent discovery policy is also covered by
+`treasury::lifecycle_tests::refund_addresses::reopened_discovery_enabled_snapshot_preserves_binding_without_transparent_recovery`:
+a discovery-enabled current seed snapshot is overridden on reopen/reconstruction,
+its exact historical binding survives, new use is rejected, and a late T-only
+receipt causes no address RPC or recovered coin. Mnemonic-only shielded recovery
+checks the same negative RPC contract. Owned-transparent shielding fixtures include
+a zero-value shielded receipt so the full transaction is relevant through trial
+decryption; this preserves balances and exercises incidental recognition without
+enabling transparent address discovery.

@@ -327,14 +327,16 @@ verifies prefetched parameters and denies network access during qualification.
 
 ## Refund receivers and seed recovery
 
-New application seeds persist `TransparentAddressDiscovery::disabled()` in their
-SDK wallet settings before the first snapshot. The SDK still derives unused
-transparent keys separately from its initial Orchard-only UA; the application
-also derives a Sapling+Orchard receive UA. The pinned SDK's UA generator emits
-shielded receivers only, including when reconstructing saved addresses.
-Mnemonic imports retain discovery defaults; reconstruction and reopening load the
-saved settings without changing address history. Legacy transparent bindings keep
-their discovery and shielding path. Shielded trial decryption remains enabled.
+All generated and mnemonic-imported application wallets persist
+`TransparentAddressDiscovery::disabled()`. Runtime owner open and SDK reconstruction
+apply the same policy even when the saved seed snapshot enabled discovery; the
+next ordinary save persists it. Read-only inspection retains the original facts.
+This disables known-address RPCs and address-gap recovery without a legacy recovery
+mode. Shielded trial decryption and already accepted transaction ownership remain.
+The SDK still derives unused transparent keys separately from its initial
+Orchard-only UA; the application also derives a Sapling+Orchard receive UA.
+Current storage accepts schema23 only; the SDK owns historical snapshot decoding,
+which is separate from an application pre-seed migration path.
 
 The v8 SDK has no verified complete transparent-retirement setting.
 `LightWallet::new` still derives and stores the first external transparent address
@@ -347,7 +349,7 @@ address, and deleting legacy identities could prevent recovery of late receipts.
 
 Full retirement therefore needs a supported upstream change or reviewed SDK source
 change covering construction/reconstruction and ordinary output recognition, plus
-an explicit legacy recovery mode. Pepper-only changes cannot prevent Zingolib's
+preservation of accepted work and recoverable owned funds. Pepper-only changes cannot prevent Zingolib's
 constructor derivation. Existing fresh-wallet negative-RPC tests qualify disabled
 discovery, not absence of derivation or recognition. Imported/reopened wallets,
 archived mixed/transparent bindings and pending shielding need separate migration

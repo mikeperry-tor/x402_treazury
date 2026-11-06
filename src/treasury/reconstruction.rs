@@ -32,6 +32,7 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "reconstructed SDK must be offline"
         );
+        disable_transparent_discovery(&mut client.wallet().write().await.wallet_settings);
         ensure!(!stop.is_cancelled(), "treasury stopping");
         self.store
             .call(|s| s.close_unpublished_preparations())

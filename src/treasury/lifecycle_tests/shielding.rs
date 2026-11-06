@@ -1,4 +1,5 @@
 //! Actual pinned SDK transparent selection, proof, journal and confirmation.
+use super::transparent_fixtures::transparent_fixture;
 use super::*;
 use pepper_sync::wallet::{KeyIdInterface, OutputInterface};
 
@@ -35,12 +36,8 @@ impl TransactionSubmission for Undelivered {
 async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input() {
     let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 1).await;
-    let small = net
-        .funding_transaction(vec![(&addresses[0], 20_000, None)])
-        .await;
-    let large = net
-        .funding_transaction(vec![(&addresses[0], 1_000_000, None)])
-        .await;
+    let small = transparent_fixture(&net, &owner, vec![(&addresses[0], 20_000, None)]).await;
+    let large = transparent_fixture(&net, &owner, vec![(&addresses[0], 1_000_000, None)]).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![small]);
@@ -248,14 +245,17 @@ async fn automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_u
     use tracing::instrument::WithSubscriber;
     let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 4).await;
-    let funding = net
-        .funding_transaction(vec![
+    let funding = transparent_fixture(
+        &net,
+        &owner,
+        vec![
             (&addresses[0], 5_000, None),
             (&addresses[1], 10_000, None),
             (&addresses[2], 1_000_000, None),
             (&addresses[3], 2_000_000, None),
-        ])
-        .await;
+        ],
+    )
+    .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![funding]);
@@ -440,9 +440,7 @@ async fn automatic_shielding_never_accepts_unconfirmed_or_paused_inputs_and_acto
     let (_dir, net, mut owner, _endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 1).await;
     owner.configure_automatic_shielding(30_000);
-    let funding = net
-        .funding_transaction(vec![(&addresses[0], 1_000_000, None)])
-        .await;
+    let funding = transparent_fixture(&net, &owner, vec![(&addresses[0], 1_000_000, None)]).await;
     // The synthetic faucet spends a fabricated note outside this chain. Inject
     // that fixture deposit; actual treasury submissions still use validation.
     net.chain.write().await.enter_mempool(funding);
@@ -489,9 +487,7 @@ async fn automatic_shielding_never_accepts_unconfirmed_or_paused_inputs_and_acto
     // A separate funded fixture below observes the production actor trigger.
     let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 1).await;
-    let funding = net
-        .funding_transaction(vec![(&addresses[0], 1_000_000, None)])
-        .await;
+    let funding = transparent_fixture(&net, &owner, vec![(&addresses[0], 1_000_000, None)]).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![funding]);
@@ -593,9 +589,7 @@ async fn shielding_callback_scans_are_consumed_before_unrelated_commands() {
     }
     let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 1).await;
-    let funding = net
-        .funding_transaction(vec![(&addresses[0], 1_000_000, None)])
-        .await;
+    let funding = transparent_fixture(&net, &owner, vec![(&addresses[0], 1_000_000, None)]).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![funding]);
@@ -675,9 +669,7 @@ async fn buried_shielding_expiry_ignores_stale_inclusion_hints_without_another_c
     }
     let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 1).await;
-    let funding = net
-        .funding_transaction(vec![(&addresses[0], 1_000_000, None)])
-        .await;
+    let funding = transparent_fixture(&net, &owner, vec![(&addresses[0], 1_000_000, None)]).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![funding]);

@@ -1,6 +1,32 @@
 //! Seed-only shielded refund discovery through the actual pinned SDK.
 use super::*;
 
+// Each family covers both unary/stream or current/deprecated methods. A marker
+// is consumed before processing, so failed or swallowed requests cannot hide.
+async fn forbid_transparent_address_rpcs(net: &MockNet) {
+    let mut chain = net.chain.write().await;
+    for rpc in [Rpc::TaddressTxids, Rpc::TaddressBalance, Rpc::AddressUtxos] {
+        chain.faults.inject(
+            rpc,
+            Fault::Fail(
+                tonic::Code::PermissionDenied,
+                "forbidden transparent address RPC".into(),
+            ),
+        );
+    }
+}
+async fn assert_no_transparent_address_rpcs(net: &MockNet) {
+    let chain = net.chain.read().await;
+    assert!(chain.taddr_request_log().is_empty());
+    for rpc in [Rpc::TaddressTxids, Rpc::TaddressBalance, Rpc::AddressUtxos] {
+        assert_eq!(
+            chain.faults.pending(rpc),
+            1,
+            "transparent address RPC reached indexer"
+        );
+    }
+}
+
 #[tokio::test]
 async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
     let (_original_dir, net, mut original, endpoint) = funded_fixture(2).await;
@@ -62,13 +88,19 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
         .sync_config
         .transparent_address_discovery
         .clone();
-    assert!(imported_settings.scopes.external && imported_settings.scopes.refund);
+    assert!(
+        !imported_settings.scopes.external
+            && !imported_settings.scopes.internal
+            && !imported_settings.scopes.refund
+    );
     let initial_addresses = restored.addresses().await.unwrap();
     assert!(!initial_addresses.to_string().contains(&refund));
     let initial = restored.status().await.unwrap();
     assert!(initial.funding_jobs.is_empty() && initial.treasury_operations.is_empty());
+    forbid_transparent_address_rpcs(&net).await;
     restored.configure_sync(SyncSettings::new(endpoint, 2).unwrap());
     restored.sync_once(&CancellationToken::new()).await.unwrap();
+    assert_no_transparent_address_rpcs(&net).await;
     let recovered = restored.status().await.unwrap();
     let sync = recovered.sync.unwrap();
     assert_eq!(sync.confirmed_shielded_zatoshis, 1_040_000);
@@ -98,7 +130,7 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
 }
 
 #[tokio::test]
-async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
+async fn reopened_discovery_enabled_snapshot_preserves_binding_without_transparent_recovery() {
     let (dir, mut owner) = unfunded_fixture().await;
     crate::rotation::test_capacity::treasury_pair(&owner, "legacy_refund", "5", None, 0)
         .await
@@ -116,6 +148,17 @@ async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
         .await
         .unwrap();
     let legacy = zcash_keys::address::Address::Transparent(receiver).encode(&owner.network.chain());
+    // Model a current seed snapshot saved before the operator disabled recovery.
+    owner
+        .client
+        .as_ref()
+        .unwrap()
+        .wallet()
+        .write()
+        .await
+        .wallet_settings
+        .sync_config
+        .transparent_address_discovery = Default::default();
     let bytes = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
     let revision = owner.revision;
     let (job_id, saved) = (job.id.clone(), legacy.clone());
@@ -135,9 +178,53 @@ async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
     )
     .await
     .unwrap();
-    assert_eq!(restored.refund_address(job.id).await.unwrap(), legacy);
-    // A transparent receipt arriving after encrypted reopen must still be found.
+    assert!(
+        restored
+            .refund_address(job.id.clone())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("shielded-only")
+    );
+    let saved_job = job.id.clone();
+    let saved_binding = restored
+        .store
+        .call(move |s| s.refund_address(&saved_job))
+        .await
+        .unwrap();
+    assert_eq!(saved_binding.as_deref(), Some(legacy.as_str()));
+    let opened = restored
+        .client
+        .as_ref()
+        .unwrap()
+        .wallet()
+        .read()
+        .await
+        .wallet_settings
+        .sync_config
+        .transparent_address_discovery
+        .clone();
+    assert!(!opened.scopes.external && !opened.scopes.internal && !opened.scopes.refund);
+    // Reconstruction must also override the enabled policy still in committed bytes.
+    restored
+        .reconstruct_sdk(&CancellationToken::new())
+        .await
+        .unwrap();
+    let discovery = restored
+        .client
+        .as_ref()
+        .unwrap()
+        .wallet()
+        .read()
+        .await
+        .wallet_settings
+        .sync_config
+        .transparent_address_discovery
+        .clone();
+    assert!(!discovery.scopes.external && !discovery.scopes.internal && !discovery.scopes.refund);
+    // A T-only late receipt does not authorize address-specific recovery.
     let net = MockNet::launch().await;
+    forbid_transparent_address_rpcs(&net).await;
     let receipt = net
         .funding_transaction(vec![(&legacy, 100_000, None)])
         .await;
@@ -148,14 +235,14 @@ async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
     }
     restored.configure_sync(SyncSettings::new(net.indexer_uri().to_string(), 2).unwrap());
     restored.sync_once(&CancellationToken::new()).await.unwrap();
-    assert!(!net.chain.read().await.taddr_request_log().is_empty());
+    assert_no_transparent_address_rpcs(&net).await;
     assert_eq!(
         restored
             .snapshot_balances()
             .await
             .unwrap()
             .confirmed_transparent,
-        Some(100_000)
+        Some(0)
     );
     let status = restored.status().await.unwrap();
     assert!(status.snapshot_revision > expected_revision);
@@ -294,9 +381,12 @@ async fn mixed_ua_refund_shields_owned_transparent_receiver_without_rebinding() 
             .await
             .unwrap();
         let receiver = Address::Transparent(transparent).encode(&owner.network.chain());
-        let funding = net
-            .funding_transaction(vec![(&receiver, 1_000_000, None)])
-            .await;
+        let funding = super::transparent_fixtures::transparent_fixture(
+            &net,
+            &owner,
+            vec![(&receiver, 1_000_000, None)],
+        )
+        .await;
         let funding_id = submission::decode(&funding).unwrap().txid().to_string();
         {
             let mut chain = net.chain.write().await;
@@ -426,6 +516,7 @@ async fn unsupported_refund_binding_is_rejected_before_sync_or_preparation() {
 async fn fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy() {
     let dir = tempfile::tempdir().unwrap();
     let net = MockNet::launch().await;
+    forbid_transparent_address_rpcs(&net).await;
     let mut owner = Treasury::create_with_network(
         dir.path().join("state"),
         dir.path().join("key"),
@@ -472,7 +563,7 @@ async fn fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy(
             .spendable_shielded_zatoshis,
         100_000
     );
-    assert!(net.chain.read().await.taddr_request_log().is_empty());
+    assert_no_transparent_address_rpcs(&net).await;
     let identity = owner.status().await.unwrap().treasury_id;
     let before = owner.addresses().await.unwrap();
     owner.close().await.unwrap();
@@ -487,7 +578,7 @@ async fn fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy(
     assert_eq!(reopened.addresses().await.unwrap(), before);
     reopened.configure_sync(SyncSettings::new(net.indexer_uri().to_string(), 2).unwrap());
     reopened.sync_once(&CancellationToken::new()).await.unwrap();
-    assert!(net.chain.read().await.taddr_request_log().is_empty());
+    assert_no_transparent_address_rpcs(&net).await;
     assert_eq!(
         reopened
             .status()
