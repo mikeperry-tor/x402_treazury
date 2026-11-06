@@ -1,4 +1,6 @@
 description = "US banking marketing checks, regulatory rule lookup and social-post drafting."
+# Local catalog and no same-origin help resource: optional cover has no candidate.
+cover_traffic_enabled = false
 # Authored HTTP projection of public root discovery and /mcp tools/list.
 spec = "openapi.json"
 name = "Banking Compliance"

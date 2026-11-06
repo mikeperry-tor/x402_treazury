@@ -172,6 +172,14 @@ needed for these resource probes; they do not establish paid settlement or
 physical-connection affinity. API functionality and configured Tor routing remain
 available without cover.
 
+Banking Compliance also disables optional cover: its local catalog and absent
+help URL supply no eligible same-origin HTTP resource. Claw402 and APEX Faucet
+opt out after unsigned HTTP/2 probes showed Claw's help/catalog and APEX's help
+returning 200 instead of the required range 206. These defaults suppress candidate
+and range-qualification notices for the affected providers; they do not assert
+that every resource on those origins is incompatible. A deployment may explicitly
+re-enable cover after supplying a verified same-origin range resource.
+
 ### Same-path method contracts
 
 GenuineGood's five grant pairs and Otto's remaining llm-research,
@@ -306,10 +314,13 @@ unqualified. Do not truncate the returned cursor or treat a first page as a
 complete result set.
 
 Market-signal API for trading agents (X/Twitter intel, Polymarket, perp
-funding/OI, stablecoin pegs). All routes are flat-price GETs ($0.015/call at
-the time of writing). No `pricing_key` is configured, so structured display prices
-remain unknown. Actual calls obtain the current x402 challenge; no startup endpoint
-requests are sent.
+funding/OI, stablecoin pegs). Routes use GET with tool-dependent flat prices.
+Profile and three-post dossier lookups for `elonmusk` returned usable data with
+observed offers of $0.015 and $0.05 respectively. Historical post-authorization
+404s remain unexplained without their original handles and error detail; these
+successful samples do not establish delivery for every account.
+No `pricing_key` is configured, so structured display prices remain unknown.
+Actual calls obtain the current x402 challenge; no startup endpoint requests are sent.
 
 ## x402stock.toml — x402stock.xyz
 

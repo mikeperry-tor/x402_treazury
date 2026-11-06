@@ -1,4 +1,6 @@
 description = "Rendered web pages, open-source research, company records, public blockchain intelligence and market data."
+# Help ignored unsigned byte ranges; the local catalog supplies no HTTP fallback.
+cover_traffic_enabled = false
 spec = "apexfaucet-openapi.json"
 name = "APEX Faucet"
 base_url = "https://apexfaucet.xyz"

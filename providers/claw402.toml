@@ -1,4 +1,6 @@
 description = "Crypto market indicators, company and funding research, and supported model gateways."
+# Help and catalog ignored unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
 # Market and crypto-company research; sparse RootData schemas preserve open JSON body routing.
 spec = "https://claw402.ai/openapi.json"
 name = "Claw402"
