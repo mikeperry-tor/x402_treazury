@@ -68,6 +68,13 @@ chain and removes checkpoint 23 explicitly before reopening; it tests damaged
 rollback state without repeating the retention-window-sized initial scan. Both
 forms retain divergence, original-input/byte ownership and subsequent-scan checks.
 
+Unsubmitted-funding expiry keeps one cold and one already-observed SDK journey,
+each requiring exactly one completed canonical proof scan during recovery and no
+lookup or submission. The warm journey retains damaged disclosure/diagnostic
+sequencing. JSON expiry and stale-txid permutations are checked in the cheap Store
+projection regression against authenticated original bytes, preserving the complete
+saved facts and encrypted transaction without another funded SDK world.
+
 The Store bootstrap fixture covers operation-backed recovery without proving:
 accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
 outcomes permit recovery assessment but cannot authorize replacement of a confirmed

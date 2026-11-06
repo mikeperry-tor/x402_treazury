@@ -328,8 +328,9 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
         }
     }
     for (malformed_sequencing, warm_cached, projected_expiry) in [
+        // Projection permutations are covered without proving in Store tests.
+        // These journeys retain the distinct cold and already-observed paths.
         (false, false, serde_json::json!(0)),
-        (true, false, serde_json::json!(u32::MAX)),
         (true, true, serde_json::json!("invalid")),
     ] {
         let (dir, net, mut owner, _endpoint) = funded_fixture(2).await;

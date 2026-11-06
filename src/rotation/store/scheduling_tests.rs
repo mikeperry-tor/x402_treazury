@@ -719,7 +719,12 @@ fn expiry_label_preserves_native_disclosure_evidence() {
 
 #[test]
 fn expired_signed_original_cannot_gain_first_disclosure_from_stale_projection() {
-    for projected_expiry in [0, 10_000] {
+    for projected_expiry in [
+        serde_json::json!(0),
+        serde_json::json!(10_000),
+        serde_json::json!(u32::MAX),
+        serde_json::json!("invalid"),
+    ] {
         let (_dir, mut store) = fixture();
         let id = "expired-first-disclosure";
         store
@@ -727,6 +732,7 @@ fn expired_signed_original_cannot_gain_first_disclosure_from_stale_projection() 
             .unwrap();
         store.accept_preparation(id, None, 60, None).unwrap();
         let raw = crate::rotation::store::test_support::transaction_raw(100);
+        let txid = crate::rotation::store::test_support::transaction_txid(100);
         store
             .prepare_with_facts(
                 id,
@@ -734,7 +740,7 @@ fn expired_signed_original_cannot_gain_first_disclosure_from_stale_projection() 
                 b"calculated",
                 &raw,
                 Some(TransactionFacts {
-                    txid: crate::rotation::store::test_support::transaction_txid(100),
+                    txid: txid.clone(),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
@@ -742,16 +748,38 @@ fn expired_signed_original_cannot_gain_first_disclosure_from_stale_projection() 
                 }),
             )
             .unwrap();
-        store.db.execute(
-            "UPDATE treasury_operations SET facts=json_set(facts,'$.expiry_height',?2,'$.txid','stale projection') WHERE id=?1",
-            params![id, projected_expiry],
-        ).unwrap();
+        let saved: String = store
+            .db
+            .query_row(
+                "SELECT facts FROM treasury_operations WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut facts: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        facts["expiry_height"] = projected_expiry;
+        facts["txid"] = serde_json::json!({"stale":true});
+        let damaged_facts = facts.to_string();
+        store
+            .db
+            .execute(
+                "UPDATE treasury_operations SET facts=?2 WHERE id=?1",
+                params![id, damaged_facts],
+            )
+            .unwrap();
         let encrypted: Vec<u8> = store
             .db
             .query_row("SELECT raw FROM outgoing WHERE id=?1", [id], |row| {
                 row.get(0)
             })
             .unwrap();
+        let prepared = crate::rotation::transaction::PreparedTransaction::load(&store, id).unwrap();
+        assert_eq!(prepared.bytes(), raw);
+        assert_eq!(prepared.facts().unwrap().txid, txid);
+        assert_eq!(prepared.facts().unwrap().expiry_height, 100);
+        let observed = store.observation_operation(id).unwrap();
+        assert_eq!(observed.facts.txid, txid);
+        assert_eq!(observed.facts.expiry_height, 100);
         let error = crate::rotation::transaction::BroadcastTransaction::request(
             &mut store, id, 1, 100, false,
         )
@@ -769,7 +797,15 @@ fn expired_signed_original_cannot_gain_first_disclosure_from_stale_projection() 
             })
             .unwrap();
         assert_eq!(retained, encrypted);
-        assert_eq!(store.db.query_row("SELECT json_extract(facts,'$.expiry_height') FROM treasury_operations WHERE id=?1", [id], |row| row.get::<_,u32>(0)).unwrap(), projected_expiry);
+        let retained_facts: String = store
+            .db
+            .query_row(
+                "SELECT facts FROM treasury_operations WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained_facts, damaged_facts);
     }
 }
 
