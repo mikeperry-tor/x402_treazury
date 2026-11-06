@@ -1355,8 +1355,9 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
             false,
             false,
         ),
-        (TransactionPresence::Unknown, false, true, false),
-        (TransactionPresence::Unknown, false, false, true),
+        // Alternate authorizing bytes and damaged bookkeeping share the same
+        // canonical-confirmation path; neither needs another funded SDK world.
+        (TransactionPresence::Unknown, false, true, true),
     ] {
         let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
         let pool = owner

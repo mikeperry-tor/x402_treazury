@@ -75,6 +75,11 @@ sequencing. JSON expiry and stale-txid permutations are checked in the cheap Sto
 projection regression against authenticated original bytes, preserving the complete
 saved facts and encrypted transaction without another funded SDK world.
 
+SDK confirmation keeps separate never-disclosed and submitted originals, plus
+one ZIP244 alternate-authorization journey carrying damaged sequencing. Each
+retains zero corroborating lookups or replay and exact original saved bytes;
+cheap Store tests cover additional malformed disclosure/health permutations.
+
 The Store bootstrap fixture covers operation-backed recovery without proving:
 accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
 outcomes permit recovery assessment but cannot authorize replacement of a confirmed
