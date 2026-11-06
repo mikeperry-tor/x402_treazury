@@ -68,7 +68,7 @@ The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkt
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover polling,
 mutation testing, cover shaping, broader lifecycle/cover acceptance, managed
-wallet extensions, [post-merge Zcash isolation recovery](plans/deferred/zcash_isolation_retries.md)
+wallet extensions, [optional Zcash Tor read recovery](plans/deferred/zcash_tor_read_recovery.md)
 and [Coinbase bundle access](plans/deferred/coinbase_bundles.md).
 Plans grant no execution or spending authority.
 

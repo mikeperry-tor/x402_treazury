@@ -1,49 +1,73 @@
-# Managed wallet follow-ups
+# Optional managed-wallet extensions and qualification
 
 The public-swap treasury, capacity-based wallet groups, admission and Tor integration
 are implemented. Their current contracts are in
 [wallet architecture](../../wallet-rotation.md), the [README](../../../README.md),
 and the [qualification scope](../../testing.md#qualification-status).
-This plan contains only remaining extensions and qualification, not a rewrite of
-that implementation. None authorizes mainnet transactions or commercial signup.
+These are optional capability, reporting and operator-tool extensions, not blockers
+for ordinary supported payments or the achieved shielded-refund/address-query
+privacy contract. NU7 support does not establish their separate live qualification.
+None authorizes mainnet transactions, private-key access or commercial signup.
+
+The source assessment baseline is `ad210e0ac527859cc4ed091b85c3808ddb541883`.
+When selecting a track, capture the current branch and exact baseline, define its
+operator outcome and independently review the remaining gap against current code.
+Refine the selected track into coherent commits with owning-guide changes, tests,
+exact-SHA/fixup and combined review under the
+[planning workflow](../../planning-workflow.md). Do not implement every extension
+merely because it is listed here.
 
 ## Structured seller receipt evidence
 
 The current client journals authorizations and reconciles canonical Base balance/
-nonce evidence. It does not provide full per-request seller-receipt accounting.
-Add an internal paid response/evidence type carrying status, body, selected
-requirements, immutable attempt/generation identity and parsed settlement evidence.
-Keep direct MCP and fallback invocation on the same path.
+nonce evidence. It already parses seller settlement headers for the narrow
+structured insufficient-funds retry contract. The
+[receipt classifier](../../../src/qualification/receipt.rs) also handles missing,
+duplicate, malformed, oversized and transport-unknown qualification outcomes,
+retaining safe seller-claim projections. Existing
+[qualification evidence](../../../src/qualification/payment.rs) persists correlated
+per-attempt receipt events, and qualification reports consume them. Those claims
+are explicitly unverified; these foundations do not need a second parser or journal.
 
-Persist only bounded necessary evidence, protected like other sensitive financial
-records. Do not log authorization headers, full signed payloads or arbitrary
-seller bodies. Distinguish missing, malformed and contradictory receipts from
-provider application errors, transport failures and chain-confirmed outcomes.
-A receipt alone cannot release a reservation or authorize a second signed request.
-Use the original address/nonce and canonical confirmed anchor for reconciliation;
-do not mix observations from different RPC endpoints or double-subtract a debit.
+The remaining extension is ordinary-serving per-request receipt reporting or
+accounting, if an operator needs it. Define the useful result and reuse the existing
+classification and immutable attempt/generation identity. An internal paid response/
+evidence result may carry status, body, selected requirements and parsed claims;
+keep direct MCP and fallback invocation on the same path. Persist only necessary
+safe projections protected like other sensitive financial records, without logging
+authorization headers, full signed payloads or arbitrary seller bodies.
 
-Implement as a commit for the type/parser and offline cases, then a commit for
-journal/report integration with migration/restart coverage. Test a receipt before
-confirmed credit/debit, success without receipt, malformed receipt, paid body loss,
-expiry-unused, reorg contradictions and duplicate observation. Preserve compatibility
-with uncertain historical attempts lacking receipt data. Use the durable canonical `USED` versus `EXPIRED_UNUSED` resolution and immutable
-admission role/claim support. A provider fulfillment report remains separate from
-canonical token-transfer attribution; neither replaces the other.
+New reporting must not grant release/replay authority or replace the existing
+narrow insufficient-funds retry contract. Distinguish provider claims, application
+errors, transport uncertainty and chain-confirmed outcomes. Use original address/
+nonce identities and coherent canonical evidence; do not mix endpoints or
+subtract a debit again because a receipt was observed. Durable canonical `USED`
+versus `EXPIRED_UNUSED` resolution and immutable admission ownership remain the
+financial authority. Provider fulfillment and token-transfer attribution remain
+separate facts.
+
+First implement only missing response/ownership integration and offline cases;
+add ordinary journal/report integration only when the selected outcome requires
+it, with migration/restart coverage. Reuse existing parser and qualification cases.
+Cover the actual new handoff with receipt-before-confirmation, missing/malformed
+claims, paid body loss, unused expiry, reorg contradiction and duplicate observation
+where relevant. Preserve uncertain historical attempts lacking receipt data.
 
 ## Authenticated confidential swap qualification
 
-Confidential configuration and request validation exist, but authenticated funded
-execution has not been qualified. Resolve partner/API authentication and any
-required user-session lifecycle against current provider contracts before adding
-an operator runbook. A public quote or a partner token is not proof of confidential
-access or entitlement to commissions. Current requests add no application fees.
+Confidential configuration, explicit request modes, binding validation, API-key
+and bearer user-session headers already exist. Authenticated funded execution
+remains unqualified. If this capability is selected, verify the current provider
+entitlement/authentication and session lifecycle before adding an operator runbook.
+A public quote or configured token proves neither confidential access nor
+entitlement to commissions. Current requests add no application fees.
 
-Capture sanitized token/quote/status fixtures and test the full configured auth
-combination, missing/expired credentials, exact recipient/refund/amount/mode
-bindings, route minimums, fees and deadlines. Refuse public fallback. Then perform
-an independently authorized bounded live qualification using supplied credentials
-and funds; keep it separate from the public edition's recorded success.
+Reuse existing configuration/request tests and add sanitized fixtures for any
+missing auth combination, expired credentials and exact recipient/refund/amount/
+mode bindings, route minimums, fees and deadlines. Refuse public fallback. Then
+perform an independently authorized bounded live qualification using supplied
+credentials and funds; keep it separate from public-swap evidence. Shielded refund
+receivers alone do not qualify provider confidentiality or funded execution.
 
 Any future commercial tier needs an explicit fee policy and user-visible terms,
 validated collector/amount limits and separate tests. Do not silently introduce
@@ -52,48 +76,60 @@ separation must not be advertised as financial unlinkability.
 
 ## Managed Permit2 / upto
 
-Managed profiles currently reject upto. Supporting it requires each ephemeral
-address to have a confirmed USDC allowance, a gas/approval funding strategy and
-metered settlement accounting. Those costs and permissions become part of readiness,
-reserve readiness and per-operation funding safeguards. Static upto signing is not sufficient qualification.
+Managed profiles currently reject upto; static signing support is a separate
+capability. If managed upto is selected, first design the per-address USDC allowance,
+necessary gas/approval funding and maximum-versus-settled liability lifecycle.
+Assess existing SDK and owner enforcement before proposing any additional readiness
+or funding gate. This plan does not authorize a new spending budget, reserve mirror,
+financial ledger or duplicate balance/allowance check; follow the
+[best-effort](../../wallet-rotation.md#best-effort-wallet-rules) and
+[reconciliation](../../wallet-rotation.md#recovery-and-reconciliation-policy) rules.
 
-Define that lifecycle before implementation. Tests must cover approval failure,
-allowance readiness/reorgs, maximum versus settled amounts and outstanding
-liabilities across retirement. Approval failures cannot churn through new wallets.
-Until this work is separately designed and qualified, retain the existing rejection.
+Qualification must cover actual approval failure, allowance reorgs, maximum versus
+settled amounts and outstanding liabilities through retirement. Approval failures
+cannot churn through new wallets. Until separately designed and qualified, retain
+the explicit managed rejection; NU7 and shielded refunds do not change it.
 
 ## Manual retirement and incident repair
 
-Ordinary serving and finite explicit sync invoke candidate-scoped canonical
-retirement under the configured per-group tolerance, default 0.001 USDC. See
-[automatic retirement](../../wallet-rotation.md#automatic-retirement).
-Never-credited predecessors retain their destination guard while original delivery
-remains possible. A completed job can close it only when accepted current/archived
-swaps have bound NEAR terminal outcomes and closed local source work, or never
-accepted calculation/submission. A completed/abandoned label or source
-expiry/confirmation alone proves neither delivery nor loss. The maintained guide describes the implemented proof boundary.
-There is no manual retirement CLI. Any future manual command needs explicit
-wallet selection, fresh dual balance evidence, unresolved-liability and destination
-checks, and durable audit support. It must not sweep funds or infer replacement
-funding authority.
+Ordinary serving and finite explicit sync already invoke candidate-scoped canonical
+[automatic retirement](../../wallet-rotation.md#automatic-retirement), including
+the configured per-group tolerance and original destination/delivery guards.
+Proven nondisclosure and closed local source work retain their separate meanings;
+source expiry/confirmation or a completed/abandoned label alone cannot establish
+bridge settlement. These are maintained runtime contracts, not unfinished manual
+repair work.
 
-Specialized abandonment and unreconstructible original-record corruption remain
-incident-specific operator work. Ordinary serving automatically rebuilds derived
-chain checkpoints and current authorization dispositions from original identities
-and fresh canonical evidence, retaining replaced proofs as history; see
+There is no manual retirement CLI. If an operator needs one, define explicit wallet
+selection and reuse the existing retirement owner, canonical proof and unresolved-
+liability checks with durable transition evidence. Do not add a parallel proof
+system, force extra agreement reads, sweep funds or infer replacement-funding
+authority merely to implement an administrative command.
+
+Ordinary serving already reconstructs derived chain checkpoints and authorization
+dispositions from original identities and canonical evidence, retaining replaced
+proofs as history; see the
 [reconciliation policy](../../wallet-rotation.md#recovery-and-reconciliation-policy).
-A future incident utility needs an exact reviewed source shape and preserved
-original bytes/support. Recovery cannot manufacture missing accepted bytes or
-immutable authorization identities.
-There is no general-purpose migration or proof override.
+Specialized abandonment and unreconstructible original-record corruption remain
+incident-specific operator work. An incident utility should start from a concrete
+failure and exact reviewed source shape, preserving original bytes and support.
+Recovery cannot manufacture missing accepted bytes or immutable authorization
+identities. No general-purpose migration or proof override is selected.
 
-## Related boundaries
+## Qualification and completion boundaries
 
-Canonical chain replacement retains automatic reconstruction work even when old
-evidence was finalized; it grants no replay or replacement funding authority.
+Canonical chain replacement grants no replay or replacement-funding authority.
 Unrecoverable original records still require scoped operator investigation.
-Live treasury exhaustion, arbitrary paid media routes
-and mainnet crash injection were not established by the public experiment; existing
-offline tests and dated reports state the evidence. Reusable live scenarios belong
-to [the live integration runner](../../../tests/live/INTEGRATION.md), not to automatic
-repetition of the completed public-swap test.
+Live treasury exhaustion, arbitrary paid-media routes and mainnet crash injection
+are not established by SDK upgrades or offline privacy regressions. Keep those
+limits in [qualification guidance](../../testing.md#qualification-status);
+reusable live scenarios belong to the
+[live integration runner](../../../tests/live/INTEGRATION.md), without automatically
+repeating the completed public-swap experiment.
+
+For a selected track, independently review its exact commits/fixups and complete
+affected payment, ownership and recovery chains, with applicable complexity and
+ordered validation. Keep financial evidence private. After implementation and
+combined review, hand enduring contracts to their owning guides and remove only
+the completed planning material through reviewed cleanup; retain genuinely
+unfinished selected work without a completed-plan archive.

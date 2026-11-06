@@ -1,26 +1,28 @@
-# Zcash isolation recovery after the HTTP batch
+# Zcash Tor read recovery
 
-## Scope and prerequisite
+## Scope and starting point
 
-Deferred extension, not part of the first catalog/pricing, API and Base RPC batch.
-Begin implementation only after that batch has passed its cumulative/final reviews
-and merged. This unfinished extension does not block its cleanup or merge and does
-not authorize live-funded qualification, transaction replay or a treasury rescan.
+Optional resilience work for eligible Zcash gRPC read failures through Tor:
+try fresh owner-bound scopes and retain a validated successful channel. Existing
+identity-bound channel isolation is implemented. Shielded-only new refunds and
+disabled transparent-address discovery already meet the address-query privacy
+contract; this extension is not a prerequisite for that protection or NU7 support.
+It does not claim an observed current outage or blanket network unlinkability.
 
-Before implementation, identify the merged HTTP batch SHA and current starting
-baseline, inspect its exact transport/ownership interfaces, and independently
-review this extension against the resulting code. The current reference baseline
-for the observations below is `970f6bde1334eb42a540288ea1432381e1b9ae64`; it is not
-an instruction to implement against stale pre-merge interfaces. Confirm permanent
-HTTP selected-entry guidance and regression evidence were handed off before
-removal of the HTTP plan. Use maintained guides and merged code as prerequisites,
-not a link to a completed plan that will be deleted.
+The source assessment baseline is `ad210e0ac527859cc4ed091b85c3808ddb541883`.
+When scheduling this work, capture the current branch, exact baseline and a concrete
+read-failure scenario or operator outcome. Independently review the smallest
+useful change against current HTTP selection and gRPC ownership interfaces before
+implementation. The old dependency on a particular HTTP batch is superseded by
+review of those maintained interfaces and their evidence. No runtime change,
+transaction replay, treasury rescan or live-funded qualification is authorized by
+this deferred plan.
 
 Owning guides: [network policy](../../network-egress.md),
 [resource limits](../../local-resource-limits.md),
 [wallet ownership/recovery](../../wallet-rotation.md),
 [wallet observation](../../wallet-rotation.md#wallet-observation-policy),
-[configuration](../../configuration.md), [development](../../development.md),
+[SDK integration](../../zingo-integration.md), [configuration](../../configuration.md), [development](../../development.md),
 [testing](../../testing.md), [Tor evidence](../../../tests/TOR.md) and
 [complexity discipline](../../../tests/COMPLEXITY.md#review-discipline).
 
@@ -29,12 +31,14 @@ Owning guides: [network policy](../../network-egress.md),
 Zcash uses `NetworkContext::grpc` and a separate cached `GrpcIndexer`/tonic channel,
 keyed by Tokio runtime, canonical identity and full endpoint. SOCKS credentials
 belong to the channel connector; cloning an indexer cannot change circuits. Reuse
-the merged HTTP work's owner-bound scope, coherent record and conditional selected-
+the HTTP transport's owner-bound scope, coherent record and conditional selected-
 entry replacement principles where useful, but retain a separate gRPC adapter and
 cache. Do not force gRPC through reqwest, Curl relay or an HTTP status retry loop.
 
-Full scans in `treasury::SyncSession` create a private runtime, install an indexer
-into the SDK and release channels before runtime teardown. Replacing a factory
+Full scans in `treasury::SyncSession` create a private runtime, acquire an
+application-owned indexer and pass its clone directly into `pepper_sync::sync`.
+`LightClient` supplies offline wallet state. Channels are released before runtime
+teardown. Replacing a factory
 entry does not move an active SDK scan; selected-channel retention naturally ends
 with that runtime. Long-lived lookup/reuse-check owners can retain selection on
 their own runtime. Do not add a cross-runtime winner registry to preserve circuits.
@@ -56,19 +60,22 @@ and requires its own SDK/progress-ownership design if later requested.
 
 ## Proposed ordered delivery and evidence
 
-These boundaries must be reconciled with the merged baseline during independent
+These candidate boundaries must be reconciled with the current baseline during independent
 design review before substantive edits. Keep coherent tests and permanent guide
 updates with each commit; do not leave an unprotected submission path between them.
 
 ### Z1 — Coherent gRPC selection and channel lifetime
 
-Introduce a canonical-owner/effective-scope channel record and explicit enrollment
-policy. Implement private candidate channels and conditional cache-entry replacement
-using exact acquired-record identity, without a winner/history table or counters.
-Use fresh scopes for participating misses, including after runtime teardown/restart;
-nonparticipating callers keep their existing behavior. Acquired old channels remain
-valid and cannot resurrect evicted/replaced records. Do not enable automatic method
-retries or broaden any financial authority in this commit.
+Assess the minimum channel record and enrollment changes needed to retain a
+canonical owner separately from an effective Tor scope. Private candidate channels
+and conditional cache replacement using exact acquired-record identity are the
+candidate design; reuse existing machinery where compatible, without a winner/
+history table or counters. Recovery candidates need fresh owner-bound scopes.
+Decide initial cache-miss behavior from the selected recovery contract rather than
+presuming that every new scan must rotate circuits. Nonparticipating callers keep
+their existing behavior. Acquired old channels remain valid and cannot resurrect
+evicted/replaced records. Do not enable automatic method retries or broaden any
+financial authority in this commit.
 
 Test with local trusted TLS/gRPC through fake authenticated SOCKS: distinct
 credentials/connections, selected-record reuse, owner/endpoint/runtime separation,
@@ -86,12 +93,12 @@ connection/gRPC status evidence at the method boundary; gRPC status/trailers are
 not equivalent to the HTTP 400/403/429/503 policy. Respect external retry guidance
 where applicable without new whole-work deadlines or an independent retry layer.
 Use selected channel then finite fresh candidates before returning the read failure;
-reuse the merged scope/selection machinery rather than duplicating retry state.
+reuse compatible existing scope/selection machinery rather than duplicating retry state.
 Retain failed/pending lookup meaning, network/capability checks and original
 scheduler authority. A read outage cannot become non-inclusion evidence.
 
 Promote after applicable read validation, before handing a selected indexer into
-new SDK work where appropriate. Preflight/read recovery must finish before the
+new Pepper work where appropriate. Preflight/read recovery must finish before the
 existing one-shot broadcast boundary; keep its selected ready handle pinned.
 No whole-SDK retry wrapper may intercept transaction submission or scan mutation.
 
@@ -106,7 +113,7 @@ cadence and recovery-attempt accounting are unchanged. Update wallet/network/
 configuration, both resource inventories and testing guidance in this commit.
 
 **Cumulative gate ZG1, after Z2:** independently review Z1/Z2, all fixups and full
-birthday/sync/preflight/lookup/submission call chains alongside the merged HTTP
+birthday/sync/preflight/lookup/submission call chains alongside the current HTTP
 implementation. Require source-matched tests for channel races, private-runtime
 lifetime and absence of financial replay. Compare original extension-baseline
 CogC/CycC with the same pinned analyzer, review new/worsened warnings and unchanged
@@ -125,7 +132,7 @@ Validate paths/anchors, delivered-versus-proposed claims and evidence source has
 
 **Final gate ZG2, after Z3:** independently review the exact cleanup SHA and combined
 extension, all prior commits/fixups, relevant unchanged consumers and its interaction
-with the merged HTTP batch. Require ZG1 findings resolved, documentation handoff,
+with the current HTTP transport. Require ZG1 findings resolved, documentation handoff,
 source-matched validation/complexity evidence and no unexplained lifetime or financial
 boundary changes. Material later changes reopen affected checks and reviews.
 
