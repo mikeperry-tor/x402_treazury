@@ -30,8 +30,11 @@ Working branch: `nu7_release_readiness`. Starting baseline:
 is outside this work. Public source retrieval and unfunded diagnostics are permitted.
 The operator separately approved the reviewed offline inspection of only
 `state/research_desk` and its default key. That approval covers saved evidence
-read/decryption and private output; private network queries, sync/rescan, signing,
-funded calls, submissions and deployment remain outside that authority.
+read/decryption and private output. The operator subsequently approved one
+separately reviewed existing-quote status GET through the selected Tor policy;
+that query has executed and its one-request authority is consumed. Further private
+network requests, sync/rescan, signing, funded calls, submissions and deployment
+remain outside current authority.
 
 The N1–N6 assessment boundaries below remain acceptance requirements. Execute
 these coherent commits in order, refining candidate details from exact sources:
@@ -286,9 +289,10 @@ and selected database/key/WAL hashes are unchanged. Private artifacts remain in
 fresh owner-only ignored storage; no keys, addresses, amounts or transaction IDs
 are committed here.
 
-Retained evidence supplies one promising shielded-receiver candidate with saved
-confirmation, SDK selection and a provider-refunded flag. It does not yet bind a
-provider refund transaction identity or prove live canonical/unreserved spendability.
+Retained evidence supplies one shielded-receiver candidate with saved confirmation,
+SDK selection and a provider-refunded flag. The subsequently authorized status
+query associates the provider-listed origin transaction with that saved receipt,
+as recorded below; amounts and fresh discovery remain unqualified.
 Some legacy refund bindings are transparent, so their obligations remain preserved.
 The status-query helper and frozen executable have independent source, complexity
 and execution-method review, with four passing public fixtures including actual
@@ -298,14 +302,34 @@ frozen executable SHA-256
 `763200d699c8a194c79f8f5c6cde8a0799ddc112f6f83a30843587ca3d576c78`.
 Recipe `target/nu7-readiness/refund-status-inspection-recipe.md` SHA-256
 `f9f9485fdfadf82a1af8c2fc117bbd7dcba02d1b8f107aa123f2ddeb1b2d83f2`
-is ready for one selected existing-quote GET, with no credentials, retries or
+was approved for one selected existing-quote GET, with no credentials, retries or
 additional endpoints. Network-only policy SHA-256
 `f98d6d2079fd21ac5f0ab3eacc53bb9ac5299c0d7aefe9eb7d9cfd6bac9a989b`
-exactly matches the selected deployment's Tor section. Separate operator network
-approval is requested and pending; no selected private query has occurred. The
-offline grant authorizes no network query, sync/rescan, signing or spending.
-N3/N4 deployed semantics, N5 actual attribution and N6 retirement stay open. Native consensus, complete real-Tor, funded and reproducible-build
-qualification are not claimed.
+exactly matches the selected deployment's Tor section. After explicit operator
+approval, the exact frozen executable ran once with cleared environment, verified
+source/binary/input/policy hashes and fresh exclusive owner-only captures. It exited 0
+with HTTP 200 and a subset-bound `REFUNDED` result. No retry, other endpoint,
+credential, wallet/key read, owner, sync, signing or spending occurred.
+
+The sole reported origin-chain transaction matches the saved Ironwood note at the
+original bound shielded receiver. The note is confirmed and SDK-selected in the
+saved snapshot. Deduplicating all retained pool/transaction/output identities and
+grouping that transaction/receiver still yields an amount larger than the provider
+reports as refunded. Only one retained binding matches this receiver/deposit, and
+no saved local outgoing identity matches the note transaction. These comparisons
+do not establish an external sender. The [official status type](https://raw.githubusercontent.com/defuse-protocol/one-click-sdk-typescript/main/src/models/SwapDetails.ts)
+describes the refund amount as transferred to the refund address, while its origin
+hashes have no dedicated refund role. No reviewed fee breakdown explains the
+difference; fees, batching or gross/net conventions are not assumed.
+
+The evidence associates the transaction with the shielded receipt; its amount
+remains unreconciled. Provider totals do not override SDK note facts or become a spendability gate. The saved
+selection still does not prove fresh discovery, live unreserved funds or spending
+authority. Private captures and exact integer comparisons remain under ignored
+owner-only storage. Further private network queries are not authorized by this
+consumed one-request grant. N3/N4 deployed semantics, N5 accounting/discovery
+qualification and N6 retirement stay open. Native consensus, complete real-Tor,
+new funded and reproducible-build qualification are not claimed.
 
 Public unfunded dry probes through the same configured Tor policy return HTTP201
 for both the current all-shielded UA and Orchard-only protocol UA at $2 nominal
@@ -327,8 +351,8 @@ requirement, late-deposit outcome, refund minimum or unused-request terminalizat
 The live reference now retains the phased shielded-refund evidence recipe, including
 exact immutable fields and missing per-note inspection/submission-disabled scan
 capabilities. Ordinary quote-input equality remains intact. No funded test is authorized/executed.
-Bounded production evidence inspection was subsequently approved and executed offline,
-as recorded above and in the current checkpoint below.
+Bounded production evidence inspection and then one separate Tor status observation
+were approved and executed as recorded in the current checkpoint above.
 The operator selected `examples/deployments/research_desk.toml`; its treasury path
 resolves to `state/research_desk`, with no explicit treasury UUID. Other wallet
 directories are outside this scope and may have unsupported schemas. Initial
@@ -339,10 +363,13 @@ production compilation, exact-SHA source review and default/three-pool public
 fixture execution passed.
 It reports saved SDK selection, not live unreserved funds or spending authority;
 copy-scan and any funded excess harness remain separate missing capabilities.
-Next action: obtain the requested separate authority for the already reviewed,
-fixture-tested one existing private quote status GET through the selected Tor policy. Origin-chain hashes remain candidates until
-correlated with exact note/source identities. Submission-disabled copy-scan and any
-funded qualification remain separate missing capabilities and authority.
+Next action: independently review a narrow offline projection of retained numeric
+fee/transaction facts if it can explain the discrepancy; otherwise prepare a
+separately authorized provider clarification of this specific accounting/transaction
+role. Do not repeat the consumed status query or infer a fee adjustment.
+Submission-disabled copy-scan can qualify discovery but cannot explain provider
+accounting; it and any funded qualification remain separate missing capabilities
+and authority.
 
 ### N6 selected-cohort retirement assessment
 
