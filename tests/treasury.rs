@@ -161,6 +161,97 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     assert!(error.contains("already exists"));
     assert!(error.contains("wallet addresses"));
     assert!(!error.contains("Stack backtrace") && !error.contains("stack backtrace"));
+    // Exercise the public notes dispatch with the existing unfunded fixture.
+    // These references are deliberately absent from run's cleared environment;
+    // offline inspection must not resolve either endpoint or construct an owner.
+    let config = dir.path().join("notes.toml");
+    std::fs::write(&config, format!(
+        "version=1\nservers={{}}\n[treasury]\nid={id:?}\nstate_dir={:?}\nkey_file={:?}\nindexer_url_env='X402_NOTES_UNSET_INDEXER'\nsubmission_url_env='X402_NOTES_UNSET_SUBMISSION'\n",
+        state.to_str().unwrap(), key.to_str().unwrap(),
+    )).unwrap();
+    let before_key = std::fs::read(&key).unwrap();
+    let key_hex = alloy_primitives::hex::encode(&before_key);
+    let snapshot = || {
+        let db = rusqlite::Connection::open_with_flags(
+            state.join("state.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        db.query_row(
+            "SELECT revision,bytes FROM snapshots ORDER BY revision DESC LIMIT 1",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?)),
+        )
+        .unwrap()
+    };
+    let before_snapshot = snapshot();
+    let before_database = std::fs::read(state.join("state.sqlite")).unwrap();
+    let before_wal = std::fs::read(state.join("state.sqlite-wal")).ok();
+    for args in [
+        vec![
+            "wallet",
+            "notes",
+            "--state-dir",
+            state.to_str().unwrap(),
+            "--key-file",
+            key.to_str().unwrap(),
+        ],
+        vec!["wallet", "notes", "--config", config.to_str().unwrap()],
+    ] {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let notes: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(notes["format_version"], 1);
+        assert_eq!(notes["state_schema_version"], 23);
+        assert_eq!(notes["treasury_id"], id);
+        assert_eq!(notes["snapshot_revision"], before_snapshot.0);
+        assert_eq!(notes["snapshot_revision"], status["snapshot_revision"]);
+        assert_eq!(notes["notes"], serde_json::json!([]));
+        assert!(notes["sdk_scanned_height"].is_null());
+        assert!(notes["selection_target_height"].is_null());
+        assert!(notes["selection_anchor_height"].is_null());
+        assert_eq!(
+            notes["spendability_unavailable_reason"],
+            "saved_target_or_anchor_unavailable"
+        );
+        assert_eq!(
+            notes["spendability_limitations"],
+            serde_json::json!([
+                "live_process_locks_unavailable",
+                "migration_reservations_may_be_selected",
+            ])
+        );
+        for bytes in [&output.stdout, &output.stderr] {
+            let rendered = String::from_utf8_lossy(bytes);
+            assert!(!rendered.contains(SEED));
+            assert!(!rendered.contains(&key_hex));
+            assert!(!rendered.contains("Zcash wallet initialized"));
+        }
+        assert_eq!(snapshot(), before_snapshot);
+        assert_eq!(std::fs::read(&key).unwrap(), before_key);
+        assert_eq!(
+            std::fs::read(state.join("state.sqlite")).unwrap(),
+            before_database
+        );
+        assert_eq!(
+            std::fs::read(state.join("state.sqlite-wal")).ok(),
+            before_wal
+        );
+        let after = run(vec![
+            "wallet",
+            "status",
+            "--json",
+            "--state-dir",
+            state.to_str().unwrap(),
+        ]);
+        assert!(after.status.success());
+        let after: serde_json::Value = serde_json::from_slice(&after.stdout).unwrap();
+        assert_eq!(after, status, "inspection changed saved financial records");
+    }
     let before_status = std::fs::read(state.join("state.sqlite")).unwrap();
     for _ in 0..2 {
         let output = run(vec![

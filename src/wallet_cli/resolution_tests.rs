@@ -38,6 +38,14 @@ fn command_value(command: Command) -> Value {
             state_dir,
             key_file,
         } => json!({"kind":"status","state":state_dir,"key":key_file}),
+        Command::Notes {
+            state_dir,
+            key_file,
+            treasury_id,
+            txid,
+        } => {
+            json!({"kind":"notes","state":state_dir,"key":key_file,"id":treasury_id,"txid":txid})
+        }
         Command::Addresses {
             state_dir,
             key_file,

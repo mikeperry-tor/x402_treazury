@@ -46,6 +46,12 @@ enum Action {
     },
     /// Display saved receive addresses without deriving new ones.
     Addresses,
+    /// Inspect saved shielded notes as JSON without syncing or taking ownership.
+    Notes {
+        /// Include only notes received by this transaction ID.
+        #[arg(long)]
+        txid: Option<String>,
+    },
     /// Derive and save a new shielded receive address.
     Address,
     /// Read saved status and the primary receive address without network access.
@@ -173,6 +179,12 @@ fn resolve_args_with_network(
         Action::Status { .. } => Command::Status {
             state_dir,
             key_file,
+        },
+        Action::Notes { txid } => Command::Notes {
+            state_dir,
+            key_file,
+            treasury_id: (!treasury_id.is_empty()).then_some(treasury_id),
+            txid,
         },
         Action::Addresses => Command::Addresses {
             state_dir,
@@ -329,7 +341,10 @@ fn resolve_administrative_identity(
             "treasury ID does not match state (state identity mismatch); use the treasury_id from `wallet status` (it is a UUID, not an account number)"
         );
         expected
-    } else if matches!(action, Action::Status { .. } | Action::Addresses) {
+    } else if matches!(
+        action,
+        Action::Status { .. } | Action::Addresses | Action::Notes { .. }
+    ) {
         String::new()
     } else {
         crate::rotation::store::treasury_id(state_dir)?
@@ -338,6 +353,12 @@ fn resolve_administrative_identity(
 }
 
 enum Command {
+    Notes {
+        state_dir: PathBuf,
+        key_file: PathBuf,
+        treasury_id: Option<String>,
+        txid: Option<String>,
+    },
     Recover {
         meta_config: PathBuf,
     },
@@ -462,6 +483,25 @@ async fn run_args(
     } = command
     {
         return show_status(state_dir, key_file, json).await;
+    }
+    if let Command::Notes {
+        state_dir,
+        key_file,
+        treasury_id,
+        txid,
+    } = command
+    {
+        let output = tokio::task::spawn_blocking(move || {
+            crate::treasury::inspect_notes(
+                &state_dir,
+                &key_file,
+                treasury_id.as_deref(),
+                txid.as_deref(),
+            )
+        })
+        .await??;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
     }
     if let Command::Addresses {
         state_dir,
@@ -605,6 +645,7 @@ async fn execute_wallet_command(
             treasury
         }
         Command::Bootstrap { .. }
+        | Command::Notes { .. }
         | Command::Addresses { .. }
         | Command::Status { .. }
         | Command::Backup { .. }
@@ -1058,3 +1099,39 @@ mod shutdown_tests {
 #[cfg(test)]
 #[path = "wallet_cli/resolution_tests.rs"]
 mod resolution_tests;
+
+#[cfg(test)]
+mod notes_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn notes_routes_offline_without_opening_state_or_resolving_endpoints() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = directory.path().join("must-not-be-created");
+        let txid = "ab".repeat(32);
+        let args = WalletArgs::try_parse_from([
+            "wallet",
+            "notes",
+            "--state-dir",
+            state.to_str().unwrap(),
+            "--txid",
+            &txid,
+        ])
+        .unwrap();
+        let command = resolve_args(args).unwrap();
+        let Command::Notes {
+            state_dir,
+            key_file,
+            treasury_id,
+            txid: selected,
+        } = command
+        else {
+            panic!("notes resolved to a mutating command");
+        };
+        assert_eq!(state_dir, state);
+        assert_eq!(key_file, state.join("wallet.key"));
+        assert_eq!(treasury_id, None);
+        assert_eq!(selected, Some(txid));
+        assert!(!state.exists());
+    }
+}

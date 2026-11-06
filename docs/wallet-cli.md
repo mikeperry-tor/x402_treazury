@@ -22,6 +22,7 @@ initial managed capacity; other administration commands do not start funding wor
 x402_treazury wallet init --config examples/deployments/managed.local.toml
 x402_treazury wallet addresses --config examples/deployments/managed.local.toml
 x402_treazury wallet status --config examples/deployments/managed.local.toml
+x402_treazury wallet notes --config examples/deployments/managed.local.toml
 x402_treazury wallet backup --config examples/deployments/managed.local.toml --destination secrets/backup
 x402_treazury wallet sync --config examples/deployments/managed.local.toml
 ```
@@ -170,6 +171,53 @@ accept them without loading relay providers or performing paid discovery.
 Saved transaction bytes, wallet identities and recovery authority are unchanged.
 Supervised qualification sync retains its pinned deployment policy and rejects
 this override. `--birthday` and import options remain command-specific.
+
+## Offline note inspection
+
+```sh
+x402_treazury wallet notes --config FILE
+x402_treazury wallet notes --config FILE --txid TRANSACTION_ID
+```
+
+`wallet notes` always returns JSON. It authenticates one committed schema-23,
+mainnet, account-zero snapshot under a read-only SQL transaction and decodes it
+with the SDK wallet reader. It can run while the serving owner holds the wallet.
+It does not construct a client, sync, create a wallet directory, issue addresses,
+prepare/reserve inputs, submit transactions or repair/save state. The configured
+UUID, when supplied, must match. A missing key/snapshot, wrong identity, unsupported
+schema or corrupt/incompatible SDK snapshot fails instead of falling back to
+unauthenticated or repaired data.
+
+The versioned output binds the treasury UUID, snapshot revision, saved SDK fully
+scanned height, saved minimum-confirmation policy and SDK selection target/anchor.
+`notes` includes every retained account-zero Sapling, Orchard and Ironwood note,
+including spent history, sorted by pool, transaction ID and output index. Optional
+`--txid` accepts a canonical 64-hex-digit transaction ID and filters receiving
+transactions only. There is no silent truncation or history cap. Absence means
+absent from this retained snapshot, not that no receipt happened.
+
+Each note reports pool/output identity, value in zatoshis, key scope, actual
+receiver and structured receiving/spending transaction facts. Pending transaction
+classes are grouped as `pending`; they are not labeled confirmed. Confirmation
+counts use the saved fully scanned height and remain unknown when it cannot
+establish a count. A block hash appears only if the corresponding block remains
+in the SDK snapshot; it is not a fresh canonical-chain proof. The `receiver` is
+the decrypted Sapling address or an Orchard-receiver-only UA, labeled by
+`receiver_encoding`. Ironwood shares Orchard's receiver format but retains its
+separate pool identity. This reconstructed receiver is **not** the original
+multi-receiver refund UA. Seeds, keys, memos, raw transactions and unrelated
+funding/payment history are excluded.
+
+`sdk_spendable_at_snapshot` records membership in the SDK's read-only
+`AllFunds(MaxSpendable)` selection over all three pools, using saved policy and
+witness/nullifier coverage. Selection unavailability produces `null` membership
+and a fixed reason; confirmed or unspent alone never implies spendability.
+The output explicitly records that live process locks are unavailable and
+migration reservations may be selected. These are SDK snapshot capabilities,
+not live unreserved funds, financial authorization or permission to spend.
+Correlating a receipt to a quote/refund experiment and obtaining authority to
+inspect production keys remain separate steps. See the
+[refund evidence recipe](../tests/live/INTEGRATION_REFERENCE.md#shielded-refund-evidence-and-qualification).
 
 ## Bootstrap before discovery
 

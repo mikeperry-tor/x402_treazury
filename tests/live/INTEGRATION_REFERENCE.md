@@ -539,8 +539,8 @@ API payments. Production wallet supervision still checkpoints sync on parent los
 
 This recipe scopes native ZEC to Base USDC refund evidence. It is a reviewable
 sequence, not an executable runner scenario or spending authority. The provider
-runner does not implement the per-note inspection or controlled excess-deposit
-path below. Do not substitute invented CLI commands, a second financial ledger,
+runner does not implement the controlled excess-deposit path below. Offline
+per-note inspection is available through `wallet notes`. Do not substitute invented CLI commands, a second financial ledger,
 an ad hoc signer or changes to ordinary recovery. Follow the
 [bridge contract limits](../../docs/network-egress.md#source-contract-and-upload-limits)
 and [refund/reconciliation policy](../../docs/wallet-rotation.md#refunds-state-and-recovery).
@@ -582,14 +582,34 @@ receipt evidence; current spendability must be reported separately.
 
 ### Qualify discovery on an isolated copy
 
-The missing offline inspection capability must be implemented and independently
-reviewed before opening production snapshots: read a consistent owner-produced
-backup/copy, report per-note pool/ownership/confirmation/spent-reserved facts using
-the selected SDK, and expose no seeds or signing material. `wallet status` has
-aggregate balances and is insufficient for note attribution. `wallet sync` can
-perform recovery and is not a read-only substitute. Preserve originals, SQLite
-sidecars and accepted work; do not run a copied funded owner concurrently with
-production serving.
+After the separate path/key inspection authority above, use the implemented
+read-only command against the selected treasury or a consistent owner-produced
+backup/copy:
+
+```sh
+x402_treazury wallet notes --config REVIEWED_CONFIG
+x402_treazury wallet notes --config REVIEWED_CONFIG --txid REFUND_TRANSACTION_ID
+```
+
+Retain its JSON privately with the binary/source identity and original backup
+provenance. It binds one authenticated committed snapshot revision and reports all
+retained account-zero shielded notes, including spent notes, with actual
+pool/receiver, confirmation/spender facts and SDK snapshot-selection membership.
+Receiver-only UAs reconstruct the actual decrypted receiver and do not replace
+the quote's complete original refund UA. Confirmations and optional retained
+block hashes describe saved SDK evidence, not a fresh canonical-chain proof.
+A missing note means absent from this retained snapshot; missing selection data
+remains `null` with a fixed reason. The SDK's `AllFunds(MaxSpendable)` query can
+include migration-reserved notes, ignores live lock filters, and cannot restore
+process-local locks, so this report does not establish live unreserved funds or
+spending authority. It excludes keys, seeds, memos, raw transactions and unrelated
+financial history. See [command details](../../docs/wallet-cli.md#offline-note-inspection).
+
+`wallet status` has aggregate balances and is insufficient for note attribution.
+`wallet sync` can perform recovery and is not a read-only substitute. Preserve
+originals, SQLite sidecars and accepted work; do not run a copied funded owner
+concurrently with production serving. Creating this inspection command grants no
+production-key, scan, submission or funded-experiment authority.
 
 If offline artifacts do not prove selected-SDK discovery/recovery, separately
 review and authorize an isolated copy scan. Disable transparent discovery, retain
@@ -640,9 +660,9 @@ or spending recovered funds. Near-deadline/late-arrival tests are separate revie
 experiments: neither the 30-minute requested preference nor any local timer
 proves sub-hour refund completion or abandonment of `PENDING_DEPOSIT` work.
 
-The next actions are therefore operator/state/evidence selection, independent
-review and inspection authority, implementation/review of the offline per-note
-inspector, then any separately authorized scan capability. Only a demonstrated
+The next actions are therefore review and validation of the implemented offline
+per-note inspector, operator/state/evidence selection and separate inspection
+authority, then any separately authorized scan capability. Only a demonstrated
 remaining funded-evidence gap justifies implementing and authorizing the controlled
 excess-deposit path. No private inspection or funded qualification is claimed by
 this runbook.

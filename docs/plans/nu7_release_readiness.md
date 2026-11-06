@@ -191,8 +191,9 @@ The operator selected `examples/deployments/research_desk.toml`; its treasury pa
 resolves to `state/research_desk`, with no explicit treasury UUID. Other wallet
 directories are outside this scope and may have unsupported schemas. No production
 state or keys have been opened. Source-only review established that existing CLI
-views lack per-note evidence, so C4 now prepares `wallet notes` using direct offline
-LightWallet decoding and the existing authenticated read-only snapshot contract.
+views lack per-note evidence. C4 implements `wallet notes` using direct offline
+LightWallet decoding and the existing authenticated read-only snapshot contract;
+compiler, exact-SHA review and public-fixture execution remain pending.
 It reports saved SDK selection, not live unreserved funds or spending authority;
 copy-scan and any funded excess harness remain separate missing capabilities.
 Next action: independently review/test that concrete inspector, then request the

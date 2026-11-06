@@ -1018,6 +1018,36 @@ pub(crate) fn inspect_wallet_snapshot(
         Ok((status, bytes))
     })
 }
+/// A single authenticated committed SDK snapshot, without financial-history decoding.
+pub(crate) struct InspectedWalletSnapshot {
+    pub treasury_id: String,
+    pub revision: i64,
+    pub bytes: Zeroizing<Vec<u8>>,
+}
+
+/// Read-only inspection shares identity and AEAD validation with existing Store reads.
+/// Identity, revision and ciphertext are read under the same SQLite transaction.
+pub(crate) fn inspect_note_snapshot(
+    dir: &Path,
+    key_file: &Path,
+    expected_id: Option<&str>,
+) -> Result<InspectedWalletSnapshot> {
+    let key = read_key(key_file)?;
+    inspect_state(dir, |db| {
+        let treasury_id = read_runtime_identity(db)?;
+        ensure!(
+            expected_id.is_none_or(|expected| expected == treasury_id),
+            "state identity mismatch"
+        );
+        let (revision, bytes) = read_snapshot(db, &key, &treasury_id, TreasuryNetwork::Mainnet)?;
+        Ok(InspectedWalletSnapshot {
+            treasury_id,
+            revision,
+            bytes,
+        })
+    })
+}
+
 fn read_status(db: &Connection) -> Result<Status> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(

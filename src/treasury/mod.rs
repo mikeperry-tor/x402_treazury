@@ -9,7 +9,9 @@ mod expiry;
 mod inputs;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
+mod notes;
 mod observation;
+pub(crate) use notes::inspect_notes;
 mod owned_transparent;
 mod prover;
 mod publication;
