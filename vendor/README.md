@@ -36,9 +36,13 @@ submission or local behavior change. A smaller patch can be a useful prerequisit
 but does not count as a retired checkout. Moving the same fork into another
 repository does not retire its maintenance responsibility.
 
-Four patched crate directories remain. Alloy uses unpatched registry sources;
-`zingolib` and `zingo-netutils` use the coherent pinned upstream Git cohort, and
-`lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override.
+Four patched crate directories remain: `hyper`, `h2`, `reqwest` and
+`pepper-sync`. The x402 EIP-155 SDK, Alloy primitives and `zcash_proofs` use
+unpatched registry sources; their known advisory exposure is accepted under the
+[dependency disposition](../docs/development.md#locked-graph-advisory-disposition),
+with raw findings retained. `zingolib` and `zingo-netutils` use the coherent pinned
+upstream Git cohort, and `lightwallet-protocol` 0.4.0 supplies Ironwood fields
+without a Git override.
 Pepper retains its path override; its public-trait merge regression runs in the
 application SDK integration target. Vendored crates are excluded from workspace
 test selection.
@@ -81,7 +85,7 @@ relevant dependency updates and use upstream notifications when explicitly set u
 
 ## Combined dependency compatibility
 
-The shared workspace uses unpatched Alloy core 1.7.3 and the pinned Zingolib v8 cohort.
+The shared workspace uses registry Alloy core 1.7.3 and the pinned Zingolib v8 cohort.
 Alloy's `sha3 0.11.0` and Zingo's `bip32 0.6.0 → hmac 0.13.0` accept stable
 `digest 0.11.3`; no local hashing manifest override is needed. Independent
 Keccak/EIP-712 vectors, payment signing and the compatibility suite remain the

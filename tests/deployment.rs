@@ -1,3 +1,5 @@
+#[path = "support/evm_address.rs"]
+mod evm_address;
 #[path = "support/tls.rs"]
 mod tls;
 use axum::{
@@ -768,10 +770,10 @@ include_tools=['beta_pay']
         .await;
         let body: Value =
             serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-        let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
+        let signer = evm_address::address_for_key(&format!("{key:064x}"));
         assert_eq!(
             body["payer"].as_str().unwrap().to_lowercase(),
-            signer.address().to_string().to_lowercase(),
+            signer.to_string().to_lowercase(),
             "{server}/{tool}"
         );
     }
@@ -1098,10 +1100,10 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
     assert_ne!(result["result"]["isError"], true);
     let paid: Value =
         serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    let key: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    let key = evm_address::address_for_key(&format!("{:064x}", 1));
     assert_eq!(
         paid["payer"].as_str().unwrap().to_lowercase(),
-        key.address().to_string().to_lowercase()
+        key.to_string().to_lowercase()
     );
     assert_eq!(paid["query"], "q=kept");
     let expensive = items

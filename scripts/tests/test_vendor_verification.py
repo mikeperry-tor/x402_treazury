@@ -194,8 +194,11 @@ class TransportVerificationTests(unittest.TestCase):
                 fromfile="a/src/lib.rs", tofile="b/src/lib.rs",
             )).encode()
             root.joinpath("sample.patch").write_bytes(patch)
+            notice = b"public license notice\n"
+            root.joinpath("LICENSE-SAMPLE").write_bytes(notice)
             root.joinpath("transport-sources.json").write_text(json.dumps({
                 "sample": {"version": "test", "patch": "sample.patch",
+                           "notices": {"LICENSE-SAMPLE": {"sha256": hashlib.sha256(notice).hexdigest()}},
                            "patch_sha256": hashlib.sha256(patch).hexdigest(),
                            "original_files": {"src/lib.rs": hashlib.sha256(original).hexdigest()}}
             }))
@@ -211,6 +214,10 @@ class TransportVerificationTests(unittest.TestCase):
                 real_run = subprocess.run
                 with mock.patch.object(module.subprocess, "run", wraps=real_run) as reverse:
                     module.verify()
+                root.joinpath("LICENSE-SAMPLE").write_bytes(b"changed license")
+                with self.assertRaisesRegex(SystemExit, "license notice differs"):
+                    module.verify()
+                root.joinpath("LICENSE-SAMPLE").write_bytes(notice)
                 arguments, options = reverse.call_args
                 self.assertEqual(arguments[0], ["patch", "--binary", "--batch", "--fuzz=0", "-R", "-p1"])
                 self.assertEqual(options["input"], patch)

@@ -1,3 +1,5 @@
+#[path = "support/evm_address.rs"]
+mod evm_address;
 use serde_json::{Value, json};
 #[path = "support/tls.rs"]
 mod tls;
@@ -559,9 +561,8 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
                 let expected = match profile {
                     "source_override" | "server_override" => {
                         let key = if profile == "source_override" { 1 } else { 2 };
-                        let signer: alloy_signer_local::PrivateKeySigner =
-                            format!("{key:064x}").parse().unwrap();
-                        signer.address().to_string()
+                        let signer = evm_address::address_for_key(&format!("{key:064x}"));
+                        signer.to_string()
                     }
                     _ => state
                         .pools

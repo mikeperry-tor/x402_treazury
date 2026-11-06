@@ -296,8 +296,7 @@ async fn fixture() {
     let records = proxy.records.lock().unwrap();
     let expected: Vec<_> = (1..=2)
         .map(|key| {
-            let signer: alloy_signer_local::PrivateKeySigner =
-                format!("{key:064x}").parse().unwrap();
+            let signer: crate::payment::signer::EvmSigner = format!("{key:064x}").parse().unwrap();
             let identity = IsolationId::evm(&signer.address().to_string()).unwrap();
             let selected = crate::network::global()
                 .http_participating(

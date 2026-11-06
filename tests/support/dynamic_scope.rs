@@ -237,8 +237,7 @@ async fn scope_child() {
             let body: Value =
                 serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
                     .unwrap();
-            let signer: alloy_signer_local::PrivateKeySigner =
-                format!("{key:064x}").parse().unwrap();
+            let signer: crate::payment::signer::EvmSigner = format!("{key:064x}").parse().unwrap();
             assert_eq!(body["payer"], signer.address().to_string());
         }
     }
@@ -288,7 +287,7 @@ async fn scope_child() {
     // business calls below retain their distinct captured payer identities.
     let mut expected = vec![public_credentials];
     for key in [1, 2] {
-        let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
+        let signer: crate::payment::signer::EvmSigner = format!("{key:064x}").parse().unwrap();
         let id = IsolationId::evm(&signer.address().to_string()).unwrap();
         let transport = crate::network::global()
             .http_participating(
@@ -326,8 +325,7 @@ async fn scope_child() {
 
     // Generated MCP tool (BoundTool::invoke_output) recovers from unsigned 403 on a fresh
     // Tor scope and promotes the winning candidate scope.
-    let writer_signer: alloy_signer_local::PrivateKeySigner =
-        format!("{:064x}", 1).parse().unwrap();
+    let writer_signer: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
     let writer_id = IsolationId::evm(&writer_signer.address().to_string()).unwrap();
     let pre_tool_scope = crate::network::global()
         .http_participating(

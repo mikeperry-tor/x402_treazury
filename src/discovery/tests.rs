@@ -590,7 +590,7 @@ async fn public_transport_child() {
         .is_err()
     );
     let ctx = crate::network::global();
-    let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    let signer: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
     let evm_id = IsolationId::evm(&signer.address().to_string()).unwrap();
     let evm_transport = ctx
         .http_participating(
@@ -1757,8 +1757,7 @@ async fn directory_payment_fixture() {
     );
     let addresses: Vec<_> = (1..=3)
         .map(|key| {
-            let signer: alloy_signer_local::PrivateKeySigner =
-                format!("{key:064x}").parse().unwrap();
+            let signer: crate::payment::signer::EvmSigner = format!("{key:064x}").parse().unwrap();
             signer.address().to_string()
         })
         .collect();

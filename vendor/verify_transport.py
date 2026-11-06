@@ -12,6 +12,9 @@ def verify(manifest_name="transport-sources.json"):
     root = Path(__file__).resolve().parent
     manifest = json.loads((root / manifest_name).read_text())
     for name, entry in manifest.items():
+        for relative, notice in entry.get("notices", {}).items():
+            if hashlib.sha256((root / relative).read_bytes()).hexdigest() != notice["sha256"]:
+                raise SystemExit(f"{name}: license notice differs: {relative}")
         source = root / name
         expected = entry["original_files"]
         actual = {p.relative_to(source).as_posix() for p in source.rglob("*") if p.is_file()}

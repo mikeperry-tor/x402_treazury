@@ -501,6 +501,26 @@ acceptance. Integrate both crypto checkouts with complete published-source
 provenance/reconstruction and retirement conditions; test aggregate std clients
 separately and retain all original native vectors and payment ownership assertions.
 
+C2a implementation checkpoint: TLS exact `e83e2043` passed independent source,
+provenance and vendor CogC/CycC review; the exact-source isolated download-params
+harness executes seven passing downloader tests. Harness identity, manifest diff
+and separate lock are retained under `target/nu7-readiness/tls-test-harness-*`;
+only inactive bundled-prover metadata is omitted. No bundled-prover qualification
+is claimed. The source-aware replay after TLS has root1 vulnerability/5 notices,
+protoc0 and normalized nonregistry0.
+
+The integrated SDK/primitive crypto candidate's actual root replay under
+`target/nu7-readiness/security-assessment-afterCrypto/` reports zero vulnerabilities
+in root, protoc and normalized nonregistry sources, with four root maintenance
+notices. The fifth baseline notice drops with pin-utils/wasmtimer; no filters or
+package renames hide findings. Both new checkouts have complete reversible
+published-source provenance and upstream license notices; the verification entrypoint
+checks their notice hashes too. Payer-binding assertions now use native fixture
+addresses, retaining the independent Python cryptographic vectors. Production
+compiler/all-target Clippy, executed core/aggregate compatibility, financial runtime
+checks, source-matched complexity and exact/combined reviews remain open. This is
+implemented advisory removal, not completed release validation.
+
 The two proposed checkouts, alternatives and maintenance costs were explained
 before vendoring. Preserve exact published archives, licenses, complete file
 inventory and authored patches; wire reconstruction into executed vendor checks

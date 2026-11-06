@@ -523,7 +523,7 @@ async fn paid_import_fixture() {
     m.fail_after_commit.store(false, Ordering::SeqCst);
     all_unsupported_refresh_avoids_authority().await;
     assert_eq!(state.calls.lock().unwrap()["unsupported"], ["origin"]);
-    let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    let signer: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
     assert_eq!(
         *state.signers.lock().unwrap(),
         vec![signer.address().to_string().to_ascii_lowercase(); 4]
@@ -745,7 +745,7 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
         state.calls.lock().unwrap()["cli-paid"],
         ["origin", "origin", "challenge", "signed"]
     );
-    let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 19).parse().unwrap();
+    let signer: crate::payment::signer::EvmSigner = format!("{:064x}", 19).parse().unwrap();
     assert_eq!(
         state.signers.lock().unwrap().last().unwrap(),
         &signer.address().to_string().to_ascii_lowercase()

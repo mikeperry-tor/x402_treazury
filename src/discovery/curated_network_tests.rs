@@ -241,7 +241,7 @@ async fn fixture() {
     assert_eq!(proxy.accepted.load(Ordering::SeqCst), accepted);
     assert_eq!(requests.lock().unwrap().len(), 2);
 
-    let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    let signer: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
     let owner = crate::network::global()
         .credentials(&IsolationId::evm(&signer.address().to_string()).unwrap());
     {

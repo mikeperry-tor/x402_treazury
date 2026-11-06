@@ -822,7 +822,7 @@ async fn fixture() {
     );
 
     let address = |key| {
-        let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
+        let signer: crate::payment::signer::EvmSigner = format!("{key:064x}").parse().unwrap();
         signer.address().to_string().to_ascii_lowercase()
     };
     for (q, payer) in f.payers.lock().unwrap().iter() {

@@ -1266,7 +1266,7 @@ async fn fixture(mode: &str) {
     pinned.replace_payer(payer(182));
     fixture.origin_release.cancel();
     in_flight.await.unwrap().unwrap();
-    let expected: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 181).parse().unwrap();
+    let expected: crate::payment::signer::EvmSigner = format!("{:064x}", 181).parse().unwrap();
     let expected_address = expected.address().to_string().to_ascii_lowercase();
     assert_eq!(
         fixture

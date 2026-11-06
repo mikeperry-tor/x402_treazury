@@ -99,7 +99,7 @@ async fn directory_relay_fixture() {
             }
             let payload: Value = serde_json::from_slice(&STANDARD.decode(headers["payment-signature"].as_bytes()).unwrap()).unwrap();
             assert_eq!(payload["payload"]["authorization"]["value"], "10000");
-            let expected: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+            let expected: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
             assert_eq!(crate::test_signatures::recover_exact(&payload), expected.address());
             let body = if url.ends_with("/invalid") {
                 "complete but invalid directory JSON".to_owned()

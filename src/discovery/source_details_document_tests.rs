@@ -436,8 +436,7 @@ async fn document_fixture() {
     assert!(unsigned.inner.lock().unwrap().state.records.is_empty());
     let mut credentials: Vec<_> = (1..=2)
         .map(|key| {
-            let signer: alloy_signer_local::PrivateKeySigner =
-                format!("{key:064x}").parse().unwrap();
+            let signer: crate::payment::signer::EvmSigner = format!("{key:064x}").parse().unwrap();
             crate::network::global()
                 .credentials(&IsolationId::evm(&signer.address().to_string()).unwrap())
         })

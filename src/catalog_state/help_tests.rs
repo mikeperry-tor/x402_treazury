@@ -333,7 +333,7 @@ async fn paid_fixture() {
         ["origin", "challenge", "signed"],
         "cancelled and compatible waiters share one retained paid acquisition"
     );
-    let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 113).parse().unwrap();
+    let signer: crate::payment::signer::EvmSigner = format!("{:064x}", 113).parse().unwrap();
     assert_eq!(
         fixture.signers.lock().unwrap()[0],
         signer.address().to_string().to_ascii_lowercase(),

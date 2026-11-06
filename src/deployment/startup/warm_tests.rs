@@ -200,7 +200,7 @@ async fn metadata_fixture(mode: &str) {
                 assert_eq!(request["method"], "GET");
                 if let Some(signature) = headers.get("payment-signature") {
                     let payload: Value = serde_json::from_slice(&STANDARD.decode(signature.as_bytes()).unwrap()).unwrap();
-                    let expected: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+                    let expected: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
                     assert_eq!(crate::test_signatures::recover_exact(&payload), expected.address());
                     assert_eq!(payload["payload"]["authorization"]["value"], "10000");
                     signed.fetch_add(1, Ordering::SeqCst);

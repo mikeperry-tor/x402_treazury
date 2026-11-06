@@ -692,36 +692,34 @@ Preserve those fixes when resolving dependencies. Tokio 1.54.0 is yanked for a
 separate [timer race](https://rustsec.org/advisories/RUSTSEC-2026-0384.html);
 the 1.54 series requires 1.54.1 or later.
 
-Alloy's signer/network cohort is 2.5.0, alongside core crates 1.7.3. The application
-declares Rust 1.99.1 as its supported baseline, matching the pinned build
-toolchain. This is a support choice, not evidence that every older compiler fails. The independent payment vectors and SDK/payment integration tests
-qualify this combination.
+The application uses registry `x402-chain-eip155` 2.0.2 with its upstream
+`client` and `telemetry` features, and registry Alloy primitives 1.7.3. Concrete
+Alloy providers and local signers can compile through that feature graph, but the
+application does not construct them to sign with payment keys. The application
+declares Rust 1.99.1 as its supported baseline, matching the pinned toolchain.
+Validate the combination with independent payment vectors and SDK/payment
+integration tests.
 
-The [crypto-bigint timing advisory](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
-still matches `crypto-bigint` 0.5.5 through `elliptic-curve` 0.13.8 and `k256`
-0.13.4. Alloy 2.5.0 requires that cohort; forcing an incompatible 0.7.6 override
-is unsupported. The previous `PrivateKeySigner` path performed affected integer
-arithmetic on signing secrets through k256 scalar reduction and nonce inversion.
-Production EVM key generation, public-key derivation and signing now use the
-native `secp256k1` 0.33.1 dependency (libsecp256k1), through the shared
-`payment::signer::EvmSigner` adapter implementing the SDK's `SignerLike` trait.
-It covers static v1/v2 exact and upto clients and managed funding/payment keys;
-raw 32-byte key storage and authorization formats remain unchanged. Each adapter
-owns its private key and erases that storage in place on drop using the dependency's
-supported API; decoded/exported buffers are zeroizing. This is best-effort erasure:
-Rust moves/copies and native internals can leave other copies, as the dependency
-documents. Alloy's opaque native credential lacks in-place erasure, so it is not
-used to hold production secrets.
+Production EVM key generation, public-key derivation and signing use native
+`secp256k1` 0.33.1 (libsecp256k1), through `payment::signer::EvmSigner` and the
+SDK's `SignerLike` trait. The upstream trait returns `alloy_signer::Error`; the
+native adapter preserves that interface without using Alloy's local signer.
+Static v1/v2 exact and upto clients and managed funding/payment keys retain raw
+32-byte key storage and authorization formats. Each adapter owns its private key
+and erases that storage in place on drop; decoded/exported buffers are zeroizing.
+This remains best-effort erasure: Rust moves/copies and native internals can leave
+other copies.
 
-The residual k256 cohort handles public signature parsing/recovery in those paths;
-this is a scoped mitigation, not removal of the affected package or a universal
-constant-time claim. Do not convert production signers back with `to_k256` or
-`into_k256`. The independent Python vector must match the production signature
-exactly, alongside address/key roundtrip, invalid-scalar rejection and full payment
-compatibility checks. Any new secret consumer requires renewed exposure analysis.
-Complete graph findings and release disposition remain owned by
-[NU7 release readiness](plans/nu7_release_readiness.md); Zcash compatibility alone
-does not resolve signing or build-only TLS advisories.
+The graph includes the affected crypto-bigint/k256 cohort; its presence is not
+proof that application secrets pass through it. The application keeps secret
+arithmetic in the native signer. Its public address-recovery tests select
+primitives' native secp256k1 backend through the root `secp256k1` feature; upstream
+k256 APIs remain available for public recovery and optional integrations. Do not
+infer general k256 safety or absence from this secret-use boundary. Preserve the
+independent Python signature/address vectors, key roundtrip, invalid-scalar
+rejection and payment compatibility. Any new secret consumer or feature selection
+requires renewed dependency and exposure assessment. See the
+[checkout ledger](../vendor/README.md).
 
 ### Reproducible local advisory evaluation
 
@@ -738,27 +736,42 @@ dispositions. Provenance checks and compatible compilation do not resolve findin
 ### Locked-graph advisory disposition
 
 The local replay covers both active lockfiles and explicitly mapped path/Git
-sources. It remains a findings report, not a clean-graph claim. The current
-remaining vulnerability matches have these scopes:
+sources. Retain findings and informational notices in the reports; do not suppress
+them or treat a nonzero audit exit as a clean result. Acceptance is based on the
+specific exposure below, rather than a requirement to eliminate every advisory
+match by maintaining local dependency forks. This accepts known findings, not
+blanket immunity from vulnerabilities.
 
-| Match | Consumer and disposition |
+The baseline assessment at
+`target/nu7-readiness/security-assessment/summary.json` uses RustSec revision
+`26fd2d43f7280a1fb925a3743ec463017afe7119` and reports eight vulnerability matches.
+The accepted registry dependency exposure is:
+
+| Package / advisory | Exposure and acceptance boundary |
 | --- | --- |
-| `crypto-bigint` 0.5.5, RUSTSEC-2026-0387 | The production secret-signing path is replaced as described above; residual public parsing/recovery remains in the upstream EVM cohort. Keep the advisory visible and recheck any new secret consumer. |
-| `rustls` 0.21.12, RUSTSEC-2026-0346 / 0349 | Build-only `minreq → zcash_proofs(download-params) → zingolib` parameter acquisition. The downloader uses the built-in session store, not custom session-secret Debug logging. Its old classical key exchange provides no post-quantum guarantee. Runtime transport uses patched rustls 0.23.46. |
-| `rustls-webpki` 0.101.7, RUSTSEC-2026-0098 / 0099 / 0104 / 0382, and `webpki-roots` 0.25.4, RUSTSEC-2026-0381 | The same public-parameter downloader retains legacy certificate verification/roots. It configures no CRLs; the CRL-parser panic has no identified consumer. Name-constraint and emSign verification risks remain in that build-time path. Accepted parameters still require upstream fixed lengths and BLAKE2b digests. |
+| `crypto-bigint` 0.5.5, RUSTSEC-2026-0387 | Timing variability in intended constant-time arithmetic. The cohort returns with upstream Alloy integrations; production EVM secret arithmetic remains in the native signer described above. Merely compiling unused signer/provider code does not send application keys through it. |
+| `rustls` 0.21.12, RUSTSEC-2026-0346 and RUSTSEC-2026-0349 | Debug exposure of TLS session secrets and unauthenticated ServerHello downgrade behavior. The minreq 2 parameter downloader can execute on an uncached build; it handles public parameter downloads, not runtime traffic or payment/wallet credentials. This accepts real build-time TLS exposure, including TLS session secrets, rather than claiming it is unreachable. |
+| `rustls-webpki` 0.101.7, RUSTSEC-2026-0104, RUSTSEC-2026-0098, RUSTSEC-2026-0099 and RUSTSEC-2026-0382; `webpki-roots` 0.25.4, RUSTSEC-2026-0381 | CRL parsing panic, incorrect URI/wildcard name constraints and distrust of compromised emSign intermediates/roots affect the same build downloader. Fixed trusted parameter digests and lengths protect accepted parameter integrity; they do not repair TLS verification, prevent disclosure of download metadata or guarantee successful acquisition. |
 
-The supported release workflow verifies prefetched public parameters and denies
-build network access. Ordinary online first builds can still suffer unavailable
-or intercepted downloads; the digest check does not fix TLS. Retiring that graph
-requires an upstream downloader migration or separately reviewed patch, rather
-than incompatible version overrides. See [SDK parameter acquisition](zingo-integration.md#build-time-parameter-downloads).
+The [parameter-download boundary](zingo-integration.md#build-time-parameter-downloads)
+and [release runner](reproducible-builds.md) retain independent digest verification
+and prefetched, network-denied release builds. Runtime TLS retains the maintained
+cohort below. Reassess when those call paths, downloaded inputs, trust anchors,
+secret consumers, Cargo features or pinned sources change, when a new advisory
+changes the exposure analysis, or when a compatible upstream fix becomes available.
+An audit match still requires review against its actual source and consumers.
 
-Maintenance notices are also retained: `derivative` through `ark-ff`, `fxhash`
-through the development analyzer, `json` through Zingolib, `paste` through Alloy/ark,
-and `pin-utils` through `wasmtimer`. These are upstream responsibilities with no
-compatible lockfile removal established. Do not vendor replacements merely to
-suppress informational findings. Reassess them with their owning cohort updates;
-any reported unsoundness or vulnerability needs its own exposure analysis.
+Four maintenance notices are accepted and remain visible: `derivative`
+(RUSTSEC-2024-0388) through `ark-ff`, `fxhash` (RUSTSEC-2025-0057) through the
+development analyzer, `json` (RUSTSEC-2022-0081) through Zingolib and `paste`
+(RUSTSEC-2024-0436) through Alloy/ark. Do not vendor replacements solely to hide
+these notices. Reassess with their owning cohorts and any new vulnerability or
+concrete unsoundness evidence; the `json` notice already references a possible
+soundness issue and is not a safety endorsement. The separate `pin-utils`
+(RUSTSEC-2026-0441) notice through `wasmtimer` also returns with upstream provider features. The
+resolved graph therefore reports five maintenance notices, including the four
+above. Retain actual audit evidence and source
+identities in the active plan until its completion gate passes.
 
 ### TLS security updates
 
@@ -775,8 +788,8 @@ inputs, not the dependency resolution used by the application workspace.
 
 The build-time downloader TLS and parameter-integrity boundary are
 documented in [the Zingo integration guide](zingo-integration.md#build-time-parameter-downloads).
-That graph still contains affected certificate-verification versions; these
-updates do not eliminate every advisory finding from the lockfiles.
+The build downloader retains its separately accepted legacy certificate-verification
+cohort; a source-aware advisory assessment remains required after graph changes.
 
 There are no repository Python requirements or uv lockfiles. The vector generator
 uses inline script dependencies; those do not pin the package manager's TLS
