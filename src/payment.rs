@@ -424,7 +424,7 @@ impl PaidClient {
         self.work.drain().await;
     }
     /// Retain an encompassing payment workflow through its outcome publication.
-    /// Nested payment execution reuses this owner and its foreground permit.
+    /// Nested payment execution reuses this accepted-work owner.
     pub(crate) fn run_owned<T: Send + 'static>(
         &self,
         work: impl std::future::Future<Output = T> + Send + 'static,

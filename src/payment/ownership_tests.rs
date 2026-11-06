@@ -169,24 +169,6 @@ async fn retained_outer_owner_reuses_task_and_inner_owner_tracks_drain() {
 }
 
 #[tokio::test]
-async fn direct_owner_reuses_existing_foreground_permit_for_managed_signing() {
-    let owner = crate::server::work::Work::default();
-    ownership::run(&owner, async {
-        assert!(ownership::foreground().unwrap().is_none());
-        let inner = crate::server::work::Work::default();
-        ownership::run(&inner, async {
-            assert!(ownership::foreground().unwrap().is_none());
-        })
-        .await
-        .unwrap();
-    })
-    .await
-    .unwrap();
-    owner.drain().await;
-    assert!(ownership::foreground().unwrap().is_some());
-}
-
-#[tokio::test]
 async fn accepted_work_reenters_same_owner_during_drain_but_not_a_closed_other_owner() {
     let owner = crate::server::work::Work::default();
     let other = crate::server::work::Work::default();
@@ -250,30 +232,4 @@ async fn accepted_work_reenters_same_owner_during_drain_but_not_a_closed_other_o
             .await
             .is_err()
     );
-}
-
-#[tokio::test]
-async fn retained_owner_without_a_permit_acquires_one_and_nested_work_reuses_it() {
-    let listener = crate::server::work::Work::default();
-    let payment = crate::server::work::Work::default();
-    listener
-        .run(async move {
-            // A Work token is a lifetime guarantee, never a capacity grant.
-            assert!(ownership::foreground().unwrap().is_some());
-            ownership::run(&payment, async {
-                assert!(ownership::foreground().unwrap().is_none());
-                let nested = crate::server::work::Work::default();
-                ownership::run(&nested, async {
-                    assert!(ownership::foreground().unwrap().is_none());
-                })
-                .await
-                .unwrap();
-            })
-            .await
-            .unwrap();
-        })
-        .await
-        .unwrap();
-    listener.drain().await;
-    assert!(ownership::foreground().unwrap().is_some());
 }

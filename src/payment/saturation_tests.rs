@@ -1,4 +1,4 @@
-//! Process-isolated foreground resource ownership; balance RPC is not admission.
+//! Accepted work remains owned beyond the former aggregate foreground count.
 use super::*;
 use crate::rotation::{
     base::BaseRpc,
@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
 
 #[test]
-fn concurrent_groups_keep_owned_calls_through_foreground_saturation() {
+fn concurrent_groups_keep_more_than_128_owned_calls() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -46,16 +46,16 @@ async fn until(label: &str, mut condition: impl FnMut() -> bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "isolated process-wide capacity; exercised by parent"]
+#[ignore = "isolated retained-work fixture; exercised by parent"]
 async fn saturation_child() {
     let unsigned = Arc::new(AtomicUsize::new(0));
     let signed = Arc::new(AtomicUsize::new(0));
     let challenges = Arc::new(Semaphore::new(0));
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state/state.sqlite");
-    let app = Router::new().route("/pay", get({
+    let app = Router::new().route("/cheap", get(|| async { "cheap" })).route("/pay/{mode}", get({
         let (unsigned, signed, challenges, db_path) = (unsigned.clone(), signed.clone(), challenges.clone(), db_path.clone());
-        move |headers: HeaderMap| {
+        move |axum::extract::Path(mode): axum::extract::Path<String>, headers: HeaderMap| {
             let (unsigned, signed, challenges, db_path) = (unsigned.clone(), signed.clone(), challenges.clone(), db_path.clone());
             async move {
                 if let Some(signature) = headers.get("payment-signature") {
@@ -67,7 +67,7 @@ async fn saturation_child() {
                     return "paid".into_response();
                 }
                 unsigned.fetch_add(1, Ordering::SeqCst);
-                challenges.acquire().await.unwrap().forget();
+                if mode != "quick" { challenges.acquire().await.unwrap().forget(); }
                 let challenge = json!({"x402Version":2,"resource":{"url":"https://localhost/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":600,"extra":{"name":"USD Coin","version":"2"}}]});
                 (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
             }
@@ -129,12 +129,12 @@ async fn saturation_child() {
         json_media_type: None,
         headers: Default::default(),
         method: "GET".into(),
-        url: format!("{origin}/pay"),
+        url: format!("{origin}/pay/held"),
         query: Default::default(),
         body: None,
     };
     let mut waiters = Vec::new();
-    for n in 0..128 {
+    for n in 0..132 {
         let (client, request) = (clients[n % 2].clone(), route());
         waiters.push(tokio::spawn(async move {
             let execution = async move {
@@ -151,8 +151,7 @@ async fn saturation_child() {
                     .await
                     .unwrap()
             };
-            // Exercise both direct callers and callers already retained by a
-            // listener. A Work token cannot bypass resource admission.
+            // Direct and listener callers retain the same accepted workflow.
             if n % 2 == 0 {
                 crate::server::work::Work::default()
                     .run(execution)
@@ -163,20 +162,27 @@ async fn saturation_child() {
             }
         }));
     }
-    until("all foreground owners", || {
-        unsigned.load(Ordering::SeqCst) == 128
+    until("all retained owners", || {
+        unsigned.load(Ordering::SeqCst) == 132
     })
     .await;
-    // Cancellation of response waiters cannot free retained foreground owners.
+    // Cancellation of response waiters cannot drop accepted work.
     for waiter in waiters.iter().take(4) {
         waiter.abort();
     }
-    let excess = clients[0].execute_response(route()).await.unwrap_err();
-    assert!(format!("{excess:#}").contains("managed payment queue capacity unavailable"));
-    assert_eq!(unsigned.load(Ordering::SeqCst), 128);
-    challenges.add_permits(128);
+    let mut quick = route();
+    quick.url = format!("{origin}/pay/quick");
+    clients[0].execute_response(quick).await.unwrap();
+    let mut cheap = route();
+    cheap.url = format!("{origin}/cheap");
+    assert_eq!(
+        PaidClient::unsigned().execute(cheap).await.unwrap(),
+        "cheap"
+    );
+    assert_eq!(unsigned.load(Ordering::SeqCst), 133);
+    challenges.add_permits(132);
     until("all owned signed calls", || {
-        signed.load(Ordering::SeqCst) == 128
+        signed.load(Ordering::SeqCst) == 133
     })
     .await;
     for (index, waiter) in waiters.into_iter().enumerate() {
@@ -200,25 +206,15 @@ async fn saturation_child() {
     for client in &clients {
         client.drain().await;
     }
-    let permits: Vec<_> = (0..128).map(|_| ownership::foreground().unwrap()).collect();
-    let (result, logs) = crate::limits::tests::capture(async { ownership::foreground() }).await;
-    assert!(result.is_err());
-    assert!(
-        logs.contains("WARN")
-            && logs.contains("foreground_work_busy")
-            && logs.contains("limit=128"),
-        "{logs}"
-    );
-    drop(permits);
-    // Both groups can accept another call after retained foreground work drains.
+    // Both groups can accept another call after retained work drains.
     for pool in &pools {
         challenges.add_permits(1);
         let client = PaidClient::managed(pool.clone());
         client.execute_response(route()).await.unwrap();
         client.drain().await;
     }
-    assert_eq!(signed.load(Ordering::SeqCst), 130);
-    assert_eq!(unsigned.load(Ordering::SeqCst), 130);
+    assert_eq!(signed.load(Ordering::SeqCst), 135);
+    assert_eq!(unsigned.load(Ordering::SeqCst), 135);
     let db = rusqlite::Connection::open(&db_path).unwrap();
     assert_eq!(
         db.query_row(
@@ -227,7 +223,7 @@ async fn saturation_child() {
             |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         )
         .unwrap(),
-        (130, 130)
+        (135, 135)
     );
     assert_eq!(
         db.query_row(
@@ -236,7 +232,7 @@ async fn saturation_child() {
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        130
+        135
     );
     for group in &groups {
         assert!(

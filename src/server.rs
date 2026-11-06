@@ -253,8 +253,8 @@ impl ServerHandler for Server {
     ) -> Result<CallToolResponse, McpError> {
         let server = self.clone();
         let started = std::time::Instant::now();
-        // Admit before spawning retained work, and hold the same resource
-        // permit through dispatch, body conversion and response construction.
+        // Retain accepted work through dispatch, body conversion and response
+        // construction, independently of response-waiter cancellation.
         let work = crate::payment::ownership::run(&self.work, async move {
             server.call_tool_owned(request, context.id).await
         });

@@ -540,11 +540,13 @@ permissions, normalized destinations, circuit ownership, success counting and
 required-target completeness. Complete sanitized outputs and rejection order are
 checked; these fixtures establish evidence interpretation, not live isolation.
 
-`tests/foreground_capacity.rs` holds seller headers and bodies while saturating
-shared ownership across authenticated MCP listeners and direct calls. Disconnects
-must retain capacity through signing and body collection; completed work permits
-reuse. A failed body-phase wait records counts and already-completed synthetic
-caller outcomes without waiting on blocked bodies or draining retained owners.
+`tests/foreground_capacity.rs` holds seller headers and bodies with more than 128
+retained owners across authenticated MCP listeners. Disconnects retain work
+through signing, body collection and drain while cheap and paid direct calls
+progress. The managed counterpart checks unique journaled signatures and absence
+of extra funding. Qualification context is captured when work is polled, including
+when its future was constructed outside the active case. These fixtures use
+deterministic release points and establish no throughput or aggregate memory bound.
 
 The [coverage map](../tests/COVERAGE.md) identifies regression boundaries and
 optional qualification methods.

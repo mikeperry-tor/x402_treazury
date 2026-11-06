@@ -491,8 +491,10 @@ when their waiter is canceled, and reuse an enclosing MCP owner when present.
 Output validation and conditional unsigned transport promotion finish inside
 that owner before result delivery, including after the waiter disconnects.
 `PaidClient::drain` closes clone-shared admission and waits for accepted work.
-The existing foreground bound limits independently retained direct tasks; nested
-managed signing reuses that permit. Qualification case identity and unsigned
+`Work` tracks accepted direct tasks and nested managed signing through output
+conversion, disconnect and shutdown drain. There is no aggregate foreground count
+bound on retained tasks or response memory and no replacement admission gate;
+concrete operation-specific I/O/storage guards remain. Qualification case identity and unsigned
 restrictions follow the retained task without renewing authority.
 
 The Rust `ManagedPool::pay_with_cover` API now takes an owned optional cover call

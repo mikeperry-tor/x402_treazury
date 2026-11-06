@@ -781,24 +781,27 @@ mod tests {
         for managed in [false, true] {
             let (_dir, guard, _) = fixture(managed);
             let claim = claim(guard).await;
+            let owner = crate::server::work::Work::default();
+            // Construction outside a case grants no context; the first poll
+            // inside the case must capture its actual authority.
+            let owned = crate::payment::ownership::run(&owner, async move {
+                (
+                    capture_case().unwrap(),
+                    unsigned_case(),
+                    payment_context().is_ok(),
+                )
+            });
             claim
                 .invoke(async {
                     let original = capture_case().unwrap();
-                    let case = original.case.clone();
-                    let guard = original.guard.clone();
-                    let owner = crate::server::work::Work::default();
-                    crate::payment::ownership::run(&owner, async move {
-                        let inherited = capture_case().unwrap();
-                        assert_eq!(inherited.case, case);
-                        assert!(Arc::ptr_eq(&inherited.guard, &guard));
-                        assert_eq!(unsigned_case(), !managed);
-                        assert_eq!(payment_context().is_ok(), managed);
-                    })
-                    .await
-                    .unwrap();
-                    owner.drain().await;
+                    let (inherited, unsigned, payment_allowed) = owned.await.unwrap();
+                    assert_eq!(inherited.case, original.case);
+                    assert!(Arc::ptr_eq(&inherited.guard, &original.guard));
+                    assert_eq!(unsigned, !managed);
+                    assert_eq!(payment_allowed, managed);
                 })
                 .await;
+            owner.drain().await;
         }
         assert!(capture_case().is_none());
     }

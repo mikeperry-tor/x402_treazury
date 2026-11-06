@@ -320,10 +320,7 @@ impl ManagedPool {
             through,
             attempted,
         } = observation;
-        // Bound foreground owners, including callers awaiting the group gate.
-        // The permit lives through the one signed dispatch and cannot cancel it.
         let facts = crate::payment::ResponseFacts::provider(response.status());
-        let _foreground = crate::payment::ownership::foreground().context(facts)?;
         diagnostics::stage("challenge_preparation");
         let (challenge, offer, omitted) =
             prepare_challenge(&response, &self.policy).context(facts)?;

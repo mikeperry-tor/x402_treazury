@@ -431,3 +431,14 @@ traced cancellation/publication/other-Store consumers. Added deterministic worke
 store-only, actor and isolated real in-flight calculation fixtures; runtime evidence
 is pending. Safe tracing/JoinError categories do not claim to sanitize the existing
 Rust panic hook's stderr output. Fresh exact-SHA/G1 review remains pending.
+
+C04 implemented with no replacement count/queue: retained Work, nested ownership,
+qualification context and output/drain remain. Initial independent review caught
+context capture moving to construction time; corrected before commit, strengthened
+existing case fixture to construct outside/poll inside and removed redundant empty
+nesting coverage. MCP/direct fixtures now hold 132 accepted owners and verify
+independent cheap/paid progress plus journal uniqueness and forbidden funding.
+G1 is pending fresh exact-SHA, complexity and runtime evidence. C05–C08 independent
+file-owned implementation was prepared concurrently with C01–C04; this departs
+from the original strictly serial preparation boundary, but no dependent financial
+work or validation is accepted through G1 until its material findings are resolved.
