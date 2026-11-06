@@ -67,6 +67,58 @@ qualification require their actual runbooks; unavailable evidence stays missing.
   Release notes and source cohort must agree before migration.
 - N5 authority and actual refund evidence remain outstanding; N6 is conditional.
 
+### Review and validation checkpoint
+
+Working branch remains `nu7_release_readiness`; accumulated implementation includes
+C1 `69d7d7cd` and fixups `b4502c21`, `3c074f7c`, `a17ad30a`; C2 `469179d8`
+and fixups `8a7b983e`, `1a272ba9`, `9fac678d`; timing `89a6d772` and fixups
+`0cda4e00`, `48ba21dc`; bridge recipe `29ef2b83`; N6 assessment `ce0a2cb6`.
+Each exact SHA has independent non-author source review. Reported material source
+findings are resolved; compiler/runtime evidence and final combined gate remain open.
+
+- Initial `check-static` passed: formatting, 92 then-existing Python tests, ten
+  analyzer qualification tests, complete 466-file application complexity comparison
+  to baseline `571eba2f`, and all transport/Pepper provenance checks.
+- Four new advisory-tool tests pass. A subsequent 96-test tooling run exposed a
+  pre-existing release fixture merging Git stderr into expected revision stdout
+  when macOS emitted a sandbox `confstr` warning. `a17ad30a` separates the streams;
+  all 16 affected release-tool tests pass. The remaining 80 cases from that run
+  passed and their evidence is unchanged; no runtime assertion was weakened.
+- Independent application complexity review verified current Rust hashes, no
+  exclusions or new warnings. Timing changes introduce no parallel owner/state;
+  healthy interval selection delegates to SDK consensus. Complete JSON/CSV artifacts
+  are under `target/complexity/`. Unrelated root dependency updates change the full
+  lock hash but leave the analyzer's 96 dependency records unchanged.
+- Supplementary same-analyzer comparison of eleven changed Pepper files is under
+  `target/nu7-readiness/vendor-complexity/`. Valid hotspots: `scan_compact_blocks`
+  CogC 51→53/CycC 43→44 (shared sparse-checkpoint membership), and `sync` CogC 46
+  unchanged/CycC 83→84 (ordered per-task result admission). Independent review
+  retained these coherent upstream responsibilities. Serialization and witness
+  files have grammar failures in both snapshots: their numbers are untrusted;
+  manual review covered address encoding, NU7 grid/spacing and checkpoint retention.
+  This is partial vendor numerical coverage, not complete parser qualification.
+- Production compiler/all-target Clippy is running; compatibility, remaining
+  runtime/proving/lifecycle/codec and optimized-profile evidence are outstanding.
+  No native consensus, funded settlement, real Tor or reproducibility pass claimed.
+
+General-update assessment selected compatible root/workspace updates and protoc
+3.3.0, plus MCP 3.9.0 and direct SHA-2 0.11.1. Independent review also approves
+qualifying base64 0.23.1, direct analyzer syn 3.0.9 and native secp256k1 0.33.1
+as a final small batch after current frozen compilation completes. Their required
+syntax/signature/wire tests remain outstanding. The analyzer's exact Tree-sitter
+0.20.9/grammar cohort stays pinned because 0.27 is API-incompatible.
+
+Other assessed incompatible-version candidates are not forced into this cohort:
+ChaCha20Poly1305 0.11 replaces the randomness API used for existing state keys/nonces
+and needs an independent old-ciphertext/AAD reopen vector; rand 0.10 changes extension
+traits and removes the cloned deterministic test RNG; TOML 1.2 changes parser/value
+semantics; rusqlite 0.41 changes the bundled SQLite/FFI and requires custom VFS,
+WAL/reopen/busy requalification. No blanket incompatibility claim is made. Retain
+current supported versions for this readiness cohort; assess those migrations
+against their named storage/configuration/sampling contracts when selecting the
+next general-update boundary. Current advisory findings are not hidden by these
+retentions, and the exact graph remains replayable.
+
 ### Follow-up validation and timing audit
 
 The local source checkpoint at `21b5b961` includes independently reviewed SDK
