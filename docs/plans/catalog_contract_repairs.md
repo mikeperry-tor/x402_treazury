@@ -110,5 +110,53 @@ results. Strict dynamic import validation passed for every local bundled schema
 Independent implementation snapshot review found only that test expectation issue;
 the corrected state has no reported additional material findings. Exact snapshot
 hashes are retained in ignored `target/catalog-contract-probes/20261106/repair-snapshot.json`.
-Static checks are running; compiler/all-target Clippy, compatibility, affected
-provider/configuration suites, exact-SHA/combined G1 and P2 cleanup/review remain.
+## Completed validation and G1
+
+P1 is commit `ade1c9e1784feaeabacd085b76bdb2aca65ff712`. Independent review
+examined exact plan SHAs `05752a35` and `8d37dbc0`, P1 and the cumulative
+implementation against the starting baseline, including the corrected CSV
+description assertion. No material findings remain; no fixups were necessary.
+
+Validation at the unchanged P1 source snapshot:
+
+- `make check-static`: passed; report
+  `target/complexity-runs/20261106T214701Z-5da566e9` covers 471 files with no
+  exclusions. Its `main` comparison resolves to P1 itself, so it supplies current
+  metrics rather than task-baseline delta evidence. Independent exact-diff/current
+  metric review found no necessary simplification; production Rust changes are
+  declarative manifest entries, not a refactor or architecture gate.
+- `make check-clippy check-compat`: production compiler and all-target
+  `zcash-regtest` Clippy warning gate passed without diagnostics; all 31
+  compatibility tests passed. Log `/tmp/x402-contract-repairs-compiler.log`.
+- Focused contract tests: 3 passed after correcting the expectation above.
+  Carry forward 4 unchanged deployment tests; no repeated suite was needed for
+  the independent contract-test-only correction. Logs
+  `/tmp/x402-contract-repairs-focused-final.log` and
+  `/tmp/x402-contract-repairs-focused.log`.
+- Strict bundled destination/import validation: 1 focused test covering every
+  local schema passed. Provider manifest/metadata/embedded schema tests: 7 passed.
+  Logs `/tmp/x402-contract-repairs-import.log` and
+  `/tmp/x402-contract-repairs-bundle.log`. The macOS library-test link emitted an
+  `__eh_frame` compact-unwind size/performance warning; tests passed. This is not
+  a clean-link claim or a production compiler warning-gate failure.
+- Affected suites: 15 configuration and 41 provider tests passed without
+  diagnostics. Log `/tmp/x402-contract-repairs-affected.log`.
+- Compiled CLI `config check --explain-routing` passed using the current two
+  research-desk source rules with local repaired assets, a public unfunded static
+  placeholder and no treasury. Evidence is retained as
+  `target/catalog-contract-probes/20261106/repaired-research-desk-offline.toml`
+  and `repaired-routing.json`: Strale 400 compatible tools, 2s 517; station history
+  routes to world, OSHA remains absent, and the nine Strale utilities remain
+  intentionally excluded by this deployment. This is catalog/routing evidence,
+  not whole-deployment serving or paid-delivery qualification.
+
+G1 is closed after independent inspection of these logs, routing evidence and
+the exact unchanged source snapshot. Endpoint guidance was reviewed: world now
+names GHCN measured historical weather, while existing Strale research positioning
+remains appropriate because those endpoints do not gain the utility tools.
+Private financial evidence is preserved and no further paid probes were made.
+OSHA remains the intentional unresolved exclusion within the accepted scope.
+
+P2 plan cleanup and its exact-SHA/final combined review are ready. A release
+executable will be built after cleanup for the operator's subsequent restart;
+the running funded server will not be restarted by this work.
