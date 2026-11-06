@@ -40,7 +40,7 @@ these coherent commits in order, refining candidate details from exact sources:
 | C1 | N1: migrate the complete SDK/backend cohort to verified v8 tag, carry necessary Pepper patches and provenance, adapt offline/indexer/send/sync consumers; assess general workspace and protoc updates. Update SDK integration and vendor ledger. | Exact source comparison, vendor integrity, production compiler and all-target Clippy, compatibility and affected lifecycle/optimized checks. Independent exact-SHA and CogC/CycC review. |
 | C2 | N2: reproducible local advisory assessment of active lockfiles and path sources, resolve signing advisory with compatible migration or evidence-based exposure/release disposition; update development/vendor/testing/tooling guidance. | Exact source and signing-call-chain assessment, independent vectors and payment compatibility; exact-SHA review. Dependency gate combines C1/C2 and all fixups. |
 | C3 | N3/N4: verify deployed refund format/receiver and published service semantics; fix demonstrated gaps only, with network/wallet/live-runbook handoff. | Public unfunded route checks, faithful contract regressions where code changes, independent exact-SHA review. Bridge gate combines all preceding work before dependent retirement. |
-| C4 | N5: reviewable inspection and qualification recipe, preferring retained evidence and simplest supported controlled-refund trigger. | No production key access or spending until separate operator authority. Record precise missing evidence and execution path; review exact recipe. |
+| C4 | N5: offline authenticated note inspection and reviewable qualification recipe, preferring retained evidence and the simplest supported controlled-refund trigger. | Public-fixture tests prove read-only/no-network/no-secret-output behavior and exact SDK note facts; independently review command and recipe before separate production-key authority. Spending/copy-scan/harness authority remains separate. |
 | C5 | N6: retire ordinary wallet-owned transparent behavior only when receiver and funded evidence support it; preserve explicit legacy recovery and accepted obligations. | Fresh/imported/reopened/seed-recovery negative RPC/address controls, shielded discovery/spendability, legacy/restart regressions; exact-SHA and applicable complexity review. Blockers remain explicit if prerequisites are unavailable. |
 | C6 | Final integration and documentation handoff; delete completed plan only when all release conditions and reviews pass. | Independent full-chain combined review of all commits/fixups, required ordered checks, exact cleanup-SHA/final-branch review. |
 
@@ -102,11 +102,20 @@ findings are resolved; compiler/runtime evidence and final combined gate remain 
   No native consensus, funded settlement, real Tor or reproducibility pass claimed.
 
 General-update assessment selected compatible root/workspace updates and protoc
-3.3.0, plus MCP 3.9.0 and direct SHA-2 0.11.1. Independent review also approves
-qualifying base64 0.23.1, direct analyzer syn 3.0.9 and native secp256k1 0.33.1
-as a final small batch after current frozen compilation completes. Their required
-syntax/signature/wire tests remain outstanding. The analyzer's exact Tree-sitter
-0.20.9/grammar cohort stays pinned because 0.27 is API-incompatible.
+3.3.0, plus MCP 3.9.0 and direct SHA-2 0.11.1. Independent design review approved base64 0.23.1, direct analyzer syn 3.0.9 and
+native secp256k1 0.33.1 as a further batch. The first compiler stage stopped on
+SHA-2 0.11's removed digest-array LowerHex trait; `ac58a6e9` converts all consumers
+to explicit canonical lowercase encoding and adds an independent leading-zero
+hash vector. No stored hash/domain/input representation changes. After that failed
+stage drained, the batch was applied with current published Hyper 1.12.0 and h2
+0.4.20: exact-source review found neither cancellation checkout can retire, and
+both patches rebase without fuzz. Public archive bytes, upstream provenance-only
+lockfiles and all blocker records remain verified. `74a3e95e` removes obsolete
+mutable reorg-start accumulation after independent simplification review.
+Syntax/signature/wire and full compiler/runtime evidence remain outstanding. The analyzer's exact Tree-sitter
+0.20.9/grammar cohort stays pinned because 0.27 is API-incompatible. The prior
+96-record analyzer comparison predates direct syn 3 selection; refresh syntax
+qualification and source-matched metrics for the resulting tool before broad suites.
 
 Other assessed incompatible-version candidates are not forced into this cohort:
 ChaCha20Poly1305 0.11 replaces the randomness API used for existing state keys/nonces
@@ -178,9 +187,16 @@ The live reference now retains the phased shielded-refund evidence recipe, inclu
 exact immutable fields and missing per-note inspection/submission-disabled scan
 capabilities. Ordinary quote-input equality remains intact. No production artifacts,
 keys or wallets have been inspected, and no funded test is authorized/executed.
-Next action after recipe review: obtain the operator-selected treasury/state mapping
-and explicit bounded retained-evidence inspection authority before deciding whether
-an existing refund qualifies or a focused excess-deposit owner harness is needed.
+The operator selected `examples/deployments/research_desk.toml`; its treasury path
+resolves to `state/research_desk`, with no explicit treasury UUID. Other wallet
+directories are outside this scope and may have unsupported schemas. No production
+state or keys have been opened. Source-only review established that existing CLI
+views lack per-note evidence, so C4 now prepares `wallet notes` using direct offline
+LightWallet decoding and the existing authenticated read-only snapshot contract.
+It reports saved SDK selection, not live unreserved funds or spending authority;
+copy-scan and any funded excess harness remain separate missing capabilities.
+Next action: independently review/test that concrete inspector, then request the
+bounded production-key inspection authority before accessing the selected wallet.
 
 ### N6 selected-cohort retirement assessment
 
@@ -215,7 +231,7 @@ C2 `469179d8` implements the supported libsecp256k1 secret-signing path and
 source-aware offline advisory replay. Independent security assessment identified
 actual secret arithmetic in the previous k256 path and the SDK's public
 `SignerLike` adapter as the smallest migration. No dependency checkout was added.
-Three mocked advisory-tool tests pass; complete pinned-database assessment,
+Four mocked advisory-tool tests pass; final-source pinned-database replay,
 compiler/Clippy and signature/payment execution remain outstanding. Exact-SHA
 review found missing owned-key erasure in Alloy's opaque native credential and
 possible suppressed informational findings in advisory replay. Independently
@@ -228,8 +244,8 @@ The full offline assessment uses cargo-audit 0.22.2 and RustSec
 matches (mitigated crypto-bigint secret-signing path and seven build-only legacy
 TLS matches) plus five maintenance notices; protoc and normalized nonregistry
 inventory have no matches. Artifacts are under ignored
-`target/nu7-readiness/security-assessment/`; final-source replay and permanent
-exposure dispositions remain required. Cargo's compatible update retains `generic-array` 0.14.7
+`target/nu7-readiness/security-assessment/`; final-source replay remains required. Permanent exposure dispositions are in
+`docs/development.md`; the report remains findings rather than clean. Cargo's compatible update retains `generic-array` 0.14.7
 because `crypto-common` 0.1.7 requires it exactly; forcing 0.14.9 is incompatible.
 
 ### Added timing scope
@@ -256,8 +272,9 @@ Fixup adapts the adapter/test signature, sanitizes `SyncPanicked`, and uses a re
 one-block merge fixture with prior empty checkpoints in all pools and no RPC.
 Also corrects copied-code origin wording and upstream clear-test expectation.
 Vendor reconstruction passes for all 35 exact upstream files. Full compiler,
-Clippy, runtime and numerical complexity evidence remain pending; the independent
-manual review examined Pepper scan ordering/drain, checkpoints, conservative
+Clippy and runtime evidence remain pending; reviewed application and partial vendor
+complexity evidence is recorded above and needs refresh after the latest batch.
+The independent manual review examined Pepper scan ordering/drain, checkpoints, conservative
 recovery, reorg retention, offline/send/expiry and original-work ownership.
 
 ## Ordered assessment boundaries

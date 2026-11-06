@@ -703,7 +703,7 @@ still matches `crypto-bigint` 0.5.5 through `elliptic-curve` 0.13.8 and `k256`
 is unsupported. The previous `PrivateKeySigner` path performed affected integer
 arithmetic on signing secrets through k256 scalar reduction and nonce inversion.
 Production EVM key generation, public-key derivation and signing now use the
-existing native `secp256k1` dependency (libsecp256k1), through the shared
+native `secp256k1` 0.33.1 dependency (libsecp256k1), through the shared
 `payment::signer::EvmSigner` adapter implementing the SDK's `SignerLike` trait.
 It covers static v1/v2 exact and upto clients and managed funding/payment keys;
 raw 32-byte key storage and authorization formats remain unchanged. Each adapter
@@ -828,7 +828,7 @@ occurs.
 
 The [vendored inventory](../vendor/README.md) records each remaining patch's
 current reason, consumers, removal evidence and source-verification scope.
-The shared graph uses unpatched Alloy core 1.7.3 with the pinned Zingolib v7 cohort:
+The shared graph uses unpatched Alloy core 1.7.3 with the pinned Zingolib v8 cohort:
 
 ```text
 Alloy → sha3 0.11.0 → digest 0.11.3
@@ -837,10 +837,10 @@ Zingolib → bip32 0.6.0 → hmac 0.13.0 → digest 0.11.3
 
 `lightwallet-protocol` 0.4.0 supplies the required Ironwood fields without a
 separate root Git override. All workspace packages use ordinary upstream Zingolib/netutils
-Git sources at the same pinned revision, with no local checkout overrides. The
+Git sources at the same pinned revision; Pepper retains its documented path override. The
 [Zingo integration](zingo-integration.md) uses public RPC traits, direct Pepper sync
 and backend calculation over the application transport. Pepper's retained patches
-own progress/drain behavior and sanitized diagnostics. Upstream v7 handles
+own progress/drain behavior and sanitized diagnostics. Upstream handles
 same-height reorg truncation and synthetic branch hashes; the application keeps
 its lifecycle regressions. HTTP transport patches preserve the
 [network inactivity/cancellation contract](network-egress.md#timeout-budgets-and-concurrency).
@@ -856,8 +856,10 @@ The independent hash vectors are regenerated with
 the committed vectors without Python. The combined suite runs the shared
 payment/MCP/crypto targets plus offline wallet tests. The root manifest and
 lockfile select one dependency graph for all of them. These checks use temporary
-offline state. SDK upgrade coverage includes a public
-v6 snapshot, retained derived addresses and next-address continuity under v7.
+offline state. SDK upgrade coverage checks format-45 snapshot roundtrips,
+retained derived addresses, scan targets and next-address continuity. Historical
+SDK codecs remain upstream-owned; these tests do not qualify arbitrary older
+production databases or snapshots.
 
 This focused compatibility suite tests dependency coexistence and offline wallet
 round trips. The application suites separately cover sync, proving and consensus

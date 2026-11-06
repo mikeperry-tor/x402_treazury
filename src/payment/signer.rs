@@ -1,7 +1,7 @@
 //! Native EVM signing with best-effort erasure of each owned key.
 use alloy_primitives::{Address, B256, Signature};
 use anyhow::Result;
-use secp256k1::{Message, SECP256K1, SecretKey};
+use secp256k1::{Message, SecretKey, ecdsa::RecoverableSignature};
 use x402_chain_eip155::v1_eip155_exact::client::SignerLike;
 use zeroize::Zeroizing;
 
@@ -21,12 +21,15 @@ impl Drop for EvmSigner {
 
 impl EvmSigner {
     pub(crate) fn from_slice(bytes: &[u8]) -> Result<Self> {
-        let key =
-            SecretKey::from_slice(bytes).map_err(|_| anyhow::anyhow!("invalid EVM private key"))?;
+        let bytes = Zeroizing::new(
+            <[u8; 32]>::try_from(bytes).map_err(|_| anyhow::anyhow!("invalid EVM private key"))?,
+        );
+        let key = SecretKey::from_secret_bytes(*bytes)
+            .map_err(|_| anyhow::anyhow!("invalid EVM private key"))?;
         Ok(Self::from_key(key))
     }
     fn from_key(key: SecretKey) -> Self {
-        let public = key.public_key(SECP256K1).serialize_uncompressed();
+        let public = key.public_key().serialize_uncompressed();
         let hash = alloy_primitives::keccak256(&public[1..]);
         Self {
             key,
@@ -34,13 +37,13 @@ impl EvmSigner {
         }
     }
     pub(crate) fn random() -> Self {
-        Self::from_key(SecretKey::new(&mut secp256k1::rand::thread_rng()))
+        Self::from_key(SecretKey::new(&mut secp256k1::rand::rng()))
     }
     pub(crate) fn address(&self) -> Address {
         self.address
     }
     pub(crate) fn to_bytes(&self) -> Zeroizing<[u8; 32]> {
-        Zeroizing::new(self.key.secret_bytes())
+        Zeroizing::new(self.key.to_secret_bytes())
     }
 }
 
@@ -60,12 +63,13 @@ impl SignerLike for EvmSigner {
         self.address()
     }
     async fn sign_hash(&self, hash: &B256) -> Result<Signature, alloy_signer::Error> {
-        let signature = SECP256K1.sign_ecdsa_recoverable(&Message::from_digest(hash.0), &self.key);
+        let signature =
+            RecoverableSignature::sign_ecdsa_recoverable(Message::from_digest(hash.0), &self.key);
         let (recovery, bytes) = signature.serialize_compact();
         Ok(Signature::from_scalars_and_parity(
             B256::from_slice(&bytes[..32]),
             B256::from_slice(&bytes[32..]),
-            i32::from(recovery) & 1 != 0,
+            recovery.to_u8() & 1 != 0,
         ))
     }
 }

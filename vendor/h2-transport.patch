@@ -9,7 +9,7 @@
                  self.pending_send.push_front(&mut stream);
                  self.try_assign_capacity(&mut stream);
              }
-@@ -906,12 +906,27 @@
+@@ -900,12 +900,27 @@
          }
      }
  

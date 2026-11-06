@@ -143,7 +143,9 @@ make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_confli
 ```
 
 See [workspace verification](development.md#combined-workspace-verification).
-Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes.
+Upstream owns same-height/deeper reorg truncation and synthetic branch hashes.
+Recovery depth uses the previous session's chain height; the application removes
+obsolete mutable verification-start accumulation from that path.
 The upstream 1000-block rolling horizon is a cache-retention policy, not consensus
 finality. A node's larger rollback window does not require matching local retention. A demonstrated divergent chain outside the retained horizon clears derived SDK
 chain state and resumes from the effective scan floor. A shorter height alone
