@@ -23,6 +23,62 @@ contracts. Follow [SDK integration](../zingo-integration.md),
 [testing](../testing.md), [release builds](../reproducible-builds.md) and
 [vendor provenance](../../vendor/README.md).
 
+## Operator-directed vendor removal
+
+At baseline `aae7f9c1154f404cbe5d2b9274c27990541b845d`, the operator explicitly
+selects removing `zcash_proofs`, `x402-chain-eip155` and `alloy-primitives` local
+forks in fixups to their introducing commits. This supersedes N2's zero-match
+acceptance: retain visible advisories with evidence-backed exposure dispositions
+instead of maintaining these forks. The earlier zero-match result remains valid
+only for its recorded historical graph. This does not authorize weakening native
+secret signing, parameter integrity, runtime network policy or accepted work.
+The operator intends later squashing to avoid retaining vendor contents; current
+work prepares fixups and does not itself rewrite history.
+
+Ordered boundaries: R1 fixup `e83e2043` restores registry proofs and the reachable
+build-only legacy downloader, removing its directory/patch/provenance and updating
+verification and maintained guidance. R2 fixup `45cf3bcc` restores registry SDK
+`client` plus `telemetry` and upstream primitives, adapting only the native signer's
+error signature to the upstream trait and removing both local trees/patches/
+provenance. Existing public-address/native cryptographic fixtures remain. R3
+fixup `aae7f9c1` records the final exact-source advisory assessment, revised
+acceptance and independent combined review. Retain the four pre-existing local
+transport/Pepper checkouts and all remaining provenance checks.
+
+Independent design review examines upstream trait/feature contracts, existing
+protections and affected consumers before implementation. Independently review
+each exact fixup and the combined branch, including complete signing/build/network
+consumers and source-matched complexity. Validate formatting/tooling/provenance,
+production compiler/full all-target Clippy, payment/SDK/crypto compatibility and
+native signer vectors, then affected proving/lifecycle/storage and optimized
+consumers as warranted by the resolved graph. Preserve valid unrelated evidence.
+Recompute both lockfile and normalized-source audit results without suppression;
+restored providers may also restore the fifth baseline maintenance notice.
+Document each accepted advisory's reachability, protections and reassessment
+triggers in development guidance, with build details in SDK guidance. Do not call
+the reachable build downloader zero-impact. No private reads or funded/live
+qualification is authorized. Review/validation completion remains pending here.
+
+## Operator-selected closeout scope
+
+The operator selects deferring the six service questions to
+[swap timing assessment](deferred/near_swap_timing_tightening.md). Answers alone
+establish no common-path speedup; scheduling that assessment begins with an actual
+delayed transition and blocking predicate, not obtaining every external answer.
+The operator explicitly cancels complete SDK transparent retirement (N6 beyond
+C5a): the intended privacy concern is met by shielded-only refunds and regression-
+protected suppression of transparent-address RPCs, not removal of local SDK key
+and output support. Broader N3/N5 live/accounting qualification is not selected as
+an additional completion goal; its missing evidence remains a truthful qualification
+limit in maintained guides/runbooks. Q4/Q6 retain optional future uses only if the
+deferred timing assessment selects a concrete outcome. No financial evidence,
+accepted binding, owned funds or recovery authority is removed by this scope change.
+This supersedes the earlier statements below that those decisions keep this plan
+open. After current vendor-removal validation and combined review, verify permanent
+guidance/deferred handoff, delete this completed plan and independently review exact
+cleanup/final branch. Preserve its evidence through Git history and all private
+financial captures in place; do not create a completed-plan archive.
+
 ## Execution baseline and commit gates
 
 Working branch: `nu7_release_readiness`. Starting baseline:
@@ -537,12 +593,17 @@ Independent final runtime/evidence review at `cccbe913` verified these logs
 and the combined C5a scope with no unresolved material findings; C5a is complete.
 N4 and dependency/security work remain open.
 
-### C2a/C1a remaining dependency implementation gates
+### C2a/C1a dependency implementation gates
+
+The operator-directed removal above supersedes retention of the three checkouts
+and the zero-match gate below; retain these records as historical validation.
 
 The operator explicitly requires all deferred major updates plus crypto-bigint,
 with removal or correction of all eight vulnerability matches as the minimum
 security acceptance. Earlier exposure dispositions remain historical evidence,
-not completion. Independently reviewed design preparation selects these boundaries:
+not completion. The implementation history below is retained; the final dependency
+checkpoint supersedes its intermediate pending statuses. Independently reviewed
+design preparation selected these boundaries:
 
 - C2a-TLS: add a narrowly patched `zcash_proofs` 0.31.0 checkout to migrate its
   forced minreq2 downloader to released minreq3 and its maintained TLS cohort.
@@ -667,6 +728,168 @@ broad runtime checks, and independently review exact commits/fixups and combined
 financial/network consumers with source-matched complexity evidence. The combined
 dependency gate after C1a covers C2a-TLS, C2a-crypto, C1a and all accumulated
 preceding commits/fixups; material findings must be resolved before exit.
+
+### Earlier zero-match dependency validation checkpoint
+
+Code validation is frozen at `33b1f1eb35af5558baab37cf4732dc428b7cf9c4` on
+`nu7_release_readiness`. N1's selected cohort/general updates and N2's eight-match
+security correction are implemented and validated. All four requested deferred
+major updates resolve and pass their affected contracts. The application graph
+contains neither crypto-bigint nor its old k256/elliptic-curve cohort; optional
+upstream aggregate SDK compatibility has its own isolated lock and is not the
+application's shipped resolution.
+
+The source-aware assessment in
+`target/nu7-readiness/security-assessment-after33b1/summary.json` uses cargo-audit
+0.22.2 and RustSec `26fd2d43f7280a1fb925a3743ec463017afe7119`. Root, independently
+locked protoc and normalized nonregistry inventories each report zero vulnerability
+matches. All eight baseline matches are removed. Four baseline maintenance notices
+remain visible: derivative, fxhash, json and paste; pin-utils disappears with the
+unused concrete-provider graph. The root audit exits1 for those four notices, not
+for a vulnerability or assessment failure. No advisory filters or package renames
+are used. Actual source inventories and lock hashes accompany the reports.
+
+All 17 stages in `target/nu7-readiness/dependency-validation-summary.json` exit0:
+
+- Static validation: 96 Python tests, ten analyzer qualification tests, formatting
+  and complete vendor reconstruction/provenance checks.
+- Production compiler and full all-target Clippy pass without diagnostics at
+  `31c3479d`; affected startup-target Clippy passes at `33b1f1eb`. The intervening
+  startup correction changes one test document-parser call and owning guidance;
+  unchanged all-target evidence carries forward.
+- SDK core5 / aggregate6 tests and optional full-feature all-target compilation
+  pass in exact-Rust-source isolated harnesses. The latter is compile coverage,
+  not live provider qualification or an upstream MSRV/no-std claim.
+- Independent old-layout codec2, TOML1, VFS3 and compatibility31 pass. The default
+  stage passes 1,914 tests with 42 ignored across 57 harnesses; proving4,
+  synthetic-chain lifecycle57 (one ignored) and the remaining codec1 pass.
+- Optimized compatibility20, native signer2 and codec2 pass. The exact-source
+  downloader harness's seven passing tests remain valid. Its manifest adaptation
+  and separate lock are recorded above; bundled-prover metadata is not qualified.
+
+Logs retain all stage names, commands, results and the earlier failures. The three
+localized corrections are independently reviewed unsquashed fixups: `6ddb92ce`
+(TOML unsigned boundary, introducing `bb2ba1f4`), `31c3479d` (cover fixture
+isolation, introducing `c42c41ed`) and `33b1f1eb` (TOML document parsing,
+introducing `bb2ba1f4`). They preserve production authority and original financial,
+startup and request-count assertions. Debug libtest links retain the previously
+assessed macOS large `__eh_frame` warning; production, Clippy and optimized checks
+have no diagnostics. This is not a warning-free debug-test claim.
+
+Independent nonauthor reviews cover exact TLS `e83e2043`, crypto `45cf3bcc`, major
+updates `bb2ba1f4` and each subsequent fixup, including documentation corrections
+`b4beba70` and `3f8d6ab0`. Source-matched application metrics at `33b1f1eb` cover
+470 Rust files / 10,371 callables with no exclusions or regression warnings versus
+the starting baseline. Changed SDK/proofs vendor metrics and manual high-risk
+call-chain reviews are recorded with their source identities; earlier Pepper
+parser limitations remain explicit. The independent nonauthor final combined source/runtime/complexity review of
+baseline `571eba2f` through exact `33b1f1eb` accepts the implemented dependency,
+security, C5a and timing gate with no material findings or compelling simplification.
+It independently verified all 17 log/exit pairs, test totals, metrics/source hashes,
+lock hashes and all 1,698 recorded file hashes across 19 nonregistry source rows.
+Validation is assembled named-stage evidence with justified continuations, not
+a single uninterrupted `make check` invocation.
+
+The whole plan remains open. Remaining work is the operator's N4 scope decision
+in the retained questions section, and N5/N6 evidence/implementation needed only
+for the broader full-retirement claim beyond completed C5a discovery policy.
+No provider question was posted. No new private inspection, wallet sync, signing,
+spending, native consensus, real-Tor, funded settlement or reproducible-build
+qualification is claimed. Plan cleanup waits for those scope and release conditions;
+this dependency checkpoint does not authorize push, merge or deployment.
+
+### Vendor-removal checkpoint
+
+The operator's acceptance revision above selects upstream sources instead of
+maintaining the three security-only forks. Exact R1 `d2763602` is a fixup of
+`e83e2043`; exact R2 `d97b23b9` is a fixup of `45cf3bcc`. Both independently
+reviewed removals preserve native secret signing, key erasure, original payment
+and state contracts, SDK algorithms, runtime network factories and the four
+pre-existing local transport/Pepper checkouts. R2 restores upstream `SignerLike`'s
+`alloy_signer::Error` return type; the native signing body is unchanged. The three
+source directories, patches, source manifests, dedicated license copies and
+verification calls are removed. No history rewrite has occurred; the fixups
+prepare the operator's later squash, and existing Git objects persist until then.
+
+The raw source-aware replay in
+`target/nu7-readiness/security-assessment-vendor-removal/summary.json` reports
+root8 vulnerability matches / five maintenance notices, with zero matches or
+notices in protoc and normalized nonregistry sources. Restoring provider features
+returns pin-utils, alongside derivative/fxhash/json/paste. The reviewed disposition
+in development guidance names each advisory, actual exposure, independent
+protections and reassessment triggers. The audit remains findings/exit1; no
+suppression, package renaming or zero-impact claim is used. Production secret
+arithmetic stays native; the legacy TLS downloader is reachable on uncached
+ordinary builds and hashes public parameters. Release prefetch verification and
+network denial are separate protections, not an ordinary-build guarantee.
+
+Independent nonauthor design/exact-SHA/combined source review reports no material
+findings or compelling simplification. Static validation passes all96 Python tests,
+ten analyzer qualification tests, formatting and all four retained vendor source
+reconstructions. Exact source/lock metrics in
+`target/complexity-runs/20261106T173022Z-c02ccb4a/` pass independent review without
+exclusions; the native signer has unchanged control flow (sign_hash CogC0/CycC1).
+All nine recorded validation stages pass at frozen code `d97b23b9`, with raw logs,
+commands and exits under `target/nu7-readiness/vendor-removal-*` and totals in
+`vendor-removal-validation-summary.json`: production/compiler and all-target
+Clippy without diagnostics; compatibility31; default continuation1914/42 ignored;
+proving4; lifecycle57/1 ignored (572.33 seconds), including all six actual-SDK
+refund/discovery cases; codec1; optimized compatibility20 and native signer2.
+Static96 Python/10 analyzer/provenance evidence above remains valid. Debug libtest
+retains the known macOS unwind-table linker warning; static tooling logs retain a
+macOS sandbox confstr warning with passing tests. No warning-free claim applies to
+those stages. This is assembled named-stage evidence, not one uninterrupted make
+check. No source, dependency or executable-feature changes occurred during these
+stages; subsequent policy/handoff edits are documentation-only.
+
+The observed long elapsed time includes ~49 minutes across dependency/application
+compilation, production compiler checking and all-target Clippy, while default test
+execution is 252.60 seconds, proving54.22 and lifecycle572.33. Compatibility and
+default continuation targets are disjoint; the optimized compatibility20 and signer2
+are deliberate additional executions. No tests were added for these retirements.
+The operator separately requests checking suite growth and repeated builds; that
+read-only audit does not authorize a new validation matrix or automatic fixture
+redesign. The independent final combined source/runtime/policy/handoff gate accepts the
+removal and revised scope with no material findings or compelling simplifications.
+It verifies exact policy `6e1a9a2c`, frozen code `d97b23b9`, all nine raw stage
+logs/exits and actual privacy regressions, and reconciles prior exact removal,
+complexity and complete signing/build/network consumer reviews. Exact handoff
+commit review, cleanup review and final inventory refresh remain pending.
+
+Subsequent operator scope decisions above supersede the older N4/N5/N6 statements:
+only optional timing questions are deferred, complete SDK transparent retirement
+is cancelled, and actual-SDK negative address-query regressions establish the
+selected privacy contract. No broader live-refund qualification is claimed or
+introduced as another completion prerequisite.
+
+### Suite timing audit at closeout
+
+A read-only independent history audit distinguishes build time from test execution.
+Current default continuation1914 executes in252.60 seconds and proving4 in54.22;
+lifecycle57/1 ignored executes in572.33 seconds, below earlier equivalent runs
+589.41 (`check-lifecycle-after0e84`),586.99 (`transparent-lifecycle-after896a`)
+and592.45 (`dependencies-lifecycle-after33b1`). The vendor removal adds no tests.
+Compatibility/default continuation select disjoint integration targets. This task's
+optimized compatibility20/signer2 are deliberate extra executions, not additional
+permanent Make check stages. Logs show approximately49 minutes across rebuilds,
+production checking and all-target Clippy, versus approximately15 minutes of test
+harness execution. Cold dependency changes do not establish warm suite latency.
+
+Pruning completion `d0e05a28` had36 lifecycle test functions; later indexer
+regression/recovery (`a11f7228`, `fba85be3`, `a095dc0c`) and calculation-owner
+(`d1528b29`) coverage contributes to the current58 functions. Shared immutable
+faucet bytes (`90c0a2cd`), consolidated expiry journeys (`40f71ea1`) and lazy
+Sapling parameters (`edc7e7d1`) remain. Fresh SDK reorg/confirmation/expiry variants
+are concrete cost candidates, but source inspection alone does not establish
+redundancy. The four-variant SDK reorg case already existed at pruning completion. Its
+`MAX_REORG_ALLOWANCE` input changed from100 to1000 with the SDK cohort, expanding
+the synthetic block workload without adding those four variants. Independent
+read-only review identifies shortening the manually missing-checkpoint variant,
+cheaper projection/expiry permutations and reducing confirmation-only bookkeeping
+variants as concrete candidates. Real retention-boundary, disclosure, proving,
+negative-query and accepted-work coverage must remain. No individual-case timings
+or savings are established; no pruning, new benchmark matrix or fixture redesign
+is selected as part of the completed vendor/privacy work.
 
 ### N6 full-retirement assessment (beyond C5a discovery policy)
 

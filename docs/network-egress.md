@@ -145,9 +145,16 @@ and timing can still correlate service-visible requests. Treasury scans share on
 identity. Generated, mnemonic-imported, reopened and reconstructed wallets disable
 transparent known-address queries and gap recovery regardless of saved settings.
 Historical bindings do not enable an address-recovery mode; accepted transactions
-and incidentally recognized owned funds retain their ordinary handling. Remaining
-removal of SDK transparent key derivation/output recognition belongs to N6 in
-[NU7 release readiness](plans/nu7_release_readiness.md).
+and incidentally recognized owned funds retain their ordinary handling. Local SDK
+transparent key derivation and incidental output recognition do not
+enable address-specific queries and need not be removed for this privacy contract.
+Shielded-only new refunds and suppressed transparent-address RPCs address the
+refund-address correlation channel between NEAR and the Zcash indexer. Real-SDK
+[refund/discovery regressions](../src/treasury/lifecycle_tests/refund_addresses.rs)
+assert absent requests across fresh/import/reopen/reconstruction paths, guarding
+all six transaction-history, balance and UTXO RPC methods, including aliases.
+Preserve these negative controls on SDK changes. Shared transport/timing and
+other metadata correlation remain separate limitations.
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient
@@ -860,7 +867,7 @@ financial or qualification authority.
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
 | Shared catalog/price retention: seven days by default | `catalog_cache_ttl_seconds` controls both; zero disables the shared cache. Reads, restart and observations never renew expiry. Successful unchanged catalog revalidation renews the joint entry. Changed bytes/configuration or eviction discard hints too. Memory follows live catalog bindings; SQLite writes are disposable and generation-conditional. No independent price timer, capacity, probe or refresh scheduler. See [local resource limits](local-resource-limits.md). |
 | NEAR sizing retries | No independent attempt cutoff. Each recognized USDC minimum must strictly raise the floor within the authorized nominal ceiling; every replacement draw persists before the next request. The original quote deadline is checked before each request and never renewed by retries. Existing response-inactivity guards and scheduler backoff remain independent. |
-| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to 30 minutes (1,800 seconds) and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund assessment is owned by [NU7 release readiness](plans/nu7_release_readiness.md). Broadcast acceptance is not settlement. |
+| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to 30 minutes (1,800 seconds) and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund assessment is owned by [deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md). Broadcast acceptance is not settlement. |
 | x402 authorization validity | New static v1/v2 exact/upto and managed exact signatures expire at the shorter of the provider's requested lifetime or 300 seconds after signing. This bounds transfer authority, independently of HTTP progress. Original accepted offers, actual journaled expiries and existing signatures are preserved; expiry never grants replay. |
 | Payment challenge bodies | One collection under the provider's `max_response_bytes` (16 MiB default); direct low-level managed body-only challenges use the default. V1 body normalization adds no second cap or deadline. |
 | Funding observation owner | Per store: four credit reads, four status reads, four prerequisite-complete unsigned quotes, one serialized source step and one pending quote prerequisite. Each of the four traversal lanes (credit, status, source and quote prerequisite) retains at most 64 acquired rows; independent cursors have no inventory-count cutoff. These bounds protect acquired work, not funding capital. Saturated lane deferrals emit aggregate DEBUG events with static capacities and the active source operation, retaining all pending work. Candidates may not yet be due. Source-step start/finish emit DEBUG with the operation, wallet, starting phase, elapsed seconds and step success; these identify the holder, not its internal wait or swap outcome. |

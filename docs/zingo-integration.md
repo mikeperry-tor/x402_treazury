@@ -342,24 +342,28 @@ Orchard-only UA; the application also derives a Sapling+Orchard receive UA.
 Current storage accepts schema23 only; the SDK owns historical snapshot decoding,
 which is separate from an application pre-seed migration path.
 
-The v8 SDK has no verified complete transparent-retirement setting.
-`LightWallet::new` still derives and stores the first external transparent address
-for a spending wallet. `TransparentAddressDiscovery::disabled()` suppresses both
-known-address discovery RPCs and gap probing, but deliberately preserves recognition
-of owned transparent outputs in shielded-relevant full/pending transactions.
-Pepper can also process compact transparent data after its discovery floor.
-Clearing the public address map is insufficient: construction already derived an
-address, and deleting legacy identities could prevent recovery of late receipts.
+The privacy contract is suppression of address-based correlation between the
+refund receiver disclosed to NEAR and transparent-address requests to the Zcash
+indexer. New refunds contain no transparent receiver, and disabled discovery
+prevents both known-address lookups and gap recovery for generated, imported,
+reopened and reconstructed wallets. The real-SDK
+[refund/discovery regressions](../src/treasury/lifecycle_tests/refund_addresses.rs)
+assert an empty transparent-request log and unconsumed failure sentinels for all
+six RPC methods across the transaction-history, balance and UTXO families, including
+stream/deprecated aliases. Keep those forbidden-side-effect assertions when
+updating the SDK or reconstructing wallets; successful shielded discovery alone
+does not prove that no transparent query occurred.
 
-Full retirement therefore needs a supported upstream change or reviewed SDK source
-change covering construction/reconstruction and ordinary output recognition, plus
-preservation of accepted work and recoverable owned funds. Pepper-only changes cannot prevent Zingolib's
-constructor derivation. Existing fresh-wallet negative-RPC tests qualify disabled
-discovery, not absence of derivation or recognition. Imported/reopened wallets,
-archived mixed/transparent bindings and pending shielding need separate migration
-evidence; the [active readiness plan](plans/nu7_release_readiness.md) owns that work.
-Bridge-owned transparent outbound deposits remain valid and require their existing
-destination and output validation independently of receive/scanning retirement.
+Complete SDK transparent removal is not required for this contract.
+`LightWallet::new` still derives a local transparent key/address, and shielded-
+relevant compact/full/pending scanning can recognize already-owned transparent
+outputs. Existing owned-fund handling preserves those identities and accepted
+work without enabling address-specific discovery. Do not clear keys or maps to
+simulate retirement. Bridge-owned transparent outbound deposits retain their
+separate destination/output validation. This contract does not establish blanket
+network unlinkability or live-funded refund qualification; see
+[network correlation](network-egress.md) and
+[refund policy](wallet-rotation.md#refunds-state-and-recovery).
 
 The requested NEAR quote window defaults to 1,800 seconds. Returned quote deadlines
 and consensus-derived signed block expiry remain independent, including across NU7;

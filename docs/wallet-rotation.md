@@ -927,8 +927,8 @@ pending observation, not a manual-repair warning. The [1Click quote contract](ht
 defines its deadline as the start of refund handling; the [status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
 provides no terminal EXPIRED result. Neither a local deadline nor additional Zcash
 blocks can manufacture that service's final delivery outcome.
-The remaining service-contract and bridge qualification work is owned by
-[NU7 release readiness](plans/nu7_release_readiness.md).
+Optional service-contract and recovery-duration questions belong to the
+[deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md).
 
 ## Refunds, state and recovery
 
@@ -939,6 +939,15 @@ recovery do not query known transparent addresses or probe address gaps. Issued
 identities and historical financial records remain intact; there is no legacy
 transparent-discovery mode. The SDK may still recognize already-owned transparent
 outputs in transactions encountered through shielded scanning.
+This meets the address-query privacy concern: a refund receiver disclosed to NEAR
+is not also disclosed through transparent-address discovery requests to the Zcash
+indexer. New refunds are shielded-only, and the real-SDK
+[refund/discovery regressions](../src/treasury/lifecycle_tests/refund_addresses.rs)
+check absent transparent requests across construction, import/seed recovery,
+reopen and SDK reconstruction, including all six RPC aliases. Local SDK transparent
+key derivation and incidental owned-output recognition remain supported; complete
+SDK removal is not needed for this query-suppression contract. This is not a claim
+of unlinkability through unrelated network, session or transaction metadata.
 The requested quote window defaults to 1,800 seconds; explicit overrides, returned
 quote deadlines and the SDK's signed block expiry retain their separate authority.
 

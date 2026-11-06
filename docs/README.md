@@ -26,9 +26,10 @@ and CLI usage. Maintained implementation and operational explanations live here:
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
-[NU7 release readiness](plans/nu7_release_readiness.md)
-owns near-term consensus/dependency security, bridge qualification and retirement
-of wallet-owned transparent address support;
+[Deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md)
+owns optional service-contract and recovery-duration questions. The achieved
+refund-address query-suppression contract and its regression coverage live in the
+[SDK guide](zingo-integration.md#refund-receivers-and-seed-recovery).
 [deferred release follow-ups](plans/deferred/release_followups.md) own Windows,
 Linux CI and the remaining focused review assessments.
 The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
