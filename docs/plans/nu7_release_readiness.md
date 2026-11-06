@@ -23,6 +23,42 @@ contracts. Follow [SDK integration](../zingo-integration.md),
 [testing](../testing.md), [release builds](../reproducible-builds.md) and
 [vendor provenance](../../vendor/README.md).
 
+## Execution baseline and commit gates
+
+Working branch: `nu7_release_readiness`. Starting baseline:
+`571eba2f8a8f4df9d3f3e89d5992ccee93f81154`. The unrelated untracked `TODO`
+is outside this work. Production keys, funded calls, submissions and deployment
+remain outside current authority. Public source retrieval and unfunded diagnostics
+are permitted; private evidence inspection requires the reviewed recipe first.
+
+The N1–N6 assessment boundaries below remain acceptance requirements. Execute
+these coherent commits in order, refining candidate details from exact sources:
+
+| Commit | Boundary and permanent documentation | Acceptance and review gate |
+| --- | --- | --- |
+| C0 | Retain baseline, implementation boundaries and review evidence in this plan. | Independent read-only design review before substantive implementation. |
+| C1 | N1: migrate the complete SDK/backend cohort to verified v8 tag, carry necessary Pepper patches and provenance, adapt offline/indexer/send/sync consumers; assess general workspace and protoc updates. Update SDK integration and vendor ledger. | Exact source comparison, vendor integrity, production compiler and all-target Clippy, compatibility and affected lifecycle/optimized checks. Independent exact-SHA and CogC/CycC review. |
+| C2 | N2: reproducible local advisory assessment of active lockfiles and path sources, resolve signing advisory with compatible migration or evidence-based exposure/release disposition; update development/vendor/testing/tooling guidance. | Exact source and signing-call-chain assessment, independent vectors and payment compatibility; exact-SHA review. Dependency gate combines C1/C2 and all fixups. |
+| C3 | N3/N4: verify deployed refund format/receiver and published service semantics; fix demonstrated gaps only, with network/wallet/live-runbook handoff. | Public unfunded route checks, faithful contract regressions where code changes, independent exact-SHA review. Bridge gate combines all preceding work before dependent retirement. |
+| C4 | N5: reviewable inspection and qualification recipe, preferring retained evidence and simplest supported controlled-refund trigger. | No production key access or spending until separate operator authority. Record precise missing evidence and execution path; review exact recipe. |
+| C5 | N6: retire ordinary wallet-owned transparent behavior only when receiver and funded evidence support it; preserve explicit legacy recovery and accepted obligations. | Fresh/imported/reopened/seed-recovery negative RPC/address controls, shielded discovery/spendability, legacy/restart regressions; exact-SHA and applicable complexity review. Blockers remain explicit if prerequisites are unavailable. |
+| C6 | Final integration and documentation handoff; delete completed plan only when all release conditions and reviews pass. | Independent full-chain combined review of all commits/fixups, required ordered checks, exact cleanup-SHA/final-branch review. |
+
+Keep fixups unsquashed and review each exact SHA. Run cheap affected contracts and
+`check-static`, complete applicable complexity review, then `check-clippy` and
+`check-compat` before remaining named runtime stages. Carry forward unchanged
+passing evidence. Optional native consensus, real Tor, funded and reproducibility
+qualification require their actual runbooks; unavailable evidence stays missing.
+
+### Evidence and remaining work
+
+- C0: baseline captured; independent design review in progress. No implementation
+  or validation completion claimed.
+- Verified public v8 tag resolves to `81d799775f11e882896e8710e8af12d6d4d29a41`
+  through Git remote metadata and a read-only checkout under ignored `target/`.
+  Release notes and source cohort must agree before migration.
+- N5 authority and actual refund evidence remain outstanding; N6 is conditional.
+
 ## Ordered assessment boundaries
 
 | ID | Work and required exit evidence |
