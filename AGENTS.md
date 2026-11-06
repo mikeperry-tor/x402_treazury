@@ -266,19 +266,22 @@ make clippy
 make fmt-check
 ```
 
+- Select checks by [affected behavior](docs/testing.md#selecting-validation-by-change);
+  do not apply full compiler, provenance or reproducibility qualification to every edit.
+  Explicitly requested full checks and named stages retain their fixed selections.
 - Follow [testing efficiency](docs/testing.md#testing-efficiency): avoid validation
   matrices, reuse valid evidence, consolidate expensive setup and prefer functional
   assertions and deterministic synchronization.
 - Follow [validation order and continuation](docs/testing.md#validation-order-and-continuation):
-  complete applicable design/complexity review and full all-target Clippy and
-  compatibility checks before broad runtime suites; run affected cheap contract
+  complete applicable design/complexity review and selected compiler/Clippy and
+  compatibility stages before broad runtime suites; run affected cheap contract
   tests first. After a localized fix, revalidate affected consumers and resume
   unfinished named `check-*` stages. Repeat passed stages only when their evidence
   is invalidated, and record the scope and results carried forward. `make check`
   remains the full application check, including the synthetic-chain treasury lifecycle.
 - Follow [compiler diagnostics and review](docs/testing.md#compiler-diagnostics-and-review):
-  run the production compiler and all-target Clippy warning gate; inspect diagnostics
-  alongside exit status. Selected-target `-D warnings` does not cover dependency
+  when selected, run the production compiler and all-target Clippy warning gate;
+  inspect diagnostics alongside exit status. Selected-target `-D warnings` does not cover dependency
   warnings, and vendoring can expose previously suppressed upstream diagnostics.
 - Coordinate editor-triggered Cargo checks and separate builds before validation;
   Make's serialization does not cover other processes. Keep source, executable,

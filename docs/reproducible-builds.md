@@ -8,6 +8,13 @@ run proves matching bytes for that revision, feature selection and recorded
 host environment. It does not establish reproducibility across operating
 systems, independent machines or different toolchain distributions.
 
+This qualification is for released binaries, changes to the reproducible-build
+contract, or an explicit request. It is not part of ordinary development validation
+and is not invoked by `make build` or `make check`. The release optimization profile
+alone does not require qualification. Ordinary pinned toolchain, locked resolution
+and embedded build identity checks still apply; see
+[validation selection](testing.md#selecting-validation-by-change).
+
 ## Toolchain and release environment
 
 `rust-toolchain.toml` selects Rust 1.99.1 for rustup. The Makefile application targets

@@ -56,6 +56,9 @@ make build PROFILE=dev CARGO_ARGS='--offline'
 
 Build targets own profile selection: use `PROFILE=NAME` with `build` or
 `build-dev` for incremental dev; Cargo profile flags in `CARGO_ARGS` are rejected.
+Select checks by [affected behavior](../docs/testing.md#selecting-validation-by-change)
+before choosing a full stage. Ordinary builds do not run vendor source verification
+or the two-build reproducibility qualification.
 `make check` and its named `check-*` stages use fixed selections regardless of
 `CARGO_ARGS` and `TEST_ARGS`. The full check runs static/tooling/complexity/provenance,
 production compiler diagnostics and full feature Clippy, compatibility, the remaining
@@ -283,6 +286,9 @@ setup consolidation and deterministic synchronization. Existing optional coverag
 commands are separate capabilities, not additional evaluation requirements.
 
 ## Vendor source verification
+
+See [source verification boundaries](../vendor/README.md#source-verification-boundaries)
+for change triggers and reuse of unchanged-input evidence.
 
 Vendor verification reconstructs byte-exact sources and patches without requiring
 Rust. Patch bytes are supplied through binary stdin with the restored tree as the

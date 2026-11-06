@@ -229,9 +229,10 @@ Make commands do not isolate artifacts or bypass Cargo's build-directory lock.
 
 ## Verification
 
-Run `make check` for the application, test-feature Clippy, compatibility
-checks and the local synthetic-chain treasury lifecycle. Run feature configurations
-sequentially because CLI tests share the executable path. See
+Select checks using [validation by change](testing.md#selecting-validation-by-change).
+Use `make check` when a full application check is required, including test-feature
+Clippy, compatibility and the local synthetic-chain treasury lifecycle. Run feature
+configurations sequentially because CLI tests share the executable path. See
 [development tools](../scripts/README.md).
 Individual commands:
 

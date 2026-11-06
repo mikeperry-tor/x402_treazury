@@ -181,6 +181,58 @@ coverage. Normal debug tests do not exercise the release profile. Release enable
 overflow checks for application and dependencies without changing explicit
 checked/wrapping/saturating arithmetic or panic ownership.
 
+## Selecting validation by change
+
+Choose checks from the affected behavior and its consumers before starting Cargo.
+Use the smallest selection that establishes the changed contract, plus any checks
+explicitly requested by the user or required by an applicable qualification.
+Independent review still applies; it does not require a full build for every edit.
+
+| Change | Applicable validation |
+| --- | --- |
+| Prose or ordinary comments only | Review accuracy, links and diff formatting; no Cargo build, Clippy or runtime suites. Executable examples, doctests and compiler-consumed directives follow their affected contracts. |
+| Configuration, provider TOML or schema data | Parse the edited inputs and check affected catalog, routing or request contracts. Use an existing executable only when the command reads the edited files. Bundled providers are embedded: tests or inspection of embedded content require a matching compilation, even without a new deliverable. No blanket production compiler/all-target Clippy gate for data-only changes. |
+| Tests or fixtures only | Compile and run the affected test targets and consumers; lint changed Rust test targets. Broaden only when shared helpers or contracts affect other suites. |
+| Runtime Rust | Run the production compiler/all-target Clippy warning gate (`make check-clippy`) and focused behavior/consumer tests. Select compatibility and broader runtime stages for affected boundaries. |
+| Dependencies, toolchain, build rules or broad refactors | Check affected source resolution, production/test compilation and compatibility; select broader stages according to the affected call chains. Run relevant source verifiers under the [vendor verification policy](../vendor/README.md#source-verification-boundaries). |
+| Financial authority, payment/recovery, network isolation, protocol or concurrency behavior | Include the relevant boundary, failure, recovery and forbidden-side-effect tests regardless of the changed file extension. |
+
+Rows can overlap. A configuration change that alters payment authority needs its
+financial contract checks; a spelling correction does not need a runtime suite.
+Use existing focused coverage where sufficient, rather than adding tests that
+merely restate a flag or document. Filtered tests must execute the intended cases,
+not pass with zero tests. Name the scope and limits of the resulting evidence.
+
+Full `make check` and explicitly requested named stages retain their fixed
+selections. Do not narrow their recipes or add automatic skip caches to implement
+this policy. Select focused commands instead of a broad stage when only a subset
+is needed. In particular, `check-static` includes both vendor verifiers and
+`check-compat` includes the Pepper verifier; requesting either still runs them.
+
+Dependency source verification is not a per-build requirement. Carry forward
+unchanged-input evidence under the vendor policy; ordinary application, data or
+documentation edits do not by themselves require reconstructing vendored sources.
+[Reproducibility qualification](reproducible-builds.md) is separate: run its two
+clean builds for release qualification, changes to the reproducible-build contract,
+or an explicit request. Ordinary development does not require it, including when
+`make build` uses the release optimization profile. Neither `make build` nor
+`make check` invokes that qualification runner. Keep ordinary toolchain/lockfile
+checks and embedded build identity intact.
+
+Batch compatible test targets in one invocation and keep feature/profile choices
+stable. Freeze the implementation snapshot, and commit it before expensive
+validation when practical. Git metadata is a build-identity input, so commits
+between checks can trigger compilation even when behavior is unchanged. Reuse
+valid evidence across prose-only commits with the original source and executable
+revision recorded; never describe an older binary as embedding the newer commit.
+Do not rebuild solely to relabel evidence. Different compiler, Clippy, test and
+feature/profile selections can still require distinct Cargo artifacts.
+
+Build an updated executable when needed for use or to validate embedded inputs;
+do not append a release build to every validation run. Prefer the incremental
+`make build-dev` for iterative executable development unless the release profile
+is required by the affected contract or the requested artifact.
+
 ## Default development checks
 
 The application always includes Zcash. The [Makefile](../Makefile) verifies pinned Cargo
@@ -302,19 +354,22 @@ toolchain pins to silence it. This does not waive the production/Clippy warning 
 
 ### Validation order and continuation
 
-Start with design review and `make check-static`. Complete applicable independent
-[complexity review](../tests/COMPLEXITY.md#review-discipline), including disposition
+Apply [validation selection](#selecting-validation-by-change) first; the sequence
+below orders selected stages and full application checks, not every edit. Start
+with applicable design review and cheap static/contract checks. Complete applicable
+independent [complexity review](../tests/COMPLEXITY.md#review-discipline), including disposition
 of findings that could require refactoring, before broad runtime suites. Generating
 a report does not complete that review; `make check` runs automatically without a
 human review pause. Reuse a verified source-matched report when its inputs have not
 changed.
 
-Run `make check-clippy check-compat` before long runtime suites to expose lint,
-shared-test compilation and dependency compatibility failures early. Run focused
+When selected, run `make check-clippy check-compat` before long runtime suites to
+expose lint, shared-test compilation and dependency compatibility failures early. Run focused
 tests for the changed behavior and affected inexpensive configuration, authored
 example, schema or diagnostic contracts before their broader suites. Choose these
 from real consumers; a blanket compile-only pass cannot detect stale runtime
-assertions. Once sources are stable, finish the remaining stages:
+assertions. For a full application check, once sources are stable, finish the
+remaining stages:
 
 ```sh
 make check-default-remaining check-proving check-lifecycle check-codec

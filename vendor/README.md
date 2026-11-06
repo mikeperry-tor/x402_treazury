@@ -143,6 +143,19 @@ factory tests exercise local refusal and transient target/handshake failures.
 
 ## Source verification boundaries
 
+Run the relevant verifier when maintained vendor sources, patches, upstream
+snapshots, provenance manifests or verifier code change, or when dependency/build
+resolution changes which vendored sources are used. Reuse prior successful evidence
+while those inputs remain unchanged; unrelated application, configuration or prose
+changes do not require another source reconstruction. Record the original evidence
+and relevant input scope rather than claiming a new verification.
+
+Release qualification and explicitly requested full checks or named stages retain
+their requirements: `make check-static` runs both verifiers and `make check-compat`
+runs the Pepper verifier. Ordinary `make build` does not invoke them. Source
+verification is separate from compilation, embedded build identity and
+[reproducible release qualification](../docs/reproducible-builds.md).
+
 Run from the repository root:
 
 ```sh
