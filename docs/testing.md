@@ -290,6 +290,16 @@ from advisory complexity scores and runtime fixture logs: those need review unde
 their owning policies, rather than blanket warning-text rejection. Do not silence
 lints or enable unused features merely to obtain a clean check.
 
+Large macOS debug library-test binaries can emit the system linker's
+`__eh_frame section too large` diagnostic. Compact-unwind DWARF hints have a
+24-bit offset field; [Apple libunwind](https://github.com/apple-oss-distributions/libunwind/blob/main/libunwind/src/UnwindCursor.hpp)
+can fall back to searching the retained full DWARF section. Record the actual
+target, warning and retained unwind information, then complete affected panic,
+cancellation/restart and optimized checks. The diagnostic reports a possible
+unwind-search performance cost, without itself demonstrating a correctness failure.
+Keep it visible; do not remove unwind data or change panic strategy, profile or
+toolchain pins to silence it. This does not waive the production/Clippy warning gate.
+
 ### Validation order and continuation
 
 Start with design review and `make check-static`. Complete applicable independent

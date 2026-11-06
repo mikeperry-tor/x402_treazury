@@ -176,6 +176,70 @@ fixture execution for this correction remain pending. The compatibility build wa
 interrupted before runtime execution to keep source/executable evidence coherent;
 its completed dependency artifacts are retained for resumption.
 
+### Offline inspection implementation gate
+
+Exact implementation `73df9ed23229d97e414178fe614c7c9d9740ca68` has a fresh
+independent combined source/complexity review against `571eba2f`, including all
+accumulated commits/fixups and complete affected consumers. No remaining material
+source finding or compelling simplification was identified. Review resolved the
+`703a1dae` scheduler assertion with `73df9ed2`: the unchanged second exponential
+step remains below the 60-second floor, rather than producing 120 seconds.
+
+The production compiler passes in `check-clippy-after73df.log`; after the operator's
+VS Code restart, full all-target `zcash-regtest` Clippy and emitted-warning checks
+pass in `clippy-all-targets-after-restart.log` (all paths here are under
+`target/nu7-readiness/`). Two orphaned editor checks from before that restart were
+stopped; no new editor Cargo launch was observed. Current source-matched complexity
+covers all 467 files/10,358 callables with no exclusions or threshold warnings;
+independent review also covered the supplementary vendor grammar gaps manually.
+
+Executed evidence at this source:
+
+- `check-compat-after73df.log`: 31 tests pass (crypto vectors2, payments15,
+  SDK3, MCP/server11), including actual activation/expiry and wallet restore.
+- `focused-cli-submission-after73df.log`: three tests pass, including actual
+  standalone/configured offline notes CLI, source lookup failure classification,
+  no implicit sends and unchanged financial records.
+- Default notes/routing3, native signer vector1, source scheduler1, treasury
+  observation4 and digest1 pass in their `focused-*-after73df.log` files.
+- `focused-notes-feature-after73df.log`: all five `zcash-testutils` note fixtures
+  execute and pass, including authenticated three-pool evidence with owner held,
+  SDK membership, spent/pending/incomplete records and exclusion of memos/secrets.
+
+Debug library-test codegen emits the macOS system-linker `__eh_frame` offset warning;
+filtered runs replay it from the same artifact. Independent inspection found both
+DWARF and compact-unwind sections retained, with a possible fallback-search cost
+and no demonstrated correctness failure. Do not describe these runs as warning-free.
+The disposition preserves panic/unwind/profile/toolchain contracts and still needs
+planned panic/cancel/reopen/lifecycle and optimized execution. The owning testing
+guide records this diagnostic; production/Clippy warning enforcement is unchanged.
+
+Final-source replay in `security-assessment-after73df/` is independently verified:
+all 16 nonregistry source fingerprints and both active lockfiles match, pinned
+cargo-audit0.22.2/database `26fd2d43` retain root eight vulnerability matches and five
+maintenance notices, with zero protoc/nonregistry matches. Exit1 remains findings;
+maintained exposure dispositions agree. No claim of a clean advisory report.
+
+C4's concrete bounded inspection recipe is independently reviewed at
+`target/nu7-readiness/refund-inspection-recipe.md` (SHA-256
+`83bb4ddc487c69b26109d602fba7e96cf5c13fe5524c8cb3605373d3143a9425`). It names only
+`state/research_desk`, its default key and the selected deployment configuration,
+with keyless JSON status and authenticated notes reads. A byte-identical frozen
+copy of the actual tested default CLI is pinned in `inspection-bin-manifest.json`
+so subsequent builds cannot replace the inspection executable. Config/executable
+hash checks, treasury-identity comparison, coherent-revision limitations and fresh
+owner-only private captures are explicit. Production execution still requires the
+operator's separate path/key authorization. Further financial extraction methods
+require read-only review before use; no scan, mutation, signing or spending is
+included. No production state or key has been opened.
+
+The public unfunded UA helper is independently reviewed and successfully encodes
+the current all-shielded and Orchard-only protocol receivers using the matching
+Cargo application-profile keys0.17/protocol0.11 artifacts; identities are retained
+in `public-format-dependency-artifacts.json`. Fresh provider dry quotes remain
+pending. Default remainder, synthetic source-proof/proving/lifecycle/codec and
+optimized checks are also pending; final validation acceptance remains open.
+
 ### Bridge evidence and qualification status
 
 N3/N4 public-source assessment found no demonstrated production bridge-code gap.
@@ -193,11 +257,12 @@ directories are outside this scope and may have unsupported schemas. No producti
 state or keys have been opened. Source-only review established that existing CLI
 views lack per-note evidence. C4 implements `wallet notes` using direct offline
 LightWallet decoding and the existing authenticated read-only snapshot contract;
-compiler, exact-SHA review and public-fixture execution remain pending.
+production compilation, exact-SHA source review and default/three-pool public
+fixture execution passed.
 It reports saved SDK selection, not live unreserved funds or spending authority;
 copy-scan and any funded excess harness remain separate missing capabilities.
-Next action: independently review/test that concrete inspector, then request the
-bounded production-key inspection authority before accessing the selected wallet.
+Next action: request the bounded production-key inspection authority for the
+reviewed, fixture-validated recipe before accessing the selected wallet.
 
 ### N6 selected-cohort retirement assessment
 
