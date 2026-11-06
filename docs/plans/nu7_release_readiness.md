@@ -371,6 +371,90 @@ Submission-disabled copy-scan can qualify discovery but cannot explain provider
 accounting; it and any funded qualification remain separate missing capabilities
 and authority.
 
+### Remaining N4 work for operator scope review
+
+The operator requests these questions and their reasons before deciding which
+facts are strictly necessary. No public issue has been sent; the prepared draft
+remains local and publication is not authorized. Obtaining every answer is not a
+prerequisite for completed C5a privacy work or dependency security validation.
+N4 scope/completion remains under review rather than silently waived.
+
+The intended outcome is faster resolution without orphaning accepted financial
+work. Each proposed use below is a decision to evaluate, not proof that another
+service check or confirmation gate is needed. First examine whether established
+SDK/blockchain facts or proven nondisclosure already resolve the relevant liability.
+Keep unsigned service observations and reporting differences advisory.
+
+1. **Deployed ZEC route and confirmations.** Does production 1Click native ZEC
+   use `zcash-connector.bridge.near`, and which watcher, relayer and additional
+   confirmation rules apply? Public connector settings alone do not establish the
+   service's policy. This could explain settlement delay or support timing estimates.
+   It is not needed to add another local confirmation wait: SDK facts already own
+   local spendability/source closure. No new wait is proposed.
+2. **First-observation event and clock.** Does arrival mean mempool observation,
+   block inclusion, sufficient confirmations, bridge credit or service observation?
+   Which timestamp/clock is compared to which deadline, and is deposit-submit
+   notification advisory? This matters if we intend to predict on-time acceptance
+   or change behavior near a cutoff. Existing accepted work can remain owned and
+   observed without resolving that clock; elapsed time alone grants no replay.
+3. **Requested versus returned deadline and late/reorg behavior.** What happens
+   when a deposit is first seen/mined before the requested deadline but confirmed
+   later, arrives between requested and returned deadlines, arrives after both,
+   or is recognized late after watcher downtime/reorg? Which fields establish swap,
+   refund or manual recovery? These facts could support a stronger resolution-time
+   promise or a changed cutoff policy. They do not invalidate the implemented
+   1,800-second preference, rewrite old quotes or replace signed SDK block expiry.
+4. **Automatic ZEC refund fees, minimums and transaction evidence.** For
+   underpayment, surplus, late arrival or failure, what are the shielded-refund
+   rules; is `refundFee` complete or estimated, is `refundedAmount` gross or net,
+   and how are refund transactions bound to deposits? Distinguish swap refunds
+   after bridge credit from rescue of an unfinalized connector UTXO. Answers could
+   explain the retained amount discrepancy or qualify a controlled refund trigger.
+   They are not needed to accept actual SDK-owned funds as spendable, and advisory
+   accounting disagreement must not become another funding gate.
+5. **Unused `PENDING_DEPOSIT` requests.** The original question asks whether an
+   unfunded request can remain pending after both deadlines and whether terminal /
+   cancel / tombstone evidence excludes later processing. **This is unnecessary
+   for proven nondisclosure.** Existing `source_never_disclosed`,
+   `non_disclosed_reset` and `status_needed` predicates exclude those attempts from
+   bridge obligations; private PREPARED bytes with zero disclosures can close
+   through signed expiry without status I/O. `funding_retry_allowed` already permits
+   a new attempt after canonical source closure while provider outcome is unknown.
+   Narrow any remaining question to previously disclosed originals and the exact
+   delivery/retirement guarantee being sought. Canonical expiry does not exclude
+   bridge ingestion before an earlier reorg or off-chain delivery already started.
+   Current `destination_obligation_pending` preserves that uncertainty for
+   retirement. This does not prevent new funding progress or prove that retaining
+   signer eligibility is the only safe design: status inventory already runs
+   independently of wallet role and retirement preserves encrypted keys. Any
+   separation of delivery observation from signer eligibility needs focused
+   financial-policy design and acceptance work; no such change is selected here.
+6. **Second deposits and completed-quote reuse.** What happens to another deposit
+   before execution and after SUCCESS/REFUNDED for exact-output/input requests;
+   which refund binding and history attribution apply? This mainly informs the
+   proposed duplicate-deposit qualification trigger and any deliberate reuse.
+   Ordinary operation does not need authority to make a second deposit, and no
+   such funded experiment is authorized. Prefer a simpler documented excess-refund
+   trigger if it satisfies the actual qualification question.
+
+Independent read-only source review at `34801de4` finds that none of the six
+external answers is required for implemented polling, the 1,800-second preference,
+SDK expiry recovery or C5a privacy. Questions1/4 support optional diagnosis or
+qualification; questions2/3 support stronger acceptance/service-time guarantees
+or changed cutoff policy; question5 must exclude proven nondisclosure; question6
+concerns deliberate reuse experiments, while ordinary recovery uses a new
+operation/quote. This review establishes neither a guaranteed sub-hour bridge
+outcome nor authority to drop disclosed delivery obligations.
+
+Next action for operator scope review: identify the delayed transition being
+improved—source confirmation/expiry, provider delivery, destination credit or
+retirement—and inspect its actual blocking predicate. Then select only the external
+facts needed for an intended behavior change, or defer optional questions. Current
+retirement policy may warrant a focused internal assessment before seeking a broad
+external contract. No service SLA, local EXPIRED outcome, financial replay, extra
+cap or new confirmation gate follows from this assessment. Continue independent
+dependency work while this decision is pending. The public issue remains unsent.
+
 ### C5a operator-directed discovery and refund policy
 
 The operator now explicitly requests disabling transparent refund use and transparent
