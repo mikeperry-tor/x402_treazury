@@ -482,6 +482,25 @@ not completion. Independently reviewed design preparation selects these boundari
   config parsing contracts and SQLite VFS/WAL/backup/recovery behavior. Record
   concrete resolver blockers rather than claiming unsupported overrides work.
 
+The first isolated crypto resolution removed concrete Alloy integrations but
+retained inactive k256 through primitives' weak `std` forwarding (Cargo #10801).
+Fresh lock generation reproduced the issue despite no active k256 feature tree.
+Independent nonauthor design assessments select a third, manifest-only
+`alloy-primitives` 1.7.3 checkout: move `k256?/std` from `std` to `k256/std`
+in the explicit k256 feature. This preserves original crypto API identities and
+aggregate std clients, while restricting the optional k256 backend to std-backed
+use; standalone no-std+k256 compatibility is not claimed. The application uses
+Linux/macOS std and native recovery. Removing forwarding outright breaks std error
+contracts; upgrading k256 alone breaks aggregate signer type conversions.
+
+The third checkout need, alternatives and maintenance cost were explained before
+introduction. Fresh isolated resolution with this candidate removes crypto-bigint,
+k256 and elliptic-curve; the isolated lock audit reports zero vulnerabilities and
+four maintenance notices. This is a resolver gate, not final application security
+acceptance. Integrate both crypto checkouts with complete published-source
+provenance/reconstruction and retirement conditions; test aggregate std clients
+separately and retain all original native vectors and payment ownership assertions.
+
 The two proposed checkouts, alternatives and maintenance costs were explained
 before vendoring. Preserve exact published archives, licenses, complete file
 inventory and authored patches; wire reconstruction into executed vendor checks
