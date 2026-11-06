@@ -773,7 +773,7 @@ necessary for platform verification. Rebuild and replace deployed binaries to
 consume locked dependency changes. Vendored upstream lockfiles are provenance
 inputs, not the dependency resolution used by the application workspace.
 
-The build-only legacy TLS dependency and parameter-integrity boundary are
+The build-time downloader TLS and parameter-integrity boundary are
 documented in [the Zingo integration guide](zingo-integration.md#build-time-parameter-downloads).
 That graph still contains affected certificate-verification versions; these
 updates do not eliminate every advisory finding from the lockfiles.

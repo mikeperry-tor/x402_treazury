@@ -311,19 +311,23 @@ parameters. Legacy v6 `vendor/zingolib/zcash-params/*.params`
 copies remain ignored, unused and preserved. Build-time acquisition is outside
 runtime Tor routing.
 
-The enabled `zcash_proofs` 0.31.0 `download-params` build dependency uses
-`minreq` 2.14.1 with `rustls` 0.21.12, `rustls-webpki` 0.101.7 and
-`webpki-roots` 0.25.4. The [locked-graph advisory disposition](development.md#locked-graph-advisory-disposition)
-covers their session, certificate-name/CRL and emSign findings; these versions
-lack the [emSign intermediate-key distrust fix](https://rustsec.org/advisories/RUSTSEC-2026-0382).
-They are absent from runtime HTTP/gRPC call chains. The downloader requests only
-public proving parameters and checks their hardcoded sizes and BLAKE2b-512
-digests before returning them; a forged TLS peer cannot substitute accepted
-parameter bytes, but can still interfere with download availability. Moving this
-graph to a maintained TLS stack requires an upstream dependency migration or a
-separately reviewed vendor patch, rather than a compatible lockfile update.
-The [release runner](reproducible-builds.md#prepare-inputs) separately
-verifies prefetched parameters and denies network access during qualification.
+The enabled registry `zcash_proofs` 0.31.0 `download-params` build dependency
+uses upstream minreq 2 and its legacy rustls 0.21 / rustls-webpki 0.101 /
+webpki-roots 0.25 cohort. On an uncached ordinary build this downloader is genuinely
+reachable. It downloads public proving parameters without runtime client secrets,
+outside runtime Tor routing. It neither supplies a production runtime network
+constructor nor changes the embedded parameter bytes.
+
+The upstream downloader checks trusted BLAKE2b-512 digests, bounds acquisition by
+the fixed parameter length and checks cached file sizes. These protect accepted
+parameter integrity; they do not fix TLS verification vulnerabilities, hide build
+network metadata or ensure availability. The known advisory exposure is explicitly
+accepted in the [dependency disposition](development.md#locked-graph-advisory-disposition)
+in preference to maintaining a downloader fork. Keep its raw audit findings
+visible and reassess when inputs, consumers or the upstream dependency cohort
+change. The [release runner](reproducible-builds.md#prepare-inputs) separately
+verifies prefetched parameters and denies network access during qualification;
+that stronger build boundary does not make ordinary uncached builds offline.
 
 ## Refund receivers and seed recovery
 

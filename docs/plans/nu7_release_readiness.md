@@ -449,7 +449,9 @@ barrier, accepted-byte and forbidden-send assertions remain. One earlier default
 suite retry encountered an unrelated ephemeral listener rebind collision; isolated
 and full continuation reruns passed without source changes. Earlier failing logs
 remain retained. No production wallet sync, signing or spending was performed.
-Final independent runtime/evidence review of this checkpoint remains required.
+Independent final runtime/evidence review at `cccbe913` verified these logs
+and the combined C5a scope with no unresolved material findings; C5a is complete.
+N4 and dependency/security work remain open.
 
 ### C2a/C1a remaining dependency implementation gates
 
@@ -462,7 +464,8 @@ not completion. Independently reviewed design preparation selects these boundari
   forced minreq2 downloader to released minreq3 and its maintained TLS cohort.
   Exclude this checkout from workspace membership when introduced.
   Adapt Iterator to Read, preserving lazy second acquisition, sticky failures,
-  empty reads, exact length/hash verification, cache and failed-file cleanup.
+  empty reads, trusted fixed digests, acquisition bounds, cache size checks and
+  failed-file cleanup.
   Explicitly retain previously unlimited headers/status lines on both requests.
   Verify resolved TLS provider construction and localhost failure regressions.
 - C2a-crypto: add a narrowly patched `x402-chain-eip155` 2.0.2 checkout exposing

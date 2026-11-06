@@ -153,7 +153,7 @@ all restored files against the recorded published-source hashes.
 notice against `pepper-sync-sources.json`, rejecting every unexpected Pepper file. It
 then reverses all declared patches in a temporary copy and checks the complete
 file inventory and every byte against hashes from the pinned upstream Git tree.
-All four crate trees must match upstream exactly after reversing their patches;
+All patched crate trees must match upstream exactly after reversing their patches;
 manifest adaptations belong in explicit patches too.
 These are source-integrity checks, not behavior tests or evidence that upstream
 still needs a patch. Build/test commands and qualification boundaries are in

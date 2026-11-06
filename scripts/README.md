@@ -166,7 +166,7 @@ separately; advisory matching does not verify that local patches preserve fixes.
 Supply `--db /path/to/advisory-db --db-revision FULL_SHA` and repeat
 `--source PACKAGE=/actual/package/directory` for **every** nonregistry package in
 both `Cargo.lock` and `tools/protoc/Cargo.lock`. This includes workspace packages,
-all four vendored packages and the pinned Git packages, including optional test
+all vendored packages and the pinned Git packages, including optional test
 packages. For example, the root package mapping is `--source x402_treazury=.`,
 the helper mapping is `--source x402-protoc-path=tools/protoc`, and a patched
 transport mapping is `--source h2=vendor/h2`. Use the actual locked Git checkout,
