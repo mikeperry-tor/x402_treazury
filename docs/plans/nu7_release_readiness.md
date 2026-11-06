@@ -43,7 +43,7 @@ these coherent commits in order, refining candidate details from exact sources:
 | --- | --- | --- |
 | C0 | Retain baseline, implementation boundaries and review evidence in this plan. | Independent read-only design review before substantive implementation. |
 | C1 | N1: migrate the complete SDK/backend cohort to verified v8 tag, carry necessary Pepper patches and provenance, adapt offline/indexer/send/sync consumers; assess general workspace and protoc updates. Update SDK integration and vendor ledger. | Exact source comparison, vendor integrity, production compiler and all-target Clippy, compatibility and affected lifecycle/optimized checks. Independent exact-SHA and CogC/CycC review. |
-| C2 | N2: reproducible local advisory assessment of active lockfiles and path sources, resolve signing advisory with compatible migration or evidence-based exposure/release disposition; update development/vendor/testing/tooling guidance. | Exact source and signing-call-chain assessment, independent vectors and payment compatibility; exact-SHA review. Dependency gate combines C1/C2 and all fixups. |
+| C2 | N2: reproducible local advisory assessment of active lockfiles and path sources, fix or remove all eight vulnerability matches; retain maintenance notices separately; update development/vendor/testing/tooling guidance. | Exact source and signing-call-chain assessment, independent vectors and payment compatibility; exact-SHA review. Dependency gate combines C1/C2 and all fixups. |
 | C3 | N3/N4: verify deployed refund format/receiver and published service semantics; fix demonstrated gaps only, with network/wallet/live-runbook handoff. | Public unfunded route checks, faithful contract regressions where code changes, independent exact-SHA review. Bridge gate combines all preceding work before dependent retirement. |
 | C4 | N5: offline authenticated note inspection and reviewable qualification recipe, preferring retained evidence and the simplest supported controlled-refund trigger. | Public-fixture tests prove read-only/no-network/no-secret-output behavior and exact SDK note facts; independently review command and recipe before separate production-key authority. Spending/copy-scan/harness authority remains separate. |
 | C5 | N6: retire ordinary wallet-owned transparent behavior only when receiver and funded evidence support it; preserve explicit legacy recovery and accepted obligations. | Fresh/imported/reopened/seed-recovery negative RPC/address controls, shielded discovery/spendability, legacy/restart regressions; exact-SHA and applicable complexity review. Blockers remain explicit if prerequisites are unavailable. |
@@ -422,6 +422,75 @@ and all-target Clippy before broad suites, reuse unchanged dependency/security
 coverage, then run affected default/SDK and synthetic lifecycle consumers with
 sources frozen. Record actual counts and limitations; no live qualification claim.
 
+C5a implementation and validation checkpoint: production change `a40dd488`,
+with reviewed follow-ups through `896a1f3c422597d39c299766964e3fe5d30387dd`
+(including `080dea7e`, `c3f6898b`, `9f3a339e`, `c1360a41`, `e559979d`,
+`7ad88e74` and `9234bff8`). Independent nonauthor exact-SHA, combined source
+and source-matched CogC/CycC reviews report no unresolved material findings or
+compelling simplifications. Complexity covers all 468 Rust files, 10,367 callables,
+no exclusions/regression warnings against the starting baseline.
+
+Validation artifacts under ignored `target/nu7-readiness/`: compiler/all-target
+Clippy `transparent-clippy-after896a` pass; calculation-owner group
+`transparent-calculation-after896a` 11 pass/1 ignored; full lifecycle
+`transparent-lifecycle-after896a` 57 pass/1 ignored (586.99 seconds). Carry forward
+unchanged compatibility31, codec1, six real-SDK refund/discovery privacy tests
+with fault sentinels guarding all six transparent-address RPC methods, default
+continuation1911 pass/42 ignored and proving4. These prove no wallet transparent
+address queries in tested fresh/import/reopen/reconstruction paths, not full SDK
+transparent key/output removal or live settlement. The known macOS debug libtest
+unwind-table warning remains dispositioned in the testing guide.
+
+Two fixture failures were repaired without weakening assertions: shared redraw
+quotes still used transparent refunds (`9234bff8`), and calculation-owner shield
+fixtures needed incidental ownership recognition (`896a1f3c`). The latter now use
+the existing zero-value shielded marker fixture; all original cancellation,
+barrier, accepted-byte and forbidden-send assertions remain. One earlier default
+suite retry encountered an unrelated ephemeral listener rebind collision; isolated
+and full continuation reruns passed without source changes. Earlier failing logs
+remain retained. No production wallet sync, signing or spending was performed.
+Final independent runtime/evidence review of this checkpoint remains required.
+
+### C2a/C1a remaining dependency implementation gates
+
+The operator explicitly requires all deferred major updates plus crypto-bigint,
+with removal or correction of all eight vulnerability matches as the minimum
+security acceptance. Earlier exposure dispositions remain historical evidence,
+not completion. Independently reviewed design preparation selects these boundaries:
+
+- C2a-TLS: add a narrowly patched `zcash_proofs` 0.31.0 checkout to migrate its
+  forced minreq2 downloader to released minreq3 and its maintained TLS cohort.
+  Exclude this checkout from workspace membership when introduced.
+  Adapt Iterator to Read, preserving lazy second acquisition, sticky failures,
+  empty reads, exact length/hash verification, cache and failed-file cleanup.
+  Explicitly retain previously unlimited headers/status lines on both requests.
+  Verify resolved TLS provider construction and localhost failure regressions.
+- C2a-crypto: add a narrowly patched `x402-chain-eip155` 2.0.2 checkout exposing
+  core client functionality separately from optional concrete Alloy providers and
+  local signers. Preserve SDK algorithms and generic providers; use an associated
+  signer error with root native signer Infallible. Exclude both checkouts from
+  workspace membership and prove isolated root resolution removes vulnerable
+  crypto before integrating. Preserve aggregate upstream features in separate
+  compatibility checks and existing independent signing/recovery vectors. Test
+  custom-provider nonce/allowance/error behavior, failing custom signers and Arc
+  error forwarding; document the associated-error custom-implementor API change.
+- C1a: update ChaCha20Poly1305, rand, TOML and rusqlite/SQLite where actual
+  dependency resolution permits. Preserve encrypted state bytes/AAD and reopen,
+  config parsing contracts and SQLite VFS/WAL/backup/recovery behavior. Record
+  concrete resolver blockers rather than claiming unsupported overrides work.
+
+The two proposed checkouts, alternatives and maintenance costs were explained
+before vendoring. Preserve exact published archives, licenses, complete file
+inventory and authored patches; wire reconstruction into executed vendor checks
+and update checkout retirement conditions. Never patch caches/reference checkouts.
+Security assessment must cover final lockfiles and normalized nonregistry sources,
+with zero vulnerabilities and separately accounted maintenance notices. Reuse
+unchanged evidence, complete compiler/all-target Clippy and compatibility before
+broad runtime checks, and independently review exact commits/fixups and combined
+financial/network consumers with source-matched complexity evidence. The combined
+dependency gate after C1a covers C2a-TLS, C2a-crypto, C1a and all accumulated
+preceding commits/fixups; material findings must be resolved before exit.
+
 ### N6 full-retirement assessment (beyond C5a discovery policy)
 
 Independent read-only audit of v8 `81d799775f11e882896e8710e8af12d6d4d29a41`
@@ -513,7 +582,7 @@ recovery, reorg retention, offline/send/expiry and original-work ownership.
 | ID | Work and required exit evidence |
 | --- | --- |
 | N1 — activation/cohort and general Rust updates | Independently assess actual NU7 activation and update the Rust dependency graph generally, including application, build, development and workspace/tooling dependencies and standalone tool manifests/lockfiles. Assess released Zingolib v8.0.0 and its compatible Pepper, Zcash backend/crypto/proofs and indexer cohort as the upgrade candidate. Resolve related direct/transitive constraints together rather than change only the Zingolib revision. Review signing, receive/decrypt, sync/reorg, migration, transaction serialization, fee, expiry, source confirmation and recovery consumers across activation. Record selected versions, retained pins and concrete incompatibility/blocker decisions; blanket unpinning or forcing every crate to its newest incompatible release is not acceptance. Preserve every existing vendor blocker and provenance check. No fixed legacy block interval or application-maintained expiry algorithm. |
-| N2 — B1 security updates | Reassess the whole locked production dependency graph, including path-vendored sources. Explicitly resolve the documented `crypto-bigint` signing-cohort advisory by a compatible migration, separately reviewed backport, or concrete exposure analysis and supported release disposition. A Zcash/NU7 upgrade does not automatically fix an EVM signing advisory. Preserve exact EIP-712/address/signature and transaction/state contracts; no incompatible forced manifest override or new vendoring without its required discussion. Establish reproducible local advisory evaluation for exact source versions even while Linux CI automation remains deferred. |
+| N2 — B1 security updates | Reassess the whole locked production dependency graph, including path-vendored sources. Fix or remove all eight recorded vulnerability matches, including the `crypto-bigint` signing-cohort advisory and seven build-only legacy TLS matches. Exposure analysis alone does not satisfy acceptance. Require zero vulnerability matches against the resulting active root lockfile and source-normalized nonregistry inventory, plus the independently locked protoc graph. Keep the five baseline maintenance notices visible and account for each separately; do not suppress advisory matches or rename packages to conceal them. A Zcash/NU7 upgrade does not automatically fix an EVM signing advisory. Preserve exact EIP-712/address/signature and transaction/state contracts; no incompatible forced manifest override or new vendoring without its required discussion. Establish reproducible local advisory evaluation for exact source versions even while Linux CI automation remains deferred. |
 | N3 — refund format and receiver selection | Determine the deployed native-ZEC/Base-USDC route's support for shielded refunds and how it selects the actual receiver. Recheck dry quotes with public unfunded shielded-only refund UAs, including the exact receiver set generated by the selected SDK. Distinguish shielded-only UAs from mixed UAs that can receive transparently. SDK tests, bridge-source/Zodl precedent and historical dry acceptance are useful distinct evidence, not proof of deployed funded refund delivery. Preserve transparent source-deposit validation and existing quote/refund bindings; do not silently fall back to transparent refunds. |
 | N4 — R7 service contract | Obtain current Zcash-specific 1Click/bridge semantics for deposit first observation, inclusion/confirmations, returned deadline versus requested preference, late deposits, refund fees/minimums, and unresolved unused `PENDING_DEPOSIT` requests. Identify terminal outcomes and transaction evidence; absence of an EXPIRED status cannot be replaced by a local timer. Map the contract to current source/credit/status/retirement ownership and repair only demonstrated gaps. |
 | N5 — live qualification | Prepare an exact reviewable unfunded qualification recipe, then obtain the existing separate operator authority before spending. First inspect any suitable retained evidence; if it does not establish actual shielded refund delivery and SDK spendability for the selected route/cohort, qualify a controlled refund. Assess deliberate second funding of the same exact-output quote as the candidate trigger described below, without assuming it guarantees a refund. Retain exact UA receiver set, request/returned quote, every source identity/txid, provider outcome, refund transaction and SDK discovery/spendability. Test selected near-deadline/late-arrival cases only within separately reviewed authority. Keep private evidence out of Git. |
@@ -532,7 +601,7 @@ retained adapter/patch and consumer; a larger upstream rollback window alone doe
 not establish that the local reorg correction or entire Pepper checkout can retire.
 Include dependency migration changes and source-matched compatibility, network,
 SDK, financial lifecycle and vendor-integrity evidence in the implementation
-boundaries. N2's advisory disposition covers the resulting complete graph; a
+boundaries. N2's zero-vulnerability acceptance covers the resulting complete graph; a
 Zcash update does not automatically fix the separate EVM signing cohort.
 Include `tools/complexity` in the root workspace graph and `tools/protoc`'s
 independently locked graph. Assess path-vendored versions and patch consumers
