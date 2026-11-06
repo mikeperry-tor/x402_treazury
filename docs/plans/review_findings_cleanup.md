@@ -442,3 +442,10 @@ G1 is pending fresh exact-SHA, complexity and runtime evidence. C05–C08 indepe
 file-owned implementation was prepared concurrently with C01–C04; this departs
 from the original strictly serial preparation boundary, but no dependent financial
 work or validation is accepted through G1 until its material findings are resolved.
+
+C05 implemented per independent consumer audit: single-owner Base complete views
+use that owner, genuinely multi-owner qualification/library headers retain a
+coherent RPC-origin view while individual reads retain each payer. NEAR metadata
+uses the known job recipient. Existing Coinbase/cross-origin scopes verified;
+no redundant discovery identity added. SOCKS regression coverage is authored and
+initial independent source review found no material issue; validation pending.

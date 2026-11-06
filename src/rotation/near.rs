@@ -363,11 +363,16 @@ impl NearClient {
         }
         serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid NEAR JSON"))
     }
-    pub async fn assets(&self) -> Result<Assets> {
+    pub async fn assets(&self, recipient: &str) -> Result<Assets> {
         validate_assets(
             &self
                 .response(
-                    crate::network::discovery(&self.origin, None)?
+                    crate::network::global()
+                        .http(
+                            &crate::network::IsolationId::evm(recipient)?,
+                            &self.origin,
+                            None,
+                        )?
                         .get(format!("{}/v0/tokens", self.origin))
                         .headers(self.headers.clone()),
                 )
@@ -1085,7 +1090,10 @@ mod tests {
         .unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let client = NearClient::at("http://near.invalid", None, None).unwrap();
-        client.assets().await.unwrap();
+        client
+            .assets(request["recipient"].as_str().unwrap())
+            .await
+            .unwrap();
         let quote = client
             .quote(request.clone(), &limits, 2_000_000_000)
             .await
@@ -1103,11 +1111,11 @@ mod tests {
             SwapStatus::Success
         );
         let records = proxy.records.lock().unwrap();
-        assert_eq!(records.len(), 2);
-        for (record, id) in records.iter().zip([
-            IsolationId::discovery("http://near.invalid").unwrap(),
-            IsolationId::evm(request["recipient"].as_str().unwrap()).unwrap(),
-        ]) {
+        assert_eq!(records.len(), 1);
+        for (record, id) in records
+            .iter()
+            .zip([IsolationId::evm(request["recipient"].as_str().unwrap()).unwrap()])
+        {
             assert_eq!(record.password, crate::network::global().credentials(&id).1);
             assert_eq!(record.address_type, 3);
         }
@@ -1681,7 +1689,12 @@ mod tests {
             "near_http_401"
         );
         assert_eq!(
-            client.assets().await.err().unwrap().to_string(),
+            client
+                .assets("0x0000000000000000000000000000000000000001")
+                .await
+                .err()
+                .unwrap()
+                .to_string(),
             "near_http_307"
         );
         server.abort();

@@ -124,8 +124,8 @@ renew another response's inactivity timer or signed authority.
 | `discovery/import.rs` | Shared complete-document OpenAPI reader, URL discovery origin, public destinations and source-bound relay authority |
 | `discovery/source_details.rs` | Complete usage-document GET or fixed GET probes, available endpoint documentation identity or URL discovery identity, public destinations and optional on-demand relay |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
-| `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
-| `rotation/near.rs` | Metadata by origin; quote and status by immutable request recipient |
+| `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; single-owner canonical headers/rechecks by that owner; genuinely multi-owner coherent headers by RPC discovery origin; validates method results before promotion |
+| `rotation/near.rs` | Metadata, quote and status by the job/immutable request recipient |
 | `treasury/birthday.rs` | Mainnet tip and capability lookup, per-invocation bootstrap identity |
 | `treasury/mod.rs`, `server.rs`, `send.rs` | Scan, witnesses, proposal and capability checks, treasury UUID |
 | `treasury/submission.rs` | Deposit/shielding broadcast and lookup, durable EVM recipient or owned transparent address scope |
@@ -133,15 +133,18 @@ renew another response's inactivity timer or signed authority.
 | `wallet_cli.rs` | Same configured adapters as serving; local inspection stays offline |
 | `tools/providers/snapshot_spec.rs`, `tools/diagnostics/quote_near.rs` | Same factory; both accept `--network-config` |
 
-These identities do not establish timing decorrelation between shared metadata/header
-reads and wallet requests or isolation of individual transparent-address discovery
-queries within a treasury scan. [Review cleanup](plans/review_findings_cleanup.md)
-selects wallet-owned metadata/header routing and removal of unnecessary fresh-wallet
-transparent probing; those changes are not yet implemented. Coinbase already uses
-the wallet documentation identity, while participating HTTP transports at different
-origins have distinct scopes. Another shared discovery identity would not itself
-remove timing, content or common-credential correlation. Remaining legacy scan
-privacy assessment belongs to the [deferred release plan](plans/deferred/release_followups.md).
+A single-owner Base view derives its identity from all requested wallet addresses and
+pending authorization payers, including history-only retirement pages. Its headers,
+canonical rechecks and fallback views use that EVM owner. Genuine multi-owner views
+retain RPC-origin headers: separately authorized qualification needs one coherent
+inventory anchor, and the public library supports pool-wide queries. Each contract
+read still uses its actual wallet; no sibling is selected to own shared work.
+Coinbase already uses the wallet documentation identity, while participating HTTP
+transports at different origins have distinct scopes. Common credentials, content
+and timing can still correlate service-visible requests. Treasury scans share one
+identity; individual transparent discovery queries within it are not isolated.
+Remaining legacy scan privacy assessment belongs to the
+[deferred release plan](plans/deferred/release_followups.md).
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient

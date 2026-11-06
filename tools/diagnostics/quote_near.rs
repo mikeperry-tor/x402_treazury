@@ -42,7 +42,9 @@ async fn run() -> Result<()> {
     }
     let amount = x402_treazury::rotation::config::positive_usdc(&args.amount_usdc)?;
     let client = NearClient::new(None)?;
-    let assets = client.assets().await?;
+    let assets = client
+        .assets("0x0000000000000000000000000000000000000001")
+        .await?;
     let instant = now()?;
     let mut request = request(
         &assets,

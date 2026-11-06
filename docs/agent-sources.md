@@ -37,6 +37,11 @@ definitions retain recommendation metadata without enabling recommendation selec
 raw calls retain their separate authority.
 See [catalog selection](configuration.md) for composition and stale-advice behavior.
 
+Wallet-owned documentation discovery retains the selected wallet identity.
+Participating transport scopes distinguish origins; common API credentials, content
+and timing remain service-visible correlation. This does not allocate another
+wallet or grant payment authority.
+
 ## Tool search matching and results
 
 Both local search surfaces use the same lexical BM25 ranker: `tools_search.query`

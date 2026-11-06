@@ -107,7 +107,7 @@ async fn status_binds_quote_and_credentials_stay_on_the_original_request() {
             .unwrap();
         state.lock().unwrap().0 =
             serde_json::from_str(include_str!("../fixtures/near/tokens.json")).unwrap();
-        client.assets().await.unwrap();
+        client.assets(request["recipient"].as_str().unwrap()).await.unwrap();
         let headers = std::mem::take(&mut state.lock().unwrap().1);
         assert_eq!(headers.len(), 3);
         for header in headers {

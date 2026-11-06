@@ -806,7 +806,7 @@ impl Observations {
             .await?;
         let assets = self
             .near
-            .assets()
+            .assets(&request.job.recipient)
             .await
             .context(NearStage("asset catalog"))?;
         let instant = clock()?;

@@ -246,6 +246,26 @@ impl BaseRpc {
             fallbacks: vec![],
         })
     }
+    /// A complete single-owner proof uses that owner's transport, including
+    /// canonical headers and rechecks. Coherent multi-owner views retain shared
+    /// headers; their address/nonce reads still use each actual payer.
+    fn for_query(&self, query: &ChainQuery) -> Result<Self> {
+        let mut owners = query
+            .wallets
+            .iter()
+            .map(|(_, address)| address.as_str())
+            .chain(query.pending.iter().map(|auth| auth.payer.as_str()))
+            .map(str::parse::<alloy_primitives::Address>);
+        let Some(owner) = owners.next().transpose()? else {
+            return Ok(self.clone());
+        };
+        for address in owners {
+            if address? != owner {
+                return Ok(self.clone());
+            }
+        }
+        self.for_address(&owner.to_string())
+    }
     fn endpoint_id(&self) -> String {
         use sha2::{Digest, Sha256};
         alloy_primitives::hex::encode(Sha256::digest(self.url.as_str().as_bytes()))
@@ -440,7 +460,8 @@ impl BaseRpc {
             // Required evidence failures restart on a configured fallback.
             // Foreground balance queries contain no authorization history;
             // maintenance owns its independent historical acquisitions.
-            let result = endpoint.view_inner(query.clone(), &progress).await;
+            let scoped = endpoint.for_query(&query)?;
+            let result = scoped.view_inner(query.clone(), &progress).await;
             match result {
                 Ok(view) => {
                     if index > 0 {

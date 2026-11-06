@@ -333,6 +333,68 @@ async fn fixture() {
     interrupted_read(&f).await;
     fallback_and_validation(&f).await;
     races_and_eviction(&f, &socks).await;
+    // Real full-view headers, balances and canonical rechecks must all use
+    // the wallet owner. Siblings receive independent transport scopes.
+    for ordinal in [8001, 8002] {
+        let payer = address(ordinal);
+        let start = socks.records.lock().unwrap().len();
+        let mut captured = query();
+        captured
+            .wallets
+            .push((format!("wallet-{ordinal}"), payer.clone()));
+        BaseRpc::new(&url("/owned-view"), 12)
+            .unwrap()
+            .view(captured)
+            .await
+            .unwrap();
+        let records = socks.records.lock().unwrap();
+        assert_eq!(
+            records.len() - start,
+            1,
+            "all full-view RPCs share the actual owner"
+        );
+        let record = &records[start];
+        assert_eq!(
+            record.password,
+            network::global()
+                .credentials(
+                    &selected(&IsolationId::evm(&payer).unwrap(), &url("/owned-view")).scope
+                )
+                .1
+        );
+    }
+    // A coherent multi-wallet library query keeps shared canonical headers;
+    // contract reads still belong to each respective wallet.
+    let start = socks.records.lock().unwrap().len();
+    let mut captured = query();
+    captured.wallets = vec![
+        ("multi-a".into(), address(8003)),
+        ("multi-b".into(), address(8004)),
+    ];
+    BaseRpc::new(&url("/multi-view"), 12)
+        .unwrap()
+        .view(captured)
+        .await
+        .unwrap();
+    let records = socks.records.lock().unwrap();
+    let expected: std::collections::BTreeSet<_> = [
+        IsolationId::discovery(&url("/multi-view")).unwrap(),
+        IsolationId::evm(&address(8003)).unwrap(),
+        IsolationId::evm(&address(8004)).unwrap(),
+    ]
+    .iter()
+    .map(|id| {
+        network::global()
+            .credentials(&selected(id, &url("/multi-view")).scope)
+            .1
+    })
+    .collect();
+    let actual: std::collections::BTreeSet<_> = records[start..]
+        .iter()
+        .map(|record| record.password.clone())
+        .collect();
+    assert_eq!(actual, expected);
+    drop(records);
     server.abort();
 }
 

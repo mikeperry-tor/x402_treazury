@@ -454,6 +454,12 @@ inputs; a fee-only proposal cannot strand an input owner. Qualification job perm
 do not authorize jobless shielding. These paths have local SDK fixture coverage,
 without live-funded, consensus or Tor qualification; see [testing](testing.md#qualification-status).
 
+Single-wallet Base canonical proofs use the wallet identity for headers, exact
+contract reads and canonical rechecks across each configured endpoint. Genuine
+multi-wallet qualification/library views retain shared RPC-origin headers for one
+coherent anchor, while wallet-specific reads retain their actual owners. NEAR
+metadata follows the already-known job recipient, as do quotes and status.
+
 ## MCP and output boundaries
 
 `src/server.rs` serves tools through `rmcp`. Streamable HTTP listeners are
