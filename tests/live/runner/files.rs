@@ -90,7 +90,7 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 pub fn hash(bytes: impl AsRef<[u8]>) -> String {
-    format!("{:x}", Sha256::digest(bytes.as_ref()))
+    alloy_primitives::hex::encode(Sha256::digest(bytes.as_ref()))
 }
 pub fn hash_file(path: &Path) -> Result<String> {
     const LIMIT: u64 = 2 * 1024 * 1024 * 1024;
@@ -107,7 +107,7 @@ pub fn hash_file(path: &Path) -> Result<String> {
         ensure!(count <= LIMIT, "file hash exceeds {LIMIT} byte limit");
         hash.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(alloy_primitives::hex::encode(hash.finalize()))
 }
 pub fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     publish_bounded(path, bytes, DOCUMENT_BYTES)

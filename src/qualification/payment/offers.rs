@@ -22,7 +22,7 @@ fn summary(headers: &reqwest::header::HeaderMap) -> Value {
         );
         return json!({"status":"header_limit_exceeded","limit_bytes":HEADER_BYTES,"offers":[]});
     }
-    let digest = format!("{:x}", Sha256::digest(header.as_bytes()));
+    let digest = alloy_primitives::hex::encode(Sha256::digest(header.as_bytes()));
     let parsed = STANDARD
         .decode(header.as_bytes())
         .ok()

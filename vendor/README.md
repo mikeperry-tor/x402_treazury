@@ -81,7 +81,7 @@ relevant dependency updates and use upstream notifications when explicitly set u
 
 ## Combined dependency compatibility
 
-The shared workspace uses unpatched Alloy core 1.7.3 and the pinned Zingolib v7 cohort.
+The shared workspace uses unpatched Alloy core 1.7.3 and the pinned Zingolib v8 cohort.
 Alloy's `sha3 0.11.0` and Zingo's `bip32 0.6.0 → hmac 0.13.0` accept stable
 `digest 0.11.3`; no local hashing manifest override is needed. Independent
 Keccak/EIP-712 vectors, payment signing and the compatibility suite remain the

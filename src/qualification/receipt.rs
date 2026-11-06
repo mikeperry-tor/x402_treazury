@@ -43,7 +43,7 @@ fn parse_network(raw: &[u8], network: &str) -> Value {
         );
         return json!({"classification":"oversized","limit_bytes":HEADER_LIMIT,"actual_bytes":raw.len()});
     }
-    let digest = format!("{:x}", Sha256::digest(raw));
+    let digest = alloy_primitives::hex::encode(Sha256::digest(raw));
     let mut result = json!({"classification":"malformed","header_sha256":digest});
     let Some(value) = BASE64_STANDARD
         .decode(raw)

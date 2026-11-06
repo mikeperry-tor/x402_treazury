@@ -156,7 +156,8 @@ fn authority(db: &Connection, binding: &Binding, at: i64) -> Result<Value> {
     )?;
     use sha2::{Digest, Sha256};
     ensure!(
-        digest == binding.pin_digest && format!("{:x}", Sha256::digest(raw.as_bytes())) == digest,
+        digest == binding.pin_digest
+            && alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes())) == digest,
         "qualification pin binding changed"
     );
     let pins = bounded(raw)?;
@@ -503,7 +504,7 @@ mod tests {
         CREATE UNIQUE INDEX application_claim_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_claim';
         INSERT INTO authorizations VALUES('review',1,100000000);").unwrap();
         let pins = json!({"catalogs":{"build":crate::build_identity::current()}}).to_string();
-        let digest = format!("{:x}", Sha256::digest(pins.as_bytes()));
+        let digest = alloy_primitives::hex::encode(Sha256::digest(pins.as_bytes()));
         db.execute(
             "INSERT INTO pins VALUES('run',?1,?2,1)",
             params![pins, digest],

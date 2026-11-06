@@ -423,39 +423,31 @@ impl Slot {
                 .unwrap_or(&crate::network::global().policy),
         )
         .ok()?;
-        let key = format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&(
-                    "discovery-get-identity-v3",
-                    kind,
-                    url,
-                    network,
-                    cfg.allow_http1,
-                    cfg.allow_tls12,
-                    cfg.read_timeout_seconds.map(f64::to_bits),
-                    limit
-                ))
-                .ok()?
-            )
-        );
+        let key = alloy_primitives::hex::encode(Sha256::digest(
+            serde_json::to_vec(&(
+                "discovery-get-identity-v3",
+                kind,
+                url,
+                network,
+                cfg.allow_http1,
+                cfg.allow_tls12,
+                cfg.read_timeout_seconds.map(f64::to_bits),
+                limit,
+            ))
+            .ok()?,
+        ));
         let key = if kind == "catalog" {
-            format!(
-                "{:x}",
-                Sha256::digest(format!(
-                    "local-catalog-v1:{}:{key}",
-                    cfg.catalog_cache_ttl_seconds
-                ))
-            )
+            alloy_primitives::hex::encode(Sha256::digest(format!(
+                "local-catalog-v1:{}:{key}",
+                cfg.catalog_cache_ttl_seconds
+            )))
         } else {
             key
         };
         // Separate provenance: an ordinary direct-mode cache never crosses policy
         // boundaries. Only explicitly warmed entries target another configured policy.
-        let direct_key = format!(
-            "{:x}",
-            Sha256::digest(format!("explicit-direct-warm-v1:{key}"))
-        );
+        let direct_key =
+            alloy_primitives::hex::encode(Sha256::digest(format!("explicit-direct-warm-v1:{key}")));
         let (key, direct_key) = if cfg.http_cache_direct_warm_target.is_some() {
             if crate::network::global().policy.mode != crate::network::Mode::Direct {
                 return None;
@@ -488,10 +480,10 @@ impl Slot {
         })
     }
     pub(crate) fn relay(mut self, identity: &str) -> Self {
-        self.key = format!(
-            "{:x}",
-            Sha256::digest(format!("discovery-relay-v1:{identity}:{}", self.key))
-        );
+        self.key = alloy_primitives::hex::encode(Sha256::digest(format!(
+            "discovery-relay-v1:{identity}:{}",
+            self.key
+        )));
         self.direct_key = None;
         self
     }
@@ -890,10 +882,9 @@ fn hydrate(
 }
 
 pub(crate) fn configuration_revision(cfg: &crate::catalog::Config) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(cfg).expect("serializable catalog configuration"))
-    )
+    alloy_primitives::hex::encode(Sha256::digest(
+        serde_json::to_vec(cfg).expect("serializable catalog configuration"),
+    ))
 }
 impl Slot {
     pub(crate) async fn record_configuration(&self, cfg: &crate::catalog::Config) {

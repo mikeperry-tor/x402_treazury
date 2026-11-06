@@ -676,6 +676,13 @@ Keep ordinary CLI errors legible even with backtrace environment variables enabl
 
 ## Dependency compatibility
 
+The application pins MCP SDK 3.9.0 and uses direct SHA-2 0.11, alongside the
+stable Zingolib v8 cohort. Protocol cancellation/authentication/output tests and
+stable identity/hash vectors qualify those consumers. The protoc helper resolves
+its independent graph separately; provenance-only vendor lockfiles are unchanged.
+The development analyzer retains its qualified Tree-sitter 0.20.9/grammar cohort
+because its analyzer API is incompatible with an independently selected 0.27.
+
 ### Security update boundaries
 
 The root lockfile selects Tokio 1.53.3 and ctutils 0.4.4, containing the fixes for

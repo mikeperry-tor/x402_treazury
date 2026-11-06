@@ -548,7 +548,9 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         .unwrap();
     let saved = owner.status().await.unwrap().sync.unwrap();
     assert_eq!(saved.spendable_shielded_zatoshis, 10_000);
-    let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let deposit = net
+        .funding_transaction(vec![(&address, 1_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![deposit]);
@@ -751,7 +753,9 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
             "repeated SDK shortages must not probe the destination"
         );
     }
-    let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let deposit = net
+        .funding_transaction(vec![(&address, 1_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![deposit]);

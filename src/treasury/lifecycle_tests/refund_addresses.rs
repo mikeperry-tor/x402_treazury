@@ -32,7 +32,7 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
     assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
     assert!(receivers.transparent().is_none());
     assert_eq!(original.refund_address(job.id).await.unwrap(), refund);
-    let receipt = faucet_funding_transaction(vec![(&refund, 40_000, None)]).await;
+    let receipt = net.funding_transaction(vec![(&refund, 40_000, None)]).await;
     let receipt_id = submission::decode(&receipt).unwrap().txid();
     {
         let mut chain = net.chain.write().await;
@@ -138,7 +138,9 @@ async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
     assert_eq!(restored.refund_address(job.id).await.unwrap(), legacy);
     // A transparent receipt arriving after encrypted reopen must still be found.
     let net = MockNet::launch().await;
-    let receipt = faucet_funding_transaction(vec![(&legacy, 100_000, None)]).await;
+    let receipt = net
+        .funding_transaction(vec![(&legacy, 100_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![receipt]);
@@ -277,7 +279,7 @@ async fn mixed_ua_refund_shields_owned_transparent_receiver_without_rebinding() 
             None,
         )
         .unwrap()
-        .encode_receiver_preserving(&owner.network.chain());
+        .encode(&owner.network.chain());
         let Address::Unified(decoded) = Address::decode(&owner.network.chain(), &mixed).unwrap()
         else {
             panic!("mixed refund fixture must preserve its transparent receiver");
@@ -292,7 +294,9 @@ async fn mixed_ua_refund_shields_owned_transparent_receiver_without_rebinding() 
             .await
             .unwrap();
         let receiver = Address::Transparent(transparent).encode(&owner.network.chain());
-        let funding = faucet_funding_transaction(vec![(&receiver, 1_000_000, None)]).await;
+        let funding = net
+            .funding_transaction(vec![(&receiver, 1_000_000, None)])
+            .await;
         let funding_id = submission::decode(&funding).unwrap().txid().to_string();
         {
             let mut chain = net.chain.write().await;
@@ -448,7 +452,9 @@ async fn fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy(
         })
         .expect("fresh wallet must publish a Sapling and Orchard receive address");
     let recipient = receive["encoded_address"].as_str().unwrap().to_owned();
-    let receipt = faucet_funding_transaction(vec![(&recipient, 100_000, None)]).await;
+    let receipt = net
+        .funding_transaction(vec![(&recipient, 100_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![receipt]);

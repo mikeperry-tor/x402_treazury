@@ -27,7 +27,9 @@ async fn reorg_before_declared_birthday_keeps_earlier_coverage_through_failure_a
         .as_str()
         .unwrap()
         .to_owned();
-    let funding = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let funding = net
+        .funding_transaction(vec![(&address, 1_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.reorg_to(30);
@@ -214,7 +216,9 @@ async fn unknown_deep_fork_rescans_before_birthday_even_when_tip_remains_above_i
         .as_str()
         .unwrap()
         .to_owned();
-    let credit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let credit = net
+        .funding_transaction(vec![(&address, 1_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.reorg_to(80);
@@ -279,7 +283,9 @@ async fn same_height_fork_before_birthday_restarts_complete_ranges_after_full_cl
         .as_str()
         .unwrap()
         .to_owned();
-    let credit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let credit = net
+        .funding_transaction(vec![(&address, 1_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.reorg_to(80);

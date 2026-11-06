@@ -548,7 +548,9 @@ async fn future_cached_roots_preserve_current_spendability_across_tail_shrink_an
         .as_str()
         .unwrap()
         .to_owned();
-    let credit = faucet_funding_transaction(vec![(&address, 2_000_000, None)]).await;
+    let credit = net
+        .funding_transaction(vec![(&address, 2_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![credit]);

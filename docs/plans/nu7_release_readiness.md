@@ -52,12 +52,48 @@ qualification require their actual runbooks; unavailable evidence stays missing.
 
 ### Evidence and remaining work
 
-- C0: baseline captured; independent design review in progress. No implementation
-  or validation completion claimed.
+- C0: exact `411ecdce2eaaa340b0a9a7a89ce5afc72d53e91b` independently
+  reviewed; no material finding. Design review selected upstream's coordinated
+  1000-block retention and previous-session-height fix while retaining local
+  conservative recovery; preserving 100 would add an unnecessary divergence.
+  Exact mainnet activation/branch/expiry regression selected to cover the
+  prerelease schedule gap. Implementation validation remains outstanding.
+- Refund design: assess documented EXACT_OUTPUT excess-input refund as a simpler
+  candidate before a duplicate-deposit harness; applicability and fees still need
+  route evidence. Dry quotes establish format acceptance only, not returned
+  deadlines or terminal behavior. No funded execution authorized.
 - Verified public v8 tag resolves to `81d799775f11e882896e8710e8af12d6d4d29a41`
   through Git remote metadata and a read-only checkout under ignored `target/`.
   Release notes and source cohort must agree before migration.
 - N5 authority and actual refund evidence remain outstanding; N6 is conditional.
+
+### Added timing scope
+
+The operator additionally requests review of Zcash polling, expiry, confirmations,
+reorg/rescan timing and faster swap resolution, including a requested sub-hour
+window. Independent design review selected a separate timing commit after C1/C2:
+healthy demanded scans follow SDK target spacing at the next established height;
+source/status success follows configured polling without the universal minute
+floor; Base credit cadence and independent failure backoff remain separate.
+The quote preference default becomes 1800 seconds, retaining overrides, returned
+deadlines and accepted bytes. Confirmation counts and SDK finite expiry remain
+unchanged: 40 pre-NU7 / 120 NU7 blocks each target about 50 minutes. None of these
+changes manufactures bridge terminal outcomes or guarantees sub-hour abandonment.
+Update wallet/configuration guides and both timing/resource inventories; test
+activation, completion-based cadence, independent backoff and retained ownership.
+
+### C1 review and validation
+
+C1 `69d7d7cd85b7d212b6751bc0c25d498c827e2d9d` independently reviewed.
+Material findings: removed mempool timeout argument, removed SDK diagnostic
+variants/new panic payload, and changed shard-tree checkpoint fixture contract.
+Fixup adapts the adapter/test signature, sanitizes `SyncPanicked`, and uses a real
+one-block merge fixture with prior empty checkpoints in all pools and no RPC.
+Also corrects copied-code origin wording and upstream clear-test expectation.
+Vendor reconstruction passes for all 35 exact upstream files. Full compiler,
+Clippy, runtime and numerical complexity evidence remain pending; the independent
+manual review examined Pepper scan ordering/drain, checkpoints, conservative
+recovery, reorg retention, offline/send/expiry and original-work ownership.
 
 ## Ordered assessment boundaries
 

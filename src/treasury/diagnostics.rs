@@ -140,10 +140,7 @@ pub(crate) fn client_failure(error: LightClientError) -> anyhow::Error {
         LightClientError::MigrationError(_) => "migration_error",
         LightClientError::SendError(_) => "send_error",
         LightClientError::Offline => "indexer_not_configured",
-        LightClientError::MigrationTransmissionTargetIsSyncEndpoint { .. } => {
-            "migration_transmission_target_is_sync_endpoint"
-        }
-        LightClientError::NoEligibleDestination(_) => "no_eligible_destination",
+        LightClientError::SyncPanicked(_) => "sync_panicked",
     };
     diagnostic.into()
 }
@@ -1036,18 +1033,8 @@ mod tests {
                 "transparent_addresses_in_use",
             ),
             (
-                LightClientError::MigrationTransmissionTargetIsSyncEndpoint {
-                    host: "private-token@example.invalid".into(),
-                },
-                "migration_transmission_target_is_sync_endpoint",
-            ),
-            (
-                LightClientError::NoEligibleDestination(
-                    zingolib::destination::servers::NoEligibleDestinations::Empty(
-                        zingolib::destination::servers::Transport::Nakednet,
-                    ),
-                ),
-                "no_eligible_destination",
+                LightClientError::SyncPanicked("private upstream panic payload".into()),
+                "sync_panicked",
             ),
         ];
         for (error, reason) in cases {

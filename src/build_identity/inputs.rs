@@ -41,6 +41,10 @@ fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     }
     Ok(())
 }
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 pub fn file_hash(path: &Path) -> io::Result<String> {
     let mut hash = Sha256::new();
     let mut file = std::fs::File::open(path)?;
@@ -52,7 +56,7 @@ pub fn file_hash(path: &Path) -> io::Result<String> {
         }
         hash.update(&buffer[..n]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex_digest(hash.finalize().as_slice()))
 }
 pub fn source_hash(root: &Path) -> io::Result<String> {
     let mut files = Vec::new();
@@ -87,12 +91,24 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
         hash.update(name.as_bytes());
         hash.update(file_hash(&file)?.as_bytes());
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex_digest(hash.finalize().as_slice()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{provider_files, source_hash};
+
+    #[test]
+    fn digest_hex_preserves_zeroes_and_matches_independent_sha256() {
+        assert_eq!(super::hex_digest(&[0, 15, 16, 255]), "000f10ff");
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), [3u8]).unwrap();
+        // Python hashlib.sha256(bytes([3])).hexdigest().
+        assert_eq!(
+            super::file_hash(file.path()).unwrap(),
+            "084fed08b978af4d7d196a7446a86b58009e636b611db16211b65a9aadff29c5"
+        );
+    }
 
     #[test]
     fn compilation_inputs_affect_fingerprint_without_private_live_inputs() {

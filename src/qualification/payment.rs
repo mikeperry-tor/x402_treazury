@@ -311,7 +311,7 @@ mod tests {
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
         pins["resolved_config"] = json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_api_payment_usdc":"0.02"}},"wallet_bindings":{"listener":{"api":{"wallet":"pool"}}}});
         let raw = pins.to_string();
-        binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        binding.pin_digest = alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes()));
         db.execute(
             "UPDATE pins SET payload=?1,digest=?2",
             params![raw, binding.pin_digest],

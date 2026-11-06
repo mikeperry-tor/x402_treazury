@@ -688,10 +688,7 @@ async fn grpc_progress_is_per_response_and_ignores_legacy_total_deadlines() {
         let headers = headers.get_lightd_info(Duration::from_secs(30));
         let stalled = stalled.get_block(BlockId::default(), Duration::from_secs(30));
         let streaming = async {
-            let mut stream = streaming
-                .get_mempool_stream(Duration::from_millis(10))
-                .await
-                .unwrap();
+            let mut stream = streaming.get_mempool_stream().await.unwrap();
             assert_eq!(
                 stream.message().await.unwrap().unwrap().data,
                 vec![7; 30000]

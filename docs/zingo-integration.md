@@ -2,7 +2,7 @@
 
 The application and its SDK integration tests use ordinary upstream `zingolib` and
 `zingo-netutils` Git sources at revision
-`bfb0a2156819ea7f75a9b09b1724abfd06c8925e` (v7.0.0). Neither crate has a local
+`81d799775f11e882896e8710e8af12d6d4d29a41` (v8.0.0). Neither crate has a local
 snapshot or override. The same cohort's `pepper-sync/` remains patched; the shared
 workspace retains its path override. Pepper is excluded from workspace test
 selection; its merge regression runs through public traits in the application
@@ -17,7 +17,7 @@ restored tree with the pinned upstream Git source.
 `pepper-sync-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
 changes; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
 `sync.rs`, `wallet/traits.rs` and `witness.rs`. `pepper-sync-reorg.patch` keeps
-the upstream 100-block rolling rollback/checkpoint/transparent-discovery horizon
+the upstream 1000-block rolling rollback/checkpoint/transparent-discovery horizon
 and repairs derived chain state when retained rollback boundaries are unavailable. The payload accepted by the public
 sync trait has a public re-export and `from_parts` constructor; the witness module
 and payload fields remain private. `pepper-sync-manifest.patch` records the
@@ -28,10 +28,27 @@ reference checkouts to implement a dependency patch. The
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) owns remaining blockers
 and candidate qualification.
 
+The stable cohort uses `zcash_client_backend` 0.25.0, `zcash_primitives` and
+`zcash_proofs` 0.31.0, `zcash_protocol` 0.11.0 and `zcash_keys` 0.17.0,
+with Pepper 0.7.0 and netutils 7.0.0. Its mainnet schedule activates NU7 at
+height 3,543,405 and branch ID `0x77190ad9`. The ordinary `sdk_compat`
+mainnet regression checks the schedule, branch transition and SDK expiry on
+both sides of activation; synthetic activation overrides alone cannot establish
+mainnet readiness. SDK selection of those parameters does not qualify a deployed
+indexer, transaction submission, consensus execution or funded settlement.
+
+The v8 one-session online API does not change application ownership: the
+LightClient stays offline and the application supplies the identity-bound indexer
+to Pepper. The port retains upstream's previous-session-height reorg comparison,
+as well as local missing-boundary and conservative-clear recovery. A larger
+retention window cannot prove that shorter endpoints are divergent or replace
+recovery outside retained history.
+
 ## Adapted application code and attribution
 
-Two application files retain implementations adapted from the upstream revision
-named above:
+Two application files retain implementations adapted from the former v7 revision
+`bfb0a2156819ea7f75a9b09b1724abfd06c8925e`; the current v8 cohort is assessed
+against those retained adapters:
 
 | Application code | Upstream origin | Purpose of the local adapter |
 | --- | --- | --- |
@@ -127,7 +144,7 @@ make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_confli
 
 See [workspace verification](development.md#combined-workspace-verification).
 Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes.
-The upstream 100-block rolling horizon is a cache-retention policy, not consensus
+The upstream 1000-block rolling horizon is a cache-retention policy, not consensus
 finality. A node's larger rollback window does not require matching local retention. A demonstrated divergent chain outside the retained horizon clears derived SDK
 chain state and resumes from the effective scan floor. A shorter height alone
 cannot establish divergence. The SDK protects retained block metadata,
@@ -292,7 +309,7 @@ parameters. Legacy v6 `vendor/zingolib/zcash-params/*.params`
 copies remain ignored, unused and preserved. Build-time acquisition is outside
 runtime Tor routing.
 
-The enabled `zcash_proofs` 0.31.0-pre.1 `download-params` build dependency uses
+The enabled `zcash_proofs` 0.31.0 `download-params` build dependency uses
 `minreq` 2.14.1 with `rustls` 0.21.12, `rustls-webpki` 0.101.7 and
 `webpki-roots` 0.25.4. These older versions do not contain the
 [emSign intermediate-key distrust fix](https://rustsec.org/advisories/RUSTSEC-2026-0382).

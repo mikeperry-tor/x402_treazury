@@ -593,7 +593,9 @@ async fn new_claim_resumes_shared_capital_discovery_and_detects_a_later_deposit(
         Some(&crate::rotation::error::FundingCondition::InsufficientFunds)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    let deposit = net
+        .funding_transaction(vec![(&address, 1_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![deposit]);

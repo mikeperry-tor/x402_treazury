@@ -108,7 +108,7 @@ impl RegistryPermits {
                 serde_json::to_vec(&("qualification-allocation-v1", treasury, pool, sequence))?;
             let hash = Sha256::digest(input);
             requests.push(Request {
-                intent: format!("{:x}", hash),
+                intent: alloy_primitives::hex::encode(hash),
                 pool: (*pool).into(),
             });
             jobs.push(uuid::Uuid::from_bytes(hash[..16].try_into()?).to_string());
@@ -270,7 +270,7 @@ mod tests {
         let mut pins: Value = serde_json::from_str(&raw).unwrap();
         pins["resolved_config"] = serde_json::json!({"resolved_wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}}}}});
         let raw = pins.to_string();
-        binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        binding.pin_digest = alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes()));
         db.execute(
             "UPDATE pins SET payload=?1,digest=?2",
             params![raw, binding.pin_digest],

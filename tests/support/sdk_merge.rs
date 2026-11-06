@@ -10,7 +10,7 @@ use pepper_sync::{
         traits::{LocatedTreeData, SyncShardTrees, SyncWallet},
     },
 };
-use shardtree::store::ShardStore;
+use shardtree::store::{Checkpoint, ShardStore};
 use shardtree::{
     LocatedPrunableTree, RetentionFlags,
     error::{InsertionError, ShardTreeError},
@@ -110,6 +110,23 @@ async fn scan_merge_conflict_preserves_pool_context() {
         let mut orchard = vec![];
         let mut ironwood = vec![];
         let trees = wallet.get_shard_trees_mut().unwrap();
+        // v8 checkpoints every scan's last block. An unchanged prior empty
+        // checkpoint lets all pools resolve it locally before the merge conflict.
+        trees
+            .sapling
+            .store_mut()
+            .add_checkpoint(0u32.into(), Checkpoint::tree_empty())
+            .unwrap();
+        trees
+            .orchard
+            .store_mut()
+            .add_checkpoint(0u32.into(), Checkpoint::tree_empty())
+            .unwrap();
+        trees
+            .ironwood
+            .store_mut()
+            .add_checkpoint(0u32.into(), Checkpoint::tree_empty())
+            .unwrap();
         match pool {
             PoolType::SAPLING => {
                 let (existing, incoming) = conflict_pair(&trees.sapling);
@@ -129,14 +146,15 @@ async fn scan_merge_conflict_preserves_pool_context() {
             _ => unreachable!(),
         }
         let (sender, mut receiver) = mpsc::unbounded_channel();
-        // Empty checkpoint range isolates the actual tree merge without RPCs.
-        let range = ScanRange::from_parts(1u32.into()..1u32.into(), ScanPriority::Historic);
+        // A one-block scan carries a valid boundary without any RPCs.
+        let range = ScanRange::from_parts(1u32.into()..2u32.into(), ScanPriority::Historic);
         let error = wallet
             .update_shard_trees(
                 &zcash_protocol::consensus::MAIN_NETWORK,
                 sender,
                 &range,
                 100_000u32.into(),
+                0u32.into(),
                 None,
                 sapling,
                 orchard,

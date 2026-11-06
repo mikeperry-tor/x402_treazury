@@ -99,7 +99,7 @@ fn inventory() -> Vec<(&'static str, &'static str)> {
     provider_manifest!(entries)
 }
 fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    alloy_primitives::hex::encode(Sha256::digest(bytes))
 }
 fn git(args: &[&str]) -> Result<String> {
     let output = Command::new("git").args(args).output()?;

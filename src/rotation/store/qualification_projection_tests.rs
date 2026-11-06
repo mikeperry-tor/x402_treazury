@@ -102,7 +102,7 @@ fn baseline(db: &Connection, status: &Status) -> Value {
     let jobs: Vec<_> = status.funding_jobs.iter().map(|job| json!({"id":job.id,"pool_id":job.pool_id,"pool_name":job.pool_name,"wallet_id":job.wallet_id,"recipient":job.recipient,"target":job.target,"operation_id":job.operation_id,"phase":job.phase})).collect();
     let operations: Vec<_> = status.treasury_operations.iter().map(|operation| {
         let raw: Vec<u8> = db.query_row("SELECT raw FROM outgoing WHERE id=?1", [&operation.operation_id], |row| row.get(0)).unwrap();
-        json!({"operation_id":operation.operation_id,"submission":operation.submission,"attempts":operation.attempts,"facts":operation.facts,"prepared_record_sha256":format!("{:x}",Sha256::digest(raw))})
+        json!({"operation_id":operation.operation_id,"submission":operation.submission,"attempts":operation.attempts,"facts":operation.facts,"prepared_record_sha256":alloy_primitives::hex::encode(Sha256::digest(raw))})
     }).collect();
     json!({"schema_version":2,"state_schema_version":status.state_schema_version,"treasury_id":status.treasury_id,"pools":status.pools,"funding_jobs":jobs,"source_operations":operations})
 }
@@ -346,7 +346,7 @@ fn raw_record_hashes_and_expiry_are_exact_without_exporting_or_validating_signed
     let changed = store.qualification_lifecycle().unwrap();
     assert_eq!(
         changed["source_operations"][0]["prepared_record_sha256"],
-        format!("{:x}", Sha256::digest([0u8]))
+        alloy_primitives::hex::encode(Sha256::digest([0u8]))
     );
     assert_eq!(
         changed["source_operations"][0]["attempts"], -1,

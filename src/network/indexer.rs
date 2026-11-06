@@ -193,7 +193,6 @@ impl Indexer for GrpcIndexer {
 
     async fn get_mempool_stream(
         &mut self,
-        _timeout: Duration,
     ) -> Result<tonic::Streaming<RawTransaction>, tonic::Status> {
         let request = Request::new(Empty {});
         Ok(self

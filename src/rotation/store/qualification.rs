@@ -240,7 +240,7 @@ fn prepared_record_hashes(db: &Connection) -> Result<std::collections::BTreeMap<
     rows.map(|row| {
         let (id, raw) = row?;
         let raw = raw.context("source operation prepared record missing")?;
-        Ok((id, format!("{:x}", Sha256::digest(&raw))))
+        Ok((id, alloy_primitives::hex::encode(Sha256::digest(&raw))))
     })
     .collect()
 }
@@ -331,8 +331,8 @@ fn read(db: &Connection) -> Result<Value> {
         ensure!(owners.insert(id.clone()), "duplicate source preparation owner");
         let binding: Option<(String,String)> = db.query_row("SELECT f.id,p.name FROM funding_jobs f JOIN pools p ON p.id=f.pool_id WHERE f.id IN (SELECT job_id FROM funding_progress WHERE operation_id=?1 UNION SELECT job_id FROM funding_recovery WHERE operation_id=?1)",[&id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         let raw:Option<Vec<u8>>=db.query_row("SELECT raw FROM outgoing WHERE id=?1",[&id],|r|r.get(0)).optional()?;
-        let raw=raw.map(|bytes|format!("{:x}",Sha256::digest(&bytes)));
-        Ok(json!({"operation_id":id,"preparation_sha256":format!("{:x}",Sha256::digest(&bytes)),"prepared_record_sha256":raw,"job_id":binding.as_ref().map(|v|&v.0),"pool_name":binding.as_ref().map(|v|&v.1)}))
+        let raw=raw.map(|bytes|alloy_primitives::hex::encode(Sha256::digest(&bytes)));
+        Ok(json!({"operation_id":id,"preparation_sha256":alloy_primitives::hex::encode(Sha256::digest(&bytes)),"prepared_record_sha256":raw,"job_id":binding.as_ref().map(|v|&v.0),"pool_name":binding.as_ref().map(|v|&v.1)}))
     }).collect::<Result<Vec<_>>>()?;
     let pending = db.prepare("SELECT n.operation_id FROM operation_network n WHERE n.preparation IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r JOIN funding_quote_refreshes q ON q.operation_id=r.operation_id WHERE r.operation_id=n.operation_id AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=n.operation_id AND j.job_id!=r.job_id) AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=n.operation_id) AND NOT EXISTS(SELECT 1 FROM treasury_operations WHERE id=n.operation_id)) UNION ALL SELECT id FROM outgoing WHERE state='PREPARED' ORDER BY 1")?
         .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;

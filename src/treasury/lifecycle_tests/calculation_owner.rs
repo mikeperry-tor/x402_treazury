@@ -62,7 +62,9 @@ async fn fixture(kind: Kind) -> (tempfile::TempDir, MockNet, Treasury, String) {
                 .unwrap();
             let address =
                 zcash_keys::address::Address::Transparent(receiver).encode(&owner.network.chain());
-            let credit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+            let credit = net
+                .funding_transaction(vec![(&address, 1_000_000, None)])
+                .await;
             {
                 let mut chain = net.chain.write().await;
                 chain.mine_block(vec![credit]);

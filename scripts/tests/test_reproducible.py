@@ -155,8 +155,8 @@ class ZingolibReleaseInputsTests(unittest.TestCase):
         ]}
 
     def git(self, directory, env, *arguments):
-        return subprocess.check_output(["git", *arguments], cwd=directory, env=env,
-                                       stderr=subprocess.STDOUT, text=True).strip()
+        return subprocess.run(["git", *arguments], cwd=directory, env=env,
+                              capture_output=True, text=True, check=True).stdout.strip()
 
     def repository(self, directory, env):
         directory.mkdir()

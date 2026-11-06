@@ -247,7 +247,9 @@ async fn fulfilled_source_work_survives_sdk_reorg_without_confirmation_or_credit
         .as_str()
         .unwrap()
         .to_owned();
-    let replacement = faucet_funding_transaction(vec![(&address, 2_000_000, None)]).await;
+    let replacement = net
+        .funding_transaction(vec![(&address, 2_000_000, None)])
+        .await;
     {
         let mut chain = net.chain.write().await;
         chain.reorg_to(20);

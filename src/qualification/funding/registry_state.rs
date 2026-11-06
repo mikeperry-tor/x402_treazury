@@ -69,7 +69,7 @@ fn verified_baseline(db: &Connection, status: &Value) -> Result<Value> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     ensure!(
-        format!("{:x}", Sha256::digest(raw.as_bytes())) == hash,
+        alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes())) == hash,
         "qualification baseline hash mismatch"
     );
     let baseline = qualification::bounded(raw)?;
@@ -563,7 +563,10 @@ mod tests {
         let raw = state.to_string();
         db.execute(
             "UPDATE identity SET baseline=?1,baseline_hash=?2",
-            params![raw, format!("{:x}", Sha256::digest(raw.as_bytes()))],
+            params![
+                raw,
+                alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes()))
+            ],
         )
         .unwrap();
     }
@@ -771,7 +774,7 @@ mod tests {
         pins["resolved_config"]["resolved_wallets"]["other"] =
             pins["resolved_config"]["resolved_wallets"]["pool"].clone();
         let raw = pins.to_string();
-        guard.binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        guard.binding.pin_digest = alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes()));
         db.execute(
             "UPDATE pins SET payload=?1,digest=?2",
             params![raw, guard.binding.pin_digest],
@@ -842,7 +845,7 @@ mod tests {
         pins["resolved_config"]["resolved_wallets"]["second"]["reserves"]["large"] =
             json!({"funding_amount_usdc":"10"});
         let raw = pins.to_string();
-        guard.binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        guard.binding.pin_digest = alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes()));
         db.execute(
             "UPDATE pins SET payload=?1,digest=?2",
             params![raw, guard.binding.pin_digest],
@@ -1292,7 +1295,7 @@ mod tests {
                 Value::Null;
         }
         let raw = pins.to_string();
-        guard.binding.pin_digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        guard.binding.pin_digest = alloy_primitives::hex::encode(Sha256::digest(raw.as_bytes()));
         db.execute(
             "UPDATE pins SET payload=?1,digest=?2",
             params![raw, guard.binding.pin_digest],

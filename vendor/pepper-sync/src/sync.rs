@@ -61,7 +61,7 @@ pub mod truncate;
 
 /// Rolling chain-state retention for inexpensive rollback, not consensus finality.
 /// Older forks recover by clearing derived state and rescanning.
-pub const MAX_REORG_ALLOWANCE: u32 = 100;
+pub const MAX_REORG_ALLOWANCE: u32 = 1000;
 
 /// The maximum number of checkpoints in the rolling window for re-org handling and chain tip anchor spends.
 pub const SHARDTREE_CHECKPOINT_ROLLING_WINDOW_SIZE: u32 = MAX_REORG_ALLOWANCE + 1;
@@ -578,7 +578,7 @@ where
 
         // on the first verification we verify the previous wallet state.
         // afterwards, we only verify the newly mined blocks if they exist.
-        let mut initial_reorg_detection_start_height_opt =
+        let initial_reorg_detection_start_height_opt =
             if first_verification_complete && new_blocks_mined {
                 Some(last_known_chain_height + 1)
             } else if first_verification_complete {
@@ -636,13 +636,9 @@ where
                         chain_height,
                         VerifyEnd::VerifyHighest,
                     );
-                    initial_reorg_detection_start_height_opt =
-                        Some(scan_range_to_verify.block_range().start);
                     truncate_wallet_data(
                         &mut *wallet_guard,
-                        initial_reorg_detection_start_height_opt
-                            .expect("value must exist in this scope")
-                            - 1,
+                        scan_range_to_verify.block_range().start - 1,
                         consensus_parameters,
                     )?;
                     // the re-orged block at the chain height is truncated, so its tree sizes are fetched. the wallet
@@ -784,57 +780,53 @@ where
         'scan: loop {
             tokio::select! {
                 Some((load, scan_results)) = scan_results_receiver.recv() => {
-                    let mut wallet_guard = wallet.write().await;
-                    let ProcessedScanResults {
-                        new_transparent_inuse_addresses,
-                        new_transparent_gap_addresses,
-                        reorg_detection_start_height,
-                    } = process_scan_results(
-                        consensus_parameters,
-                        &mut *wallet_guard,
-                        fetch_request_sender.clone(),
-                        &ufvks,
-                        load,
-                        scanner.in_flight_tasks(),
-                        scan_results,
-                        initial_reorg_detection_start_height_opt,
-                        config.performance_level,
-                        &mut nullifier_map_limit_exceeded,
-                    )
-                    .await?;
-                    scanner.retire_finished_tasks(
-                        wallet_guard
-                            .get_sync_state()
-                            .map_err(SyncError::WalletError)?
-                            .scan_ranges(),
-                    );
-                    // only the changes to the gap addresses are applied. scan results without compact block
-                    // transparent data, such as re-fetched nullifiers, carry no changes and leave the gap addresses
-                    // as they are.
-                    // NOTE: this is safe in the current architecture as the correct set of gap addressses will be
-                    // determined before scanning begins and these changes will only come from the latest newly mined
-                    // block(s). If the sync engine is modified so there are cases where compact blocks may be scanned
-                    // for transparent data out-of-order, more checks must be applied here to ensure gap addresses are
-                    // not lost and correctly follow on from the wallets current in-use address list.
-                    scanner.update_transparent_gap_addresses(
-                        &new_transparent_inuse_addresses,
-                        new_transparent_gap_addresses,
-                    );
-                    if let Some(reorg_detection_start_height) = reorg_detection_start_height {
-                        // the scanner only scans ranges with `Verify` priority while verifying, and a new continuous
-                        // sync loop waits for it to finish.
-                        scanner.state.reverify();
-                        initial_reorg_detection_start_height_opt = Some(
-                            initial_reorg_detection_start_height_opt
-                                .map_or(reorg_detection_start_height, |height| {
-                                    height.min(reorg_detection_start_height)
-                                }),
+                    for (load, scan_results) in scanner.admit_scan_results(load, scan_results) {
+                        let mut wallet_guard = wallet.write().await;
+                        let ProcessedScanResults {
+                            new_transparent_inuse_addresses,
+                            new_transparent_gap_addresses,
+                            reorg_detection_start_height,
+                        } = process_scan_results(
+                            consensus_parameters,
+                            &mut *wallet_guard,
+                            fetch_request_sender.clone(),
+                            &ufvks,
+                            load,
+                            scanner.in_flight_tasks(),
+                            scan_results,
+                            last_known_chain_height,
+                            config.performance_level,
+                            &mut nullifier_map_limit_exceeded,
+                        )
+                        .await?;
+                        scanner.retire_finished_tasks(
+                            wallet_guard
+                                .get_sync_state()
+                                .map_err(SyncError::WalletError)?
+                                .scan_ranges(),
                         );
+                        // only the changes to the gap addresses are applied. scan results without compact block
+                        // transparent data, such as re-fetched nullifiers, carry no changes and leave the gap addresses
+                        // as they are.
+                        // NOTE: this is safe in the current architecture as the correct set of gap addressses will be
+                        // determined before scanning begins and these changes will only come from the latest newly mined
+                        // block(s). If the sync engine is modified so there are cases where compact blocks may be scanned
+                        // for transparent data out-of-order, more checks must be applied here to ensure gap addresses are
+                        // not lost and correctly follow on from the wallets current in-use address list.
+                        scanner.update_transparent_gap_addresses(
+                            &new_transparent_inuse_addresses,
+                            new_transparent_gap_addresses,
+                        );
+                        if reorg_detection_start_height.is_some() {
+                            // Only Verify ranges run until reverification completes.
+                            // Recovery depth uses the previous session's chain height.
+                            scanner.state.reverify();
+                        }
+                        expire_transactions(&mut *wallet_guard)?;
+                        publish_sync_status(&*wallet_guard, &progress).await?;
+                        wallet_guard.set_save_flag().map_err(SyncError::WalletError)?;
+                        drop(wallet_guard);
                     }
-                    expire_transactions(&mut *wallet_guard)?;
-                    publish_sync_status(&*wallet_guard, &progress).await?;
-                    wallet_guard.set_save_flag().map_err(SyncError::WalletError)?;
-                    drop(wallet_guard);
                 }
 
                 Some(mempool_message) = mempool_transaction_receiver.recv() => {
@@ -1622,6 +1614,12 @@ struct ProcessedScanResults {
 /// Applies the scan results of one load to the wallet and returns the transparent addresses the scan found, after a
 /// re-org recovery truncates the wallet, and after stale results are discarded with their part of the scan range
 /// reset.
+///
+/// `previous_chain_height` is the chain height the wallet's scanned state was formed against: the chain tip of
+/// the previous session, or the one before the blocks a continuous session found newly mined. The validator
+/// finalizes every block more than the re-org allowance below its tip, so a hash that disagrees that far below
+/// it is a different chain and clears the wallet with the chain error, as a re-org deeper than the allowance
+/// does.
 #[allow(clippy::too_many_arguments)]
 async fn process_scan_results<W>(
     consensus_parameters: &(impl consensus::Parameters + Sync),
@@ -1631,7 +1629,7 @@ async fn process_scan_results<W>(
     load: ScanLoad,
     in_flight_tasks: &BTreeMap<TaskId, ScanRange>,
     scan_results: Result<ScanResults, ScanError>,
-    initial_reorg_detection_start_height: Option<BlockHeight>,
+    previous_chain_height: BlockHeight,
     performance_level: PerformanceLevel,
     nullifier_map_limit_exceeded: &mut bool,
 ) -> Result<ProcessedScanResults, SyncError<W::Error>>
@@ -1647,6 +1645,8 @@ where
     let ScanLoad {
         task_id,
         scan_range,
+        chain_height,
+        highest_scanned_height,
     } = load;
     let task = in_flight_tasks
         .get(&task_id)
@@ -1878,6 +1878,8 @@ where
                     fetch_request_sender,
                     ufvks,
                     &scan_range,
+                    chain_height,
+                    highest_scanned_height,
                     if map_nullifiers {
                         Some(&mut nullifiers)
                     } else {
@@ -1961,9 +1963,10 @@ where
                 .start;
                 state::merge_scan_ranges(sync_state, ScanPriority::Verify);
 
-                if initial_reorg_detection_start_height
-                    .expect("re-org can only be detected in wallets that have synced previously!")
-                    - current_reorg_detection_start_height
+                // a block more than the allowance below the chain height the wallet's state was formed against is
+                // final on the wallet's chain, whatever its highest scanned block, so a disagreement there is a
+                // different chain rather than a re-org to truncate
+                if previous_chain_height - current_reorg_detection_start_height
                     > MAX_REORG_ALLOWANCE
                 {
                     clear_wallet_data(wallet, consensus_parameters)?;
@@ -2560,6 +2563,8 @@ async fn update_wallet_data<W>(
     fetch_request_sender: mpsc::UnboundedSender<FetchRequest>,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
     scan_range: &ScanRange,
+    chain_height: BlockHeight,
+    highest_scanned_height: BlockHeight,
     nullifiers: Option<&mut NullifierMap>,
     outpoints: &mut BTreeMap<OutputId, ScanTarget>,
     mut transactions: HashMap<TxId, WalletTransaction>,
@@ -2577,12 +2582,6 @@ where
         + SyncShardTrees
         + Send,
 {
-    let highest_scanned_height = wallet
-        .get_sync_state()
-        .map_err(SyncError::WalletError)?
-        .highest_scanned_height()
-        .expect("scan ranges should not be empty in this scope");
-
     // the updates that may fail are applied before any other, so a failure leaves the wallet without the rest of
     // the scan results. address discovery only adds addresses of the wallet's own keys, and the shard trees fetch
     // every checkpoint they are missing before they are updated.
@@ -2594,6 +2593,7 @@ where
             consensus_parameters,
             fetch_request_sender,
             scan_range,
+            chain_height,
             highest_scanned_height,
             witness::anchor_retention_policy(consensus_parameters),
             sapling_located_trees,
@@ -5321,6 +5321,7 @@ mod test {
             let (fetch_request_sender, _) = mpsc::unbounded_channel();
             let task_id = TaskId::first();
             let in_flight_tasks = BTreeMap::from([(task_id, scan_range.clone())]);
+            let previous_chain_height = scan_range.block_range().end - 1;
 
             process_scan_results(
                 &NETWORK,
@@ -5329,11 +5330,13 @@ mod test {
                 &HashMap::new(),
                 ScanLoad {
                     task_id,
+                    chain_height: scan_range.block_range().end - 1,
+                    highest_scanned_height: scan_range.block_range().start - 1,
                     scan_range,
                 },
                 &in_flight_tasks,
                 scan_results,
-                None,
+                previous_chain_height,
                 PerformanceLevel::High,
                 &mut false,
             )
@@ -5444,12 +5447,15 @@ mod test {
             error::SyncError,
             mocks::{MockWallet, MockWalletBuilder, MockWalletError},
             shardtree_ext::ShardTreeExt,
-            sync::{ScanPriority, ScanRange},
+            sync::{SHARDTREE_CHECKPOINT_ROLLING_WINDOW_SIZE, ScanPriority, ScanRange},
             wallet::{ShardTrees, traits::SyncShardTrees},
         };
 
         use super::NETWORK;
         const HIGHEST_SCANNED: u32 = 10;
+        /// A chain height whose rolling window lies above the scanned blocks.
+        const CHAIN_HEIGHT_ABOVE_THE_WINDOW: u32 =
+            SECOND_SCANNED_BLOCK + 2 * SHARDTREE_CHECKPOINT_ROLLING_WINDOW_SIZE;
         const FIRST_SCANNED_BLOCK: u32 = HIGHEST_SCANNED + 1;
         const SECOND_SCANNED_BLOCK: u32 = FIRST_SCANNED_BLOCK + 1;
         const SHIELDED_POOLS: usize = 3;
@@ -5457,7 +5463,7 @@ mod test {
         const ORCHARD_TREE_SIZE: u64 = 3;
 
         /// Updates the wallet's shard trees with the scan of the two blocks above the highest scanned height, which
-        /// hold no note commitments of any pool.
+        /// hold no note commitments of any pool. The chain height is the second block.
         async fn update_shard_trees(
             wallet: &mut MockWallet,
             fetch_request_sender: mpsc::UnboundedSender<FetchRequest>,
@@ -5471,6 +5477,7 @@ mod test {
                             ..BlockHeight::from_u32(SECOND_SCANNED_BLOCK + 1),
                         ScanPriority::ChainTip,
                     ),
+                    BlockHeight::from_u32(SECOND_SCANNED_BLOCK),
                     BlockHeight::from_u32(HIGHEST_SCANNED),
                     None,
                     Vec::new(),
@@ -5553,6 +5560,51 @@ mod test {
                     .unwrap(),
             ]
             .map(|checkpoint| checkpoint.map(|checkpoint| checkpoint.tree_state()))
+        }
+
+        /// A load below the chain's rolling window places a checkpoint on its last block and on no other, in every
+        /// pool. The block below holds no checkpoint, so each pool fetches the tree state once, and a session
+        /// stopped after the load anchors a spend there.
+        #[tokio::test]
+        async fn a_load_below_the_window_checkpoints_its_last_block_in_every_pool() {
+            let mut wallet = wallet(ShardTrees::new());
+            let (fetch_request_sender, request_count) = spawn_counting_fetcher();
+            wallet
+                .update_shard_trees(
+                    &NETWORK,
+                    fetch_request_sender,
+                    &ScanRange::from_parts(
+                        BlockHeight::from_u32(FIRST_SCANNED_BLOCK)
+                            ..BlockHeight::from_u32(SECOND_SCANNED_BLOCK + 1),
+                        ScanPriority::Historic,
+                    ),
+                    BlockHeight::from_u32(CHAIN_HEIGHT_ABOVE_THE_WINDOW),
+                    BlockHeight::from_u32(HIGHEST_SCANNED),
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                checkpoint_tree_states(&mut wallet, FIRST_SCANNED_BLOCK),
+                [None, None, None]
+            );
+            assert_eq!(
+                checkpoint_tree_states(&mut wallet, SECOND_SCANNED_BLOCK),
+                [
+                    Some(store::TreeState::Empty),
+                    Some(store::TreeState::AtPosition(Position::from(
+                        ORCHARD_TREE_SIZE - 1,
+                    ))),
+                    Some(store::TreeState::Empty),
+                ]
+            );
+            assert_eq!(
+                request_count.load(atomic::Ordering::Acquire),
+                SHIELDED_POOLS
+            );
         }
 
         /// Every shard tree holds the checkpoint of the highest scanned block, so the checkpoints of the scanned
@@ -5952,11 +6004,13 @@ mod test {
                 &ufvks,
                 ScanLoad {
                     task_id,
+                    chain_height: scan_range.block_range().end - 1,
+                    highest_scanned_height: scan_range.block_range().start - 1,
                     scan_range,
                 },
                 &in_flight_tasks,
                 Ok(scan_results),
-                None,
+                block_height,
                 PerformanceLevel::High,
                 &mut false,
             )
@@ -6314,7 +6368,7 @@ mod test {
             wallet: &mut MockWallet,
             scan_range: ScanRange,
             height: u32,
-            initial_reorg_detection_start_height: Option<BlockHeight>,
+            previous_chain_height: BlockHeight,
         ) -> Result<ProcessedScanResults, SyncError<MockWalletError>> {
             let task_id = TaskId::first();
             let in_flight_tasks = BTreeMap::from([(task_id, scan_range.clone())]);
@@ -6326,6 +6380,8 @@ mod test {
                 &HashMap::new(),
                 ScanLoad {
                     task_id,
+                    chain_height: scan_range.block_range().end - 1,
+                    highest_scanned_height: scan_range.block_range().start - 1,
                     scan_range,
                 },
                 &in_flight_tasks,
@@ -6336,7 +6392,7 @@ mod test {
                         previous_block_hash: BlockHash([2; 32]),
                     },
                 )),
-                initial_reorg_detection_start_height,
+                previous_chain_height,
                 PerformanceLevel::High,
                 &mut false,
             )
@@ -6359,7 +6415,7 @@ mod test {
                 &mut wallet,
                 scan_range(SCAN_RANGE_START, SCAN_RANGE_END, ScanPriority::ChainTip),
                 SCAN_RANGE_START,
-                None,
+                BlockHeight::from_u32(SCAN_RANGE_END - 1),
             )
             .await
             .unwrap();
@@ -6400,7 +6456,7 @@ mod test {
                 &mut wallet,
                 scan_range(SCAN_RANGE_START, SCAN_RANGE_END, ScanPriority::ChainTip),
                 SCAN_RANGE_START + 1,
-                None,
+                BlockHeight::from_u32(SCAN_RANGE_END - 1),
             )
             .await;
 
@@ -6435,7 +6491,7 @@ mod test {
                 &mut wallet,
                 scan_range(SCAN_RANGE_START, VERIFY_END, ScanPriority::Verify),
                 SCAN_RANGE_START,
-                Some(BlockHeight::from_u32(SCAN_RANGE_START)),
+                BlockHeight::from_u32(SCAN_RANGE_END - 1),
             )
             .await
             .unwrap();
@@ -6448,6 +6504,52 @@ mod test {
                     scan_range(TRUNCATE_HEIGHT + 1, VERIFY_END, ScanPriority::Verify),
                     scan_range(VERIFY_END, SCAN_RANGE_END, ScanPriority::Historic),
                 ]
+            );
+        }
+
+        /// A discontinuity more than the re-org allowance below the chain height the wallet's state was formed
+        /// against is on a different chain: the block is final on the wallet's chain, so the wallet is cleared
+        /// and the chain error returned, with no truncation attempted. A wallet stopped between the loads of a
+        /// task meets this when the next session's server disagrees below where it stopped.
+        #[tokio::test]
+        async fn a_discontinuity_below_the_allowance_of_the_previous_chain_height_is_the_chain_error()
+         {
+            const PREVIOUS_CHAIN_HEIGHT: u32 =
+                SCAN_RANGE_START + crate::sync::MAX_REORG_ALLOWANCE + VERIFY_BLOCK_RANGE_SIZE;
+            let mut wallet = wallet(
+                vec![
+                    scan_range(BIRTHDAY, SCAN_RANGE_START, ScanPriority::Scanned),
+                    scan_range(
+                        SCAN_RANGE_START,
+                        PREVIOUS_CHAIN_HEIGHT + 1,
+                        ScanPriority::Scanning,
+                    ),
+                ],
+                vec![BIRTHDAY, SCAN_RANGE_START - 1],
+            );
+
+            let result = process_hash_discontinuity(
+                &mut wallet,
+                scan_range(SCAN_RANGE_START, SCAN_RANGE_END, ScanPriority::Verify),
+                SCAN_RANGE_START,
+                BlockHeight::from_u32(PREVIOUS_CHAIN_HEIGHT),
+            )
+            .await;
+
+            assert!(matches!(
+                result,
+                Err(SyncError::ServerError(
+                    crate::error::ServerError::ChainVerificationError
+                ))
+            ));
+            let floor = zcash_protocol::consensus::Parameters::activation_height(
+                &NETWORK,
+                zcash_protocol::consensus::NetworkUpgrade::Sapling,
+            ).unwrap();
+            assert_eq!(
+                wallet.get_sync_state().unwrap().scan_ranges(),
+                [ScanRange::from_parts(floor..floor + 1, ScanPriority::Historic)],
+                "clearing retains the conservative replacement-chain scan floor"
             );
         }
     }

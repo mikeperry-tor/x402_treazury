@@ -67,11 +67,13 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
         .await
         .unwrap();
         let address = sapling_address(&mut owner).await;
-        let funding = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+        net.chain.write().await.mine_empty_blocks(20);
+        let funding = net
+            .funding_transaction(vec![(&address, 1_000_000, None)])
+            .await;
         let funding_id = submission::decode(&funding).unwrap().txid();
         {
             let mut chain = net.chain.write().await;
-            chain.mine_empty_blocks(20);
             chain.mine_block(vec![funding.clone()]);
             chain.mine_empty_blocks(2);
         }
@@ -104,7 +106,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
             == crate::rotation::store::preparation::InputPool::Sapling
             && input.txid == funding_id.to_string()
             && input.output_index == old_id.output_index()));
-        let padding = faucet_funding_transaction(vec![(&address, 1, None)]).await;
+        let padding = net.funding_transaction(vec![(&address, 1, None)]).await;
         {
             let mut chain = net.chain.write().await;
             chain.reorg_to(20);

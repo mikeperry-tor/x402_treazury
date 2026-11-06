@@ -1518,11 +1518,11 @@ mod tests {
         let mixed_orchard =
             UnifiedAddress::from_receivers(ua.orchard().cloned(), None, Some(t), None, None)
                 .unwrap()
-                .encode_receiver_preserving(&MainNetwork);
+                .encode(&MainNetwork);
         let mixed_sapling =
             UnifiedAddress::from_receivers(None, ua.sapling().cloned(), Some(t), None, None)
                 .unwrap()
-                .encode_receiver_preserving(&MainNetwork);
+                .encode(&MainNetwork);
         for mixed in [&mixed_orchard, &mixed_sapling] {
             let Address::Unified(decoded) = Address::decode(&MainNetwork, mixed).unwrap() else {
                 panic!("mixed unified fixture")
