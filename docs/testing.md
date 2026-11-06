@@ -172,6 +172,12 @@ test/helper and in review evidence. Use focused orchestration tests for selectio
 and ordinary review for semantic duplication, rather than source-text bans,
 arbitrary duration caps or a new policy framework.
 
+Optimized arithmetic changes require relevant payment/treasury tests with
+`make test CARGO_ARGS='--release --test payments'` and focused release library
+coverage. Normal debug tests do not exercise the release profile. Release enables
+overflow checks for application and dependencies without changing explicit
+checked/wrapping/saturating arithmetic or panic ownership.
+
 ## Default development checks
 
 The application always includes Zcash. The [Makefile](../Makefile) verifies pinned Cargo

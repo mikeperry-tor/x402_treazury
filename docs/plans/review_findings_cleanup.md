@@ -6,8 +6,8 @@ Implementation started on branch `review_findings_cleanup` at
 `afaf26b226bf46e9ecf0a0eb9d71d782c3061be0`. The initial tracked tree was clean;
 untracked `TODO` and `x402_treazury_review.md` are unrelated operator files and
 remain untouched. Independent read-only G0 reviews are in progress for C01–C04,
-C05/C06/C08, and C07 respectively. C01–C10 remain proposed; no implementation or
-validation completion is claimed. This execution baseline supersedes the earlier
+C05/C06/C08, and C07 respectively. C01 is implemented pending validation and exact-SHA review; C02–C10 remain
+proposed. No validation completion is claimed. This execution baseline supersedes the earlier
 planning baseline for source comparisons without changing the selected scope.
 
 Implement the operator's selected production-release changes from the review of
@@ -364,3 +364,12 @@ consensus or a fresh reproducible release. Execute those only under their existi
 separate authorization/runbooks. A release claiming NU7/native-ZEC funding readiness
 must also meet the applicable evidence and unresolved-contract conditions in the
 NU7 plan; do not silently call a pending funded-refund check complete.
+
+## Execution evidence
+
+G0 C01 design review verified the existing compiler pin, root profile and optimized
+financial consumers. Root MSRV now matches 1.99.1 and release overflow checks are
+enabled without changing explicit arithmetic or panic recovery. Independent
+reviewers also identified and resolved the C03 unpublished-byte retention boundary,
+C05 coherent multi-wallet header exception and C07 atomic ACL creation requirement
+before affected implementation. Validation and exact-SHA reviews remain pending.

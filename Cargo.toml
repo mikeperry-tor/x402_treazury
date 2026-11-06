@@ -2,7 +2,7 @@
 name = "x402_treazury"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94.1"
+rust-version = "1.99.1"
 publish = false
 default-run = "x402_treazury"
 
@@ -19,9 +19,12 @@ exclude = [
 ]
 
 # Keep file/line backtraces without full type and variable debug information.
-# The test profile inherits these settings; release settings remain unchanged.
+# The test profile inherits these settings.
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.release]
+overflow-checks = true
 
 [[bin]]
 name = "x402_treazury"

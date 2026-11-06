@@ -50,9 +50,11 @@ A blanket replacement of test hooks with injected traits is not selected work;
 inspect the affected production and test behavior before choosing a focused change,
 and add an abstraction only when its concrete responsibility justifies it.
 
-The [cleanup plan](plans/review_findings_cleanup.md) selects the supported compiler
-baseline and release overflow checks. Current settings below remain authoritative
-until implementation. Other hygiene observations require individual evidence;
+The supported compiler baseline is Rust 1.99.1, matching the pinned toolchain.
+Release builds enable integer overflow checks throughout the dependency graph;
+explicit checked, wrapping and saturating operations retain their semantics.
+Financial code must return checked-arithmetic errors rather than rely on panic
+recovery. Other hygiene observations require individual evidence;
 their presence alone does not establish a functional defect.
 
 No replacement of `fs2` based solely on age, blanket dependency unpinning, source-hash
@@ -123,7 +125,8 @@ Bare `make` and `make build` default to release mode and set
 to select another profile with incremental caches disabled. The Makefile requires
 GNU Make 3.81+ and a POSIX shell; see the [entrypoint reference](../scripts/README.md)
 for prerequisites and argument forwarding.
-Release compilation takes longer, but produces optimized code without debug info.
+Release compilation takes longer, but produces optimized code without debug info
+and with integer overflow checks enabled.
 This ordinary build is separate from the qualified
 [reproducible release workflow](reproducible-builds.md).
 
@@ -664,8 +667,8 @@ separate [timer race](https://rustsec.org/advisories/RUSTSEC-2026-0384.html);
 the 1.54 series requires 1.54.1 or later.
 
 Alloy's signer/network cohort is 2.5.0, alongside core crates 1.7.3. The application
-declares Rust 1.94.1 to meet Alloy's minimum; the pinned build toolchain remains
-Rust 1.99.1. The independent payment vectors and SDK/payment integration tests
+declares Rust 1.99.1 as its supported baseline, matching the pinned build
+toolchain. This is a support choice, not evidence that every older compiler fails. The independent payment vectors and SDK/payment integration tests
 qualify this combination.
 
 The [crypto-bigint timing advisory](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
