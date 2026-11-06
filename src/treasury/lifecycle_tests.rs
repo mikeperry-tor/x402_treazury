@@ -1003,7 +1003,9 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
     }
     for (rollback, old_checkpoint_window, same_height_fork) in [
         (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, false, false),
-        (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, true, false),
+        // Tip 43 is replaced by tip 33 while checkpoint 23 is removed explicitly.
+        // Missing-checkpoint recovery needs no rolling-window-sized chain.
+        (20, true, false),
         (pepper_sync::sync::MAX_REORG_ALLOWANCE + 11, false, false),
         (pepper_sync::sync::MAX_REORG_ALLOWANCE + 1, false, true),
     ] {

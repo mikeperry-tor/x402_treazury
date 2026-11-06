@@ -62,6 +62,12 @@ with lookup and submission doubles that panic if called. Canonical expiry does
 not consult external inclusion hints, so these tests do not repeat the journey
 for unused mempool and confirmed hint values.
 
+The SDK reorg fixture keeps its actual rolling-window boundary, deep rollback and
+same-height fork journeys. The manually missing-checkpoint journey uses a short
+chain and removes checkpoint 23 explicitly before reopening; it tests damaged
+rollback state without repeating the retention-window-sized initial scan. Both
+forms retain divergence, original-input/byte ownership and subsequent-scan checks.
+
 The Store bootstrap fixture covers operation-backed recovery without proving:
 accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
 outcomes permit recovery assessment but cannot authorize replacement of a confirmed
