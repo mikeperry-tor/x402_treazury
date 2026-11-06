@@ -20,9 +20,9 @@ Follow [planning workflow](../planning-workflow.md),
 
 | ID | Commit boundary and preserved acceptance |
 | --- | --- |
-| F1 | Shorten only the manually missing-checkpoint SDK reorg variant to rollback20 (tip43 replaced by33, checkpoint23 manually absent). Retain actual1000-window boundary999, deep1011 and same-height1001 cases, exact divergent hash, reset/reopen, byte/input/liability and second-scan assertions. |
-| F2 | Expand existing cheap Store projection test to cover JSON0, maximumu32 and invalid string (retain existing10000 if useful), authenticating signed expiry/txid and preserving complete facts/encrypted bytes. Reduce expiry integration from3 to2 cold/warm journeys; retain actual one-scan count, no submit/lookup and malformed sequencing preservation in the warm case. |
-| F3 | Reduce confirmation integration from4 to3 journeys, combining malformed sequencing with alternate authorization. Retain clean never-disclosed attempts0, submitted attempts1, real ZIP244 alternate bytes and zero lookup/replay, original facts/bytes and damaged-counter preservation. Update owning lifecycle guidance alongside these boundaries. |
+| F1 | Shorten only the manually missing-checkpoint SDK reorg variant to rollback 20 (tip 43 replaced by 33, checkpoint 23 manually absent). Retain actual 1000-window boundary 999, deep 1011 and same-height 1001 cases, exact divergent hash, reset/reopen, byte/input/liability and second-scan assertions. |
+| F2 | Expand existing cheap Store projection test to cover JSON 0, maximum u32 and invalid string (retain existing 10000 if useful), authenticating signed expiry/txid and preserving complete facts/encrypted bytes. Reduce expiry integration from 3 to 2 cold/warm journeys; retain actual one-scan count, no submit/lookup and malformed sequencing preservation in the warm case. |
+| F3 | Reduce confirmation integration from 4 to 3 journeys, combining malformed sequencing with alternate authorization. Retain clean never-disclosed attempts 0, submitted attempts 1, real ZIP244 alternate bytes and zero lookup/replay, original facts/bytes and damaged-counter preservation. Update owning lifecycle guidance alongside these boundaries. |
 
 Independent read-only design review at the baseline passes without material
 findings. It traced fork construction, pinned SDK verification/truncation,
@@ -61,6 +61,50 @@ unaffected default/compatibility/proving/codec/optimized evidence: only cfg(test
 fixture code and owning guidance change, no production arithmetic, graph, signing,
 transport or proof algorithms. Revalidate affected consumers after any failure and
 resume unfinished checks, without restarting passed unrelated stages.
+
+## Implementation and validation checkpoint
+
+F1 `de527d1d`, F2 `04faa90c`, F3 `8881fa6e`, formatting fixup `bfd02e2f`
+and comment correction `f1010d9b` all pass independent exact-SHA and combined
+source review. The source comment now correctly describes old tip 43 replaced by
+33. No material findings remain in those reviews. Changes are confined to the
+three lifecycle functions, the existing Store projection test and owning guidance;
+production behavior, the dependency graph, Make and test counts are unchanged;
+existing assertions are retained.
+
+Formatting passes. Final source-matched metrics at frozen code `f1010d9b` are in
+`target/complexity-runs/20261106T184820Z-6865b609/`: 470 files / 10,373 callable
+spaces, no exclusions or baseline-comparison warnings. Independent complexity
+review accepts reorg/expiry/confirmation/Store projection and the relevant
+unchanged canonical recovery ordering without further refactoring.
+
+All selected validation passes, with commands, logs and exits under
+`target/lifecycle-efficiency/`:
+
+- `store-tests`: all 11 inexpensive inventory tests pass in 0.72 seconds, including
+  all four JSON expiry inputs, malformed health/disclosure and immutable bytes.
+- `clippy`: production compiler and full all-target `zcash-regtest` Clippy pass
+  without diagnostics (40.07 and 239 seconds respectively).
+- `lifecycle`: the one complete `zcash-testutils` run at eight threads passes all
+  57 cases, with the same one deliberately ignored case. It executes all three
+  modified tests and all six real-SDK refund/discovery privacy regressions.
+  Test execution is 538.30 seconds, versus the prior 572.33 seconds: an observed
+  34.03-second / 5.95% reduction from one comparison, not a repeatability guarantee.
+  Its executable rebuild takes 28.33 seconds; compilation and execution are reported
+  separately. Both Store and lifecycle debug links retain the already assessed
+  macOS large unwind-table warning; production/Clippy are warning-free.
+
+Unchanged compatibility 31, default continuation 1914/42 ignored, proving 4,
+codec 1, optimized compatibility 20/signer 2, Python 96/analyzer 10 and retained
+vendor provenance evidence carry forward from the baseline's recorded
+`vendor-removal-*` logs and final source review. These fixtures change no shared
+production algorithms, feature/profile selection, helper implementations or tool
+sources; no broad or optimized suite was repeated. No additional performance
+matrix or production tuning is claimed. Independent final combined runtime/evidence review accepts the exact frozen
+implementation, all accumulated commits/fixups and affected call chains with no
+material findings or compelling simplifications. It verifies raw logs/exits,
+actual scenario execution, comparison limits and the evidence carried forward.
+Exact evidence-record and cleanup review remain pending.
 
 ## Completion and handoff
 
