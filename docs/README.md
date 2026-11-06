@@ -48,9 +48,9 @@ Dynamic registry build reuse, publication and read contracts live in
 HTTP cache ownership is maintained in [network policy](network-egress.md), and
 qualification budgets and complete lifecycle snapshots in the
 [technical reference](../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority).
-The [storage assessment](plans/portability_fixes.md) supplies the macOS ACL work
-selected by review cleanup and retains the separate Unix namespace-authority
-assessment. Windows runtime work remains deferred by user decision.
+The [storage assessment](plans/portability_fixes.md) retains the separate Unix
+namespace-authority question; implemented ACL privacy contracts belong in
+[development](development.md#portability) and [wallet administration](wallet-cli.md). Windows runtime work remains deferred by user decision.
 The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.

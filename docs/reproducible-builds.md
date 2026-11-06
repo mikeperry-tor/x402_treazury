@@ -27,6 +27,10 @@ tools installed to reproduce this profile; replacing their version strings in
 the profile requires a fresh qualification. Other platforms need an explicit
 profile and equivalent OS network sandbox before support is claimed.
 
+The root release profile enables integer overflow checks for application and
+dependencies. Preserve that setting in qualified builds; compiler/toolchain pins
+and explicit checked, wrapping and saturating arithmetic remain independent.
+
 ## Prepare inputs
 
 Shipped provider TOML and their local schemas are compilation inputs embedded in
@@ -133,7 +137,3 @@ vendor checks and CLI smoke tests. That evidence does not qualify the current
 This historical result does not establish a fresh qualification of later candidates,
 independent-host equality, signing or notarization. Run the procedure for the
 release candidate being distributed and retain hashes and provenance with that release outside the source tree.
-
-The root release profile enables integer overflow checks for application and
-dependencies. Preserve that setting in qualified builds; compiler/toolchain pins
-and explicit checked, wrapping and saturating arithmetic remain independent.

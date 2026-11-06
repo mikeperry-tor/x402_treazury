@@ -5,10 +5,13 @@
 Implementation started on branch `review_findings_cleanup` at
 `afaf26b226bf46e9ecf0a0eb9d71d782c3061be0`. The initial tracked tree was clean;
 untracked `TODO` and `x402_treazury_review.md` are unrelated operator files and
-remain untouched. Independent read-only G0 reviews are in progress for C01–C04,
-C05/C06/C08, and C07 respectively. C01 is implemented pending validation and exact-SHA review; C02–C10 remain
-proposed. No validation completion is claimed. This execution baseline supersedes the earlier
-planning baseline for source comparisons without changing the selected scope.
+remain untouched. C01–C09 are implemented and validated with preserved fixups.
+Independent exact-SHA and combined reviews have no unresolved material findings.
+G0–G2 source/complexity acceptance is complete; fresh G3 combined review accepted
+the implementation and evidence subject to exact review of this final status
+commit. Required compiler, native, runtime and optimized acceptance is complete
+through the scoped continuations recorded below. C10 cleanup and G4 remain pending. This execution baseline supersedes the earlier planning
+baseline for source comparisons without changing selected scope.
 
 Implement the operator's selected production-release changes from the review of
 `3ceb88f2e41038c4f6ef6959494c2f501373f1cd`, using current source rather than the
@@ -16,7 +19,7 @@ review's historical locations or proposed fixes. Planning baseline:
 `e3b151d7651c1d6210c6ebd11a42b1e1c0e66ba1`. Capture the implementation branch,
 HEAD, working-tree changes and source-matched validation evidence again before
 starting. Preserve unrelated tracked, untracked and ignored files and all private
-financial evidence. This document describes proposed work, not implemented behavior.
+financial evidence. Status and execution evidence below distinguish implemented work from pending acceptance.
 
 The operator-restored [original review](x402_treazury_review.md) is historical source
 input. Its recommendations are not implementation instructions, and its old code
@@ -339,8 +342,8 @@ not justify organization by themselves; do not extract helpers merely to lower s
 
 ## Validation and release boundaries
 
-For this planning-only change, validate document links, scope and independent design
-review; no application build is required. During implementation use Make entrypoints
+The original planning-only review required document links, scope and independent
+design review. Implementation requires application validation through Make entrypoints
 and the [ordered continuation policy](../testing.md#validation-order-and-continuation):
 
 1. Capture source/executable/features/profile and run affected cheap contracts;
@@ -606,3 +609,101 @@ quote-deadline/proving/cancellation/restart and actual SDK NU7 activation-bounda
 expiry fixtures remain authoritative and will run in their named stages. Owning
 configuration, wallet, SDK and both timer inventories updated. Validation and exact
 SHA review pending.
+
+C09 handoff: original finding coverage map was checked against all authored finding
+IDs in the restored review; none lacks a plan disposition. Accepted traversal now
+states few funded wallets as operational rationale without an attempt cap, balance
+read gate or extra allocation. Existing maintained guides own the non-action
+choices; NU7, deferred release, U2 and vendor retirement remain separate focused
+owners. ACL guidance is current and release arithmetic belongs in release-profile
+guidance. Existing AGENTS links already reach these owners; no duplicate enduring
+rule was added. C09 acceptance and final integration remain pending required tests.
+
+Independent exact reviews so far: fresh G1 reviewer covered `29800556`, `384d1f75`,
+`4cae2a9b`, `987d7a55`, `a5291d3a`, `bd5beb4d`, `c497fa52`, `99c562fe` and combined
+C01–C04; fresh G2 reviewer covered `e44cd918`, `64ff8bbd`, `6462982b`, `29c510ad`,
+`fdbfc933`, `1fcee0c6` and combined C01–C08. No material source findings remain;
+validation/complexity gates are explicitly still pending. Probe correction
+`ca2ca7b4` and C09 still need exact review.
+
+
+## Final implementation acceptance
+
+Tested code is `474e849fe6e3ffb64ef434a61c257c1b04c4795e`, from baseline
+`afaf26b226bf46e9ecf0a0eb9d71d782c3061be0`. Source hashes, profiles, log paths,
+selected continuation inputs and diagnostics are indexed under ignored
+`target/review-findings-cleanup/validation-index.json`. This is assembled full
+application acceptance with focused continuations, not a claim that a single
+uninterrupted `make check` invocation passed.
+
+- Static tooling: native Python92/92 and coverage tooling; complexity analyzer10/10,
+  analyzer all-target Clippy, and vendor provenance passed. Current fmt-check passed.
+- Current production compiler and full all-target `zcash-regtest` Clippy passed,
+  warning-free (`check-clippy-receiver-simplification.log`).
+- Current compatibility passed crypto2/payments15/SDK2/server11; affected CLI
+  contracts25, treasury2 and wallet workflow7 passed. Prior default library1222
+  (22 intentional ignores), binary4 and11 early integration targets carry forward;
+  metadata-derived remainder44 targets passed593 cases (20 intentional ignores).
+  The final address projection simplification leaves pinned SDK output unchanged;
+  its affected CLI, compatibility and refund consumers were revalidated.
+- Synthetic proving4/4 passed. Lifecycle56 passed with1 intentional child ignored;
+  the sole stale fresh-address assertion was corrected, and all6 affected refund
+  cases then passed, including actual shielded receipt, zero transparent RPCs,
+  saved policy reopening and legacy transparent recovery. Codec1/1 passed.
+- Optimized release payments15 passed; publication12 passed with1 intentional
+  child ignored; actual accepted SDK Store-death1, calculation/facts panic1 and
+  actual NU7 expiry/proving1 passed. `release-acceptance.json` records original
+  artifact hashes and actual root/runtime compiler commands: optimization3 and
+  overflow checks enabled, no release diagnostics. No performance claim is made.
+- Native macOS private filesystem5 and actual registry-parent1 passed after the
+  FFI allocation-owner correction. Linux helper3 passed with retained POSIX ACLs,
+  actual bundled SQLite, denied-read/mode/link controls, an ordinary non-root UID,
+  exact helper input and recorded pinned toolchain/image. Later source changes
+  affect macOS ownership only or unrelated address output. This is not full Linux
+  application or automated CI coverage.
+
+The large macOS development lib-test linker emits a compact-unwind offset-size
+performance advisory; it was reviewed and retained. Tested panic paths pass with
+DWARF fallback; no blanket unwind/performance guarantee or global panic-hook
+sanitization is claimed. An affected refund run failed before test execution in
+code signing, and its retry reported no disk space. Verified118 task-created
+executable copies were not open or mapped, then removed only those copies
+(11.9GiB logical); inventory/inspection/removal evidence is retained. No target,
+wallet state, logs or financial evidence was deleted. The unchanged-artifact
+refund retry passed6/6. These pre-execution failures are not test passes.
+
+Independent exact reviews and fixup ancestry are retained unsquashed:
+
+| Scope | Reviewed exact commits | Independent reviewer |
+| --- | --- | --- |
+| Baseline/plan | `366e8d3d` | G2 |
+| C01 | `29800556` | G1 |
+| C02 | `384d1f75`, `4cae2a9b`, `7d159911`, `aafd0357`, `b249d0c0`, `1a363b48`, `485b57bc` | G1 |
+| C03 | `987d7a55`, `a5291d3a`, `99c562fe`, `04a83fb6` | G1 |
+| C04 | `bd5beb4d`, `c497fa52`, `96786f96` | G1 |
+| C05 | `e44cd918`, `cd792a2a` | G2 |
+| C06 | `64ff8bbd`, `474e849f` | G2 |
+| C07/tooling | `6462982b`, `29c510ad`, `1fcee0c6`, `ca2ca7b4`, `a61c70dc`, `0b5d8354`, `75f7b526`, `c1fccb0f`, `6304ef56`, `862d1e63`, `f0b1c04b` | G2 |
+| C08 | `fdbfc933` | G2 |
+| C09 | `ccbd8b09` | G2 |
+| Existing CLI precedence fixture | `78ea079b` (fixup of `83bc75e3`) | G1 |
+
+Fresh read-only final reviewer `/root/final_integration` independently assessed
+combined code/history before consulting dispositions, then reconciled all commits,
+fixups and complete affected ownership, authority, transport, filesystem and SDK
+chains. No material finding or compelling remaining simplification was identified.
+All42 authored historical finding IDs have explicit dispositions. The current
+complexity report `20261106T034001Z-00fca436` has465 files/10277 callable spaces,
+no exclusions, and independently matched source/lock hashes. The main coordinator
+26/46 retains real inspection/startup duties after removing repeated policy
+construction. Publisher23 retains one original calculation/publication owner;
+extracting helpers or state would move rather than remove ownership choreography.
+Both dispositions and relevant unchanged high-risk consumers were reviewed.
+
+G1/G2 acceptance carries forward and fresh G3 implementation/evidence assessment
+is clean; independently review this exact final evidence commit to close G3, then
+perform C10 and independent exact cleanup/final combined G4 review. Keep all
+ancestry. NU7 release qualification, funded refund/settlement, real Tor, a fresh
+reproducible release, Windows, Linux CI and the remaining focused assessments stay
+with their existing unfinished owners. No push, merge, deployment, paid call or
+funded qualification is authorized by this acceptance or cleanup.

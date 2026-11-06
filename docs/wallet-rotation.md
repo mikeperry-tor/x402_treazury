@@ -461,7 +461,13 @@ retirement and incident-specific repair remain [deferred](plans/deferred/managed
 
 Managed `PaidClient` calls may repeat an operation on another captured wallet only
 when the signed attempt receives a supported structured insufficient-funds failure.
-Both authorizations can charge or execute. Other HTTP failures, transport loss,
+Every authorization remains potentially chargeable or executable. A small reserve
+inventory normally leaves few wallets able to cover a price, while retained funds
+can enlarge that set. This is an operational expectation, never an attempt cap:
+low or unknown estimates can remain eligible. Traversal visits each captured
+identity once with its own challenge; it never allocates, tops up or waits for
+funding, and balance reconciliation proceeds independently.
+Other HTTP failures, transport loss,
 malformed replies, successful responses and output conversion failures grant no
 retry. The low-level `ManagedPool::pay_with_cover` API dispatches an already-bound
 challenge/transport once; use `PaidClient::managed` for complete routed calls.
