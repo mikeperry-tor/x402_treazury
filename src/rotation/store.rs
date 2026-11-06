@@ -35,8 +35,8 @@ pub(crate) mod scheduling;
 pub(crate) mod selection;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
+use crate::payment::signer::EvmSigner;
 use alloy_primitives::U256;
-use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
 use chacha20poly1305::{
     ChaCha20Poly1305, KeyInit, Nonce,

@@ -7030,6 +7030,7 @@ name = "x402_treazury"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-signer",
  "alloy-signer-local",
  "alloy-sol-types",
  "anyhow",
@@ -7063,6 +7064,7 @@ dependencies = [
  "rusqlite",
  "rustls 0.23.46",
  "sapling-crypto",
+ "secp256k1 0.30.0",
  "serde",
  "serde_json",
  "sha2 0.11.1",

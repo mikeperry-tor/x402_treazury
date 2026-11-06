@@ -311,8 +311,9 @@ runtime Tor routing.
 
 The enabled `zcash_proofs` 0.31.0 `download-params` build dependency uses
 `minreq` 2.14.1 with `rustls` 0.21.12, `rustls-webpki` 0.101.7 and
-`webpki-roots` 0.25.4. These older versions do not contain the
-[emSign intermediate-key distrust fix](https://rustsec.org/advisories/RUSTSEC-2026-0382).
+`webpki-roots` 0.25.4. The [locked-graph advisory disposition](development.md#locked-graph-advisory-disposition)
+covers their session, certificate-name/CRL and emSign findings; these versions
+lack the [emSign intermediate-key distrust fix](https://rustsec.org/advisories/RUSTSEC-2026-0382).
 They are absent from runtime HTTP/gRPC call chains. The downloader requests only
 public proving parameters and checks their hardcoded sizes and BLAKE2b-512
 digests before returning them; a forged TLS peer cannot substitute accepted

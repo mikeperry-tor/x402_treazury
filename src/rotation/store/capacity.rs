@@ -453,7 +453,7 @@ fn allocate_claim(
     generation: i64,
     target: &str,
 ) -> Result<String> {
-    let signer = PrivateKeySigner::random();
+    let signer = EvmSigner::random();
     let wallet = Uuid::new_v4().to_string();
     let secret = Zeroizing::new(signer.to_bytes().to_vec());
     let encrypted = seal(

@@ -1,6 +1,6 @@
 use super::*;
+use crate::payment::signer::EvmSigner;
 use crate::payment::{Payer, SpendPolicy, USDC, V1ExactClient};
-use alloy_signer_local::PrivateKeySigner;
 use serde_json::Value;
 use std::{
     sync::Arc,
@@ -134,7 +134,7 @@ async fn static_offer_keeps_opaque_numbers_exactly() {
 
 #[tokio::test]
 async fn duplicate_offers_retain_their_own_original_metadata() {
-    let signer = Arc::new(PrivateKeySigner::from_slice(&[91; 32]).unwrap());
+    let signer = Arc::new(EvmSigner::from_slice(&[91; 32]).unwrap());
     for version in [1, 2] {
         for scheme in if version == 1 {
             vec!["exact"]

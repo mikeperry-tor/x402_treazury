@@ -4,9 +4,9 @@ use super::{
     base::{BaseRpc, now},
     store::{Authorization, StoreHandle},
 };
+use crate::payment::signer::EvmSigner;
 use crate::payment::{SpendPolicy, USDC, diagnostics};
 use alloy_primitives::{Address, B256, U256, keccak256};
-use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
@@ -504,7 +504,7 @@ async fn sign_authorization(
     offer: &Offer,
     challenge: &x402_types::proto::PaymentRequired,
 ) -> Result<(String, Authorization)> {
-    let signer = PrivateKeySigner::from_slice(&prepared.key)
+    let signer = EvmSigner::from_slice(&prepared.key)
         .map_err(|_| anyhow::anyhow!("invalid stored signer"))?;
     ensure!(
         signer.address().to_string() == prepared.address,
@@ -769,7 +769,7 @@ mod offer_tests {
     }
     #[tokio::test]
     async fn managed_sdk_lifetime_is_bounded_without_changing_selected_authority() {
-        let signer = Arc::new(PrivateKeySigner::from_slice(&[91; 32]).unwrap());
+        let signer = Arc::new(EvmSigner::from_slice(&[91; 32]).unwrap());
         for version in [1, 2] {
             for timeout in [30, 3600, u64::MAX] {
                 let mut raw = offer("1", 1);
@@ -830,7 +830,7 @@ mod offer_tests {
     async fn sdk_payload_validation_rejects_changed_authority_and_validity() {
         // One public, unfunded signer; no Store, RPC or HTTP dispatch is needed
         // to exercise the boundary between SDK output and journal acceptance.
-        let signer = Arc::new(PrivateKeySigner::from_slice(&[91; 32]).unwrap());
+        let signer = Arc::new(EvmSigner::from_slice(&[91; 32]).unwrap());
         let payer = signer.address().to_string();
         let challenge = serde_json::json!({
             "x402Version":2,

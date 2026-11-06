@@ -154,6 +154,54 @@ debug-information settings and selective cache cleanup, and
 Cargo's existing job controls and timing reports. The focused SDK/payment tests share the
 application target directory and remain a separately selected, sequential stage.
 
+## Local dependency advisory assessment
+
+`python3 scripts/dependency_audit.py` replays an operator-installed `cargo-audit`
+against a clean RustSec database checkout at an explicitly supplied full Git SHA.
+It does not install tools, fetch advisories, resolve Cargo dependencies or build.
+Freeze source changes while collecting evidence. Run the existing
+`python3 vendor/verify.py` and `python3 vendor/verify_pepper.py` provenance checks
+separately; advisory matching does not verify that local patches preserve fixes.
+
+Supply `--db /path/to/advisory-db --db-revision FULL_SHA` and repeat
+`--source PACKAGE=/actual/package/directory` for **every** nonregistry package in
+both `Cargo.lock` and `tools/protoc/Cargo.lock`. This includes workspace packages,
+all four vendored packages and the pinned Git packages, including optional test
+packages. For example, the root package mapping is `--source x402_treazury=.`,
+the helper mapping is `--source x402-protoc-path=tools/protoc`, and a patched
+transport mapping is `--source h2=vendor/h2`. Use the actual locked Git checkout,
+not an unrelated reference revision. Missing mappings fail visibly. Use
+`--cargo-audit /path/to/cargo-audit` to select the installed executable and
+`--output target/dependency-audit` to select the artifact directory.
+
+The tool snapshots and hashes both active lockfiles, records the auditor version
+and executable hash, checks the database revision and clean tree, and hashes the
+actual Git-inventoried package files (tracked plus unignored files). Ignored local
+state and build artifacts are excluded; symlinks are recorded without following
+them. Git dependencies must have the exact locked HEAD and a clean checkout.
+Workspace-inherited versions are resolved from their workspace manifests.
+
+Three JSON reports cover the two original lockfiles and a synthetic nonregistry
+name/version inventory. RustSec normally skips path and Git sources. The synthetic
+inventory gives those exact package versions a crates.io identity **only for
+advisory matching**; `summary.json` retains their original source, package path
+and file hashes. It is not a dependency resolution or evidence that a Git package
+is byte-identical to the same registry version. Inspect advisory applicability
+against those actual sources and patches before assigning a disposition.
+
+All audit calls use `--no-fetch --no-yanked --stale --json`: the pinned historical
+database is allowed, network-dependent yank checks are omitted, and no advisory
+IDs, architectures or operating systems may be filtered by ambient audit settings.
+Exit 0 means no reported findings; 1 means findings requiring assessment; 2 means
+tool/input failure and incomplete evidence. Raw stdout/stderr and the final status
+are retained under the output directory. Findings do not prove exploitability;
+a clean report does not establish a complete security audit. Runtime, build-only,
+optional-test and helper exposure need separate dispositions. Vendored upstream
+lockfiles are provenance inputs, not additional active resolutions.
+
+Run the focused offline tests with
+`python3 -m unittest scripts.tests.test_dependency_audit`.
+
 Regenerate the independent cryptographic vectors with:
 
 ```sh

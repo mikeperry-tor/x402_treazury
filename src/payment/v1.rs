@@ -1,5 +1,5 @@
 //! Compatibility boundary for the pinned x402-chain-eip155 2.0.2 client.
-use alloy_signer_local::PrivateKeySigner;
+use crate::payment::signer::EvmSigner;
 use std::sync::Arc;
 use x402_chain_eip155::V1Eip155ExactClient;
 use x402_types::{
@@ -10,10 +10,10 @@ use x402_types::{
     },
 };
 
-pub(crate) struct V1ExactClient(V1Eip155ExactClient<Arc<PrivateKeySigner>>);
+pub(crate) struct V1ExactClient(V1Eip155ExactClient<Arc<EvmSigner>>);
 
 impl V1ExactClient {
-    pub(crate) fn new(signer: Arc<PrivateKeySigner>) -> Self {
+    pub(crate) fn new(signer: Arc<EvmSigner>) -> Self {
         Self(V1Eip155ExactClient::new(signer))
     }
 }

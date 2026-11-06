@@ -685,7 +685,7 @@ because its analyzer API is incompatible with an independently selected 0.27.
 
 ### Security update boundaries
 
-The root lockfile selects Tokio 1.53.3 and ctutils 0.4.4, containing the fixes for
+The root lockfile selects Tokio 1.54.1 and ctutils 0.4.8, containing the fixes for
 [Tokio I/O safety](https://rustsec.org/advisories/RUSTSEC-2026-0386.html) and
 [constant-time mask generation](https://rustsec.org/advisories/RUSTSEC-2026-0385.html).
 Preserve those fixes when resolving dependencies. Tokio 1.54.0 is yanked for a
@@ -698,16 +698,67 @@ toolchain. This is a support choice, not evidence that every older compiler fail
 qualify this combination.
 
 The [crypto-bigint timing advisory](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
-remains unresolved in `crypto-bigint` 0.5.5 through
-`elliptic-curve` 0.13.8 and `k256` 0.13.4. Alloy 2.5.0 still requires that cohort;
-its upgrade does not supply the advisory's 0.7.6 fix. Removal requires a compatible
-upstream signing-cohort migration or a separately reviewed backport. Do not force
-the incompatible version through a manifest override or treat dependency presence
-alone as proof of application exploitability. Reassess the complete signing chain
-when upstream support changes; retain exact signature/address and state contracts.
-The near-term release assessment is owned by
-[NU7 release readiness](plans/nu7_release_readiness.md); upgrading the Zcash cohort
-alone does not resolve an EVM signing-cohort advisory.
+still matches `crypto-bigint` 0.5.5 through `elliptic-curve` 0.13.8 and `k256`
+0.13.4. Alloy 2.5.0 requires that cohort; forcing an incompatible 0.7.6 override
+is unsupported. The previous `PrivateKeySigner` path performed affected integer
+arithmetic on signing secrets through k256 scalar reduction and nonce inversion.
+Production EVM key generation, public-key derivation and signing now use the
+existing native `secp256k1` dependency (libsecp256k1), through the shared
+`payment::signer::EvmSigner` adapter implementing the SDK's `SignerLike` trait.
+It covers static v1/v2 exact and upto clients and managed funding/payment keys;
+raw 32-byte key storage and authorization formats remain unchanged. Each adapter
+owns its private key and erases that storage in place on drop using the dependency's
+supported API; decoded/exported buffers are zeroizing. This is best-effort erasure:
+Rust moves/copies and native internals can leave other copies, as the dependency
+documents. Alloy's opaque native credential lacks in-place erasure, so it is not
+used to hold production secrets.
+
+The residual k256 cohort handles public signature parsing/recovery in those paths;
+this is a scoped mitigation, not removal of the affected package or a universal
+constant-time claim. Do not convert production signers back with `to_k256` or
+`into_k256`. The independent Python vector must match the production signature
+exactly, alongside address/key roundtrip, invalid-scalar rejection and full payment
+compatibility checks. Any new secret consumer requires renewed exposure analysis.
+Complete graph findings and release disposition remain owned by
+[NU7 release readiness](plans/nu7_release_readiness.md); Zcash compatibility alone
+does not resolve signing or build-only TLS advisories.
+
+### Reproducible local advisory evaluation
+
+Use the [local advisory tool](../scripts/README.md#local-dependency-advisory-assessment)
+with an explicitly pinned RustSec checkout to assess both active lockfiles and
+all path/Git package sources. Preserve its lockfile/source hashes, original-source
+mapping and raw reports under ignored `target/`. Ordinary RustSec lockfile scans
+skip nonregistry packages, so their absence from the standard report is not a
+clean assessment. The supplementary normalized inventory matches advisory package
+names and exact versions; review the actual source and local patches to determine
+applicability. Preserve separate runtime, build-only, optional-test and protoc-helper
+dispositions. Provenance checks and compatible compilation do not resolve findings.
+
+### Locked-graph advisory disposition
+
+The local replay covers both active lockfiles and explicitly mapped path/Git
+sources. It remains a findings report, not a clean-graph claim. The current
+remaining vulnerability matches have these scopes:
+
+| Match | Consumer and disposition |
+| --- | --- |
+| `crypto-bigint` 0.5.5, RUSTSEC-2026-0387 | The production secret-signing path is replaced as described above; residual public parsing/recovery remains in the upstream EVM cohort. Keep the advisory visible and recheck any new secret consumer. |
+| `rustls` 0.21.12, RUSTSEC-2026-0346 / 0349 | Build-only `minreq → zcash_proofs(download-params) → zingolib` parameter acquisition. The downloader uses the built-in session store, not custom session-secret Debug logging. Its old classical key exchange provides no post-quantum guarantee. Runtime transport uses patched rustls 0.23.46. |
+| `rustls-webpki` 0.101.7, RUSTSEC-2026-0098 / 0099 / 0104 / 0382, and `webpki-roots` 0.25.4, RUSTSEC-2026-0381 | The same public-parameter downloader retains legacy certificate verification/roots. It configures no CRLs; the CRL-parser panic has no identified consumer. Name-constraint and emSign verification risks remain in that build-time path. Accepted parameters still require upstream fixed lengths and BLAKE2b digests. |
+
+The supported release workflow verifies prefetched public parameters and denies
+build network access. Ordinary online first builds can still suffer unavailable
+or intercepted downloads; the digest check does not fix TLS. Retiring that graph
+requires an upstream downloader migration or separately reviewed patch, rather
+than incompatible version overrides. See [SDK parameter acquisition](zingo-integration.md#build-time-parameter-downloads).
+
+Maintenance notices are also retained: `derivative` through `ark-ff`, `fxhash`
+through the development analyzer, `json` through Zingolib, `paste` through Alloy/ark,
+and `pin-utils` through `wasmtimer`. These are upstream responsibilities with no
+compatible lockfile removal established. Do not vendor replacements merely to
+suppress informational findings. Reassess them with their owning cohort updates;
+any reported unsoundness or vulnerability needs its own exposure analysis.
 
 ### TLS security updates
 

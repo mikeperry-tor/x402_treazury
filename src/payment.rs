@@ -2,8 +2,8 @@
 //! challenge validation and durable admission. Managed insufficient-funds failures
 //! may traverse existing wallets; every authorization remains chargeable.
 use crate::catalog::{RoutedRequest, arg_text};
+use crate::payment::signer::EvmSigner;
 use alloy_primitives::U256;
-use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
@@ -14,6 +14,7 @@ use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 mod document_identity;
 mod lifetime;
+pub(crate) mod signer;
 pub(crate) use lifetime::{BoundedClient, MAX_AUTHORITY_SECONDS};
 mod presentation;
 pub(crate) use presentation::{
@@ -121,7 +122,7 @@ pub struct Payer {
 }
 impl Payer {
     pub fn new(key: &str, policy: SpendPolicy) -> Result<Self> {
-        let signer: PrivateKeySigner = key
+        let signer: EvmSigner = key
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid EVM private key"))?;
         let address = signer.address().to_string();
