@@ -137,6 +137,70 @@ async fn prepare(
     }
 }
 
+#[test]
+fn store_death_during_accepted_calculation_retains_result_without_disclosure() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "treasury::lifecycle_tests::calculation_owner::accepted_calculation_store_death_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[ignore = "fatal accepted result retains blocking ownership until isolated runtime is forced down"]
+fn accepted_calculation_store_death_child() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let (dir, net, mut owner, destination) = fixture(Kind::Deposit).await;
+        let identity = owner.status().await.unwrap().treasury_id;
+        let store = owner.store.clone();
+        let (reached, mut release, calls) = hold(&mut owner, false, false, false);
+        {
+            let calculation = prepare(&mut owner, Kind::Deposit, destination);
+            tokio::pin!(calculation);
+            tokio::select! {
+                result = &mut calculation => panic!("unexpected early calculation result: {}", result.is_ok()),
+                result = reached => result.unwrap(),
+            };
+            let id = accepted_id(dir.path());
+            let inputs = store.call(move |s| s.prepared_inputs(&id)).await.unwrap();
+            assert!(!inputs.is_empty());
+            let error = store.call::<()>(|_| panic!("fixture in-flight Store failure")).await.unwrap_err();
+            assert!(error.is::<crate::rotation::store::WorkerStopped>());
+            store.stopped().await;
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            release.release();
+            let error = calculation.await.err().unwrap();
+            assert!(error.is::<crate::rotation::store::WorkerStopped>());
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(!owner.running.as_ref().unwrap().is_finished());
+        no_send(&net).await;
+        drop(store);
+        assert!(open(&dir.path().join("state"), &dir.path().join("key"), &identity).is_err());
+        let close = tokio::spawn(owner.close());
+        tokio::task::yield_now().await;
+        assert!(!close.is_finished());
+        close.abort();
+        assert!(open(&dir.path().join("state"), &dir.path().join("key"), &identity).is_err());
+        no_send(&net).await;
+    });
+    runtime.shutdown_background();
+}
+
 fn accepted_id(dir: &std::path::Path) -> String {
     rusqlite::Connection::open(dir.join("state/state.sqlite"))
         .unwrap()

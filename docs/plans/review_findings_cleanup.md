@@ -421,3 +421,13 @@ and verify research authentication and sibling-listener isolation independently;
 explicit auth=false remains usable. This is another stale C02 consumer expectation,
 not a production authority change. Revalidate deployment Clippy/tests, preserve
 unaffected evidence and continue the remaining named stages.
+
+C03 implemented: the exact Store worker is supervised, typed loss stops affected
+operations, and StoreHandle clones retain the existing exclusive lock. Completed
+unpublished results stay with their original blocking owner on terminal Store loss;
+callers fail promptly, ordinary drain remains pending and explicit force retains
+its documented uncertainty. Independent design and initial implementation reviews
+traced cancellation/publication/other-Store consumers. Added deterministic worker,
+store-only, actor and isolated real in-flight calculation fixtures; runtime evidence
+is pending. Safe tracing/JoinError categories do not claim to sanitize the existing
+Rust panic hook's stderr output. Fresh exact-SHA/G1 review remains pending.

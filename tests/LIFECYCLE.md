@@ -2,6 +2,11 @@
 
 These tests use public deterministic keys, localhost fixtures and isolated regtest
 chains. None spends mainnet funds or contacts NEAR's production API.
+Store-worker fixtures cover accepted and disconnected callers, absence of closure
+replay, independent Store progress and sanitized terminal failure. Treasury
+publication loss runs in an isolated child: the original completed result remains
+owned, graceful drain stays pending and forced runtime teardown is confined to
+that child. These controls do not qualify power-loss recovery or settlement.
 The full concurrent worker's local bridge, Base RPC and paid API share a verified
 TLS router, so its actual payment and rotation assertions execute under provider
 HTTPS policy. Infrastructure-only HTTP fixtures remain separate; fixture trust

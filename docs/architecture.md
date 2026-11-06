@@ -428,9 +428,18 @@ not discard that work. The treasury joins it before another SDK mutation,
 reconstruction or shutdown; [SDK integration](zingo-integration.md) owns the details.
 Completed SDK bytes
 and their snapshot stay with the existing owner until identical local publication
-succeeds; cancelled close waiters do not abandon this drain. Irrecoverable storage
-failure or forced process death can lose unpublished bytes, leaving the accepted
-input claim uncertain. Unhealthy SDK capabilities are reconstructed from the latest committed snapshot
+succeeds; cancelled close waiters do not abandon this drain. The exact serialized
+Store worker is supervised in treasury and store-only lifecycles. Its termination
+fails dependent operations and stops treasury admission without restarting the
+Store or replaying closures. Independent wallets and listeners remain usable.
+Store handles retain the original exclusive file lock through accepted work even
+after worker death, preventing a second owner from opening the same state.
+If that worker dies with a completed unpublished transaction, its blocking owner
+retains the original client, exact bytes, snapshot and accepted input ownership
+without further Store retries or SDK reconstruction. The caller receives failure;
+graceful close remains pending. Explicit forced process termination can lose those
+unpublished bytes, leaving the accepted input claim uncertain.
+Unhealthy SDK capabilities are reconstructed from the latest committed snapshot
 through the same Store owner. Interrupted commands never replay; queued commands
 and accepted work remain owned across caller cancellation. Exited funding and
 reconciliation tasks reuse existing gates and retry cadences; shutdown stops replacement.

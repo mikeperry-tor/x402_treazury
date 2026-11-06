@@ -103,13 +103,26 @@ impl Treasury {
     ) -> Result<()> {
         use futures_util::FutureExt;
         let result = loop {
-            let outcome = std::panic::AssertUnwindSafe(self.command_loop(
-                &mut commands,
-                &mut submission,
-                &stop,
-            ))
-            .catch_unwind()
-            .await;
+            let store = self.store.clone();
+            let outcome = {
+                let command_loop = std::panic::AssertUnwindSafe(self.command_loop(
+                    &mut commands,
+                    &mut submission,
+                    &stop,
+                ))
+                .catch_unwind();
+                tokio::pin!(command_loop);
+                tokio::select! {
+                    failure = store.stopped() => {
+                        stop.cancel();
+                        // Sync and submission own cancellation cleanup. Request
+                        // their stop and join rather than dropping accepted work.
+                        let _ = command_loop.await;
+                        Ok(Err(failure.into()))
+                    },
+                    outcome = &mut command_loop => outcome,
+                }
+            };
             match outcome {
                 Ok(result) => break result,
                 Err(_) => {
@@ -581,6 +594,30 @@ mod tests {
         async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
             panic!("unexpected lookup")
         }
+    }
+
+    #[tokio::test]
+    async fn dead_store_stops_treasury_commands_and_close_reports_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = Treasury::create(
+            dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
+        ).await.unwrap();
+        let store = owner.store_handle();
+        let error = store
+            .call::<()>(|_| panic!("fixture treasury storage failure"))
+            .await
+            .unwrap_err();
+        assert!(error.is::<crate::rotation::store::WorkerStopped>());
+        store.stopped().await;
+        let (handle, commands) = channel();
+        let stop = CancellationToken::new();
+        let result = owner
+            .run_commands(commands, NoSubmission, stop.clone())
+            .await;
+        assert!(result.is_err() && stop.is_cancelled());
+        assert!(handle.refund_address("unstarted".into()).await.is_err());
+        drop(store);
     }
 
     #[tokio::test]

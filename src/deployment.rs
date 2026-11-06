@@ -1001,7 +1001,7 @@ impl Deployment {
                                 );
                                 ManagedSetup::StoreOnly {
                                     owner: StoreOnlyOwner::new(*shared),
-                                    base: Some(base),
+                                    base: Some(Box::new(base)),
                                 }
                             }
                         },
@@ -1012,7 +1012,7 @@ impl Deployment {
                             );
                             ManagedSetup::StoreOnly {
                                 owner: StoreOnlyOwner::new(shared),
-                                base: Some(base),
+                                base: Some(Box::new(base)),
                             }
                         }
                     },
@@ -1802,7 +1802,7 @@ impl StoreOnlyOwner {
 enum ManagedSetup {
     StoreOnly {
         owner: StoreOnlyOwner,
-        base: Option<crate::rotation::base::BaseRpc>,
+        base: Option<Box<crate::rotation::base::BaseRpc>>,
     },
     Treasury(Box<TreasurySetup>),
 }
@@ -1820,7 +1820,7 @@ impl ManagedSetup {
     }
     fn base(&self) -> Option<&crate::rotation::base::BaseRpc> {
         match self {
-            Self::StoreOnly { base, .. } => base.as_ref(),
+            Self::StoreOnly { base, .. } => base.as_deref(),
             Self::Treasury(treasury) => Some(&treasury.base),
         }
     }
@@ -2106,6 +2106,8 @@ impl RunningDeployment {
     }
 }
 
+#[cfg(test)]
+mod store_loss_tests;
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;

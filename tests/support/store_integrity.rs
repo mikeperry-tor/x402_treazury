@@ -853,12 +853,7 @@ async fn owner_panic_never_acknowledges_or_loses_an_atomic_payment() {
                 panic!("injected atomic payment owner failure");
             })
             .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("store worker stopped")
-        );
+        assert!(result.unwrap_err().is::<WorkerStopped>());
         assert!(worker.await.unwrap_err().is_panic());
         assert!(gate.try_lock().is_ok());
         drop(store);

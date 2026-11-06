@@ -261,6 +261,23 @@ fn publish_owned(
                 };
             }
             Err(error) => {
+                if error.is::<crate::rotation::store::WorkerStopped>() || store.is_stopped() {
+                    if let Some(notify) = notify.take() {
+                        let _ = notify.send(crate::rotation::store::WorkerStopped.into());
+                    }
+                    tracing::error!(
+                        category = "unpublished_transaction_store_stopped",
+                        "Calculated transaction cannot be saved because wallet storage stopped; its exact bytes and accepted inputs remain owned. Graceful shutdown cannot complete; forced shutdown can lose unpublished bytes and requires recovery before further funding"
+                    );
+                    // No Store retry, reconstruction, disclosure or recalculation
+                    // can resolve worker death. Preserve the original completed
+                    // result through waiter/runtime cancellation until explicit
+                    // process termination rather than claiming a successful drain.
+                    loop {
+                        std::hint::black_box((&client, &completed, &store));
+                        std::thread::park();
+                    }
+                }
                 if !crate::rotation::store::database_busy(&error) {
                     diagnostics::report_local_retry(&error, "transaction publication");
                 }
@@ -347,6 +364,93 @@ impl Treasury {
 mod tests {
     use super::*;
     const SEED: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    #[test]
+    fn dead_store_retains_completed_bytes_and_truthfully_blocks_graceful_close() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "treasury::publication::tests::dead_store_retention_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "terminal retained owner requires isolated forced runtime teardown"]
+    fn dead_store_retention_child() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let mut owner = Treasury::create(
+                dir.path().join("state"),
+                dir.path().join("key"),
+                2_000_000,
+                Some(Zeroizing::new(SEED.into())),
+            )
+            .await
+            .unwrap();
+            let id = owner
+                .store
+                .call(|s| {
+                    s.accept_preparation("retained", None, 60, None)?;
+                    Ok(s.id().to_owned())
+                })
+                .await
+                .unwrap();
+            let error = owner
+                .store
+                .call::<()>(|_| panic!("fixture storage loss"))
+                .await
+                .unwrap_err();
+            assert!(error.is::<crate::rotation::store::WorkerStopped>());
+            owner.store.stopped().await;
+            let error = owner
+                .retain_calculation("retained".into(), late_raw(), Ok(late_facts()))
+                .await
+                .err()
+                .unwrap();
+            assert!(error.is::<crate::rotation::store::WorkerStopped>());
+            assert!(owner.client.is_none() && !owner.healthy);
+            assert!(!owner.running.as_ref().unwrap().is_finished());
+            assert!(
+                Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err(),
+                "retained completion keeps the original exclusive Store lock"
+            );
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM outgoing", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            let close = tokio::spawn(owner.close());
+            tokio::task::yield_now().await;
+            assert!(
+                !close.is_finished(),
+                "fatal retained bytes cannot report a successful drain"
+            );
+            close.abort();
+            assert!(
+                Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).is_err(),
+                "disconnecting the close waiter cannot release retained ownership"
+            );
+        });
+        // Production's explicit forced process termination is the only escape
+        // from a permanently dead Store holding an unpublished result. Confine
+        // this fixture's deliberately unfinished blocking owner to its child.
+        runtime.shutdown_background();
+    }
     #[tokio::test]
     async fn retained_publication_busy_is_one_safe_debug_record_and_retries_identical_bytes() {
         if crate::test_log_capture::run_in_child(

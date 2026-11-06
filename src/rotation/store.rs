@@ -15,6 +15,8 @@ pub(crate) mod test_support;
 pub(crate) mod test_vfs;
 mod treasury_observation;
 mod treasury_reads;
+#[cfg(test)]
+mod worker_tests;
 pub use capacity::AllocationKind;
 mod evidence;
 pub use evidence::BalanceSupport;
@@ -46,6 +48,7 @@ use std::{
     fs::{self, File, OpenOptions},
     path::Path,
 };
+use tracing::instrument::WithSubscriber;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -224,7 +227,7 @@ pub struct Store {
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
-    _lock: ownership::Owner,
+    _lock: std::sync::Arc<ownership::Owner>,
     key: Zeroizing<[u8; 32]>,
     id: String,
 }
@@ -468,7 +471,7 @@ impl Store {
             group_gates: Default::default(),
             treasury_changes: Default::default(),
             db,
-            _lock: owner,
+            _lock: std::sync::Arc::new(owner),
             key,
             id,
             network,
@@ -530,7 +533,7 @@ impl Store {
             group_gates: Default::default(),
             treasury_changes: Default::default(),
             db,
-            _lock: owner,
+            _lock: std::sync::Arc::new(owner),
             key,
             id,
             network: expected_network,
@@ -1146,9 +1149,21 @@ struct GroupOwners {
     capacity_changed: std::sync::Arc<tokio::sync::Notify>,
 }
 type GroupGates = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, GroupOwners>>>;
+/// The serialized Store has ended. Retrying a closure cannot restore this capability.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WorkerStopped;
+impl std::fmt::Display for WorkerStopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Store worker stopped; affected wallet operations require restart; accepted financial work remains unresolved")
+    }
+}
+impl std::error::Error for WorkerStopped {}
 #[derive(Clone)]
 pub struct StoreHandle {
     sender: tokio::sync::mpsc::Sender<Work>,
+    // Accepted consumers retain the original exclusive lock after worker death.
+    _lock: std::sync::Arc<ownership::Owner>,
+    worker_stopped: tokio::sync::watch::Receiver<bool>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
     balance_observers: observation::Observers,
@@ -1156,18 +1171,36 @@ pub struct StoreHandle {
 }
 impl StoreHandle {
     pub fn spawn(store: Store) -> (Self, tokio::task::JoinHandle<()>) {
+        let lock = store._lock.clone();
         let group_gates = store.group_gates.clone();
         let treasury_changes = store.treasury_changes.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Work>(32);
-        let task = tokio::task::spawn_blocking(move || {
+        let worker = tokio::task::spawn_blocking(move || {
             let mut store = store;
             while let Some(work) = receiver.blocking_recv() {
                 work(&mut store);
             }
         });
+        let (stopped, worker_stopped) = tokio::sync::watch::channel(false);
+        // Supervise the exact blocking worker, including when no caller is using
+        // the Store. Never replay its accepted closures or restart its connection.
+        let task = tokio::spawn(async move {
+            let result = worker.await;
+            stopped.send_replace(true);
+            if let Err(error) = result {
+                let cause = if error.is_panic() { "worker_panic" } else { "worker_cancelled" };
+                tracing::error!(category = "store_worker_stopped", cause,
+                    "Wallet storage stopped; dependent payments, funding and reconciliation are unavailable until restart. Independent wallets remain usable; accepted financial work remains unresolved");
+                // A panic payload can contain credentials. Preserve failure at
+                // join/close without exposing the original payload.
+                std::panic::resume_unwind(Box::new("Store worker stopped"));
+            }
+        }.with_current_subscriber());
         (
             Self {
                 sender,
+                _lock: lock,
+                worker_stopped,
                 group_gates,
                 treasury_changes,
                 balance_observers: Default::default(),
@@ -1175,6 +1208,14 @@ impl StoreHandle {
             },
             task,
         )
+    }
+    pub(crate) async fn stopped(&self) -> WorkerStopped {
+        let mut stopped = self.worker_stopped.clone();
+        let _ = stopped.wait_for(|stopped| *stopped).await;
+        WorkerStopped
+    }
+    pub(crate) fn is_stopped(&self) -> bool {
+        self.sender.is_closed()
     }
     pub(crate) fn funding_owner(
         &self,
@@ -1227,8 +1268,8 @@ impl StoreHandle {
         let (work, recv) = Self::work(f, FailureDisposition::Terminal);
         crate::limits::send_capacity(&self.sender, work, "store_queue_full", 32)
             .await
-            .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
-        recv.await.context("store worker stopped")?
+            .map_err(|_| WorkerStopped)?;
+        recv.await.map_err(|_| WorkerStopped)?
     }
     pub(crate) fn call_blocking<T: Send + 'static>(
         &self,
@@ -1236,10 +1277,8 @@ impl StoreHandle {
         f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (work, recv) = Self::work(f, disposition);
-        self.sender
-            .blocking_send(work)
-            .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
-        recv.blocking_recv().context("store worker stopped")?
+        self.sender.blocking_send(work).map_err(|_| WorkerStopped)?;
+        recv.blocking_recv().map_err(|_| WorkerStopped)?
     }
 
     fn work<T: Send + 'static>(

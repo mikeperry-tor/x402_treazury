@@ -1,5 +1,10 @@
 # Catalog startup qualification
 
+`deployment::store_loss_tests` checks that store-only ownership observes the exact
+worker failure, dependent calls fail and close reports failure while a separate
+Store remains usable. The shared Store supervisor reports loss even without a
+new request; it does not stop independent listeners or restart financial work.
+
 `tests/startup.rs` checks rolling replenishment, the default two-request catalog bound,
 failure and caller cancellation closing active requests, untouched queued sources,
 serial/parallel inventory equality, compatible alias sharing (concurrent and queued),

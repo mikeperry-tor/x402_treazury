@@ -190,6 +190,18 @@ are both absent. Completed bytes take precedence:
 only an unacknowledged local publication repeats on the existing 60-second cadence,
 including shutdown. The blocking owner alone owns this retry and its diagnostic;
 its first publication error can return to the caller while identical work continues.
+The exact Store worker is supervised independently of pending requests, including
+store-only serving. A worker failure is terminal for that Store capability, fails
+its callers and stops treasury admission; it is never an SQL-contention retry or
+permission to restart a closure. Other Stores and static wallets remain usable.
+The original exclusive file lock stays with Store handles, so accepted consumers
+still prevent another owner from opening the same state after worker death.
+If completed bytes cannot be published because the worker died, the existing
+blocking owner retains the original client, bytes, snapshot and accepted inputs
+without retries, another calculation or SDK reconstruction. The caller receives
+failure promptly. Graceful close cannot finish while this terminal retained work
+exists; an explicit forced shutdown can lose unpublished bytes and leaves recovery
+responsible for uncertain accepted input claims.
 Normal runtime shutdown can wait for persistent local storage failure to be repaired;
 there is no forced abandonment deadline. A known durable commit clears that retry owner even if its
 submission view cannot be decoded; that view failure requires SDK reconstruction,

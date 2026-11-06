@@ -357,6 +357,12 @@ Retried local SDK reconstruction and completed-transaction publication report
 individual failures at DEBUG, with fixed snapshot categories, SQLite error codes
 or I/O kinds when available. Arbitrary error prose is never logged. These
 retries preserve accepted work and do not imply an operator-required stop.
+Store-worker termination is different: its exact handle is supervised and emits
+one immediate ERROR with a fixed panic/cancellation cause and affected capability,
+without the panic payload. Dead-Store operations fail instead of retrying SQL.
+Completed unpublished transactions emit their own ERROR explaining that exact
+bytes remain retained and graceful shutdown cannot finish. A forced shutdown can
+lose those bytes; the original accepted inputs remain uncertain, never replayable.
 
 The treasury scan owner emits INFO when its existing observation schedule first
 changes from successful/unattempted to failed, including scans requested through
