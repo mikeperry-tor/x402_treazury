@@ -599,7 +599,7 @@ It accepts one mainnet transparent recipient, uses account 0's
 shielded inputs, rejects multi-step transactions, and verifies the resulting
 recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
 operation UUID, source/fee safeguards and quote deadline.
-`funding.quote_deadline_seconds` requests a 7,200-second window by default;
+`funding.quote_deadline_seconds` requests a 3,600-second window by default;
 the returned quote can be shorter and remains authoritative. Preparation and the
 first submission require an unexpired returned deadline, without an extra local
 margin. The requested window is a preference. The chain-specific 1Click watcher

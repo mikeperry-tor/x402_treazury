@@ -316,6 +316,10 @@ Mnemonic imports retain discovery defaults; reconstruction and reopening load th
 saved settings without changing address history. Legacy transparent bindings keep
 their discovery and shielding path. Shielded trial decryption remains enabled.
 
+The requested NEAR quote window defaults to 3,600 seconds. Returned quote deadlines
+and consensus-derived signed block expiry remain independent, including across NU7;
+existing accepted deadlines and bytes survive restart unchanged.
+
 New refund derivation calls the pinned SDK's existing
 `generate_unified_address(ReceiverSelection::all_shielded(), AccountId::ZERO)`.
 The result contains Sapling and Orchard receivers without a transparent fallback.

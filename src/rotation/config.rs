@@ -47,7 +47,7 @@ fn deadline() -> u64 {
     1800
 }
 fn quote_window() -> u64 {
-    7200
+    3600
 }
 const DEFAULT_SMALL_MINIMUM_USDC: &str = "2.00";
 const DEFAULT_SMALL_MAXIMUM_USDC: &str = "5.00";

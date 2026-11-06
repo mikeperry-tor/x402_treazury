@@ -643,6 +643,11 @@ amounts are separate. Offline inspection cannot infer migration cost or usable
 capacity.
 None of these inspection commands allocates keys or funds.
 
+`funding.quote_deadline_seconds` defaults to 3,600 seconds and preserves explicit
+operator overrides. It requests a quote window; the returned deadline governs
+preparation/disclosure independently of the SDK's consensus-derived signed block
+expiry. Existing accepted deadlines and signatures remain unchanged on restart.
+
 ### Reserve sizing and fragmentation
 
 Size large to at least twice the largest expected payment, preferably four times

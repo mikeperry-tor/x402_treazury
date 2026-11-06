@@ -599,3 +599,10 @@ and newly owned descriptors were independently checked against Apple sources.
 No extra allocation state/framework is needed. Stop the unfinished validation
 build before editing, retain its interrupted log without a pass claim, and rerun
 affected native/compiler consumers before continuing runtime and optimized checks.
+
+C08 implemented the 3,600-second requested default; explicit 7,200-second override
+regression remains, accepted quotes/transactions are unchanged. Existing returned
+quote-deadline/proving/cancellation/restart and actual SDK NU7 activation-boundary
+expiry fixtures remain authoritative and will run in their named stages. Owning
+configuration, wallet, SDK and both timer inventories updated. Validation and exact
+SHA review pending.

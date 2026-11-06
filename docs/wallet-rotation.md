@@ -930,7 +930,8 @@ New seed wallets persist disabled transparent discovery and publish shielded-onl
 receive addresses: the SDK's initial Orchard-only address and an additional
 Sapling+Orchard address. Imports and reopened snapshots preserve their discovery settings and issued
 addresses. This does not remove legacy transparent late-receipt recovery.
-
+The requested quote window defaults to 3,600 seconds; explicit overrides, returned
+quote deadlines and the SDK's signed block expiry retain their separate authority.
 
 New swaps use a persisted unique shielded-only unified refund address, containing
 Sapling and Orchard receivers derived from treasury account zero. The same Zcash
