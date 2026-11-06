@@ -707,3 +707,14 @@ ancestry. NU7 release qualification, funded refund/settlement, real Tor, a fresh
 reproducible release, Windows, Linux CI and the remaining focused assessments stay
 with their existing unfinished owners. No push, merge, deployment, paid call or
 funded qualification is authorized by this acceptance or cleanup.
+
+Narrowed production/all-target Clippy passed and the complete default library now
+passes 1,222 tests (22 intentional ignores). Further default integrations passed
+through CLI contracts 25/25, then exposed a pre-existing CLI layout assertion
+comparing timestamped stderr bytes across separate invocations. Its introducing
+commit is `83bc75e3325d5ec90cdeb1aba56874edd5ac009b`. Disable lifecycle tracing only
+in that precedence fixture, preserving exact command-error/status comparisons and
+all path/override assertions; severity remains covered by CLI diagnostic tests.
+This is a focused prerequisite for required validation, not production log suppression.
+Carry forward unchanged library/compatibility/compiler inputs and revalidate the
+changed target before continuing unfinished default/proving/lifecycle/codec stages.

@@ -135,6 +135,9 @@ fn deployment_config_environment_applies_to_each_command_and_cli_wins() {
         command
             .env_clear()
             .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+            // Compare command errors; timestamped lifecycle diagnostics have
+            // separate coverage in cli_contracts.
+            .env("RUST_LOG", "off")
             .current_dir(dir.path())
             .args(args);
         if let Some(config) = config {
