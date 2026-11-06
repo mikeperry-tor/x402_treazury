@@ -92,6 +92,95 @@ fn presence_alternatives_rename_only_body_arguments() {
 }
 
 #[test]
+fn scalar_query_unions_preserve_constraints_and_route_values_without_rewriting() {
+    for (arm, value) in [
+        (json!({"type":"string","enum":["BTC"]}), json!("BTC")),
+        (
+            json!({"type":"integer","minimum":1,"maximum":365}),
+            json!(90),
+        ),
+        (json!({"type":"number","minimum":0}), json!(1.5)),
+        (json!({"type":"boolean"}), json!(true)),
+    ] {
+        for other in [json!({"type":"null"}), json!({"type":"string"})] {
+            for reversed in [false, true] {
+                let arms = if reversed {
+                    json!([other, arm])
+                } else {
+                    json!([arm, other])
+                };
+                let schema = json!({"anyOf":arms,"default":value,"description":"Filter.","x-note":{"opaque":true}});
+                let document = json!({"openapi":"3.1.0","paths":{"/lookup":{"get":{"parameters":[
+                    {"name":"q","in":"query","schema":schema,"explode":false}
+                ]}}}});
+                let tool = build_tools(&Config::default(), &document, "api")
+                    .unwrap()
+                    .remove(0);
+                let mut expected = schema;
+                expected["description"] =
+                    json!("Filter. Use a scalar value or an array of scalars.");
+                assert_eq!(tool.input_schema["properties"]["q"], expected);
+                let restored: ToolSpec =
+                    serde_json::from_value(serde_json::to_value(&tool).unwrap()).unwrap();
+                let route = restored
+                    .route(
+                        "https://example.com",
+                        json!({"q":value}).as_object().unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(route.query["q"], value);
+                assert!(route.body.is_none());
+                let route = restored
+                    .route(
+                        "https://example.com",
+                        json!({"q":null}).as_object().unwrap(),
+                    )
+                    .unwrap();
+                assert!(route.query.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn scalar_query_union_near_matches_remain_unsupported() {
+    for schema in [
+        json!({"anyOf":[{"type":"object"},{"type":"null"}]}),
+        json!({"anyOf":[{"type":"array","items":{"type":"string"}},{"type":"null"}]}),
+        json!({"anyOf":[{"type":"null"},{"type":"null"}]}),
+        json!({"anyOf":[{"type":"integer"},true]}),
+        json!({"anyOf":[{"type":"integer"},{}]}),
+        json!({"anyOf":[{"type":"integer"},{"type":"string"},{"type":"null"}]}),
+        json!({"oneOf":[{"type":"integer"},{"type":"null"}]}),
+        json!({"allOf":[{"type":"string"},{"type":"array"}]}),
+    ] {
+        assert!(
+            input::prepare(&json!({"params":[{"name":"q","in":"query","schema":schema}]})).is_err()
+        );
+    }
+    let original = json!({"anyOf":[{"type":"integer"},{"type":"null"}]});
+    for patch in [
+        json!({"in":"path"}),
+        json!({"style":"deepObject"}),
+        json!({"allowReserved":true}),
+    ] {
+        let mut parameter = json!({"name":"q","in":"query","schema":original});
+        parameter
+            .as_object_mut()
+            .unwrap()
+            .extend(patch.as_object().unwrap().clone());
+        assert!(input::prepare(&json!({"params":[parameter]})).is_err());
+    }
+    for key in ["allOf", "oneOf", "not", "if", "then", "else", "prefixItems"] {
+        let mut schema = original.clone();
+        schema[key] = json!({});
+        assert!(
+            input::prepare(&json!({"params":[{"name":"q","in":"query","schema":schema}]})).is_err()
+        );
+    }
+}
+
+#[test]
 fn exact_string_array_query_union_preserves_schema_and_uses_existing_codec_guards() {
     let original = json!({"anyOf":[{"type":"array","items":{"type":"string"}},{"type":"string"}],
         "default":["photos"],"description":"Fields to exclude.","x-note":{"opaque":true}});

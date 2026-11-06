@@ -687,7 +687,11 @@ Public demos, previews, feed pages, refinery data, lease-auction/portfolio reads
 and audit-target listings are included. No subscription-management or wallet-owned
 contract appears in those captured
 requests. Recommendations suggest macro/rates, news and token research plus help,
-without hiding other supported tools. The guide remains lazy.
+without hiding other supported tools. Nullable scalar query schemas on funding
+rates, insider trades and portfolio analysis retain their authored `anyOf` and
+defaults; the scalar query codec handles their values and omits nulls. This also
+keeps exact deployment selectors such as `insider_trades` available. The guide
+remains lazy.
 
 ## glassnode/ — Glassnode x402 gateway (x402.glassnode.com)
 
@@ -1911,7 +1915,15 @@ across calls. Rotating payment identities cannot preserve that workflow. Batch c
 embed these primitives without a schema-level eligibility boundary, so it is also
 excluded. `/api/countdown/gif` returns unsupported animated GIF bytes. Other model
 and utility calls remain reusable; research selections are editorial. Object-valued
-query filters are serialized as JSON, including OSHA initialPenalty bounds.
+query filters are unsupported, so `GET /api/gov/osha-violations` is excluded for
+its `initialPenalty` object. The schema supplies no supported POST twin.
+`GET /api/climate/station-history`, `GET /api/crypto/kimchi-premium` and
+`GET /api/crypto/token-price` are excluded because their query schemas intersect
+string and array types with `allOf`; treating these as alternatives would change
+the declared contracts. Revisit these exclusions when authoritative schemas are
+repaired or the required serializer is supported. The scalar `anyOf` queries on
+representatives, USC sections and URL mapping remain supported without rewriting
+their constraints.
 
 Generic POI and Google Places calls are partial resort alternatives, not ski APIs.
 The 2s POI sample near Kitzbühel failed HTTP 502 from Overpass; StableEnrich partial
@@ -1928,6 +1940,14 @@ namespace changes the payment contract. An unsigned UK-company request advertise
 Base USDC exact under v2; this does not qualify delivery. Authenticated account,
 credit and transaction workflows are separate from wallet-paid capabilities.
 Public metadata remains available where the schema supports ordinary reads.
+
+Exact GET exclusions cover `api-health-check`, `api-mock-response`,
+`fake-data-generate`, `html-to-pdf`, `http-to-curl`, `json-schema-validate`,
+`llm-output-validate`, `risk-narrative-generate` and `tool-call-validate` under
+`/x402/v2`: each declares object-valued query parameters without a supported
+serialization contract or POST twin. Do not silently JSON-stringify these objects
+or drop optional inputs. Revisit the exclusions when their request contracts or
+serializer support change; other wallet-paid v2 capabilities remain available.
 
 Exact exclusions also cover account-owned transaction listing/deletion,
 audit-token creation, dispute reads/submission, solution execution, webhook-secret

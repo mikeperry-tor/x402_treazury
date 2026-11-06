@@ -1070,8 +1070,11 @@ encoding and are omitted explicitly rather than advertised as empty JSON inputs.
 Path inputs serialize scalars; query inputs serialize scalars or repeated scalar
 arrays. Authored boolean schemas and no-type constraints remain intact; only an
 absent schema uses the legacy string default. Composed parameter schemas need an
-explicit representable root wire type, except the exact query union of a string
-and an array of strings. That union uses the existing form/explode query codec
+explicit representable root wire type, except two-arm query `anyOf` unions of
+explicit scalar types (string, integer, number, boolean or null, with at least one
+non-null arm), or the exact union of a string and an array of strings. Scalar
+unions preserve arm constraints and use the existing scalar codec; null query
+values are omitted. The string/array union uses the existing form/explode query codec
 without rewriting its schema/default, and still requires repeated-value array
 encoding (`explode = true`, the form default). Without an explicit root wire type,
 other compositions (including coexisting applicators) and path-array unions remain

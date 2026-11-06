@@ -127,7 +127,7 @@ fn issue(value: &Value) -> Result<()> {
 }
 // A bounded wire-family exception, not a schema evaluator. Keep the authored
 // alternatives/default unchanged and let the existing array codec guards apply.
-fn string_or_string_array(schema: &Value) -> bool {
+fn query_union(schema: &Value) -> bool {
     if schema.get("type").is_some()
         || ["allOf", "oneOf", "not", "if", "then", "else", "prefixItems"]
             .iter()
@@ -141,6 +141,15 @@ fn string_or_string_array(schema: &Value) -> bool {
     let [left, right] = arms.as_slice() else {
         return false;
     };
+    let scalar = |node: &Value| {
+        matches!(
+            node["type"].as_str(),
+            Some("string" | "integer" | "number" | "boolean" | "null")
+        )
+    };
+    if scalar(left) && scalar(right) {
+        return left["type"] != "null" || right["type"] != "null";
+    }
     let string = |node: &Value| {
         node.as_object().is_some_and(|fields| {
             fields.len() == 1 && fields.get("type").and_then(Value::as_str) == Some("string")
@@ -202,8 +211,14 @@ fn parameter(p: &Value) -> Result<()> {
                 .is_some_and(|types| types.iter().any(|value| value == kind))
     };
     let object = contains("object");
-    let query_union = location == "query" && string_or_string_array(&p["schema"]);
-    let array = contains("array") || query_union;
+    let query_union = location == "query" && query_union(&p["schema"]);
+    // The existing string/array union needs repeated-value encoding; scalar
+    // unions do not, including nullable scalars whose null value is omitted.
+    let union_array = query_union
+        && p["schema"]["anyOf"]
+            .as_array()
+            .is_some_and(|arms| arms.iter().any(|arm| arm["type"] == "array"));
+    let array = contains("array") || union_array;
     // Other compositions still need an explicit root wire type. Do not infer
     // through arbitrary alternatives or intersect the contract with type:string.
     if types.is_null()
