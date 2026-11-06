@@ -1,0 +1,143 @@
+{
+  "source": "https://2s.io/api/openapi",
+  "source_sha256": "ba8ea3094957214d6d514ed6aca8f29a66dea6870ed1d615813d1624fa4c106e",
+  "purpose": "Original contradictory preprocessing schemas for the four authored CSV query repairs.",
+  "parameters": [
+    {
+      "path": "/api/climate/station-history",
+      "parameter": {
+        "name": "dataTypes",
+        "in": "query",
+        "description": "Comma-separated element codes (TMAX, TMIN, TAVG, PRCP, SNOW, SNWD, AWND, WSF2, WSF5, EVAP). Default TMAX,TMIN,PRCP.",
+        "schema": {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "default": "TMAX,TMIN,PRCP"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "TMAX",
+                  "TMIN",
+                  "TAVG",
+                  "PRCP",
+                  "SNOW",
+                  "SNWD",
+                  "AWND",
+                  "WSF2",
+                  "WSF5",
+                  "EVAP"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/api/crypto/kimchi-premium",
+      "parameter": {
+        "name": "symbol",
+        "in": "query",
+        "description": "Comma-separated ticker symbols, up to 10 (default BTC). E.g. \"BTC,ETH,XRP,SOL\".",
+        "schema": {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "string",
+                  "maxLength": 120
+                }
+              ],
+              "default": "BTC"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z0-9]{2,12}$"
+              },
+              "minItems": 1,
+              "maxItems": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/api/crypto/token-price",
+      "parameter": {
+        "name": "ids",
+        "in": "query",
+        "required": true,
+        "description": "Comma-separated CoinGecko asset ids (lowercase), e.g. \"bitcoin,ethereum\". Max 25.",
+        "schema": {
+          "allOf": [
+            {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 600
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "minItems": 1,
+              "maxItems": 25
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/api/crypto/token-price",
+      "parameter": {
+        "name": "vs",
+        "in": "query",
+        "description": "Vs.",
+        "schema": {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "not": {}
+                },
+                {
+                  "type": "string",
+                  "maxLength": 60
+                }
+              ],
+              "default": "usd"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]{2,10}$"
+              },
+              "minItems": 1,
+              "maxItems": 5
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

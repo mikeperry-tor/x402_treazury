@@ -2,7 +2,7 @@
 macro_rules! provider_manifest {
     ($consumer:ident) => {
         $consumer! {
-            ("2s", "providers/2s.toml", None),
+            ("2s", "providers/2s.toml", Some("providers/2s-openapi.json")),
             ("agdata", "providers/agdata.toml", None),
             ("agent402", "providers/agent402.toml", None),
             ("agentfund", "providers/agentfund.toml", None),
@@ -60,7 +60,7 @@ macro_rules! provider_manifest {
             ("stableenrich", "providers/stableenrich.toml", None),
             ("stabletravel", "providers/stabletravel/provider.toml", Some("providers/stabletravel/openapi.json")),
             ("straits", "providers/straits/provider.toml", Some("providers/straits/openapi.json")),
-            ("strale", "providers/strale.toml", None),
+            ("strale", "providers/strale.toml", Some("providers/strale-openapi.json")),
             ("vaaya", "providers/vaaya.toml", None),
             ("voipstore", "providers/voipstore.toml", None),
             ("webintel", "providers/webintel.toml", None),

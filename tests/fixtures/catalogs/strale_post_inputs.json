@@ -1,0 +1,234 @@
+{
+  "source": "https://api.strale.io/x402/catalog?include=output_schema",
+  "capture_sha256": "d8c0f65431d4bf59699367be4f11c1fb1e54601ea3c4de840ca4b81dda4a16be",
+  "purpose": "Complete catalog input schemas for the nine authored POST method repairs; advertised GET is incompatible with the gateway complex-input method gate.",
+  "capabilities": [
+    {
+      "slug": "api-health-check",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/api-health-check",
+      "input_schema": {
+        "properties": {
+          "body": {},
+          "expected_schema": {
+            "type": "object"
+          },
+          "expected_status": {
+            "type": "integer"
+          },
+          "headers": {
+            "type": "object"
+          },
+          "method": {
+            "type": "string"
+          },
+          "url": {
+            "description": "API endpoint URL",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "slug": "api-mock-response",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/api-mock-response",
+      "input_schema": {
+        "properties": {
+          "method": {
+            "type": "string"
+          },
+          "response_schema": {
+            "type": "object"
+          },
+          "status_code": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "slug": "fake-data-generate",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/fake-data-generate",
+      "input_schema": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "fields": {
+            "description": "Array of {name, type}",
+            "type": "array"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "schema": {
+            "description": "JSON Schema",
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "slug": "html-to-pdf",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/html-to-pdf",
+      "input_schema": {
+        "properties": {
+          "html": {
+            "description": "HTML string to convert",
+            "type": "string"
+          },
+          "landscape": {
+            "type": "boolean"
+          },
+          "margins": {
+            "type": "object"
+          },
+          "paper_size": {
+            "type": "string"
+          },
+          "url": {
+            "description": "URL to convert",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "slug": "http-to-curl",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/http-to-curl",
+      "input_schema": {
+        "properties": {
+          "auth": {
+            "type": "object"
+          },
+          "body": {},
+          "headers": {
+            "type": "object"
+          },
+          "method": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "slug": "json-schema-validate",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/json-schema-validate",
+      "input_schema": {
+        "properties": {
+          "data": {
+            "description": "JSON data to validate"
+          },
+          "schema": {
+            "description": "JSON Schema to validate against",
+            "type": "object"
+          }
+        },
+        "required": [
+          "data",
+          "schema"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "slug": "llm-output-validate",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/llm-output-validate",
+      "input_schema": {
+        "properties": {
+          "expected_schema": {
+            "description": "JSON Schema to validate against",
+            "type": "object"
+          },
+          "llm_output": {
+            "description": "Raw LLM output string",
+            "type": "string"
+          },
+          "strict_mode": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "llm_output"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "slug": "risk-narrative-generate",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/risk-narrative-generate",
+      "input_schema": {
+        "properties": {
+          "check_results": {
+            "description": "Structured check results from upstream capabilities",
+            "type": "object"
+          },
+          "context": {
+            "description": "Context for the risk assessment (kyb or invoice_fraud)",
+            "enum": [
+              "kyb",
+              "invoice_fraud"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_results",
+          "context"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "slug": "tool-call-validate",
+      "advertised_method": "GET",
+      "endpoint": "https://api.strale.io/x402/v2/tool-call-validate",
+      "input_schema": {
+        "properties": {
+          "expected_schema": {
+            "type": "object"
+          },
+          "tool_input": {
+            "type": "object"
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name",
+          "tool_input",
+          "expected_schema"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

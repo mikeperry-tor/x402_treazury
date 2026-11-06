@@ -1895,8 +1895,13 @@ catalog checks validate the full runtime asset without freezing a tool inventory
 
 ## 2s (`2s.toml`)
 
-The vendor schema at `https://2s.io/api/openapi` supplies request contracts and
-`x-payment-info` pricing. `/api` is the naming anchor; `twos` is the tool prefix.
+`2s-openapi.json` is an authored request snapshot of the vendor schema at
+`https://2s.io/api/openapi`, preserving its operation inventory, request contracts,
+security and `x-payment-info` pricing outside the four CSV repairs below. Operation
+responses and `components.responses` are omitted: their grouped external schema
+references are unused by request construction and fail strict bundled-import
+reference admission. The full upstream capture remains development evidence.
+`/api` is the naming anchor; `twos` is the tool prefix.
 Base USDC exact offers are available alongside optional metered offers. No funded
 settlement or comparative output quality is established by schema inspection.
 
@@ -1915,15 +1920,29 @@ across calls. Rotating payment identities cannot preserve that workflow. Batch c
 embed these primitives without a schema-level eligibility boundary, so it is also
 excluded. `/api/countdown/gif` returns unsupported animated GIF bytes. Other model
 and utility calls remain reusable; research selections are editorial. Object-valued
-query filters are unsupported, so `GET /api/gov/osha-violations` is excluded for
-its `initialPenalty` object. The schema supplies no supported POST twin.
-`GET /api/climate/station-history`, `GET /api/crypto/kimchi-premium` and
-`GET /api/crypto/token-price` are excluded because their query schemas intersect
-string and array types with `allOf`; treating these as alternatives would change
-the declared contracts. Revisit these exclusions when authoritative schemas are
-repaired or the required serializer is supported. The scalar `anyOf` queries on
+query filters remain unresolved for `GET /api/gov/osha-violations`, which stays
+excluded. Its `initialPenalty` JSON string returned HTTP 400; default flattened
+min/max encoding returned the unfiltered baseline, and bracket notation and a
+scalar control returned HTTP 502. A successful unfiltered trial does not establish
+penalty filtering. The schema supplies no supported POST twin. Revisit this exact
+exclusion when an authoritative working filter contract is available.
+
+The upstream schemas for station-history `dataTypes`, kimchi-premium `symbol`
+and token-price `ids`/`vs` intersect preprocessed string inputs with parsed array
+outputs using `allOf`. Their parameter descriptions and help explicitly document
+CSV strings; live requests applied multiple weather types, symbols, token IDs and
+quote currencies. The authored projection uses strings and preserves the original
+string lengths/defaults plus item enum/pattern and count restrictions as CSV
+patterns. It does not reinterpret `allOf` generally or expose repeated query
+arrays for these parameters. The scalar `anyOf` queries on
 representatives, USC sections and URL mapping remain supported without rewriting
 their constraints.
+
+Refresh through the shared maintenance capture/review workflow, comparing the
+complete upstream schema and registry before reapplying these four exact parameter
+repairs and response-document omission. Preserve all unrelated request metadata.
+Use the bundled provider ID or API-base lookup for this repaired contract;
+importing the upstream OpenAPI URL directly uses the unpatched remote schema.
 
 Generic POI and Google Places calls are partial resort alternatives, not ski APIs.
 The 2s POI sample near Kitzbühel failed HTTP 502 from Overpass; StableEnrich partial
@@ -1935,19 +1954,38 @@ supply Maxwell resort menus, lift distances, ticket prices or operating feeds.
 ## Strale (`strale.toml`)
 
 Use the actual `/x402/v2` paths in `https://api.strale.io/openapi.json`.
-The `/x402/catalog` directory advertises legacy `/x402` URLs; substituting that
-namespace changes the payment contract. An unsigned UK-company request advertised
+The `/x402/catalog` directory also supplies canonical `/x402/v2` URLs; retain that
+namespace rather than substituting legacy `/x402` paths. An unsigned UK-company request advertised
 Base USDC exact under v2; this does not qualify delivery. Authenticated account,
 credit and transaction workflows are separate from wallet-paid capabilities.
 Public metadata remains available where the schema supports ordinary reads.
 
-Exact GET exclusions cover `api-health-check`, `api-mock-response`,
+`strale-openapi.json` is an authored snapshot preserving the upstream OpenAPI
+outside nine complex-input method repairs. The published OpenAPI and x402 catalog
+advertise GET for `api-health-check`, `api-mock-response`,
 `fake-data-generate`, `html-to-pdf`, `http-to-curl`, `json-schema-validate`,
 `llm-output-validate`, `risk-narrative-generate` and `tool-call-validate` under
-`/x402/v2`: each declares object-valued query parameters without a supported
-serialization contract or POST twin. Do not silently JSON-stringify these objects
-or drop optional inputs. Revisit the exclusions when their request contracts or
-serializer support change; other wallet-paid v2 capabilities remain available.
+`/x402/v2`, but the gateway rejects complex-schema GET requests with HTTP 405
+after payment verification. Each repaired operation uses POST with a required
+`application/json` body containing its complete x402 catalog `input_schema`.
+The repair preserves other operation metadata, responses, security and pricing.
+JSON-stringifying objects in query parameters cannot fix the method mismatch.
+
+The gateway and PDF executor were inspected at upstream commit
+`e79fbf2574def4583b80053a29515a265db8a0ac`. HTML-to-PDF returns synchronous JSON
+with `base64_pdf`, without the async-only `files` field. Live POST probes showed
+schema validation applying a nested schema and HTTP-to-cURL preserving nested
+headers/body; the other seven operations have source/schema evidence rather than
+paid delivery qualification. No automatic retry or nonpayment assurance follows
+from the failed GET probe.
+
+Refresh through shared maintenance capture/review, reconciling the upstream
+OpenAPI, complete catalog input schemas and gateway source. Preserve complete
+body schemas rather than reconstructing them from the lossy GET parameter view;
+retire a repair when upstream publishes the correct POST contract. Bundled ID or
+API-base selection uses the repaired asset; importing the upstream OpenAPI URL
+directly retains upstream contracts. Previously accepted dynamic registrations
+retain their accepted bytes until explicitly refreshed.
 
 Exact exclusions also cover account-owned transaction listing/deletion,
 audit-token creation, dispute reads/submission, solution execution, webhook-secret

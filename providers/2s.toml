@@ -1,5 +1,6 @@
 description = "Public records, patent search and EPO records, scientific datasets, aviation, climate, vulnerability evidence and market research."
-spec = "https://2s.io/api/openapi"
+# Authored request snapshot repairs four CSV schemas; see CAVEATS.md.
+spec = "2s-openapi.json"
 name = "2s"
 base_url = "https://2s.io"
 prefix = "twos"
@@ -10,11 +11,7 @@ exclude = ["/api/store", "/api/lock", "/api/queue", "/api/schedule", "/api/pubsu
 exclude_operations = [
   "POST /api/batch/run",
   "GET /api/countdown/gif",
-  # Conflicting string/array intersections cannot be represented faithfully.
-  "GET /api/climate/station-history",
-  "GET /api/crypto/kimchi-premium",
-  "GET /api/crypto/token-price",
-  # Object-valued query filters require unsupported serialization.
+  # No working encoding for the documented penalty object was established.
   "GET /api/gov/osha-violations",
 ]
 pricing_key = "x-payment-info"

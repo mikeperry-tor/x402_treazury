@@ -46,6 +46,18 @@ Preserve full inputs only where a concrete comparison needs the entire inventory
 The following notes describe scoped inputs, their concrete consumers and refresh
 basis.
 
+`strale_post_inputs.json` retains complete catalog input schemas for the nine
+complex-input operations whose advertised GET methods fail the gateway's method
+check. `twos_csv_parameters.json` retains the four original preprocessing
+intersections for the documented CSV inputs. These small independent witnesses
+support `tests/provider_contract_repairs.rs` schema fidelity and exact request
+reconstruction checks. Complete authored runtime assets remain under `providers/`;
+the 2s runtime asset omits response documentation, following the existing request
+snapshot convention so bundled registration contains no external response refs.
+The research-desk regression in `tests/deployment_provider_updates.rs` verifies
+the repaired assets through actual source selection and endpoint routing, keeping
+unselected utilities and unresolved OSHA filtering unavailable.
+
 The separate `tests/fixtures/otto_routing_openapi.json` reproduces the removed
 `generate_meme`/`video_gen` exact-selector failure in research-desk distribution.
 It retains complete current path objects for that deployment's exact selections,

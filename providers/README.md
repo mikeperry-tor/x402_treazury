@@ -54,8 +54,8 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Provider | Definition | Catalog |
 | --- | --- | --- |
 | Agent402 | `agent402.toml` | Full supported catalog; advisory web research recommendations and lowercase tags |
-| 2s | `2s.toml` | Public-data catalog; wallet-owned infrastructure, nested batch and GIF output excluded |
-| Strale | `strale.toml` | Wallet-paid v2 capabilities plus supported public discovery |
+| 2s | `2s.toml` | Authored request snapshot with CSV repairs; owned infrastructure, batch, GIF and unresolved OSHA filtering excluded |
+| Strale | `strale.toml` | Authored complex-input POST repairs; wallet-paid v2 capabilities and supported public discovery |
 | Maxwell International | `maxwell.toml` | Public data and travel; manual domain transfer excluded |
 | HALOWERK | `halowerk.toml` | Full JSON tool catalog; optional screenshot base64 retained as JSON |
 | Daedalus | `daedalus/provider.toml` | Identity-header request repair; queued fulfillment and persistent ownership excluded |

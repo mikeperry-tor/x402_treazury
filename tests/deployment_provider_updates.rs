@@ -131,6 +131,72 @@ async fn horizon_company_facts_use_reviewed_post_on_dynamic_company_endpoints() 
 }
 
 #[tokio::test]
+async fn repaired_csv_weather_and_post_utilities_preserve_research_desk_distribution() {
+    let twos = research_source(
+        "twos",
+        x402_treazury::providers::get("2s")
+            .unwrap()
+            .local_schema
+            .unwrap(),
+    )
+    .await;
+    let world = twos.iter().find(|server| server.server == "world").unwrap();
+    let history = world
+        .tools
+        .iter()
+        .find(|entry| entry.tool.name == "twos_climate_station_history")
+        .unwrap();
+    assert_eq!(history.tool.method, "GET");
+    assert_eq!(
+        history.tool.input_schema["properties"]["dataTypes"]["type"],
+        "string"
+    );
+    for server in &twos {
+        assert!(server.tools.iter().all(|entry| !matches!(
+            entry.tool.path.as_str(),
+            "/api/crypto/token-price" | "/api/crypto/kimchi-premium" | "/api/gov/osha-violations"
+        )));
+    }
+    let strale = research_source(
+        "strale",
+        x402_treazury::providers::get("strale")
+            .unwrap()
+            .local_schema
+            .unwrap(),
+    )
+    .await;
+    assert!(strale.iter().any(|server| {
+        server.server == "business"
+            && server
+                .tools
+                .iter()
+                .any(|entry| entry.tool.name == "strale_polish_company_data")
+    }));
+    // The reusable provider restores utilities; this deployment still deliberately
+    // excludes them in its final rule because parsing/validation belongs locally.
+    for server in &strale {
+        assert!(server.tools.iter().all(|entry| !matches!(
+            entry.tool.path.as_str(),
+            "/x402/v2/http-to-curl"
+                | "/x402/v2/json-schema-validate"
+                | "/x402/v2/tool-call-validate"
+                | "/x402/v2/html-to-pdf"
+        )));
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config: toml::Value = toml::from_str(
+        &std::fs::read_to_string(root.join("examples/deployments/research_desk.toml")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        config["servers"]["world"]["discovery_search_tool_instructions_text"]
+            .as_str()
+            .unwrap()
+            .contains("GHCN")
+    );
+}
+
+#[tokio::test]
 async fn authored_market_groundwater_and_history_additions_have_intended_destinations() {
     let apex = research_source(
         "apexfaucet",

@@ -1,6 +1,24 @@
 # Development evidence only. Runtime membership and URLs come from the bundle/TOML.
 # Sources are public evidence, never executable update recipes. Missing entries
 # are explicit unfinished authority research, never guessed URLs.
+[2s]
+intent = "authored"
+guidance = "providers/CAVEATS.md#2s-2stoml"
+sources = [
+    { url = "https://2s.io/api/openapi", purpose = "schema" },
+    { url = "https://2s.io/registry.json", purpose = "registry" },
+]
+
+[strale]
+intent = "authored"
+guidance = "providers/CAVEATS.md#strale-straletoml"
+sources = [
+    { url = "https://api.strale.io/openapi.json", purpose = "schema" },
+    { url = "https://api.strale.io/x402/catalog", purpose = "registry" },
+    { url = "https://raw.githubusercontent.com/strale-io/strale/main/apps/api/src/routes/x402-gateway-v2.ts", purpose = "source" },
+    { url = "https://raw.githubusercontent.com/strale-io/strale/main/apps/api/src/capabilities/html-to-pdf.ts", purpose = "source" },
+]
+
 [agproxy]
 intent = "vendor-copy"
 guidance = "providers/CAVEATS.md#pinned-relay-contracts"

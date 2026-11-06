@@ -92,4 +92,23 @@ whole-document import validation; Strale responses remain unchanged. The exact
 frozen 2s input has 566 external refs across 109 group response documents.
 Bundled ID/base-URL selection gets repaired assets; importing upstream OpenAPI
 URLs retains upstream contracts, following existing local-provider behavior.
-Pending: P1, validation, exact-SHA/combined G1, and P2 cleanup/review.
+P1 implementation is prepared: complete Strale authored asset, request-only 2s
+asset, provider settings/manifest/evidence metadata, independent schema witnesses,
+contract and deployment regressions, owning caveats and world discovery guidance.
+No source distribution selectors changed. Structural reconstruction against the
+frozen originals verifies unrelated requests/pricing/security are unchanged and
+Strale responses are preserved.
+
+Initial focused validation passed four deployment tests and two of three contract
+tests; the remaining test incorrectly omitted the parameter description added by
+catalog conversion. Corrected its expected schema to assert the full preserved
+description and constraints, without changing runtime assets. The corrected
+three-test contract suite passed, carrying forward the four unchanged deployment
+results. Strict dynamic import validation passed for every local bundled schema
+(one focused library test), closing the response-reference handoff concern.
+
+Independent implementation snapshot review found only that test expectation issue;
+the corrected state has no reported additional material findings. Exact snapshot
+hashes are retained in ignored `target/catalog-contract-probes/20261106/repair-snapshot.json`.
+Static checks are running; compiler/all-target Clippy, compatibility, affected
+provider/configuration suites, exact-SHA/combined G1 and P2 cleanup/review remain.

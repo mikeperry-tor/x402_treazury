@@ -1,5 +1,6 @@
 description = "International company registries, ownership, insolvency, compliance and trade research."
-spec = "https://api.strale.io/openapi.json"
+# Authored snapshot repairs complex-input methods with complete JSON bodies.
+spec = "strale-openapi.json"
 name = "Strale"
 base_url = "https://api.strale.io"
 prefix = "strale"
@@ -17,16 +18,6 @@ exclude_operations = [
   "POST /v1/web3-assurance",
   "POST /v1/transactions/{id}/audit-token",
   "POST /v1/transactions/{id}/dispute",
-  # Object-valued query inputs require unsupported serialization; no POST twins.
-  "GET /x402/v2/api-health-check",
-  "GET /x402/v2/api-mock-response",
-  "GET /x402/v2/fake-data-generate",
-  "GET /x402/v2/html-to-pdf",
-  "GET /x402/v2/http-to-curl",
-  "GET /x402/v2/json-schema-validate",
-  "GET /x402/v2/llm-output-validate",
-  "GET /x402/v2/risk-narrative-generate",
-  "GET /x402/v2/tool-call-validate",
 ]
 pricing_key = "x-payment-info"
 help_url = "https://api.strale.io/llms-full.txt"
