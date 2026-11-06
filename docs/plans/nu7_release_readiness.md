@@ -632,6 +632,19 @@ and all-target Clippy, refresh affected metrics and resume default/proving/lifec
 codec stages. Unchanged static Python/analyzer, SDK and earlier contract evidence
 remains valid within its recorded scope.
 
+After the TOML correction, the focused test and warm compiler/all-target Clippy
+pass. The next default run passed the corrected parser case but stopped on the
+catalog-capacity child's all-request count (1,233 pass/1 fail/22 ignored). Its
+serving tool may start Tor-default cover against the same catalog URL, so the
+fixture counted permitted range traffic as another catalog attempt. The isolated
+parent passed; independent source review confirms the ambiguity and the failure
+log records one cover request, without recording its peer Range header. A fixture
+opt-out isolates the named scheduler contract while preserving every exact count
+assertion and production defaults. Nearby Tor startup fixtures already opt out;
+no production retry/cancellation defect or wider missing opt-out was found in this
+focused audit. Revalidate that fixture and local Clippy, then resume unfinished
+named stages; retained logs preserve both failures and their distinct causes.
+
 The next default run passed all 1,234 library tests (22 ignored) and advanced to
 startup integration, where a fixture used `String::parse::<toml::Value>` for a
 whole document. TOML1.2 Value FromStr uses its standalone-value parser; the fixture

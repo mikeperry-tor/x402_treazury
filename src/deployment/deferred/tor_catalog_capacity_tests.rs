@@ -53,8 +53,10 @@ async fn origin(
     Json(serde_json::json!({"operations":[{"method":"GET","path":"/read"}]})).into_response()
 }
 fn config(mode: &str, socks: std::net::SocketAddr) -> String {
+    // Isolate catalog scheduling: an invoked tool's optional Tor cover ranges
+    // can otherwise use the catalog URL and inflate these request counts.
     let mut config = format!(
-        "version=1\n[network]\nmode='tor'\nsocks_endpoint='{socks}'\n[startup]\ncatalog_concurrency=2\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n"
+        "version=1\n[network]\nmode='tor'\nsocks_endpoint='{socks}'\ncover_traffic_enabled=false\n[startup]\ncatalog_concurrency=2\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n"
     );
     for id in ["a", "b", "z"] {
         config.push_str(&format!(
