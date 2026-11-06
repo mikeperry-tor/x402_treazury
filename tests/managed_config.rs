@@ -542,12 +542,25 @@ fn retirement_configuration_reopen_preserves_values_until_selected_groups_are_ap
 fn managed_cap_is_explicit_and_independent_of_reserve_targets() {
     let base = "mode='zcash_rotation'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='2'";
     assert!(toml::from_str::<WalletConfig>(base).is_err());
-    for cap in ["0", "0.01", "10", "none", "off", ""] {
+    for cap in ["0", "0.01", "10", "none", "off"] {
         let config: WalletConfig =
             toml::from_str(&format!("max_api_payment_usdc='{cap}'\n{base}")).unwrap();
         config.validate().unwrap();
         let shown = serde_json::to_value(config).unwrap();
         assert_eq!(shown["max_retirement_remainder_usdc"], "0.001");
+    }
+    for cap in ["", " "] {
+        for wallet in [
+            format!("max_api_payment_usdc='{cap}'\n{base}"),
+            format!("mode='static'\nprivate_key_env='KEY'\nmax_api_payment_usdc='{cap}'"),
+        ] {
+            assert!(
+                toml::from_str::<WalletConfig>(&wallet)
+                    .unwrap()
+                    .validate()
+                    .is_err()
+            );
+        }
     }
     let static_wallet: WalletConfig =
         toml::from_str("mode='static'\nprivate_key_env='KEY'").unwrap();

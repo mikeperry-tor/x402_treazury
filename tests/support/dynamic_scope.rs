@@ -212,11 +212,8 @@ async fn scope_child() {
             .clone();
         let name = bound.tool.name.clone();
         let reference = bound.tool.name.clone();
-        let (url, t) = listen(crate::server::http_app(
-            server(&m, id),
-            format!("{id}-token"),
-        ))
-        .await;
+        let (url, t) =
+            listen(crate::server::http_app(server(&m, id), format!("{id}-token")).unwrap()).await;
         tasks.push(t);
         let client = direct.discovery(&url, Duration::from_secs(3)).unwrap();
         for fallback in [false, true] {

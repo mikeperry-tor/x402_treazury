@@ -81,10 +81,10 @@ config and source commands. An explicit `--config FILE` overrides it. Export it
 in each terminal where you run commands. Unset it for standalone `--provider`
 commands or wallet commands using `--state-dir`.
 
-`X402_TREAZURY_MCP_TOKEN` is optional: when absent, the example listeners allow
-requests without authentication and log a WARN. Set it to require bearer auth;
-an empty value is rejected. Existing local configs must change their
-`bearer_token_env` references to `X402_TREAZURY_MCP_TOKEN` to use this behavior.
+The example listeners require `X402_TREAZURY_MCP_TOKEN`; missing, empty and
+whitespace-only values fail startup. To allow unauthenticated access explicitly,
+set `auth = false` and omit `bearer_token_env` on that listener. Host checking must
+remain enabled when authentication is disabled.
 
 To serve over Tor instead, start Tor Browser with its SOCKS listener at
 `127.0.0.1:9150`. Pass [the Tor and discovery-relay settings](examples/network/tor.toml):
@@ -226,9 +226,8 @@ state and decryption material.
 
 ### 3. Start the MCP server
 
-Set `X402_TREAZURY_MCP_TOKEN` to require bearer authentication, then launch
-using the exported `X402_TREAZURY_CONFIG` path. Leaving the token absent disables
-authentication and logs a WARN:
+Set the required `X402_TREAZURY_MCP_TOKEN`, then launch using the exported
+`X402_TREAZURY_CONFIG` path:
 
 ```sh
 export X402_TREAZURY_MCP_TOKEN="treazury_bearer_auth_key_here"

@@ -379,7 +379,7 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     );
     let server = Server::new(tools, client, vendor, None);
-    let (base, task) = serve(http_app(server, "fixture".into())).await;
+    let (base, task) = serve(http_app(server, "fixture".into()).unwrap()).await;
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     for name in ["media_raw", "media_json", "media_bad", "media_unknown"] {
         let result:Value=http.post(format!("{base}/mcp")).bearer_auth("fixture").header("accept","application/json, text/event-stream")
@@ -467,7 +467,7 @@ async fn json_projection_reaches_direct_and_discovered_mcp_calls_without_changin
     for discovered in [false, true] {
         let mut server = server.clone();
         server.discover_on_demand = discovered;
-        let (base, task) = serve(http_app(server, "fixture".into())).await;
+        let (base, task) = serve(http_app(server, "fixture".into()).unwrap()).await;
         let params = if discovered {
             json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":"fixture_search","arguments":{}}})
         } else {

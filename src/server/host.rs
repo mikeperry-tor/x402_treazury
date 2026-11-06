@@ -50,6 +50,22 @@ impl HostPolicy {
         })
     }
 
+    pub fn validate_auth(&self, token: Option<&str>) -> Result<()> {
+        ensure!(
+            token.is_none_or(|value| !value.trim().is_empty()),
+            "HTTP bearer token is empty or whitespace-only"
+        );
+        self.validate_auth_enabled(token.is_some())
+    }
+
+    pub fn validate_auth_enabled(&self, enabled: bool) -> Result<()> {
+        ensure!(
+            enabled || !self.allowed.as_ref().is_some_and(Vec::is_empty),
+            "HTTP authentication and Host checking cannot both be disabled"
+        );
+        Ok(())
+    }
+
     pub(super) fn apply(
         &self,
         config: StreamableHttpServerConfig,

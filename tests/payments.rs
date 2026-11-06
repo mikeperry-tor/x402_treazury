@@ -345,7 +345,7 @@ fn caps_use_exact_decimal_arithmetic() {
             .unwrap(),
         alloy_primitives::U256::from(1)
     );
-    for bad in ["NaN", "-1", "1e3", "0.0000001"] {
+    for bad in ["", " ", "NaN", "-1", "1e3", "0.0000001"] {
         assert!(SpendPolicy::dollars(bad).is_err());
     }
 }
@@ -448,7 +448,7 @@ async fn mixed_offers_caps_and_invalid_requirements_never_bypass_policy() {
         assert!(gate.signed.lock().unwrap().is_empty());
         task.abort();
     }
-    for alias in ["none", "off", "", "NONE", "OFF"] {
+    for alias in ["none", "off", "NONE", "OFF"] {
         assert!(SpendPolicy::dollars(alias).unwrap().max_atomic.is_none());
         for allowed in [true, false] {
             let mut c = challenge("exact", "1000001");

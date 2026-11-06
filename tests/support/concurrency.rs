@@ -86,7 +86,7 @@ async fn mcp_burst_across_listeners_retains_every_journal_and_isolates_pools() {
             x402_treazury::server::Server::new(tools.clone(), client, h.base.clone(), None);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         endpoints.push(format!("http://{}/mcp", listener.local_addr().unwrap()));
-        let app = x402_treazury::server::http_app(server, format!("token-{i}"));
+        let app = x402_treazury::server::http_app(server, format!("token-{i}")).unwrap();
         let stopped = stop.clone();
         servers.push(tokio::spawn(async move {
             axum::serve(listener, app)

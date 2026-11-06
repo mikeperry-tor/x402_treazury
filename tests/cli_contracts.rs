@@ -2025,3 +2025,61 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         "damaged counter"
     );
 }
+
+#[tokio::test]
+async fn standalone_authority_errors_precede_provider_io_and_wallet_loading() {
+    let temp = tempfile::tempdir().unwrap();
+    // An absent local specification proves rejection precedes catalog I/O; no key is supplied.
+    let base = ["serve", "--spec", "missing-authority-spec.json"];
+    for (extra, env, expected) in [
+        (
+            vec!["--max-api-payment-usdc", ""],
+            vec![],
+            "API payment cap is empty",
+        ),
+        (
+            vec![],
+            vec![("X402_MAX_PRICE_USD", "")],
+            "API payment cap is empty",
+        ),
+        (
+            vec!["--transport", "http"],
+            vec![],
+            "HTTP transport requires",
+        ),
+        (
+            vec!["--transport", "http"],
+            vec![("X402_MCP_BEARER_TOKEN", " \t")],
+            "HTTP bearer token is empty",
+        ),
+        (
+            vec!["--transport", "http", "--bearer-token", ""],
+            vec![],
+            "HTTP bearer token is empty",
+        ),
+        (
+            vec!["--transport", "http", "--no-auth", "--disable-host-check"],
+            vec![],
+            "cannot both be disabled",
+        ),
+    ] {
+        let args: Vec<_> = base.iter().copied().chain(extra).collect();
+        let error = bad(run(temp.path(), &args, &env).await);
+        assert!(error.contains(expected), "{error}");
+        assert!(!error.contains("EVM_PRIVATE_KEY required"), "{error}");
+        assert!(!temp.path().join("state").exists());
+    }
+}
+
+#[tokio::test]
+async fn standalone_inspection_validates_authority_without_token_secrets() {
+    let temp = tempfile::tempdir().unwrap();
+    for (extra, env) in [(Vec::<&str>::new(), vec![("X402_MAX_PRICE_USD", "")])] {
+        let args: Vec<_> = ["catalog", "tools", "--spec", "absent.json"]
+            .into_iter()
+            .chain(extra)
+            .collect();
+        let error = bad(run(temp.path(), &args, &env).await);
+        assert!(error.contains("API payment cap is empty"), "{error}");
+    }
+}

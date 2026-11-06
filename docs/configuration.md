@@ -336,7 +336,7 @@ Standalone HTTP serving accepts `--allowed-hosts mcp.example.com,localhost` or
 `--disable-host-check`, both requiring `--transport http`. Deployments configure
 these settings in TOML. Disabling the allowlist emits a startup warning and removes
 this DNS-rebinding defense; it does not change authentication. Disabling both
-authentication and Host checking is permitted. Malformed/missing Host headers
+authentication and Host checking is rejected, including `allowed_hosts = []`. Malformed/missing Host headers
 and HTTP/2 authority validation still follow the MCP library's protocol rules.
 `config show` exposes each server's settings without starting listeners.
 
@@ -360,20 +360,17 @@ Neither setting enables discovery or provider management. See
 for defaults, client caching and guidance placement.
 
 
-Listeners configured with `bearer_token_env = "X402_TREAZURY_MCP_TOKEN"` use
-bearer authentication when that variable is set. If it is absent, they serve
-without authentication and log a WARN. Empty or whitespace-only values are
-rejected. Custom `bearer_token_env` names still require a nonempty value.
-Existing local configurations using `TREAZURY_MCP_TOKEN` must update the reference
-to adopt the new optional variable.
+Every authenticated listener requires its configured `bearer_token_env` value,
+including `X402_TREAZURY_MCP_TOKEN`. Missing, empty and whitespace-only values fail
+startup before provider or funding I/O. Offline inspection does not require tokens.
 
 To disable HTTP authentication for one listener, set `auth = false` and omit
 `bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own
 authentication policy. Standalone HTTP uses `--transport http --no-auth`; this
 explicit flag ignores `X402_MCP_BEARER_TOKEN` and conflicts with `--bearer-token`.
 Startup warns when a listener allows clients to call tools without authentication.
-Disabling both authentication and the Host allowlist remains permitted and emits
-both independent startup warnings.
+Disabling authentication requires Host checking to remain enabled. An empty
+`allowed_hosts` list also disables Host checking and is rejected in that combination.
 Prefer `X402_MCP_BEARER_TOKEN` to standalone `--bearer-token`: the latter exposes
 the credential to process inspection and emits a warning.
 Stdio needs no authentication. Live integration qualification still requires
@@ -503,8 +500,9 @@ Configuration changes take effect when the deployment is reopened. Managed
 profiles require an explicit `max_api_payment_usdc`; the static-wallet default
 remains unchanged. The cap applies to every active, reserve and retained wallet,
 independently of original funding size. Explicit unlimited spellings retain their
-existing meaning for payment authority only. Empty caps also mean unlimited,
-with a WARN asking for explicit `"none"` or `"off"`; configured defaults are unchanged.
+existing meaning for payment authority only. Empty and whitespace-only caps are
+errors; use `"none"` or `"off"` explicitly for unlimited authority. Missing static
+caps retain their default; missing managed caps remain errors.
 A cap above every nominal bound is valid, and nominal bounds above the cap are
 valid; neither arrangement authorizes extra funding.
 
@@ -963,8 +961,8 @@ mapping configuration.
   automatically approve one. Managed profiles support v2 `exact` only.
 - Asset/network filtering and an exact decimal per-payment cap before signing.
   `--max-api-payment-usdc` overrides `X402_MAX_PRICE_USD`, default `1.00`.
-  `none`, `off`, or an empty value removes the amount cap **but retains the
-  Base USDC restriction**.
+  `none` or `off` removes the amount cap **but retains the Base USDC restriction**.
+  Present-but-empty values are errors, including CLI and environment overrides.
 - Static profiles perform one signed payment attempt after the unsigned challenge.
   Managed profiles may traverse existing eligible wallets after recognized
   insufficient-funds headers; see the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).

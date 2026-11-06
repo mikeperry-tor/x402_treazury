@@ -84,7 +84,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
     for response_mode in [0, 4] {
         mode.store(response_mode, Ordering::SeqCst);
         let s = s.clone();
-        let (base, task) = listen(crate::server::http_app(s, "test-token".into())).await;
+        let (base, task) = listen(crate::server::http_app(s, "test-token".into()).unwrap()).await;
         for fallback in [false, true] {
             let args = json!({"id":"a/b?雪","q":["x y","雪"],"flag":true,"body":{"q":"body🙂"}});
             let result = if fallback {
@@ -147,7 +147,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
             );
         }
     }
-    let (base, task) = listen(crate::server::http_app(s, "test-token".into())).await;
+    let (base, task) = listen(crate::server::http_app(s, "test-token".into()).unwrap()).await;
     for (tool, args) in [
         (name.as_str(), json!({})),
         ("missing", json!({})),
@@ -222,7 +222,7 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
             m.catalog.publish(snapshot);
             let s = server(&m, "writer");
             let (base, task) =
-                listen(crate::server::http_app(s.clone(), "test-token".into())).await;
+                listen(crate::server::http_app(s.clone(), "test-token".into()).unwrap()).await;
             let reference = name.clone();
             let (url, n, pending_reference) = (base.clone(), name.clone(), reference.clone());
             let pending = tokio::spawn(async move {

@@ -1045,11 +1045,8 @@ async fn real_http_directory_search_and_cached_client_workflow() {
     let m = manager(None).await;
     *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(vendor.clone()));
     assert!(m.catalog.read().views["writer"].is_empty());
-    let (base, task) = listen(crate::server::http_app(
-        server(&m, "writer"),
-        "test-token".into(),
-    ))
-    .await;
+    let (base, task) =
+        listen(crate::server::http_app(server(&m, "writer"), "test-token".into()).unwrap()).await;
     let denied = crate::network::discovery(&base,Duration::from_secs(5)).unwrap()
         .post(format!("{base}/mcp")).bearer_auth("wrong-token")
         .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x402_treazury_providers_search_remote","arguments":{"q":"weather"}}}))
@@ -1795,11 +1792,9 @@ async fn directory_payment_fixture() {
         }
     }
     // Exercise real MCP typed output and ensure output failures never replay paid work.
-    let (base, http_task) = listen(crate::server::http_app(
-        server(&manager, "writer"),
-        "test-token".into(),
-    ))
-    .await;
+    let (base, http_task) =
+        listen(crate::server::http_app(server(&manager, "writer"), "test-token".into()).unwrap())
+            .await;
     let local = NetworkContext::new(Default::default())
         .unwrap()
         .with_test_root(crate::test_tls::CA)
@@ -1994,11 +1989,8 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     let (vendor, vendor_task) = listen(app).await;
     let m = manager(None).await;
     *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(vendor));
-    let (base, task) = listen(crate::server::http_app(
-        server(&m, "writer"),
-        "test-token".into(),
-    ))
-    .await;
+    let (base, task) =
+        listen(crate::server::http_app(server(&m, "writer"), "test-token".into()).unwrap()).await;
     let invoke = |name, args| call(&base, name, args);
     let result = invoke(
         directory::SEARCH,
@@ -2193,7 +2185,8 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
     *m.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(vendor));
     let server = server(&m, "writer");
     let work = server.work.clone();
-    let (base, http_task) = listen(crate::server::http_app(server, "test-token".into())).await;
+    let (base, http_task) =
+        listen(crate::server::http_app(server, "test-token".into()).unwrap()).await;
     for disconnect in [false, true] {
         let base = base.clone();
         let request = tokio::spawn(async move {
@@ -2272,8 +2265,9 @@ async fn on_demand_management_keeps_eight_wrappers_and_scoped_dynamic_search() {
     writer.discover_on_demand = true;
     let mut reader = server(&m, "reader");
     reader.discover_on_demand = true;
-    let (base, task) = listen(crate::server::http_app(writer, "test-token".into())).await;
-    let (other, other_task) = listen(crate::server::http_app(reader, "test-token".into())).await;
+    let (base, task) = listen(crate::server::http_app(writer, "test-token".into()).unwrap()).await;
+    let (other, other_task) =
+        listen(crate::server::http_app(reader, "test-token".into()).unwrap()).await;
     let listed = rpc(&base, "test-token", "tools/list", json!({})).await;
     assert_eq!(listed["tools"].as_array().unwrap().len(), 8);
     assert!(
@@ -3156,7 +3150,7 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         let url = format!("https://{}", listener.local_addr().unwrap());
         let shutdown = tokio_util::sync::CancellationToken::new();
         let stopped = shutdown.clone();
-        let app = crate::server::http_app(endpoint.clone(), "fixture".into());
+        let app = crate::server::http_app(endpoint.clone(), "fixture".into()).unwrap();
         let http_task = tokio::spawn(async move {
             axum::serve(listener, app)
                 .with_graceful_shutdown(stopped.cancelled_owned())
@@ -3693,11 +3687,8 @@ async fn complete_inventory_preserves_definitions_and_search_pagination() {
     add(&m, "demo", "", "").await;
     let template = m.catalog.read().views["writer"][0].clone();
     for owner in ["hidden", "writer"] {
-        let (base, task) = listen(crate::server::http_app(
-            server(&m, owner),
-            "test-token".into(),
-        ))
-        .await;
+        let (base, task) =
+            listen(crate::server::http_app(server(&m, owner), "test-token".into()).unwrap()).await;
         for count in [0, 25, 51, 501] {
             let mut snapshot = (*m.catalog.read()).clone();
             snapshot.generation += 1;
@@ -3775,7 +3766,7 @@ async fn complete_inventory_preserves_definitions_and_search_pagination() {
         let mut on_demand = server(&m, owner);
         on_demand.discover_on_demand = true;
         let (on_demand_base, on_demand_task) =
-            listen(crate::server::http_app(on_demand, "test-token".into())).await;
+            listen(crate::server::http_app(on_demand, "test-token".into()).unwrap()).await;
         let listed = rpc(&on_demand_base, "test-token", "tools/list", json!({})).await;
         let expected = tools::listener_definitions(m.policy(owner), true, None, None);
         assert_eq!(listed["tools"], serde_json::to_value(expected).unwrap());

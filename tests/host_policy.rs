@@ -30,7 +30,7 @@ async fn host_policies_preserve_auth_and_match_hosts_and_ports() {
             disabled,
         )
         .unwrap();
-        let app = http_app(server, "fixture-token".into());
+        let app = http_app(server, "fixture-token".into()).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let task = tokio::spawn(async move {
@@ -98,7 +98,7 @@ async fn standalone_flags_reach_http_and_disabled_check_warns() {
     for flags in [
         vec!["--allowed-hosts", "mcp.example"],
         vec!["--disable-host-check"],
-        vec!["--disable-host-check", "--no-auth"],
+        vec!["--allowed-hosts", "mcp.example", "--no-auth"],
     ] {
         let auth_flags = if flags.contains(&"--no-auth") {
             vec![]

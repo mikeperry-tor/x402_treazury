@@ -464,9 +464,12 @@ async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() 
             .discovery(&endpoint, None)
             .unwrap();
         let serving = tokio::spawn(async move {
-            axum::serve(listener, crate::server::http_app(server, "fixture".into()))
-                .await
-                .unwrap()
+            axum::serve(
+                listener,
+                crate::server::http_app(server, "fixture".into()).unwrap(),
+            )
+            .await
+            .unwrap()
         });
         for (mode, amount, is_error, blocks) in [
             (200, 5000, false, 2),

@@ -67,7 +67,7 @@ async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains(
         let mut server = Server::new(tools.clone(), client, vendor.clone(), None);
         server.discover_on_demand = discovered;
         let name = tools[0].name.clone();
-        let (base, task) = serve(http_app(server, "token".into())).await;
+        let (base, task) = serve(http_app(server, "token".into()).unwrap()).await;
         let local = reqwest::Client::new();
         for (code, kind) in [
             (402, "payment rejected"),
@@ -252,7 +252,7 @@ async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result
     )
     .unwrap();
     let server = Server::new(tools, PaidClient::new(payer), vendor, None);
-    let (mcp, task) = serve(http_app(server, "test-token".into())).await;
+    let (mcp, task) = serve(http_app(server, "test-token".into()).unwrap()).await;
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     let request = || {
         http.post(format!("{mcp}/mcp"))
@@ -352,7 +352,7 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
     );
     let server = Server::new(tools, client, vendor, cfg.instructions_text);
     let catalog = server.catalog.clone();
-    let (base, task) = serve(http_app(server, "test-token".into())).await;
+    let (base, task) = serve(http_app(server, "test-token".into()).unwrap()).await;
     let endpoint = format!("{base}/mcp");
     for token in [None, Some("wrong")] {
         let mut request = http.post(&endpoint);
@@ -804,6 +804,7 @@ async fn standalone_non_loopback_listener_is_rejected_before_provider_io() {
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .env("X402_MCP_BEARER_TOKEN", "public-loopback-test-token")
         .current_dir(directory.path())
         .args([
             "serve",

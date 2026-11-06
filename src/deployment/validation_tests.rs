@@ -152,7 +152,7 @@ fn address_uniqueness_and_listener_iteration_are_ordered() {
 }
 
 #[test]
-fn auth_whitespace_and_host_settings_remain_independent() {
+fn auth_token_and_host_settings_require_at_least_one_defense() {
     for (auth, token, expected) in [
         (
             true,
@@ -178,6 +178,11 @@ fn auth_whitespace_and_host_settings_remain_independent() {
         ),
     ] {
         for hosts in [Value::Null, json!([]), json!(["localhost"])] {
+            let expected = if !auth && hosts == json!([]) {
+                Some("server one: HTTP authentication and Host checking cannot both be disabled")
+            } else {
+                expected
+            };
             let mut v = fixture();
             v["servers"]["one"]["auth"] = json!(auth);
             v["servers"]["one"]["bearer_token_env"] = json!(token);
@@ -305,12 +310,12 @@ fn retired_response_character_setting_is_rejected_by_name() {
 }
 
 #[test]
-fn canonical_listener_token_is_optional_only_when_absent() {
+fn all_required_listener_tokens_fail_closed() {
     let mut value = fixture();
     value["servers"]["one"]["bearer_token_env"] = json!("X402_TREAZURY_MCP_TOKEN");
     let listener = config(&value).servers.remove("one").unwrap();
     let mut env = std::collections::BTreeMap::new();
-    assert_eq!(listener.token(&env).unwrap(), None);
+    assert!(listener.token(&env).is_err());
     for token in ["", " \t"] {
         env.insert("X402_TREAZURY_MCP_TOKEN".into(), token.into());
         assert!(listener.token(&env).is_err());
@@ -400,4 +405,25 @@ fn empty_source_capabilities_and_on_demand_are_independent() {
     let mut value = fixture();
     value["servers"]["one"]["sources"] = json!([]);
     error(&value, "server one: sources cannot be empty");
+}
+
+#[test]
+fn unauthenticated_listeners_require_host_checking() {
+    for (key, value) in [
+        ("disable_host_check", json!(true)),
+        ("allowed_hosts", json!([])),
+    ] {
+        let mut v = fixture();
+        v["servers"]["one"]["auth"] = json!(false);
+        v["servers"]["one"]
+            .as_object_mut()
+            .unwrap()
+            .remove("bearer_token_env");
+        config(&v).validate().unwrap();
+        v["servers"]["one"][key] = value;
+        error(
+            &v,
+            "server one: HTTP authentication and Host checking cannot both be disabled",
+        );
+    }
 }

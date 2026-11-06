@@ -340,11 +340,12 @@ impl Server {
     }
 }
 
-pub fn http_app(server: Server, token: String) -> axum::Router {
+pub fn http_app(server: Server, token: String) -> Result<axum::Router> {
     http_app_with_auth(server, Some(token))
 }
 
-pub fn http_app_with_auth(server: Server, token: Option<String>) -> axum::Router {
+pub fn http_app_with_auth(server: Server, token: Option<String>) -> Result<axum::Router> {
+    server.host_policy.validate_auth(token.as_deref())?;
     use axum::{
         extract::{Request, State},
         http::{StatusCode, header},
@@ -395,9 +396,9 @@ pub fn http_app_with_auth(server: Server, token: Option<String>) -> axum::Router
         Arc::new(LocalSessionManager::default()),
         config,
     );
-    axum::Router::new()
+    Ok(axum::Router::new()
         .route_service("/mcp", service)
-        .layer(middleware::from_fn_with_state(auth, gate))
+        .layer(middleware::from_fn_with_state(auth, gate)))
 }
 
 pub const FORCE_SHUTDOWN_MESSAGE: &str = "forced shutdown; unfinished paid operations may have unknown outcomes; reservations remain for recovery";
@@ -460,7 +461,7 @@ async fn serve_http_inner(
     let stop = tokio_util::sync::CancellationToken::new();
     let _cancel_on_drop = stop.clone().drop_guard();
     let work = server.work.clone();
-    let serving = axum::serve(listener, http_app_with_auth(server, token))
+    let serving = axum::serve(listener, http_app_with_auth(server, token)?)
         .with_graceful_shutdown(stop.clone().cancelled_owned())
         .into_future();
     tokio::pin!(serving);

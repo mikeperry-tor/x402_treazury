@@ -418,6 +418,17 @@ async fn optional_auth_is_explicit_and_independent_per_listener() {
         assert_eq!(shown["servers"]["beta_only"]["auth"], true);
         let mut environment = env();
         environment.remove("RESEARCH_TOKEN");
+        if configured_auth {
+            assert!(
+                Deployment::load(&path)
+                    .await
+                    .unwrap()
+                    .bind(&environment)
+                    .await
+                    .is_err()
+            );
+            environment.insert("X402_TREAZURY_MCP_TOKEN".into(), "research-fixture".into());
+        }
         let running = Deployment::load(&path)
             .await
             .unwrap()
@@ -428,8 +439,17 @@ async fn optional_auth_is_explicit_and_independent_per_listener() {
         let stop = CancellationToken::new();
         let task = tokio::spawn(running.serve(stop.clone()));
         let http = reqwest::Client::builder().no_proxy().build().unwrap();
-        for (listener, expected) in [("research", 200), ("beta_only", 401)] {
-            let response = http.post(format!("http://{}/mcp", addresses[listener]))
+        for (listener, token, expected) in [
+            ("research", None, if configured_auth { 401 } else { 200 }),
+            ("research", Some("research-fixture"), 200),
+            ("beta_only", None, 401),
+            ("beta_only", Some("research-fixture"), 401),
+        ] {
+            let mut request = http.post(format!("http://{}/mcp", addresses[listener]));
+            if let Some(token) = token {
+                request = request.bearer_auth(token);
+            }
+            let response = request
             .header("accept", "application/json, text/event-stream")
             .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
                 "protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}))

@@ -373,3 +373,51 @@ enabled without changing explicit arithmetic or panic recovery. Independent
 reviewers also identified and resolved the C03 unpublished-byte retention boundary,
 C05 coherent multi-wallet header exception and C07 atomic ACL creation requirement
 before affected implementation. Validation and exact-SHA reviews remain pending.
+
+C01 exact-SHA review: `298005561f5699798f7904cb37900310c807a4fa`, independent
+runtime reviewer, no material source findings. Optimized payment and publication
+coverage remains pending; no performance or release-reproducibility claim.
+C02 implementation rejects empty caps at the shared parser, removes conventional
+token absence bypass, validates authentication/Host policy before serving I/O,
+and makes HTTP app construction fallible for direct library consumers. Offline
+inspection remains secret-free. Focused regressions are authored; validation and
+exact-SHA review remain pending.
+
+C02 independent review found inspection skipped cap parsing along with secret
+validation. The fix parses nonsecret authority unconditionally and validates the
+structural Host/auth combination separately from serving-only token lookup.
+Inspection still needs no token/key secrets. A focused CLI regression covers empty
+environment caps before catalog I/O; the serve-only CLI cap is covered separately.
+
+Corrected source compiler/all-target Clippy passed (`check-clippy-native-corrected.log`).
+Compatibility passed crypto 2/2, payments 15/15 and SDK 2/2; server passed 10/11.
+The existing non-loopback fixture omitted the now-required HTTP token, so it observed
+that earlier validation rather than its intended loopback guard. Supply a public
+fixture token and preserve all rejection/pre-provider-I/O assertions; no production
+validation precedence change. Carry forward the unchanged compatibility targets and
+full compiler/dependency warning evidence, revalidate changed server target with
+Clippy and all server tests, then resume named remaining stages. Focused cache 1/1
+and standalone CLI 6/6 passed with corrected source. Linker warning remains recorded.
+
+Default library stage executed 1,242 cases: 1,217 passed, 22 intentional children/
+opt-in cases ignored, 3 failed on stale expectations. C02 auth cross-product now
+expects dual-disabled rejection; C03 atomic panic now asserts typed WorkerStopped;
+C05 SOCKS proofs now compare actual selected transport scope credentials instead
+of logical EVM-id credentials. All behavioral/side-effect assertions remain.
+Focused auth, atomic-panic and Base-scope continuations pass 1/1 each. The repeated
+cause prompted a wider affected-consumer scan, which found `host_policy.rs` still
+expecting dual-disabled startup success. Replace that case with explicit no-auth
+plus a real Host allowlist; existing pre-provider-I/O negative coverage remains.
+Pause queued runtime stages only while the active compiler finishes, then validate
+this fixture and resume, without changing sources during any active build/test.
+
+Post-FFI compiler/all-target Clippy passed without warnings; native macOS5/5 and
+registry-parent1/1 passed. Full compatibility passed crypto2/payments15/SDK2/server11.
+Default library again passed1222 (22 intentional ignores); integration continued
+through deployment, where an older conventional-token fixture still expected
+implicit unauthenticated serving when the named token was absent. Correct this
+consumer to assert missing-token bind rejection, then supply a public fixture token
+and verify research authentication and sibling-listener isolation independently;
+explicit auth=false remains usable. This is another stale C02 consumer expectation,
+not a production authority change. Revalidate deployment Clippy/tests, preserve
+unaffected evidence and continue the remaining named stages.

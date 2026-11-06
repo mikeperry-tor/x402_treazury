@@ -120,10 +120,7 @@ pub struct ListenerConfig {
 }
 impl ListenerConfig {
     fn token(&self, env: &BTreeMap<String, String>) -> Result<Option<String>> {
-        if !self.auth
-            || (self.bearer_token_env == "X402_TREAZURY_MCP_TOKEN"
-                && !env.contains_key(&self.bearer_token_env))
-        {
+        if !self.auth {
             return Ok(None);
         }
         required_secret(env, &self.bearer_token_env).map(Some)
@@ -268,7 +265,9 @@ impl MetaConfig {
                 server.allowed_hosts.clone(),
                 server.disable_host_check,
             )
-            .with_context(|| format!("server {name}: invalid Host policy"))?;
+            .with_context(|| format!("server {name}: invalid Host policy"))?
+            .validate_auth_enabled(server.auth)
+            .with_context(|| format!("server {name}"))?;
             crate::server::host::require_loopback(server.listen.ip())
                 .with_context(|| format!("server {name}"))?;
             ensure!(
@@ -1503,7 +1502,7 @@ impl Deployment {
             listeners.push((
                 name.clone(),
                 listener,
-                http_app_with_auth(server, tokens.remove(name).unwrap()),
+                http_app_with_auth(server, tokens.remove(name).unwrap())?,
             ));
         }
         Ok(BoundListeners {

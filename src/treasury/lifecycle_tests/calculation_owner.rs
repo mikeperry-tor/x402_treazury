@@ -852,7 +852,11 @@ async fn actual_mcp_help_completes_on_same_runtime_while_deposit_and_shield_calc
         let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
         // This serving task and preparation below use THIS current-thread runtime.
         let serving = tokio::spawn(async move {
-            axum::serve(listener, crate::server::http_app(server, "fixture".into())).await
+            axum::serve(
+                listener,
+                crate::server::http_app(server, "fixture".into()).unwrap(),
+            )
+            .await
         });
         let (reached, mut release, calls) = hold(&mut owner, false, false, false);
         let count = calls.clone();

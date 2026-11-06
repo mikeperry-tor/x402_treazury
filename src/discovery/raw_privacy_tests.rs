@@ -80,6 +80,7 @@ pub(super) async fn exercise(manager: &Arc<Manager>, local: &reqwest::Client, ba
         .body(body)
         .unwrap();
     let response = crate::server::http_app(server(manager, "writer"), "test-token".into())
+        .unwrap()
         .oneshot(request)
         .await
         .unwrap();

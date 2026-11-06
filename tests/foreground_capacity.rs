@@ -101,7 +101,7 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
         let server = Server::new(tools, client.clone(), origin.clone(), None);
         owners.push(server.work.clone());
         clients.push(client);
-        let (url, task) = serve(http_app(server, "fixture-token".into())).await;
+        let (url, task) = serve(http_app(server, "fixture-token".into()).unwrap()).await;
         urls.push((url, name));
         listeners.push(task);
     }

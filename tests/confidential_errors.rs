@@ -101,7 +101,8 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     let app = http_app(
         Server::new(tools, payer(), origin, None),
         "DUMMY_BEARER".into(),
-    );
+    )
+    .unwrap();
     let mcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/mcp", mcp.local_addr().unwrap());
     let mcp_task = tokio::spawn(async move { axum::serve(mcp, app).await.unwrap() });

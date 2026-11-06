@@ -138,7 +138,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     ));
     let s = Server::from_bindings(bindings, None);
     // Accepted help remains complete; download rejection stays explicit.
-    let (base, server) = serve(http_app(s.clone(), "fixture".into())).await;
+    let (base, server) = serve(http_app(s.clone(), "fixture".into()).unwrap()).await;
     let result = call(&http, &base, "t_help").await;
     assert_ne!(result["isError"], true);
     assert_eq!(result["content"][0]["text"], "雪🙂");

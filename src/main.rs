@@ -284,6 +284,30 @@ async fn run_command(command: cli::Command, matches: &clap::ArgMatches) -> Resul
 }
 
 async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()> {
+    let inspecting = args.list_tools || args.list_tags || args.check || args.route_tool.is_some();
+    let policy = standalone_spend_policy(&args, &env)?;
+    let token = if args.transport == "http" {
+        let host_policy = x402_treazury::server::host::HostPolicy::new(
+            args.allowed_hosts.clone(),
+            args.disable_host_check,
+        )?;
+        if inspecting {
+            host_policy.validate_auth_enabled(!args.no_auth)?;
+            None
+        } else {
+            let token = if args.no_auth {
+                None
+            } else {
+                Some(args.bearer_token.clone()
+                    .or_else(|| env.get("X402_MCP_BEARER_TOKEN").cloned())
+                    .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
+            };
+            host_policy.validate_auth(token.as_deref())?;
+            token
+        }
+    } else {
+        None
+    };
     let listen = if args.transport == "http" {
         Some(x402_treazury::network::loopback_listener_addresses(&args.host, args.port).await?)
     } else {
@@ -348,7 +372,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if inspect_standalone(&args, &cfg, &base, &tools).await? {
         return Ok(());
     }
-    let server = prepare_standalone_server(&args, &env, cfg, base, tools).await?;
+    let server = prepare_standalone_server(&args, &env, cfg, base, tools, policy).await?;
     if args.transport == "stdio" {
         serve_standalone_stdio(server).await?;
     } else {
@@ -357,15 +381,6 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
                 "Passing the MCP bearer token on the command line exposes it to process inspection; set X402_MCP_BEARER_TOKEN instead"
             );
         }
-        let token = if args.no_auth {
-            None
-        } else {
-            Some(args
-            .bearer_token
-            .or_else(|| env.get("X402_MCP_BEARER_TOKEN").cloned())
-            .filter(|s| !s.is_empty())
-            .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
-        };
         let signals = ShutdownSignals::new()?;
         let listener = tokio::net::TcpListener::bind(listen.as_deref().unwrap()).await?;
         tracing::info!(address = %listener.local_addr()?, "MCP listening at /mcp");
@@ -410,19 +425,23 @@ async fn inspect_standalone(
     Ok(false)
 }
 
+fn standalone_spend_policy(args: &Args, env: &BTreeMap<String, String>) -> Result<SpendPolicy> {
+    SpendPolicy::dollars(
+        args.max_api_payment_usdc
+            .as_deref()
+            .or_else(|| env.get("X402_MAX_PRICE_USD").map(String::as_str))
+            .unwrap_or("1.00"),
+    )
+}
+
 async fn prepare_standalone_server(
     args: &Args,
     env: &BTreeMap<String, String>,
     cfg: Config,
     base: String,
     tools: Vec<catalog::ToolSpec>,
+    policy: SpendPolicy,
 ) -> Result<Server> {
-    let policy = SpendPolicy::dollars(
-        args.max_api_payment_usdc
-            .as_deref()
-            .or_else(|| env.get("X402_MAX_PRICE_USD").map(String::as_str))
-            .unwrap_or("1.00"),
-    )?;
     let payer = Payer::new(
         env.get("EVM_PRIVATE_KEY")
             .context("EVM_PRIVATE_KEY required")?,

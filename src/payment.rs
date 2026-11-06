@@ -85,13 +85,11 @@ pub struct SpendPolicy {
 }
 impl SpendPolicy {
     pub fn dollars(text: &str) -> Result<Self> {
-        if text.is_empty() {
-            tracing::warn!(
-                category = "implicit_unlimited_payment_cap",
-                "The API payment cap is empty, so payments have no amount limit; use \"none\" or \"off\" to request unlimited payments explicitly"
-            );
-        }
-        if matches!(text.to_ascii_lowercase().as_str(), "none" | "off" | "") {
+        ensure!(
+            !text.is_empty(),
+            "API payment cap is empty; use none or off for unlimited payments"
+        );
+        if matches!(text.to_ascii_lowercase().as_str(), "none" | "off") {
             return Ok(Self { max_atomic: None });
         }
         let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
