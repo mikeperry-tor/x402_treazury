@@ -12,9 +12,10 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   necessary, isolate it behind a small shared abstraction and implement it for
   Linux and macOS. Preserve equivalent correctness and security contracts;
   do not substitute silent no-ops. Follow the [portability guidance](docs/development.md#portability).
-- Before vendoring a new package, tell the user why it is needed and describe
-  alternatives and maintenance costs. Logging or diagnostic changes alone are
-  generally insufficient justification for vendoring. Follow the
+- Obtain explicit informed user approval before introducing a new maintained
+  dependency checkout or fork. General upgrade or audit-cleanup authority is not
+  approval to vendor. Present actual exposure, existing mitigations, alternatives
+  and maintenance costs, then wait before implementation. Follow the
   [dependency policy](docs/development.md#dependency-vendoring).
 - Favor simplicity and best-effort execution. Remove responsibilities before
   adding counters, certificates, recovery ledgers or workflow frameworks.

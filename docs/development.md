@@ -38,8 +38,8 @@ Ordinary application support and optional qualification are separate:
 Qualification connectivity probes use Rust ErrorKind to distinguish permission
 denial, refusal and timeout. These portable reporting controls do not establish
 OS confinement. Strict byte-exact vendor reconstruction and portable test fixtures
-remain in use. Current dependency-security evaluation belongs to
-[NU7 release readiness](plans/nu7_release_readiness.md); Linux CI automation and
+remain in use. Current dependency-security evaluation and accepted findings belong
+to the [advisory disposition](#locked-graph-advisory-disposition); Linux CI automation and
 future platform acceptance belong to the [deferred release plan](plans/deferred/release_followups.md).
 
 ## Review decisions and unfinished assessments
@@ -81,12 +81,41 @@ deferred release plan. Snapshot pruning is not selected work. Current contracts 
 
 ## Dependency vendoring
 
-Before introducing a new vendored package, tell the user the concrete need,
-why upstream releases or application-level alternatives are insufficient, and
-the maintenance cost. Logging or diagnostic changes alone generally do not
-justify a new checkout; document upstream limitations where practical. Existing
-patches are not precedent for adding another. Track necessary patches and their
-removal evidence in the [vendor ledger](../vendor/README.md).
+Before introducing a new maintained dependency checkout or fork, obtain explicit
+informed user approval for the named package and proposed patch scope. This applies
+to a new vendored directory, a separate Git fork or an equivalent new maintenance
+responsibility; moving it elsewhere does not avoid the requirement. General
+instructions to implement a plan, upgrade dependencies or clear audit findings do
+not authorize this choice. Present a concrete proposal and wait for the user's
+answer before adding the checkout or implementing the production fork.
+
+The proposal must explain:
+
+- The exact package/version, proposed change and concrete benefit, including why
+  an upstream release or application-level alternative is insufficient.
+- The actual affected call path and remaining exposure. Distinguish reachable
+  runtime, build-time and development use from unused dependency code or lockfile
+  entries; explain existing mitigations and material uncertainty. An audit match
+  alone does not establish unmitigated exposure or justify a fork.
+- Alternatives and their tradeoffs, including retaining upstream sources with a
+  documented accepted finding where appropriate. Explain what practical protection
+  the fork adds beyond existing mitigations.
+- The ongoing rebase, provenance, regression-test and upstream/retirement work.
+  Describe how the checkout could be removed and any known compatibility costs.
+
+Read-only source/reference inspection and small ignored assessment probes may
+prepare this proposal; do not first implement and validate the full fork and only
+then seek approval. Continue unrelated authorized work while waiting. Silence is
+not approval. Existing explicit approval remains valid within its disclosed scope;
+routine updates or rebases of an already approved checkout do not require another
+request. Additional packages or a materially different patch purpose require a
+new informed decision.
+
+Logging or diagnostic changes alone generally do not justify a new checkout.
+Existing patches are not precedent for adding another, and an accepted advisory
+finding is not a standing mandate to eliminate it by vendoring. Reassess when new
+evidence warrants it and obtain approval if a new fork is proposed. Track approved
+patches and their removal evidence in the [vendor ledger](../vendor/README.md).
 
 ## Embedded provider inputs
 
@@ -782,8 +811,9 @@ concrete unsoundness evidence; the `json` notice already references a possible
 soundness issue and is not a safety endorsement. The separate `pin-utils`
 (RUSTSEC-2026-0441) notice through `wasmtimer` also returns with upstream provider features. The
 resolved graph therefore reports five maintenance notices, including the four
-above. Retain actual audit evidence and source
-identities in the active plan until its completion gate passes.
+above. Retain raw audit evidence and source identities under ignored `target/`; for
+planned work, record the reviewed disposition and validation in its plan before
+cleanup.
 
 ### TLS security updates
 
