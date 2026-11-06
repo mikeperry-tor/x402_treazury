@@ -324,3 +324,9 @@ unburied original. The pre-canceled case establishes accepted-source preservatio
 not active-I/O drain; existing `treasury_sync` in-flight cancellation tests retain
 that separate evidence.
 These local fixtures establish no consensus, live bridge settlement or Tor claim.
+
+Fresh receive-policy coverage:
+`treasury::lifecycle_tests::refund_addresses::fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy`
+uses the actual SDK and synthetic indexer to verify shielded receipt spendability,
+zero transparent-address queries, safe receive output and persisted restart policy.
+Imported seed-only recovery and legacy transparent binding tests remain independent.

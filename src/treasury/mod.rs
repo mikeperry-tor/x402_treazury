@@ -172,11 +172,16 @@ impl Treasury {
                 birthday,
                 wallet_settings: WalletSettings::default(),
             },
-            None => WalletConfig::NewSeed {
-                no_of_accounts: NonZeroU32::new(1).unwrap(),
-                chain_height: birthday,
-                wallet_settings: WalletSettings::default(),
-            },
+            None => {
+                let mut settings = WalletSettings::default();
+                settings.sync_config.transparent_address_discovery =
+                    pepper_sync::config::TransparentAddressDiscovery::disabled();
+                WalletConfig::NewSeed {
+                    no_of_accounts: NonZeroU32::new(1).unwrap(),
+                    chain_height: birthday,
+                    wallet_settings: settings,
+                }
+            }
         };
         let scratch = tempfile::tempdir()?;
         let mut client = LightClient::new(config(scratch.path(), wallet, network)?, false)

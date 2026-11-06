@@ -27,7 +27,11 @@ x402_treazury wallet sync --config examples/deployments/managed.local.toml
 ```
 
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
-it. `wallet sync` and `wallet status` show readable summaries by default, with
+it. New seed wallets expose shielded-only receive addresses and persist disabled
+transparent address discovery. Mnemonic imports retain SDK discovery defaults;
+reopening preserves the saved settings and legacy receive/refund bindings.
+The SDK's initial receive address is Orchard-only; initialization also derives a
+Sapling+Orchard receive address. `wallet sync` and `wallet status` show readable summaries by default, with
 saved balance observations distinguished from current spending authority.
 The human summary computes ZEC balances from the existing saved SDK snapshot,
 using the same read that supplies receive addresses. It groups them with the

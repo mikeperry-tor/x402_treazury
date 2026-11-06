@@ -449,3 +449,40 @@ coherent RPC-origin view while individual reads retain each payer. NEAR metadata
 uses the known job recipient. Existing Coinbase/cross-origin scopes verified;
 no redundant discovery identity added. SOCKS regression coverage is authored and
 initial independent source review found no material issue; validation pending.
+
+C06 implemented fresh-seed-only persisted transparent-discovery disablement and
+shielded-only exposed receive addresses; imports and reopen preserve saved policy.
+Actual SDK/synthetic-indexer fixtures cover fresh shielded funds, zero transparent
+RPCs, restart and legacy transparent late receipts. Current public dry quote
+accepted our exact Sapling+Orchard/no-transparent UA with echoed binding, native
+ZEC/Base-USDC, public EXACT_OUTPUT dry mode and no deposit allocation (HTTP 201).
+Ignored evidence: `target/review-findings-cleanup/shielded-dry-quote-100.json` and
+`.log`; diagnostic executable SHA256
+`98a862285b06d5ec95e7b130de76050f04b54d8e66c0ae8651f216e7b69f5b36` predates
+these source edits and exercises the existing factory/refund-format contract.
+The initial 1-USDC request hit the explicit route minimum; unfunded synthetic
+100-USDC dry quote succeeded. This is quote compatibility, never refund delivery.
+Rust validation and exact-SHA review remain pending.
+
+Default acceptance is now assembled: current production/native/compatibility pass;
+unchanged default library1222+bin4 and11 early integrations carry forward from
+`check-runtime-ffi-owner.log`; metadata-derived remaining44 targets passed593
+cases with20 intentional ignores (`default-metadata-continuation.log`, exact
+selection/input evidence in `default-continuation-selection.json`). Proving4/4
+passed. Lifecycle56 passed/1 intentional ignored; fresh receipt failed at its
+per-address Sapling assertion. Codec and optimized acceptance remain pending.
+
+Independent pinned-SDK diagnosis rejected a proposed height workaround: BlockHeight
+subtraction is saturating, so no new bound or birthday change is justified. Actual
+SDK default_receivers is Orchard-only; application initialization adds all_shielded.
+Require every published address noT+usable shielded and require/select the dual
+Sapling+Orchard address for the actual receipt. More importantly, the authored
+initial-mixed-UA assumption was false for the pinned cohort: ReceiverSelection has
+only Orchard/Sapling and generation plus disk restore use no transparent receiver.
+Remove the resulting redundant address_info filter and wallet lock, correct owning
+guides, and preserve disabled fresh discovery, import/reopen settings and exact
+legacy refund identities. This supersedes earlier mixed-UA/filter rationale in this
+plan. G2 independently checked current generation and all disk reconstruction paths;
+no hypothetical SDK boundary guard is retained. Revalidate affected compiler,
+address/receipt/refund and CLI consumers, carry forward unrelated lifecycle/default
+results, then finish codec and optimized evidence before final gates.

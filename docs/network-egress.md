@@ -142,9 +142,9 @@ read still uses its actual wallet; no sibling is selected to own shared work.
 Coinbase already uses the wallet documentation identity, while participating HTTP
 transports at different origins have distinct scopes. Common credentials, content
 and timing can still correlate service-visible requests. Treasury scans share one
-identity; individual transparent discovery queries within it are not isolated.
-Remaining legacy scan privacy assessment belongs to the
-[deferred release plan](plans/deferred/release_followups.md).
+identity. New shielded-only wallets disable transparent address probing; legacy and
+imported wallets retain their discovery settings and late-receipt recovery. Remaining
+legacy scan privacy assessment belongs to the [deferred release plan](plans/deferred/release_followups.md).
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient

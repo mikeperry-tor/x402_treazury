@@ -51,6 +51,18 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
     )
     .await
     .unwrap();
+    let imported_settings = restored
+        .client
+        .as_ref()
+        .unwrap()
+        .wallet()
+        .read()
+        .await
+        .wallet_settings
+        .sync_config
+        .transparent_address_discovery
+        .clone();
+    assert!(imported_settings.scopes.external && imported_settings.scopes.refund);
     let initial_addresses = restored.addresses().await.unwrap();
     assert!(!initial_addresses.to_string().contains(&refund));
     let initial = restored.status().await.unwrap();
@@ -124,8 +136,27 @@ async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
     .await
     .unwrap();
     assert_eq!(restored.refund_address(job.id).await.unwrap(), legacy);
+    // A transparent receipt arriving after encrypted reopen must still be found.
+    let net = MockNet::launch().await;
+    let receipt = faucet_funding_transaction(vec![(&legacy, 100_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![receipt]);
+        chain.mine_empty_blocks(2);
+    }
+    restored.configure_sync(SyncSettings::new(net.indexer_uri().to_string(), 2).unwrap());
+    restored.sync_once(&CancellationToken::new()).await.unwrap();
+    assert!(!net.chain.read().await.taddr_request_log().is_empty());
+    assert_eq!(
+        restored
+            .snapshot_balances()
+            .await
+            .unwrap()
+            .confirmed_transparent,
+        Some(100_000)
+    );
     let status = restored.status().await.unwrap();
-    assert_eq!(status.snapshot_revision, expected_revision);
+    assert!(status.snapshot_revision > expected_revision);
     assert!(status.treasury_operations.is_empty() && !status.outgoing_pending);
     restored.close().await.unwrap();
 }
@@ -385,4 +416,81 @@ async fn unsupported_refund_binding_is_rejected_before_sync_or_preparation() {
             .unwrap();
         owner.close().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = MockNet::launch().await;
+    let mut owner = Treasury::create_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        1,
+        None,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    let addresses = owner.addresses().await.unwrap();
+    let addresses = addresses.as_array().unwrap();
+    for address in addresses {
+        assert_eq!(address["receiver_capabilities"]["transparent"], false);
+        assert!(
+            address["receiver_capabilities"]["orchard_protocol"] == true
+                || address["receiver_capabilities"]["sapling"] == true
+        );
+    }
+    let receive = addresses
+        .iter()
+        .find(|address| {
+            address["receiver_capabilities"]["orchard_protocol"] == true
+                && address["receiver_capabilities"]["sapling"] == true
+        })
+        .expect("fresh wallet must publish a Sapling and Orchard receive address");
+    let recipient = receive["encoded_address"].as_str().unwrap().to_owned();
+    let receipt = faucet_funding_transaction(vec![(&recipient, 100_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![receipt]);
+        chain.mine_empty_blocks(2);
+    }
+    owner.configure_sync(SyncSettings::new(net.indexer_uri().to_string(), 2).unwrap());
+    owner.sync_once(&CancellationToken::new()).await.unwrap();
+    assert_eq!(
+        owner
+            .status()
+            .await
+            .unwrap()
+            .sync
+            .unwrap()
+            .spendable_shielded_zatoshis,
+        100_000
+    );
+    assert!(net.chain.read().await.taddr_request_log().is_empty());
+    let identity = owner.status().await.unwrap().treasury_id;
+    let before = owner.addresses().await.unwrap();
+    owner.close().await.unwrap();
+    let mut reopened = Treasury::open_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        identity,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(reopened.addresses().await.unwrap(), before);
+    reopened.configure_sync(SyncSettings::new(net.indexer_uri().to_string(), 2).unwrap());
+    reopened.sync_once(&CancellationToken::new()).await.unwrap();
+    assert!(net.chain.read().await.taddr_request_log().is_empty());
+    assert_eq!(
+        reopened
+            .status()
+            .await
+            .unwrap()
+            .sync
+            .unwrap()
+            .spendable_shielded_zatoshis,
+        100_000
+    );
+    reopened.close().await.unwrap();
 }

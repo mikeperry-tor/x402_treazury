@@ -926,6 +926,12 @@ The remaining service-contract and bridge qualification work is owned by
 
 ## Refunds, state and recovery
 
+New seed wallets persist disabled transparent discovery and publish shielded-only
+receive addresses: the SDK's initial Orchard-only address and an additional
+Sapling+Orchard address. Imports and reopened snapshots preserve their discovery settings and issued
+addresses. This does not remove legacy transparent late-receipt recovery.
+
+
 New swaps use a persisted unique shielded-only unified refund address, containing
 Sapling and Orchard receivers derived from treasury account zero. The same Zcash
 seed also derives transparent addresses and unified addresses with transparent

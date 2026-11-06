@@ -307,6 +307,15 @@ verifies prefetched parameters and denies network access during qualification.
 
 ## Refund receivers and seed recovery
 
+New application seeds persist `TransparentAddressDiscovery::disabled()` in their
+SDK wallet settings before the first snapshot. The SDK still derives unused
+transparent keys separately from its initial Orchard-only UA; the application
+also derives a Sapling+Orchard receive UA. The pinned SDK's UA generator emits
+shielded receivers only, including when reconstructing saved addresses.
+Mnemonic imports retain discovery defaults; reconstruction and reopening load the
+saved settings without changing address history. Legacy transparent bindings keep
+their discovery and shielding path. Shielded trial decryption remains enabled.
+
 New refund derivation calls the pinned SDK's existing
 `generate_unified_address(ReceiverSelection::all_shielded(), AccountId::ZERO)`.
 The result contains Sapling and Orchard receivers without a transparent fallback.
