@@ -27,9 +27,11 @@ contracts. Follow [SDK integration](../zingo-integration.md),
 
 Working branch: `nu7_release_readiness`. Starting baseline:
 `571eba2f8a8f4df9d3f3e89d5992ccee93f81154`. The unrelated untracked `TODO`
-is outside this work. Production keys, funded calls, submissions and deployment
-remain outside current authority. Public source retrieval and unfunded diagnostics
-are permitted; private evidence inspection requires the reviewed recipe first.
+is outside this work. Public source retrieval and unfunded diagnostics are permitted.
+The operator separately approved the reviewed offline inspection of only
+`state/research_desk` and its default key. That approval covers saved evidence
+read/decryption and private output; private network queries, sync/rescan, signing,
+funded calls, submissions and deployment remain outside that authority.
 
 The N1–N6 assessment boundaries below remain acceptance requirements. Execute
 these coherent commits in order, refining candidate details from exact sources:
@@ -57,7 +59,7 @@ qualification require their actual runbooks; unavailable evidence stays missing.
   1000-block retention and previous-session-height fix while retaining local
   conservative recovery; preserving 100 would add an unnecessary divergence.
   Exact mainnet activation/branch/expiry regression selected to cover the
-  prerelease schedule gap. Implementation validation remains outstanding.
+  prerelease schedule gap. Subsequent implementation validation is recorded below.
 - Refund design: assess documented EXACT_OUTPUT excess-input refund as a simpler
   candidate before a duplicate-deposit harness; applicability and fees still need
   route evidence. Dry quotes establish format acceptance only, not returned
@@ -65,16 +67,17 @@ qualification require their actual runbooks; unavailable evidence stays missing.
 - Verified public v8 tag resolves to `81d799775f11e882896e8710e8af12d6d4d29a41`
   through Git remote metadata and a read-only checkout under ignored `target/`.
   Release notes and source cohort must agree before migration.
-- N5 authority and actual refund evidence remain outstanding; N6 is conditional.
+- N5 funded/copy-scan authority and actual refund attribution remain outstanding;
+  bounded offline inspection is approved and executed as recorded below. N6 is conditional.
 
-### Review and validation checkpoint
+### Earlier review and validation checkpoint
 
 Working branch remains `nu7_release_readiness`; accumulated implementation includes
 C1 `69d7d7cd` and fixups `b4502c21`, `3c074f7c`, `a17ad30a`; C2 `469179d8`
 and fixups `8a7b983e`, `1a272ba9`, `9fac678d`; timing `89a6d772` and fixups
 `0cda4e00`, `48ba21dc`; bridge recipe `29ef2b83`; N6 assessment `ce0a2cb6`.
-Each exact SHA has independent non-author source review. Reported material source
-findings are resolved; compiler/runtime evidence and final combined gate remain open.
+Each exact SHA has independent non-author source review. The following records
+the earlier checkpoint; later checkpoints supersede its pending validation statuses.
 
 - Initial `check-static` passed: formatting, 92 then-existing Python tests, ten
   analyzer qualification tests, complete 466-file application complexity comparison
@@ -97,8 +100,9 @@ findings are resolved; compiler/runtime evidence and final combined gate remain 
   files have grammar failures in both snapshots: their numbers are untrusted;
   manual review covered address encoding, NU7 grid/spacing and checkpoint retention.
   This is partial vendor numerical coverage, not complete parser qualification.
-- Production compiler/all-target Clippy is running; compatibility, remaining
-  runtime/proving/lifecycle/codec and optimized-profile evidence are outstanding.
+- At this earlier checkpoint, production compiler/all-target Clippy was running;
+  compatibility, remaining runtime/proving/lifecycle/codec and optimized evidence
+  were outstanding. The current checkpoint below records their completion.
   No native consensus, funded settlement, real Tor or reproducibility pass claimed.
 
 General-update assessment selected compatible root/workspace updates and protoc
@@ -112,7 +116,8 @@ stage drained, the batch was applied with current published Hyper 1.12.0 and h2
 both patches rebase without fuzz. Public archive bytes, upstream provenance-only
 lockfiles and all blocker records remain verified. `74a3e95e` removes obsolete
 mutable reorg-start accumulation after independent simplification review.
-Syntax/signature/wire and full compiler/runtime evidence remain outstanding. The analyzer's exact Tree-sitter
+At that stage syntax/signature/wire and full compiler/runtime evidence were
+outstanding; later runs below complete them. The analyzer's exact Tree-sitter
 0.20.9/grammar cohort stays pinned because 0.27 is API-incompatible. The prior
 96-record analyzer comparison predates direct syn 3 selection; refresh syntax
 qualification and source-matched metrics for the resulting tool before broad suites.
@@ -172,7 +177,8 @@ buried-expiry proof precedence intact. No counter, timer, replay or new financia
 guard is added. Existing transport, scheduler and synthetic-expiry fixtures cover
 failure versus unknown, scoped backoff, retained bytes/inputs/attempts and proof
 completion without lookup. Compiler/Clippy, refreshed complexity review and actual
-fixture execution for this correction remain pending. The compatibility build was
+fixture execution for this correction were pending at that point and subsequently
+passed as recorded below. The compatibility build was
 interrupted before runtime execution to keep source/executable evidence coherent;
 its completed dependency artifacts are retained for resumption.
 
@@ -189,7 +195,7 @@ The production compiler passes in `check-clippy-after73df.log`; after the operat
 VS Code restart, full all-target `zcash-regtest` Clippy and emitted-warning checks
 pass in `clippy-all-targets-after-restart.log` (all paths here are under
 `target/nu7-readiness/`). Two orphaned editor checks from before that restart were
-stopped; no new editor Cargo launch was observed. Current source-matched complexity
+stopped; no new editor Cargo launch was observed. At that checkpoint, source-matched complexity
 covers all 467 files/10,358 callables with no exclusions or threshold warnings;
 independent review also covered the supplementary vendor grammar gaps manually.
 
@@ -228,17 +234,88 @@ with keyless JSON status and authenticated notes reads. A byte-identical frozen
 copy of the actual tested default CLI is pinned in `inspection-bin-manifest.json`
 so subsequent builds cannot replace the inspection executable. Config/executable
 hash checks, treasury-identity comparison, coherent-revision limitations and fresh
-owner-only private captures are explicit. Production execution still requires the
-operator's separate path/key authorization. Further financial extraction methods
-require read-only review before use; no scan, mutation, signing or spending is
-included. No production state or key has been opened.
+owner-only private captures are explicit. The operator subsequently approved this
+exact offline scope, including the selected key. Frozen CLI status and notes
+inspections both succeeded with coherent identity/revision. No other wallet
+directory was inspected. No scan, mutation, signing or spending was included.
 
 The public unfunded UA helper is independently reviewed and successfully encodes
 the current all-shielded and Orchard-only protocol receivers using the matching
 Cargo application-profile keys0.17/protocol0.11 artifacts; identities are retained
-in `public-format-dependency-artifacts.json`. Fresh provider dry quotes remain
-pending. Default remainder, synthetic source-proof/proving/lifecycle/codec and
-optimized checks are also pending; final validation acceptance remains open.
+in `public-format-dependency-artifacts.json`. Fresh provider dry quotes and all ordered local checks subsequently pass as
+recorded in the current checkpoint; deployed financial qualification remains open.
+
+### Current validation and approved offline evidence checkpoint
+
+Exact application snapshot `0e8445aa5fd4c4d2ecd28f141f0a535417e10288` has independent
+combined source/complexity review against `571eba2f`, including all accumulated
+commits and fixups, with no remaining material source finding or compelling
+simplification. Source-matched analysis covers all 467 files/10,358 callables,
+without exclusions or comparison warnings. Manual vendor grammar-gap review carries
+forward. Later changes are test-only: `8c9438e9` corrects four scheduler assertions
+that retained the removed healthy minute floor; `0e8445aa` corrects the corresponding
+real-worker lifecycle test, including the SDK's synthetic NU7 scan interval25.
+No production timer, authority or financial assertion was weakened.
+
+Full all-target Clippy passes without diagnostics in
+`clippy-all-targets-after0e84.log`. Unchanged production compiler, 31 compatibility
+tests, static/provenance checks and advisory dispositions carry forward from the
+recorded earlier runs. Default continuation at `8c9438e9` passes 1,909 tests across
+57 harnesses, with 42 ignored; all 40 scheduler tests pass. Proving passes four
+cases. The initial lifecycle run passes 56/fails 1/ignores 1; the failure is exactly
+the obsolete lookup-floor assertion, not a production failure. The corrected exact
+worker test and codec each pass. The full lifecycle retry passes 57/ignores 1 in
+`check-lifecycle-after0e84.log`; optimized payment/SDK/crypto 20 and focused
+signer/timing/notes 10 all pass in their `release-*-after0e84.log` files, with no
+compiler/linker diagnostics. Debug library tests retain the explicitly
+dispositioned macOS unwind-table warning; no warning-free claim applies to them.
+
+The approved offline CLI evidence was supplemented by an independently reviewed
+one-off binding reader, retained only under ignored `target/nu7-readiness/`.
+Source SHA-256 `1165c5ba8c96ac3cc912ee5ca305bdbfbe8b07ecbc3aa2d619bdca3af0da681f`
+and frozen post-signing executable SHA-256
+`52f945248cbb9aa4878c59ac747e720deaa6f1af19da03bd905f6c51a6682671` have four
+passing public fixtures, including actual CLI, active WAL/held ownership,
+authentication/context mismatch and scoped record corruption. Revised offline recipe
+SHA-256 `253f17e7cdd6b169ce0558df7ccd304eb1fdb0971ed39c697556cc13e4419c7a` received
+independent execution review under the existing operator approval. The reader uses
+one read-only authenticated transaction; no SDK or owner is initialized. Its 17
+unused shared-module warnings are recorded, not suppressed; its test build has no
+diagnostics. Inspection succeeds with the same saved identity/revision as notes,
+and selected database/key/WAL hashes are unchanged. Private artifacts remain in
+fresh owner-only ignored storage; no keys, addresses, amounts or transaction IDs
+are committed here.
+
+Retained evidence supplies one promising shielded-receiver candidate with saved
+confirmation, SDK selection and a provider-refunded flag. It does not yet bind a
+provider refund transaction identity or prove live canonical/unreserved spendability.
+Some legacy refund bindings are transparent, so their obligations remain preserved.
+The status-query helper and frozen executable have independent source, complexity
+and execution-method review, with four passing public fixtures including actual
+CLI and direct-policy rejection. Its source SHA-256 is
+`7bfdba32f14e6f3a50e168309d13cbeafd8d22cc43f97d97578cd643b01fe56c`;
+frozen executable SHA-256
+`763200d699c8a194c79f8f5c6cde8a0799ddc112f6f83a30843587ca3d576c78`.
+Recipe `target/nu7-readiness/refund-status-inspection-recipe.md` SHA-256
+`f9f9485fdfadf82a1af8c2fc117bbd7dcba02d1b8f107aa123f2ddeb1b2d83f2`
+is ready for one selected existing-quote GET, with no credentials, retries or
+additional endpoints. Network-only policy SHA-256
+`f98d6d2079fd21ac5f0ab3eacc53bb9ac5299c0d7aefe9eb7d9cfd6bac9a989b`
+exactly matches the selected deployment's Tor section. Separate operator network
+approval is requested and pending; no selected private query has occurred. The
+offline grant authorizes no network query, sync/rescan, signing or spending.
+N3/N4 deployed semantics, N5 actual attribution and N6 retirement stay open. Native consensus, complete real-Tor, funded and reproducible-build
+qualification are not claimed.
+
+Public unfunded dry probes through the same configured Tor policy return HTTP201
+for both the current all-shielded UA and Orchard-only protocol UA at $2 nominal
+USDC. Exact refund-address/public-recipient/dry echoes agree; neither response
+allocates a deposit address or returned deadline. Initial $1 probes return HTTP400
+with an amount-below-bridge-minimum result, not an established address-format
+rejection. `public-refund-format-results.json` records the source/log identities.
+These are format acceptance and bounded configured-transport observations, not
+funded delivery, deployed receiver selection, watcher timing, settlement or full
+Tor qualification. No production bridge change is justified by these probes.
 
 ### Bridge evidence and qualification status
 
@@ -249,20 +326,23 @@ still do not establish the deployed ZEC watcher's arrival timestamp, confirmatio
 requirement, late-deposit outcome, refund minimum or unused-request terminalization.
 The live reference now retains the phased shielded-refund evidence recipe, including
 exact immutable fields and missing per-note inspection/submission-disabled scan
-capabilities. Ordinary quote-input equality remains intact. No production artifacts,
-keys or wallets have been inspected, and no funded test is authorized/executed.
+capabilities. Ordinary quote-input equality remains intact. No funded test is authorized/executed.
+Bounded production evidence inspection was subsequently approved and executed offline,
+as recorded above and in the current checkpoint below.
 The operator selected `examples/deployments/research_desk.toml`; its treasury path
 resolves to `state/research_desk`, with no explicit treasury UUID. Other wallet
-directories are outside this scope and may have unsupported schemas. No production
-state or keys have been opened. Source-only review established that existing CLI
+directories are outside this scope and may have unsupported schemas. Initial
+source-only review established that existing CLI
 views lack per-note evidence. C4 implements `wallet notes` using direct offline
 LightWallet decoding and the existing authenticated read-only snapshot contract;
 production compilation, exact-SHA source review and default/three-pool public
 fixture execution passed.
 It reports saved SDK selection, not live unreserved funds or spending authority;
 copy-scan and any funded excess harness remain separate missing capabilities.
-Next action: request the bounded production-key inspection authority for the
-reviewed, fixture-validated recipe before accessing the selected wallet.
+Next action: obtain the requested separate authority for the already reviewed,
+fixture-tested one existing private quote status GET through the selected Tor policy. Origin-chain hashes remain candidates until
+correlated with exact note/source identities. Submission-disabled copy-scan and any
+funded qualification remain separate missing capabilities and authority.
 
 ### N6 selected-cohort retirement assessment
 
@@ -283,22 +363,25 @@ must separately inspect internal maps, known/gap RPCs, compact/full/pending/calc
 recognition, fresh/import/reopen/seed+snapshot restore and original late obligations.
 Existing shielded fresh/RPC and seed-refund tests are useful but insufficient.
 
-Evidence/authority next action: under the reviewed recipe, identify current and
-archived transparent/mixed refund bindings, disclosed quotes, original outgoing
-records, owned funds and pending shielding. No private inventory or funded receiver
-qualification has occurred. N3/N5 deployed receiver/pool/spendability evidence and
-legacy ownership remain release blockers; N6 is explicitly incomplete. Current
+The approved bounded selected-state inventory now includes current/archived refund
+bindings, saved original outgoing identities and shielded-note facts. It does not
+qualify live legacy transparent funds, late obligations or deployed refund delivery.
+Next action: complete provider attribution and separately review submission-disabled
+copy-scan/legacy recovery evidence before selecting any SDK retirement patch.
+N3/N5 deployed receiver/pool/spendability evidence and complete legacy ownership
+remain release blockers; N6 is explicitly incomplete. Current
 SDK limitations are maintained in the integration guide, without claiming that
 query isolation or disabled discovery retires transparent support.
 
-### C2 implementation status
+### Earlier C2 implementation status
 
 C2 `469179d8` implements the supported libsecp256k1 secret-signing path and
 source-aware offline advisory replay. Independent security assessment identified
 actual secret arithmetic in the previous k256 path and the SDK's public
 `SignerLike` adapter as the smallest migration. No dependency checkout was added.
-Four mocked advisory-tool tests pass; final-source pinned-database replay,
-compiler/Clippy and signature/payment execution remain outstanding. Exact-SHA
+Four mocked advisory-tool tests pass. Final-source pinned-database replay,
+compiler/Clippy and signature/payment execution subsequently completed as recorded
+in the current checkpoint. Exact-SHA
 review found missing owned-key erasure in Alloy's opaque native credential and
 possible suppressed informational findings in advisory replay. Independently
 reviewed fixup `8a7b983e` uses direct native key ownership with in-place best-effort
@@ -310,7 +393,8 @@ The full offline assessment uses cargo-audit 0.22.2 and RustSec
 matches (mitigated crypto-bigint secret-signing path and seven build-only legacy
 TLS matches) plus five maintenance notices; protoc and normalized nonregistry
 inventory have no matches. Artifacts are under ignored
-`target/nu7-readiness/security-assessment/`; final-source replay remains required. Permanent exposure dispositions are in
+`target/nu7-readiness/security-assessment/`; the final-source replay is recorded
+above under `security-assessment-after73df/`. Permanent exposure dispositions are in
 `docs/development.md`; the report remains findings rather than clean. Cargo's compatible update retains `generic-array` 0.14.7
 because `crypto-common` 0.1.7 requires it exactly; forcing 0.14.9 is incompatible.
 
@@ -338,8 +422,8 @@ Fixup adapts the adapter/test signature, sanitizes `SyncPanicked`, and uses a re
 one-block merge fixture with prior empty checkpoints in all pools and no RPC.
 Also corrects copied-code origin wording and upstream clear-test expectation.
 Vendor reconstruction passes for all 35 exact upstream files. Full compiler,
-Clippy and runtime evidence remain pending; reviewed application and partial vendor
-complexity evidence is recorded above and needs refresh after the latest batch.
+Clippy and applicable runtime evidence subsequently completed; refreshed application
+and partial vendor complexity evidence is recorded above.
 The independent manual review examined Pepper scan ordering/drain, checkpoints, conservative
 recovery, reorg retention, offline/send/expiry and original-work ownership.
 
