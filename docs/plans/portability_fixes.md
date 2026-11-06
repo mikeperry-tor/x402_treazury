@@ -3,10 +3,8 @@
 ## Intent, scope and baseline
 
 U2 retains the focused unfinished namespace-authority assessment identified at
-`51549a453b5612b02332fa91625358e1ec568c72`. C07 of the
-[review cleanup plan](review_findings_cleanup.md) owns Linux/macOS ACL creation and
-reopen privacy implementation and its native acceptance; it is no longer duplicate
-active work here. Current privacy contracts belong in
+`51549a453b5612b02332fa91625358e1ec568c72`. Current Linux/macOS private-storage
+contracts belong in
 [development](../development.md#portability) and [wallet administration](../wallet-cli.md).
 Windows implementation remains [deferred release work](deferred/release_followups.md).
 

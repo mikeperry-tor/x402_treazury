@@ -2,8 +2,9 @@
 
 ## Intent and scope
 
-Own the near-term consensus/dependency and bridge evidence work accompanying
-[review findings cleanup](review_findings_cleanup.md). The operator reports NU7
+Own near-term consensus/dependency security and bridge evidence under the
+[SDK integration contract](../zingo-integration.md) and
+[refund/recovery policy](../wallet-rotation.md#refunds-state-and-recovery). The operator reports NU7
 activation on November 5, 2026; verify current network activation height, consensus
 parameters, deployed indexer/submission capabilities and exact upstream cohort
 before changing production dependencies. Do not hardcode that date or assume all

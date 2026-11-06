@@ -26,8 +26,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
-The [review findings cleanup plan](plans/review_findings_cleanup.md) owns selected
-production fixes and their review gates. [NU7 release readiness](plans/nu7_release_readiness.md)
+[NU7 release readiness](plans/nu7_release_readiness.md)
 owns near-term consensus/dependency security and bridge qualification;
 [deferred release follow-ups](plans/deferred/release_followups.md) own Windows,
 Linux CI and the remaining focused review assessments.
