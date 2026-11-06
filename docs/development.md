@@ -21,10 +21,16 @@ remain explicitly deferred in the [release follow-ups](plans/deferred/release_fo
 Preserve existing portable improvements; Windows validation is not a prerequisite
 for the selected Linux/macOS cleanup.
 
-Inherited macOS ACLs can defeat a mode-only privacy check. Supported-platform ACL
-repair is selected in [review cleanup](plans/review_findings_cleanup.md); the
-[storage plan](plans/portability_fixes.md) retains its concrete evidence and the
-separate Unix namespace-authority assessment. Neither is resolved by deferring Windows.
+Inherited macOS ACLs can defeat a mode-only privacy check. The shared private-storage
+boundary creates files/directories atomically without inherited grants on macOS,
+and validates reopened descriptors. Linux owner-only modes constrain POSIX ACL
+masks; default ACLs can remain. SQLite copies the private database mode to its
+sidecars. macOS SQLite parents reject file-inheriting grants; non-inheriting parent
+grants remain valid. Private files/directories themselves reject granting macOS
+ACLs. Inspection errors and
+unsupported privacy operations fail explicitly. The [storage assessment](plans/portability_fixes.md)
+retains the separate Unix namespace-authority question; privacy checks do not prove
+configured-name authority or detect authenticated-state rollback.
 Ordinary application support and optional qualification are separate:
 [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) have macOS-specific evidence.
@@ -359,7 +365,9 @@ or I/O kinds when available. Arbitrary error prose is never logged. These
 retries preserve accepted work and do not imply an operator-required stop.
 Store-worker termination is different: its exact handle is supervised and emits
 one immediate ERROR with a fixed panic/cancellation cause and affected capability,
-without the panic payload. Dead-Store operations fail instead of retrying SQL.
+without formatting the panic payload into that diagnostic. This does not suppress
+the existing Rust panic hook, which may print a closure panic to stderr.
+Dead-Store operations fail instead of retrying SQL.
 Completed unpublished transactions emit their own ERROR explaining that exact
 bytes remain retained and graceful shutdown cannot finish. A forced shutdown can
 lose those bytes; the original accepted inputs remain uncertain, never replayable.
@@ -591,6 +599,11 @@ individual attempt facts belong at DEBUG. Optional cover degradation alone does
 not establish failure of an agent operation. See
 [cover diagnostics](cover-traffic.md#cover-diagnostics) for fields, deadline
 cleanup and safe resource labels.
+
+Disposable HTTP cache read/write failures retain complete origin responses. Their
+WARNs identify the operation, safe filesystem kind or SQLite code when available,
+or explicitly unavailable local-validation detail. Worker panic/cancellation uses
+fixed cause text; paths, database error prose and response content are excluded.
 
 An unexpected balance reconciliation task exit reports its pending retry at INFO
 with the affected pool; routine observation attempts remain DEBUG.

@@ -34,6 +34,14 @@ async fn run(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
         .unwrap()
         .unwrap()
 }
+fn private_registry_fixture(path: &Path) -> rusqlite::Connection {
+    tempfile::NamedTempFile::new_in(path.parent().unwrap())
+        .unwrap()
+        .persist_noclobber(path)
+        .unwrap();
+    rusqlite::Connection::open(path).unwrap()
+}
+
 fn good(output: Output) -> Value {
     assert!(
         output.status.success(),
@@ -297,7 +305,7 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
     let id = "00000000-0000-0000-0000-000000000001";
     let document = json!({"openapi":"3.0.3","servers":[{"url":"https://offline.invalid"}],"paths":{"/read":{"get":{"description":"PRIVATE_SCHEMA_SENTINEL"}},"/write":{"post":{}}}}).to_string();
     let record = json!({"id":id,"owner":"toolbox","candidate":{"name":"demo","spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"},"targets":["toolbox"],"revision":2,"document":document,"hash":format!("{:x}",Sha256::digest(document.as_bytes())),"format":1,"accepted_at":1,"updated_at":2,"removed":false,"disabled":null});
-    let db = rusqlite::Connection::open(dir.join("registry.sqlite")).unwrap();
+    let db = private_registry_fixture(&dir.join("registry.sqlite"));
     db.execute_batch(
         "CREATE TABLE snapshot(id INTEGER PRIMARY KEY,json TEXT NOT NULL); PRAGMA user_version=1;",
     )
@@ -342,13 +350,7 @@ async fn source_removal_selects_saved_names_and_empty_bulk_removal_preserves_reg
     let selected_id = "00000000-0000-0000-0000-000000000001";
     let remaining_id = "00000000-0000-0000-0000-000000000002";
     let record = |id: &str, name: &str, disabled: Value| json!({"id":id,"owner":"toolbox","candidate":{"name":name,"spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"},"targets":["toolbox"],"revision":1,"document":document,"hash":format!("{:x}",Sha256::digest(document.as_bytes())),"format":1,"accepted_at":1,"updated_at":1,"removed":false,"disabled":disabled});
-    drop(
-        tempfile::NamedTempFile::new_in(dir)
-            .unwrap()
-            .persist(dir.join("registry.sqlite"))
-            .unwrap(),
-    );
-    let db = rusqlite::Connection::open(dir.join("registry.sqlite")).unwrap();
+    let db = private_registry_fixture(&dir.join("registry.sqlite"));
     db.execute_batch(
         "CREATE TABLE snapshot(id INTEGER PRIMARY KEY,json TEXT NOT NULL); PRAGMA user_version=1;",
     )
@@ -532,7 +534,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     let inspect = ["sources", "inspect", "--config", "registry.toml"];
     bad(run(dir, &inspect, &[]).await);
     assert!(!dir.join("registry.sqlite").exists());
-    let db = rusqlite::Connection::open(dir.join("registry.sqlite")).unwrap();
+    let db = private_registry_fixture(&dir.join("registry.sqlite"));
     db.execute_batch(
         "CREATE TABLE snapshot(id INTEGER PRIMARY KEY,json TEXT NOT NULL); PRAGMA user_version=1;",
     )

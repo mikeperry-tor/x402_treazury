@@ -93,6 +93,13 @@ space for metrics. This covers ordinary/raw literals and macro tokens, preserves
 byte positions/newlines and cannot add control-flow syntax. Raw evidence records
 `c_string_lines`; syntax probes compare scores and locations with equivalent string
 literals and still reject malformed Rust. Other grammar errors remain failures.
+The same preprocessing blanks only the `unsafe` token of each `syn`-validated
+foreign module (`unsafe extern` block), preserving its byte positions and newlines
+for the older grammar. Raw evidence records `unsafe_extern_lines`. Nested and
+conditionally compiled modules receive the same treatment; unsafe functions,
+unsafe expression blocks, comments and string contents remain unchanged. Probes
+compare the complete metric trees and locations with equivalent `extern` blocks
+and reject malformed original Rust before either compatibility transformation.
 
 This is not a compiled-feature report: all other feature branches remain present,
 including opt-in test code. Zcash application code is unconditional. Cargo feature

@@ -1,45 +1,32 @@
 //! Inspect a stopped, exclusively owned database without touching its journals.
 //! The caller must retain the application owner lock throughout this snapshot.
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
-use std::{fs::OpenOptions, path::Path};
+use std::path::Path;
 
 pub(super) struct Snapshot {
     pub db: Connection,
     // SQLite closes before the private temporary directory is removed.
-    _directory: Option<tempfile::TempDir>,
+    _directory: Option<crate::private_fs::TempDir>,
 }
 
 pub(super) fn snapshot(dir: &Path) -> Result<Snapshot> {
     let mut sources = Vec::with_capacity(3);
     let mut needs_recovery = false;
     for name in ["state.sqlite", "state.sqlite-wal", "state.sqlite-journal"] {
-        let mut options = OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-        }
-        let source = match options.open(dir.join(name)) {
+        let source = match crate::private_fs::open_file(&dir.join(name), false) {
             Ok(file) => file,
             Err(error)
-                if name != "state.sqlite" && error.kind() == std::io::ErrorKind::NotFound =>
+                if name != "state.sqlite"
+                    && error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
             {
                 continue;
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(error),
         };
         let metadata = source.metadata()?;
-        ensure!(metadata.is_file(), "invalid preflight database file");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            ensure!(
-                metadata.permissions().mode() & 0o077 == 0,
-                "preflight database permissions are not private"
-            );
-        }
         needs_recovery |= name != "state.sqlite" && metadata.len() != 0;
         sources.push((name, source));
     }
@@ -63,28 +50,13 @@ pub(super) fn snapshot(dir: &Path) -> Result<Snapshot> {
         });
     }
 
-    let temporary = tempfile::Builder::new();
-    #[cfg(unix)]
-    let temporary = {
-        use std::os::unix::fs::PermissionsExt;
-        let mut temporary = temporary;
-        temporary.permissions(std::fs::Permissions::from_mode(0o700));
-        temporary
-    };
-    let temporary = temporary.tempdir_in(dir)?;
+    let temporary = crate::private_fs::tempdir_in(dir)?;
     // Nonempty journals may contain the authoritative schema. Let SQLite recover
     // only a disposable copy, without parsing WAL/rollback formats ourselves.
     // Wallet payloads remain encrypted; database metadata is plaintext.
     // No source SHM is needed.
     for (name, mut source) in sources {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut destination = options.open(temporary.path().join(name))?;
+        let mut destination = crate::private_fs::create_file(&temporary.path().join(name))?;
         std::io::copy(&mut source, &mut destination)?;
     }
     let db = Connection::open_with_flags(

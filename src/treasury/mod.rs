@@ -58,7 +58,7 @@ use zingolib::{
 
 pub struct Treasury {
     network: TreasuryNetwork,
-    _scratch: tempfile::TempDir,
+    _scratch: crate::private_fs::TempDir,
     client: Option<LightClient>,
     store: StoreHandle,
     worker: tokio::task::JoinHandle<()>,
@@ -183,7 +183,7 @@ impl Treasury {
                 }
             }
         };
-        let scratch = tempfile::tempdir()?;
+        let scratch = crate::private_fs::tempdir()?;
         let mut client = LightClient::new(config(scratch.path(), wallet, network)?, false)
             .await
             .map_err(|_| anyhow::anyhow!("offline treasury initialization failed"))?;
@@ -271,7 +271,7 @@ impl Treasury {
             Ok::<_, anyhow::Error>((store, revision, bytes))
         })
         .await??;
-        let scratch = tempfile::tempdir()?;
+        let scratch = crate::private_fs::tempdir()?;
         // Borrow a zeroizing buffer instead of handing an unzeroized Vec to upstream.
         let client = match LightClient::from_reader(
             bytes.as_slice(),
@@ -352,7 +352,7 @@ impl Treasury {
             crate::rotation::store::inspect_wallet_snapshot(&dir, &key, expected_id.as_deref())
         })
         .await??;
-        let scratch = tempfile::tempdir()?;
+        let scratch = crate::private_fs::tempdir()?;
         let client = LightClient::from_reader(
             bytes.as_slice(),
             config(scratch.path(), WalletConfig::Read, TreasuryNetwork::Mainnet)?,

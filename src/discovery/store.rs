@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use fs2::FileExt;
 use rusqlite::Connection;
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     path::{Path, PathBuf},
 };
 pub struct Store {
@@ -54,6 +54,19 @@ fn protect_one(path: &Path, protected: &[PathBuf]) -> Result<()> {
     }
     Ok(())
 }
+fn open_or_create(path: &Path) -> Result<File> {
+    match crate::private_fs::create_file(path) {
+        Ok(file) => Ok(file),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) =>
+        {
+            crate::private_fs::open_file(path, true)
+        }
+        Err(error) => Err(error),
+    }
+}
 impl Store {
     pub fn open(path: &Path, protected: &[PathBuf]) -> Result<Self> {
         let path = normalized(path)?;
@@ -61,49 +74,22 @@ impl Store {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        crate::private_fs::parent_acl(path.parent().context("registry parent missing")?)?;
         for suffix in [".owner.lock", "-journal", "-wal", "-shm"] {
             let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
-            if let Ok(meta) = std::fs::symlink_metadata(sidecar) {
-                ensure!(
-                    meta.is_file() && !meta.file_type().is_symlink(),
-                    "unsafe registry sidecar"
-                );
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::MetadataExt;
-                    ensure!(meta.nlink() == 1, "hard-linked registry sidecar");
-                }
+            match crate::private_fs::open_file(&sidecar, false) {
+                Ok(_) => (),
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => {}
+                Err(error) => return Err(error),
             }
         }
-        let file = options.open(&path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{MetadataExt, PermissionsExt};
-            let meta = file.metadata()?;
-            ensure!(
-                meta.is_file() && meta.nlink() == 1 && meta.permissions().mode() & 0o077 == 0,
-                "registry must be a private file without hard links"
-            );
-        }
-        drop(file);
-        let lock = options.open(format!("{}.owner.lock", path.display()))?;
+        drop(open_or_create(&path)?);
+        let lock = open_or_create(&PathBuf::from(format!("{}.owner.lock", path.display())))?;
         lock.try_lock_exclusive()
             .context("source registry already owned")?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            ensure!(
-                lock.metadata()?.permissions().mode() & 0o077 == 0,
-                "registry must have owner-only permissions"
-            );
-        }
         let db = Connection::open(&path)?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(version <= 1, "unsupported source registry version");
@@ -166,7 +152,23 @@ impl Store {
     }
 }
 pub fn inspect(path: &Path) -> Result<serde_json::Value> {
-    ensure!(path.is_file(), "source registry does not exist");
+    crate::private_fs::open_file(path, false)?;
+    crate::private_fs::parent_acl(
+        path.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new(".")),
+    )?;
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+        match crate::private_fs::open_file(&sidecar, false) {
+            Ok(_) => (),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+    }
     let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(version == 1, "unsupported source registry version");
@@ -221,6 +223,38 @@ fn inspect_source(record: &Record) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn registry_parent_rejects_inheritable_grants_before_file_creation() {
+        let parent = crate::private_fs::tempdir().unwrap();
+        for (grant, allowed, name) in [
+            ("everyone allow read,write,execute", true, "allowed.sqlite"),
+            (
+                "everyone allow read,write,execute,file_inherit,directory_inherit",
+                false,
+                "blocked.sqlite",
+            ),
+        ] {
+            assert!(
+                std::process::Command::new("/bin/chmod")
+                    .arg("+a")
+                    .arg(grant)
+                    .arg(parent.path())
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let path = parent.path().join(name);
+            let result = super::Store::open(&path, &[]);
+            assert_eq!(result.is_ok(), allowed);
+            if !allowed {
+                assert!(!path.exists());
+                assert!(!parent.path().join(format!("{name}.owner.lock")).exists());
+            }
+            drop(result);
+        }
+    }
+
     use super::*;
     use serde_json::{Value, json};
 

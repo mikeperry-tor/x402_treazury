@@ -133,6 +133,16 @@ set `key_file` for separate storage. Possession of the complete default director
 is sufficient to decrypt the wallet. Owner-only permissions are not a password or
 OS keychain. Initialization creates missing state parent directories, refuses an
 existing state/key destination, and never silently imports or replaces a wallet.
+On Linux and macOS, private files are created with owner-only access before any
+wallet bytes are written. macOS creation suppresses inherited ACLs atomically;
+reopening checks permissions, link count and ACLs on the opened descriptor.
+Access-granting macOS ACLs on private state must be removed before reopening.
+SQLite parents reject file-inheriting grants; non-inheriting parent grants remain
+valid. Linux POSIX ACLs remain constrained by owner-only modes, including SQLite's
+copied sidecar modes. Inspection errors fail closed.
+Private storage operations on unsupported platforms return an explicit error.
+The [separate namespace assessment](plans/portability_fixes.md) concerns configured
+aliases and authenticated older state; these privacy checks do not detect rollback.
 
 Omit `treasury.id` to read the persisted UUID at runtime. An explicit ID asserts an
 expected wallet and must match; omit it for new-wallet initialization. Inspection
@@ -1028,10 +1038,12 @@ presentation changes add no persisted fields or schema version.
 
 Unsupported owner opens preserve existing state files before writable
 initialization. Stopped-state preflight recovers nonempty journals only in a
-disposable copy in a mode-restricted subdirectory of the state directory; normal
+disposable copy in a private subdirectory of the state directory; normal
 completion and errors remove that copy without changing original database or
-journal bytes. Effective ACL protection remains subject to the
-[unfinished portability contract](development.md#portability).
+journal bytes. Private creation and descriptor checks also cover encryption keys,
+mnemonic input, lock files, backup files and temporary SDK/preflight directories.
+SQLite sidecars use a parent without access-granting inherited ACLs; existing
+sidecars are checked before SQLite is opened.
 Clean stopped databases are read in place without creating a copy.
 Live read-only SQLite inspection preserves database and existing
 financial journal bytes; SQLite may create WAL/SHM coordination files or update

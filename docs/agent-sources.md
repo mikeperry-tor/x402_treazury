@@ -826,6 +826,14 @@ mappings. They do not activate static caches, warming, relays,
 cover configuration or recommendation selection, and grant no wallet/payment
 authority. Legacy generic records retain their existing settings and identity.
 
+Private registry/database and lock creation uses the shared Linux/macOS storage
+boundary; descriptor checks reject unsafe permissions, hard links and macOS access
+grants. Existing SQLite sidecars are checked before opening, including read-only
+inspection. macOS parents must not supply file-inheriting ACL grants to newly
+created SQLite sidecars; non-inheriting grants remain valid. Linux POSIX ACLs are
+constrained by the database and copied sidecar owner-only modes. Unsupported privacy operations and ACL-inspection failures
+return errors. The disk HTTP cache uses the same boundary in its private directory.
+
 The registry contains no wallet keys, but URLs and documents can reveal operator interests. Back it up while
 serving is stopped. Never delete or replace its ownership sidecar while serving.
 Registry files and sidecars cannot alias configuration or treasury paths. Each

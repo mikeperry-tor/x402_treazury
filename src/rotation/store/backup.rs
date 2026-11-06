@@ -26,17 +26,8 @@ impl Store {
         destination: &Path,
         mut boundary: impl FnMut(Boundary) -> Result<()>,
     ) -> Result<()> {
-        let builder = fs::DirBuilder::new();
-        #[cfg(unix)]
-        let builder = {
-            use std::os::unix::fs::DirBuilderExt;
-            let mut builder = builder;
-            builder.mode(0o700);
-            builder
-        };
-        builder
-            .create(destination)
-            .context("backup destination must not exist")?;
+        crate::private_fs::create_dir(destination)
+            .context("backup destination must not exist and must support private storage")?;
         let database = destination.join("state.sqlite");
         // Pre-create owner-only: SQLite VACUUM INTO accepts an empty file.
         let database_file = private_file(&database, true)?;

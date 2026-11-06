@@ -149,10 +149,49 @@ fn c_string_compatibility(code: &str) -> Result<(Vec<u8>, Vec<usize>), String> {
     Ok((bytes, lines))
 }
 
+struct MetricsSource {
+    bytes: Vec<u8>,
+    c_string_lines: Vec<usize>,
+    unsafe_extern_lines: Vec<usize>,
+}
+
+// The old grammar also predates unsafe extern blocks. Only the original parsed
+// foreign-module unsafety token is omitted; unsafe functions/blocks stay intact.
+fn metrics_source(code: &str, file: &syn::File) -> Result<MetricsSource, String> {
+    struct ForeignUnsafety<'a> {
+        bytes: &'a mut [u8],
+        lines: Vec<usize>,
+    }
+    impl<'ast> Visit<'ast> for ForeignUnsafety<'_> {
+        fn visit_item_foreign_mod(&mut self, node: &'ast syn::ItemForeignMod) {
+            if let Some(token) = node.unsafety {
+                let range = token.span.byte_range();
+                assert_eq!(&self.bytes[range.clone()], b"unsafe");
+                self.bytes[range].fill(b' ');
+                self.lines.push(token.span.start().line);
+            }
+            syn::visit::visit_item_foreign_mod(self, node);
+        }
+    }
+    let (mut bytes, c_string_lines) = c_string_compatibility(code)?;
+    let mut foreign = ForeignUnsafety {
+        bytes: &mut bytes,
+        lines: Vec::new(),
+    };
+    foreign.visit_file(file);
+    let unsafe_extern_lines = foreign.lines;
+    Ok(MetricsSource {
+        bytes,
+        c_string_lines,
+        unsafe_extern_lines,
+    })
+}
+
 fn analyze(path: &Path, code: &str) -> Value {
     let mut errors = vec![];
     let mut metric_code = code.as_bytes().to_vec();
     let mut c_string_lines = Vec::new();
+    let mut unsafe_extern_lines = Vec::new();
     let mut inventory = Inventory::default();
     match syn::parse_file(code) {
         Ok(file) => {
@@ -160,10 +199,11 @@ fn analyze(path: &Path, code: &str) -> Value {
                 inventory.test_ranges.push((1, code.lines().count()));
             }
             inventory.visit_file(&file);
-            match c_string_compatibility(code) {
-                Ok((bytes, lines)) => {
-                    metric_code = bytes;
-                    c_string_lines = lines;
+            match metrics_source(code, &file) {
+                Ok(source) => {
+                    metric_code = source.bytes;
+                    c_string_lines = source.c_string_lines;
+                    unsafe_extern_lines = source.unsafe_extern_lines;
                 }
                 Err(error) => errors.push(error),
             }
@@ -181,7 +221,7 @@ fn analyze(path: &Path, code: &str) -> Value {
     if metrics.is_none() {
         errors.push("analyzer returned no metric tree".into());
     }
-    json!({"path":path,"errors":errors,"c_string_lines":c_string_lines,"test_ranges":inventory.test_ranges,
+    json!({"path":path,"errors":errors,"c_string_lines":c_string_lines,"unsafe_extern_lines":unsafe_extern_lines,"test_ranges":inventory.test_ranges,
         "macro_lines":inventory.macro_lines,"test_attribute_lines":inventory.test_attribute_lines,"cfg_attr_lines":inventory.cfg_attr_lines,"metrics":metrics})
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -284,6 +324,49 @@ mod tests {
                     .unwrap()
                     .is_empty()
             );
+        }
+    }
+
+    #[test]
+    fn unsafe_extern_preserves_metrics_locations_and_other_unsafe_tokens() {
+        let code = "// unsafe extern comment\nconst LABEL: &str = \"é unsafe extern\";\n#[cfg(unix)]\nmod native {\nunsafe\nextern \"C\" { fn work(); }\nunsafe fn f(a: bool) { unsafe { if a { work(); } } }\nfn g() { let _ = c\"unsafe extern\"; }\n}";
+        let file = syn::parse_file(code).unwrap();
+        let source = metrics_source(code, &file).unwrap();
+        let compatible = String::from_utf8(source.bytes).unwrap();
+        assert_eq!(compatible.len(), code.len());
+        assert_eq!(source.unsafe_extern_lines, vec![5]);
+        assert_eq!(source.c_string_lines, vec![8]);
+        assert_eq!(
+            compatible,
+            code.replacen("\nunsafe\nextern", "\n      \nextern", 1)
+                .replace("c\"unsafe extern\"", " \"unsafe extern\"")
+        );
+        assert!(compatible.contains("unsafe fn f(a: bool) { unsafe {"));
+        let original = analyze(Path::new("probe.rs"), code);
+        let equivalent = analyze(Path::new("probe.rs"), &compatible);
+        assert_eq!(original["errors"], json!([]));
+        assert_eq!(equivalent["errors"], json!([]));
+        assert_eq!(original["unsafe_extern_lines"], json!([5]));
+        assert_eq!(original["metrics"], equivalent["metrics"]);
+        assert_eq!(original["test_ranges"], equivalent["test_ranges"]);
+    }
+
+    #[test]
+    fn malformed_unsafe_extern_source_is_rejected_before_normalization() {
+        for code in [
+            "unsafe extern \"C\" { fn work( }",
+            "unsafe extern \"C\" { fn work() -> ; }",
+            "unsafe extern \"C\" { fn work(); } fn f( {",
+        ] {
+            let result = analyze(Path::new("bad.rs"), code);
+            assert!(
+                result["errors"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|error| error.as_str().unwrap().starts_with("syn syntax error"))
+            );
+            assert_eq!(result["unsafe_extern_lines"], json!([]));
         }
     }
     #[test]

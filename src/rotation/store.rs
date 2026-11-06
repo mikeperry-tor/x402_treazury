@@ -45,7 +45,7 @@ use chacha20poly1305::{
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     path::Path,
 };
 use tracing::instrument::WithSubscriber;
@@ -231,39 +231,17 @@ pub struct Store {
     key: Zeroizing<[u8; 32]>,
     id: String,
 }
-#[cfg(unix)]
-fn private_options(options: &mut OpenOptions) {
-    use std::os::unix::fs::OpenOptionsExt;
-    options
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-}
-#[cfg(not(unix))]
-fn private_options(_: &mut OpenOptions) {}
-fn validate_private_metadata(metadata: &fs::Metadata) -> Result<()> {
-    ensure!(
-        metadata.file_type().is_file(),
-        "state path must be a regular file"
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        ensure!(
-            metadata.nlink() == 1,
-            "state/key file must not have hard links"
-        );
-        ensure!(
-            metadata.permissions().mode() & 0o077 == 0,
-            "state/key file must be owner-only"
-        );
-    }
-    Ok(())
-}
 fn existing_private_path(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => validate_private_metadata(&metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
+    match crate::private_fs::open_file(path, false) {
+        Ok(_) => Ok(()),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error),
     }
 }
 fn database_paths(dir: &Path) -> Result<()> {
@@ -278,41 +256,23 @@ fn database_paths(dir: &Path) -> Result<()> {
     Ok(())
 }
 fn private_file(path: &Path, create: bool) -> Result<File> {
-    existing_private_path(path)?;
-    let mut options = OpenOptions::new();
-    options.read(true).write(true);
     if create {
-        options.create_new(true);
+        crate::private_fs::create_file(path)
+    } else {
+        crate::private_fs::open_file(path, true)
     }
-    private_options(&mut options);
-    let file = options.open(path)?;
-    validate_private_metadata(&file.metadata()?)?;
-    Ok(file)
 }
 fn directory(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
-        let message = if error.kind() == std::io::ErrorKind::NotFound {
-            format!(
-                "wallet directory '{}' was not found; if this is the directory you intend to use for a new wallet, run `wallet init` with the same configuration",
-                path.display()
-            )
+    crate::private_fs::directory(path).map_err(|error| {
+        let missing = error.downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+        let message = if missing {
+            format!("wallet directory '{}' was not found; if this is the directory you intend to use for a new wallet, run `wallet init` with the same configuration", path.display())
         } else {
-            format!("could not inspect wallet directory '{}'", path.display())
+            format!("could not open private wallet directory '{}'", path.display())
         };
-        anyhow::Error::new(error).context(message)
+        error.context(message)
     })?;
-    ensure!(
-        metadata.file_type().is_dir(),
-        "state directory must not be a symlink"
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        ensure!(
-            metadata.permissions().mode() & 0o077 == 0,
-            "state directory must be owner-only"
-        );
-    }
     Ok(())
 }
 fn lock(path: &Path) -> Result<ownership::Owner> {
@@ -366,12 +326,7 @@ fn unseal(key: &[u8; 32], aad: &str, bytes: &[u8]) -> Result<Zeroizing<Vec<u8>>>
 }
 fn read_key(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     use std::io::Read;
-    existing_private_path(path)?;
-    let mut options = OpenOptions::new();
-    options.read(true);
-    private_options(&mut options);
-    let mut file = options.open(path)?;
-    validate_private_metadata(&file.metadata()?)?;
+    let mut file = crate::private_fs::open_file(path, false)?;
     let mut key = Zeroizing::new([0u8; 32]);
     file.read_exact(key.as_mut())?;
     let mut extra = [0u8; 1];
@@ -415,13 +370,7 @@ impl Store {
         ensure!(!snapshot.is_empty(), "treasury snapshot cannot be empty");
         ensure!(!dir.exists(), "refusing to overwrite state directory");
         ensure!(!key_file.exists(), "refusing to overwrite encryption key");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            fs::DirBuilder::new().mode(0o700).create(dir)?;
-        }
-        #[cfg(not(unix))]
-        fs::create_dir(dir)?;
+        crate::private_fs::create_dir(dir)?;
         let owner = lock(dir)?;
         let mut key = Zeroizing::new([0u8; 32]);
         OsRng.fill_bytes(key.as_mut());

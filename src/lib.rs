@@ -53,3 +53,5 @@ mod test_funding_quote;
 #[cfg(test)]
 #[path = "../tests/support/log_capture.rs"]
 mod test_log_capture;
+
+mod private_fs;

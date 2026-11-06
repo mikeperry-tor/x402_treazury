@@ -824,22 +824,13 @@ async fn init(
     };
     let seed = if let Some(path) = mnemonic_file {
         tracing::info!("wallet init: validating and reading mnemonic file");
-        let metadata = std::fs::symlink_metadata(&path)?;
-        anyhow::ensure!(
-            metadata.file_type().is_file(),
-            "mnemonic file must be a regular file"
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            anyhow::ensure!(
-                metadata.permissions().mode() & 0o077 == 0,
-                "mnemonic file must be owner-only"
-            );
-        }
-        Some(zeroize::Zeroizing::new(
-            std::fs::read_to_string(path).context("reading mnemonic file")?,
-        ))
+        use std::io::Read;
+        let mut file =
+            crate::private_fs::open_file(&path, false).context("opening private mnemonic file")?;
+        let mut seed = zeroize::Zeroizing::new(String::new());
+        file.read_to_string(&mut seed)
+            .context("reading mnemonic file")?;
+        Some(seed)
     } else {
         None
     };

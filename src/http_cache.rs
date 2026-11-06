@@ -607,13 +607,8 @@ impl Slot {
         .await;
         match result {
             Ok(Ok(value)) => value,
-            _ => {
-                tracing::warn!(
-                    source = self.source,
-                    resource = self.resource,
-                    limit_database_bytes = DATABASE_LIMIT,
-                    "HTTP cache read failed; fetching origin without cached data"
-                );
+            failure => {
+                report_failure(self, "read", &failure);
                 None
             }
         }
@@ -674,20 +669,53 @@ impl Slot {
                 "HTTP disk cache entry stored"
             );
         }
-        if !matches!(result, Ok(Ok(_))) {
-            tracing::warn!(
-                source = self.source,
-                resource = self.resource,
-                limit_database_bytes = DATABASE_LIMIT,
-                "HTTP cache update failed; response remains usable without persistence"
-            );
-        }
+        report_failure(self, "update", &result);
         result
             .ok()
             .and_then(Result::ok)
             .and_then(|(_, hints)| hints)
     }
 }
+// Local error types supply safe causes; never format arbitrary error prose,
+// database messages, paths or cached/upstream content into persistence diagnostics.
+fn report_failure<T>(
+    slot: &Slot,
+    operation: &'static str,
+    result: &std::result::Result<Result<T>, tokio::task::JoinError>,
+) {
+    let error = match result {
+        Ok(Ok(_)) => return,
+        Ok(Err(error)) => Some(error),
+        Err(_) => None,
+    };
+    let io = error.and_then(|error| error.downcast_ref::<std::io::Error>());
+    let sqlite = error.and_then(|error| match error.downcast_ref::<rusqlite::Error>() {
+        Some(rusqlite::Error::SqliteFailure(code, _)) => Some(code),
+        _ => None,
+    });
+    let cause = match result {
+        Err(error) if error.is_panic() => "local cache worker panicked",
+        Err(_) => "local cache worker was cancelled",
+        _ if io.is_some() => "filesystem access failed",
+        _ if sqlite.is_some() => "SQLite access failed",
+        _ => "local cache validation failed; specific cause unavailable",
+    };
+    let impact = if operation == "read" {
+        "fetching origin without cached data"
+    } else {
+        "response remains usable without persistence"
+    };
+    tracing::warn!(
+        source = slot.source,
+        resource = slot.resource,
+        limit_database_bytes = DATABASE_LIMIT,
+        io_kind = io.map(|error| format!("{:?}", error.kind())),
+        sqlite_code = sqlite.map(|error| format!("{:?}", error.code)),
+        sqlite_extended_code = sqlite.map(|error| error.extended_code),
+        "HTTP cache {operation} failed: {cause}; {impact}"
+    );
+}
+
 fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> tokio::task::JoinHandle<Result<T>> {
@@ -696,50 +724,39 @@ fn blocking<T: Send + 'static>(
 }
 
 fn open(directory: &Path) -> Result<Connection> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        if !directory.exists() {
-            match std::fs::DirBuilder::new().mode(0o700).create(directory) {
-                Ok(()) => (),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-                Err(e) => return Err(e.into()),
-            }
+    match crate::private_fs::create_dir(directory) {
+        Ok(()) => (),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) =>
+        {
+            crate::private_fs::directory(directory)?;
         }
-        let metadata = std::fs::symlink_metadata(directory)?;
-        ensure!(
-            metadata.is_dir() && metadata.permissions().mode() & 0o077 == 0,
-            "cache directory must be private"
-        );
-    }
-    #[cfg(not(unix))]
-    if !directory.exists() {
-        std::fs::create_dir(directory)?;
+        Err(error) => return Err(error),
     }
     let path = directory.join("discovery-v1.sqlite");
-    if !path.exists() {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
+    match crate::private_fs::create_file(&path) {
+        Ok(_) => (),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists) =>
         {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            crate::private_fs::open_file(&path, true)?;
         }
-        match options.open(&path) {
-            Ok(_) => (),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(e) => return Err(e.into()),
-        }
+        Err(error) => return Err(error),
     }
-    let metadata = std::fs::symlink_metadata(&path)?;
-    ensure!(metadata.is_file(), "cache must be an ordinary file");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        ensure!(
-            metadata.mode() & 0o077 == 0 && metadata.nlink() == 1,
-            "cache must be private and singly linked"
-        );
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let sidecar = directory.join(format!("discovery-v1.sqlite{suffix}"));
+        match crate::private_fs::open_file(&sidecar, false) {
+            Ok(_) => (),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => {}
+            Err(error) => return Err(error),
+        }
     }
     let db = Connection::open(path)?;
     db.busy_timeout(Duration::from_secs(2))?;

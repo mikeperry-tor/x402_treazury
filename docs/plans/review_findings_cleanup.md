@@ -486,3 +486,116 @@ plan. G2 independently checked current generation and all disk reconstruction pa
 no hypothetical SDK boundary guard is retained. Revalidate affected compiler,
 address/receipt/refund and CLI consumers, carry forward unrelated lifecycle/default
 results, then finish codec and optimized evidence before final gates.
+
+C07 implemented a shared private-file/directory/temporary boundary without another
+crate: Darwin atomic filesec ACL_NO_INHERIT, Linux mode-masked creation with default
+ACL removal, descriptor reopen validation and explicit unsupported errors. Keys,
+Store/SQLite and sidecars, registry/cache/locks, backups, mnemonic reads and SDK/
+preflight scratch use it. U1 was consolidated out of the portability plan, which
+retains U2's separate configured-name/rollback assessment. Initial native macOS
+libc probes passed; Rust/native Linux acceptance remains pending. Full check-static
+found the analyzer grammar cannot parse edition-2024 unsafe extern blocks; independent
+review approved narrowly masking the validated foreign-module unsafe token for
+metrics with explicit evidence and syntax probes. No exclusion may be accepted as
+a successful complexity review. Tooling correction and native validation pending.
+
+C07 tooling follow-up: the independently approved analyzer compatibility correction
+masks only AST-validated foreign-module `unsafe` tokens for the older grammar,
+preserving locations/newlines and recording transformed lines. Equivalence,
+unrelated unsafe syntax and malformed-original probes are authored; no application
+syntax, toolchain/analyzer dependency pin or financial behavior was weakened.
+Native Linux testing is now available via disposable Docker Rust 1.99.1, using only
+an exact public helper-source copy and isolated Cargo/SQLite evidence, without
+mounting application state/secrets. Results pending.
+
+Compiler continuation: production compiler passed; all-target Clippy identified
+unneeded unit arms (C07), async-wrapper syntax (C04), and C03's enlarged preflight
+enum plus a test-only Debug bound. Focused fixups `1fcee0c6`, `c497fa52`, `99c562fe`
+resolve them; fresh exact-SHA review found no material issue. Analyzer probes then
+passed 9/10: syn accepts a free extern function declaration without a body as a
+verbatim item, so that test did not demonstrate malformed syntax. Replace it with
+an actually malformed foreign return type; no production/parser contract loosened.
+Carry forward the passing 92 native Python/tooling fixtures and coverage-publication
+checks; rerun analyzer/provenance remainder and resume the compiler gate.
+
+Complexity review verified the complete 465-file/10,268-callable report at
+`target/complexity-runs/20261106T013702Z-9750015e` against execution baseline;
+no exclusions. Publisher CogC 17→23 is retained because the existing owner alone
+holds exact bytes/client/snapshot/lock through consumer notification and terminal
+non-drain; helper/state extraction adds choreography without removing a duty.
+For `run_standalone` CogC 19→24/CycC 38→48, independent review selected a real
+simplification: build HTTP Host policy once and separate inspection structure from
+serving token validation in that branch. Apply as C02 fixup; regenerate affected
+metrics. Unchanged deployment/payment/relay ownership hotspots were reviewed without
+material findings or further compelling simplifications.
+The resumed Clippy gate found only three macOS test permission literals requiring
+octal syntax; C07 fixture-only fixup changes `0` to `0o0`, preserving behavior.
+
+The next compiler continuation exposed a real consumer-layout dependency: removing
+the wrapper's pre-poll `Box::pin(work)` made `tests/server.rs` exceed the existing
+layout-query depth. Restore that existing indirection outside the async block;
+retain poll-time qualification capture and remove only admission machinery. No
+recursion-limit increase or runtime gate is introduced. G2 also encountered two
+affected cache persistence WARNs without safe causes; C07 fixup adds typed I/O/
+SQLite/worker causes (explicit unknown fallback), best-effort origin results and
+focused corruption/filesystem diagnostic assertions. Raw error prose stays excluded.
+
+Native C07 correction: focused CLI filter passed 5/6; an existing Store fixture
+exposed descriptor ACL retrieval NULL/ENOENT for a valid newly-created directory.
+Independent native/API audit traced Apple Libc `acl_file.c` → `statx_np.c` →
+`filesec.c`: descriptor retrieval uses ENOENT for absent FILESEC_ACL, while invalid
+fds return EBADF. Native clean file/dir, inherited-grant and invalid-fd probes
+confirmed that contract (`macos-acl-api-contract.json`). Accept only NULL+ENOENT;
+retain every other inspection error and grant rejection. Explicit Rust no-ACL
+file/directory reopen and invalid-descriptor controls added; inherited positive and
+denied-read controls retained. This is a functional portability fix, not a broad
+error suppression. Revalidate native fixtures and affected compiler/consumers.
+
+Native macOS Rust controls passed 4/4 after `75f7b526`, including real EBADF,
+explicit no-ACL file/dir reopen, inherited grant/denied-read, link/mode checks and
+SQLite sidecars/temp cleanup. Linux exact copied helper again passed 3/3.
+Focused cache exercise returned complete origin data and safe filesystem causes;
+its assertion incorrectly omitted tracing's quoted string format. Correct it to
+check the field plus typed kind without imposing formatting. SQLite continuation
+remains pending. The development lib-test linker emitted `__eh_frame section too
+large ... compact unwind` performance warning; retain it for independent diagnostic
+review and panic-ownership regressions. Do not suppress it or change build pins.
+
+C07 necessity review supersedes the earlier Linux default-ACL rejection/removal:
+pinned SQLite 3.51.1 copies validated DB modes to WAL/SHM/rollback journals; Linux
+0600/0700 modes constrain POSIX ACL class masks. Remove redundant xattr inspection/
+mutation and preserve real descriptor/mode/link/directory checks. On macOS, reject
+file-inheriting parent ALLOW entries rather than harmless non-inheriting parent
+grants; private objects still reject all granting ACLs. Independent native/source
+probes established both distinctions before implementation. Add actual bundled-
+rusqlite inherited/non-inherited controls and registry-before-bytes assertions.
+No namespace/U2 work or general ACL framework is selected. Owning guides updated.
+The corrected default library ran 1,220 passes/22 intentional ignores; default
+continued through early integration targets and found three CLI consumer failures:
+two handcrafted legacy registry fixtures were created 0644 rather than privately,
+and directory guidance had unnecessarily changed wording. Precreate synthetic
+registries privately before SQLite writes; restore maintained init guidance using
+the actual descriptor error kind (not `path.exists`, which conflates access denial
+with missing). Native and affected consumer/compiler continuations remain pending.
+
+Narrowed native controls passed macOS 5/5 plus actual registry-parent 1/1 and
+Linux 3/3 with bundled SQLite. Full CLI now passes 24/25; independent exact review
+caught the remaining fixture already precreated its registry before calling the
+new private precreation helper. Remove that duplicate, preserving one private
+creation path. Linux native fixture now explicitly chooses a named UID distinct
+from its ordinary owner and exercises a fresh denied read at mode 0000, while
+retaining default/access ACLs and actual SQLite mode checks. It does not claim an
+alternate-UID read trial. Revalidate these focused fixtures, preserve prior results
+where inputs remain valid, then finish compiler/runtime/optimized acceptance.
+
+The operator's question about the new unsafe boundary prompted an additional
+independent native-API ownership audit. Atomic macOS no-inherit creation still
+requires the isolated Darwin APIs; pinned std/libc offer no safe equivalent.
+Reviewer found `Security` constructed before checking `filesec_init()` for NULL;
+its destructor would pass NULL to Apple's dereferencing `filesec_free` on allocation
+failure. Check the raw pointer before constructing the owner. `acl_free(NULL)` is
+valid; copied FILESEC_ACL property, borrowed ACL entries/flags, CString lifetimes
+and newly owned descriptors were independently checked against Apple sources.
+No extra allocation state/framework is needed. Stop the unfinished validation
+build before editing, retain its interrupted log without a pass claim, and rerun
+affected native/compiler consumers before continuing runtime and optimized checks.

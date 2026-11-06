@@ -28,9 +28,12 @@ no Windows support claim or rerun requirement for the selected cleanup. Preserve
 historical Git/private evidence; partial native builds or API results do not
 qualify privacy, recovery or power-loss behavior.
 
-Supported-platform ACL repair is selected in [review cleanup](plans/review_findings_cleanup.md);
-the [storage plan](plans/portability_fixes.md) retains its evidence and the separate
-Unix namespace assessment. Normal Unix financial, lifecycle and compiler checks
+The shared Linux/macOS private-storage boundary has native fixtures for atomic
+creation under inherited ACLs, descriptor reopen rejection, SQLite sidecars and
+private preflight cleanup. Source review alone does not qualify these native
+contracts: execute the host-specific controls, including a denied-read control.
+The [storage assessment](plans/portability_fixes.md) retains the separate Unix
+namespace-authority question. Normal Unix financial, lifecycle and compiler checks
 remain required. Record exact source/executable/features, commands, diagnostics and
 nonzero test counts; retain valid evidence and revalidate affected consumers.
 No live-funded, consensus or Tor qualification follows from these controls.

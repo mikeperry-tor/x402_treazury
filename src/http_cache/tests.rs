@@ -275,6 +275,48 @@ async fn opt_out_isolation_missing_state_and_corruption() {
     cfg.http_cache_directory = Some(dir.path().join("missing/http-cache"));
     catalog(&url, &cfg).await.unwrap();
     assert!(!dir.path().join("missing").exists());
+    // Native filesystem rejection and SQLite corruption remain best-effort cache
+    // failures, with causes visible without exposing local or upstream prose.
+    let bad_directory = dir.path().join("not-a-directory");
+    crate::private_fs::create_file(&bad_directory).unwrap();
+    cfg.http_cache_directory = Some(bad_directory);
+    let (response, logs) = crate::limits::tests::capture(catalog(&url, &cfg)).await;
+    assert_eq!(response.unwrap()["value"], 1);
+    assert!(
+        logs.contains("HTTP cache read failed: filesystem access failed"),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("HTTP cache update failed: filesystem access failed"),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("io_kind=") && logs.contains("NotADirectory"),
+        "{logs}"
+    );
+    cfg.http_cache_directory = Some(dir.path().join("corrupt-cache"));
+    let directory = cfg.http_cache_directory.as_ref().unwrap();
+    drop(open(directory).unwrap());
+    std::fs::write(
+        directory.join("discovery-v1.sqlite"),
+        b"private synthetic cache error prose",
+    )
+    .unwrap();
+    let (response, logs) = crate::limits::tests::capture(catalog(&url, &cfg)).await;
+    assert_eq!(response.unwrap()["value"], 1);
+    assert!(
+        logs.contains("HTTP cache read failed: SQLite access failed"),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("HTTP cache update failed: SQLite access failed"),
+        "{logs}"
+    );
+    assert!(logs.contains("sqlite_extended_code=26"), "{logs}");
+    assert!(
+        !logs.contains("private synthetic cache error prose") && !logs.contains("corrupt-cache"),
+        "{logs}"
+    );
     task.abort();
 }
 
