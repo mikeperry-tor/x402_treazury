@@ -956,12 +956,19 @@ expiry. Disabled admissions and process restart preserve these bindings.
 
 `swap_preview` accepts a destination `asset_id`, `chain`, positive atomic
 `amount` and `recipient`. It returns `executable = false` and creates no payment
-authority or input reservation. Native preview validates the shielded recipient
-locally and reports principal, the operator's total-debit preference and the
-existing treasury network-fee ceiling. It does not enqueue an SDK fee estimate;
-the actual fee remains unknown until preparation. Foreign preview obtains a dry
-exact-output quote using an existing shielded refund receiver, without deriving a
-new address or creating an executable quote.
+authority or input reservation. Both routes report principal, the operator's
+optional total-debit preference and the existing treasury network-fee ceiling.
+`fee_estimate` reports an advisory SDK ZIP317 network fee, principal-plus-fee total
+and whether that estimate fits those limits. Missing spendable inputs or scan data
+leave the estimate null with an `unavailable_reason`; limit inspection remains
+available. This query waits behind accepted SDK work, creates no proof and reserves
+no inputs. The actual fee and accepted authority are checked during preparation.
+Native estimates use the validated Ironwood recipient. Foreign preview obtains a
+dry exact-output quote using an existing shielded refund receiver, without deriving
+a new address or creating an executable quote. Its fee basis is explicitly
+`near_deposit_output_shape`: a private standard transparent-output assumption,
+since a dry quote has no actual deposit address. The estimate grants no authority
+to pay that assumed output.
 
 `swap_send` accepts the same destination terms and a caller `request_id`. Native
 ZEC uses the exact principal and a shielded-only recipient, with no NEAR request

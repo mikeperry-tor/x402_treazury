@@ -198,7 +198,7 @@ async fn send_only_discovery_native_preview_and_disabled_status_preserve_authori
         .call(|s| s.reserve_direct("alice", "send", "accepted", json!({"original":"alice"})))
         .await
         .unwrap();
-    let (treasury, commands) = crate::treasury::actor::channel();
+    let (treasury, mut commands) = crate::treasury::actor::channel();
     let service = crate::direct_swap::Service::native(store.clone(), treasury, 15_000, 5);
     let mut server = Server::from_bindings(vec![], None);
     server.catalog_server = "alice".into();
@@ -245,45 +245,54 @@ async fn send_only_discovery_native_preview_and_disabled_status_preserve_authori
             .iter()
             .all(|tool| tool.name != "x402_treazury_swap_send")
     );
-    let search: Value = serde_json::from_str(
-        &server
-            .invoke(
-                "x402_treazury_tools_search",
-                json!({"query":"Zcash send"}).as_object().unwrap(),
-            )
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    for name in ["x402_treazury_swap_send", "x402_treazury_swap_preview"] {
-        assert!(
-            search["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool["tool_id"] == name)
-        );
+    for query in ["Zcash send", "ZEC"] {
+        let search: Value = serde_json::from_str(
+            &server
+                .invoke(
+                    "x402_treazury_tools_search",
+                    json!({"query":query}).as_object().unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        for name in ["x402_treazury_swap_send", "x402_treazury_swap_preview"] {
+            assert!(
+                search["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["tool_id"] == name)
+            );
+        }
     }
     let preview_args = json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"1000","recipient":SHIELDED_RECIPIENT});
-    let preview: Value = serde_json::from_str(
-        &server
-            .invoke(
-                "x402_treazury_swap_preview",
-                preview_args.as_object().unwrap(),
-            )
-            .await
-            .unwrap(),
-    )
-    .unwrap();
+    let (preview, observed) = tokio::join!(
+        server.invoke(
+            "x402_treazury_swap_preview",
+            preview_args.as_object().unwrap()
+        ),
+        commands.test_observe(),
+    );
+    assert!(
+        matches!(observed, crate::treasury::actor::ObservedCommand::PreviewFee(
+        crate::treasury::FeeTarget::Native(ref address), 1000
+    ) if address == SHIELDED_RECIPIENT)
+    );
+    let preview: Value = serde_json::from_str(&preview.unwrap()).unwrap();
     assert_eq!(preview["executable"], false);
+    assert_eq!(preview["fee_estimate"]["unavailable_reason"], "unavailable");
+    assert_eq!(preview["max_network_fee_zatoshis"], "15000");
     let wrapped = json!({"tool_id":"x402_treazury_swap_preview","arguments":preview_args});
-    let same: Value = serde_json::from_str(
-        &server
-            .invoke("x402_treazury_tool_call", wrapped.as_object().unwrap())
-            .await
-            .unwrap(),
-    )
-    .unwrap();
+    let (same, observed) = tokio::join!(
+        server.invoke("x402_treazury_tool_call", wrapped.as_object().unwrap()),
+        commands.test_observe(),
+    );
+    assert!(matches!(
+        observed,
+        crate::treasury::actor::ObservedCommand::PreviewFee(_, 1000)
+    ));
+    let same: Value = serde_json::from_str(&same.unwrap()).unwrap();
     assert_eq!(preview, same);
     // An owner argument is not a routing authority, even on an enabled send tool.
     let foreign_owner = json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"1000","recipient":SHIELDED_RECIPIENT,"request_id":"denied","owner":"bob"});

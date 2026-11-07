@@ -22,6 +22,7 @@ enum Command {
     Refund(String, oneshot::Sender<Result<String>>),
     DirectAddress(String, oneshot::Sender<Result<String>>),
     PreviewAddress(oneshot::Sender<Result<String>>),
+    PreviewFee(super::FeeTarget, u64, oneshot::Sender<Result<u64>>),
     NativeReceipt(String, oneshot::Sender<Result<serde_json::Value>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(
@@ -70,6 +71,10 @@ impl TreasuryHandle {
     }
     pub async fn preview_address(&self) -> Result<String> {
         self.call(Command::PreviewAddress).await
+    }
+    pub(crate) async fn preview_fee(&self, target: super::FeeTarget, amount: u64) -> Result<u64> {
+        self.call(|reply| Command::PreviewFee(target, amount, reply))
+            .await
     }
     pub async fn native_receipt(&self, id: String) -> Result<serde_json::Value> {
         self.call(|reply| Command::NativeReceipt(id, reply)).await
@@ -239,6 +244,7 @@ impl Treasury {
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::DirectAddress(id, reply) => { let _ = reply.send(self.direct_address(id).await); }
                         Command::PreviewAddress(reply) => { let _ = reply.send(self.preview_address().await); }
+                        Command::PreviewFee(target, amount, reply) => { let _ = reply.send(self.preview_fee(target, amount).await); }
                         Command::NativeReceipt(id, reply) => { let _ = reply.send(self.native_receipt(id).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, base, reply) => {
@@ -308,6 +314,7 @@ impl Treasury {
 // Observe the real command boundary without substituting a fake FundingBackend.
 #[cfg(test)]
 pub(crate) enum ObservedCommand {
+    PreviewFee(super::FeeTarget, u64),
     NativeReceipt(String),
     RecoverFunding(String, u32, bool),
     Prepare(PrepareRequest),
@@ -321,6 +328,10 @@ impl TreasuryCommands {
     }
     pub(crate) async fn test_observe(&mut self) -> ObservedCommand {
         match self.receiver.recv().await.expect("command channel closed") {
+            Command::PreviewFee(target, amount, reply) => {
+                let _ = reply.send(Err(super::FeePreviewUnavailable::Unavailable.into()));
+                ObservedCommand::PreviewFee(target, amount)
+            }
             Command::NativeReceipt(id, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
                 ObservedCommand::NativeReceipt(id)

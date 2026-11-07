@@ -106,10 +106,17 @@ rewrite accepted authority. Managed funding and shielding do not inherit this
 preference. SDK spendability and shared accepted-input ownership remain the
 capital and concurrency authorities; no additional reserve ledger is created.
 
-Dry previews reserve no inputs or payment authority. Native preview validates
-amount and receiver locally without an SDK proposal or fee-estimation command;
-actual fee is known during preparation. Foreign preview uses a dry quote and
-existing shielded refund receiver. Provider waits remain outside the SDK owner.
+Dry previews reserve no inputs or payment authority. Both routes expose configured
+limits and request an advisory SDK ZIP317 fee through the existing treasury actor.
+The Ironwood-only unsigned proposal is discarded without storing a proposal,
+clearing accepted work, signing, writing a snapshot or reserving inputs. Missing
+spendable funds/scan data leave an explicit unavailable estimate while preserving
+limit reporting. Native estimates use the validated recipient; foreign estimates
+use a private standard transparent deposit-output shape, since the dry exact-output
+quote has no actual deposit address. Foreign preview uses an existing shielded
+refund receiver. Provider waits remain outside the SDK owner. Actual preparation
+rechecks fees and shared accepted-input ownership; advisory selection does not
+promise input availability.
 
 Source preparation/submission and provider observation retain independent facts
 and progress. Native completion follows the treasury transaction's blockchain

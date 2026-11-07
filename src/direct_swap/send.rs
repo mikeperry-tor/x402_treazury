@@ -3,6 +3,7 @@ use super::*;
 use crate::rotation::store::direct_swap::{
     DirectSendAction, DirectSendAuthority, DirectSourceCondition,
 };
+use crate::treasury::{FeePreviewUnavailable, FeeTarget};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,8 +55,15 @@ impl Service {
         let cap = config.max_debit_zatoshis()?;
         if native {
             let principal = native_amount(&destination.amount)?;
+            let estimate = self
+                .fee_estimate(
+                    FeeTarget::Native(destination.recipient.clone()),
+                    principal,
+                    cap,
+                )
+                .await?;
             return Ok(
-                json!({"executable":false,"route":"native","asset_id":route::ZEC,"chain":"zec","amount_zatoshis":principal.to_string(),"recipient":destination.recipient,"network_fee_zatoshis":null,"max_network_fee_zatoshis":self.backend()?.max_fee.to_string(),"max_total_debit_zatoshis":cap.map(|value|value.to_string()),"principal_within_limit":cap.is_none_or(|limit|principal<=limit)}),
+                json!({"executable":false,"route":"native","asset_id":route::ZEC,"chain":"zec","amount_zatoshis":principal.to_string(),"recipient":destination.recipient,"fee_estimate":estimate,"max_network_fee_zatoshis":self.backend()?.max_fee.to_string(),"max_total_debit_zatoshis":cap.map(|value|value.to_string()),"principal_within_limit":cap.is_none_or(|limit|principal<=limit)}),
             );
         }
         let refund = self.backend()?.treasury.preview_address().await?;
@@ -64,9 +72,26 @@ impl Service {
             .output_quote(&destination, &refund, &identity, true)
             .await?;
         let principal = native_amount(&quote.input)?;
+        let estimate = self
+            .fee_estimate(FeeTarget::NearDeposit, principal, cap)
+            .await?;
         Ok(
-            json!({"executable":false,"route":"near","quote":quote,"max_network_fee_zatoshis":self.backend()?.max_fee.to_string(),"max_total_debit_zatoshis":cap.map(|value|value.to_string()),"principal_within_limit":cap.is_none_or(|limit|principal<=limit)}),
+            json!({"executable":false,"route":"near","quote":quote,"fee_estimate":estimate,"max_network_fee_zatoshis":self.backend()?.max_fee.to_string(),"max_total_debit_zatoshis":cap.map(|value|value.to_string()),"principal_within_limit":cap.is_none_or(|limit|principal<=limit)}),
         )
+    }
+    async fn fee_estimate(
+        &self,
+        target: FeeTarget,
+        principal: u64,
+        cap: Option<u64>,
+    ) -> Result<Value> {
+        let backend = self.backend()?;
+        let basis = match &target {
+            FeeTarget::Native(_) => "native_transaction",
+            FeeTarget::NearDeposit => "near_deposit_output_shape",
+        };
+        let fee = backend.treasury.preview_fee(target, principal).await;
+        Ok(advisory_fee(fee, principal, cap, backend.max_fee, basis))
     }
     pub(super) async fn send(&self, owner: &str, config: &Config, request: Send) -> Result<Value> {
         ensure!(
@@ -274,5 +299,80 @@ impl Service {
         self.store
             .call(move |s| s.direct_send_action(&id, maximum, now))
             .await
+    }
+}
+
+// Estimates are advisory: wallet selection and actual fees are checked again at preparation.
+fn advisory_fee(
+    fee: Result<u64>,
+    principal: u64,
+    cap: Option<u64>,
+    max_fee: u64,
+    basis: &str,
+) -> Value {
+    let (fee, reason) = match fee {
+        Ok(fee) => (Some(fee), None),
+        Err(error) => (
+            None,
+            Some(
+                error
+                    .downcast_ref::<FeePreviewUnavailable>()
+                    .copied()
+                    .unwrap_or(FeePreviewUnavailable::Unavailable)
+                    .to_string(),
+            ),
+        ),
+    };
+    let total = fee.and_then(|fee| principal.checked_add(fee));
+    json!({"advisory":true,"basis":basis,"network_fee_zatoshis":fee.map(|v|v.to_string()),
+        "total_debit_zatoshis":total.map(|v|v.to_string()),"unavailable_reason":reason,
+        "network_fee_within_limit":fee.map(|fee|fee<=max_fee),
+        "total_debit_within_limit":total.map(|total|cap.is_none_or(|cap|total<=cap))})
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    #[test]
+    fn advisory_fee_reports_total_limits_and_safe_unavailability() {
+        let estimate = advisory_fee(
+            Ok(15_000),
+            100_000,
+            Some(110_000),
+            30_000,
+            "native_transaction",
+        );
+        assert_eq!(estimate["network_fee_zatoshis"], "15000");
+        assert_eq!(estimate["total_debit_zatoshis"], "115000");
+        assert_eq!(estimate["network_fee_within_limit"], true);
+        assert_eq!(estimate["total_debit_within_limit"], false);
+        let estimate = advisory_fee(
+            Ok(15_000),
+            100_000,
+            None,
+            10_000,
+            "near_deposit_output_shape",
+        );
+        assert_eq!(estimate["total_debit_within_limit"], true);
+        assert_eq!(estimate["network_fee_within_limit"], false);
+        let missing = advisory_fee(
+            Err(FeePreviewUnavailable::ScanRequired.into()),
+            100_000,
+            None,
+            30_000,
+            "native_transaction",
+        );
+        assert_eq!(missing["unavailable_reason"], "scan_required");
+        assert!(missing["network_fee_zatoshis"].is_null());
+        assert!(missing["total_debit_within_limit"].is_null());
+        let unexpected = advisory_fee(
+            Err(anyhow::anyhow!("private upstream diagnostic")),
+            100_000,
+            None,
+            30_000,
+            "native_transaction",
+        );
+        assert_eq!(unexpected["unavailable_reason"], "unavailable");
+        assert!(!unexpected.to_string().contains("private"));
     }
 }

@@ -15,7 +15,7 @@ use zcash_keys::address::Address;
 use zcash_protocol::value::Zatoshis;
 use zingo_netutils::Indexer;
 
-type DepositProposal = zcash_client_backend::proposal::Proposal<
+pub(super) type DepositProposal = zcash_client_backend::proposal::Proposal<
     zcash_primitives::transaction::fees::zip317::FeeRule,
     zingolib::wallet::output::OutputRef,
 >;
@@ -124,7 +124,7 @@ fn validate_calculated_payment(
     Ok(())
 }
 
-fn source_proposal(
+pub(super) fn source_proposal(
     wallet: &mut zingolib::wallet::LightWallet,
     request: zcash_client_backend::zip321::TransactionRequest,
 ) -> std::result::Result<DepositProposal, zingolib::wallet::error::ProposeSendError> {

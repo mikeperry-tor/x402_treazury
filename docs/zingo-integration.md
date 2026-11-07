@@ -451,10 +451,19 @@ does not authorize extra outgoing payments. The direct
 operation's optional total-debit authority checks principal plus the SDK's actual
 network fee at proposal and calculated-byte publication; it does not estimate the
 fee by subtracting the requested amount from an advisory balance. Existing
-treasury network-fee safeguards apply independently. Native preview uses local
-receiver validation without deriving an address, reserving inputs or requesting an
-SDK fee estimate. Foreign previews use an existing shielded receiver; executable
-foreign sends persist their own shielded refund binding before source preparation.
+treasury network-fee safeguards apply independently. Direct previews reuse the
+application's Ironwood-only `source_proposal` and SDK `total_fee` through the
+serialized actor; the SDK's unrestricted preview wrapper is unsuitable. The
+unsigned proposal is discarded, never stored or calculated. Passing `lock_inputs =
+None` avoids SDK input locks; no snapshot, address derivation or cached-proposal
+replacement occurs. The SDK's note selector ignores its generic lock filter, so
+this is advisory and actual preparation still checks accepted-input ownership.
+Native estimates use the validated receiver. Foreign dry quotes lack a deposit
+address, so a private standard transparent-output shape estimates the fee; neither
+that placeholder nor proposal may escape into accepted terms or signing. Foreign
+previews use an existing shielded receiver; executable foreign sends persist their
+own shielded refund binding before source preparation. Missing funds or scan data
+return typed unavailable estimates, not an invented fee.
 
 Native direct receiving uses the same persisted shielded derivation, with a fresh
 UA per new request ID and no NEAR transport. Native receipt inspection matches

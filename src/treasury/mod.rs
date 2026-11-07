@@ -6,6 +6,8 @@ pub mod birthday;
 mod coverage;
 pub(crate) mod diagnostics;
 mod expiry;
+mod fee_preview;
+pub(crate) use fee_preview::{FeePreviewUnavailable, FeeTarget};
 mod inputs;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
