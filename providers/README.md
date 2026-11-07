@@ -102,6 +102,8 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Unified catalog with direct service URLs, including public previews/feeds; research recommendations |
 | Market Intelligence API | `marketintelligence.toml` | Market research and analytics; POST opportunity scans; prepaid/webhook workflows excluded |
+| Medical Codes (x402 Toolkit) | `medical-codes.toml` | Full ICD-10, HCPCS, LOINC, RxNorm and NPI-format reference catalog; held in reserve |
+| medRxiv Preprint Details | `medrxiv-details.toml` | Date-window medRxiv preprint listings with cursor pagination |
 | Nansen | `nansen.toml` | Keyless paid analytics; API-key account/trading and SSE agents excluded |
 | News Gurus | `newsgurus/provider.toml` | Vendor x402 catalog projection, including agent-status; lazy help |
 | OneShot | `oneshot.toml` | Synchronous search and public discovery; authenticated jobs excluded |

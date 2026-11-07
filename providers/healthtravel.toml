@@ -11,6 +11,10 @@ instructions_text = "Preserve source dates, identifiers, currencies and coverage
 [overrides.healthtravel_help]
 description = "Read SiteCheck's health, travel and transport endpoint guide, prices and source coverage. Use exposed schemas for exact inputs."
 
+[overrides.healthtravel_health_pubmed_abstracts]
+description = "Search PubMed and return citation metadata: PMID, title, authors, journal, publication date and DOI. Up to 20 results. Despite the vendor tool name, abstract text is not included."
+pricing_description = "Cost: ~$0.002/call [spec]."
+
 [overrides.healthtravel_health_ema_shortages_safety]
 description = "Search EMA medicine supply-shortage records by medicine or INN words. Supply shortages only; no safety-signal or pharmacovigilance data. Returns status, forms, alternatives, update dates and source links. Results can include resolved shortages and discontinued medicines; a match does not mean an active shortage today."
 pricing_description = "Cost: ~$0.002/call [spec]."

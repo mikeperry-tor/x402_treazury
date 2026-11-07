@@ -45,6 +45,8 @@ macro_rules! provider_manifest {
             ("lonestar", "providers/lonestar.toml", None),
             ("marketintelligence", "providers/marketintelligence.toml", None),
             ("maxwell", "providers/maxwell.toml", None),
+            ("medical-codes", "providers/medical-codes.toml", None),
+            ("medrxiv-details", "providers/medrxiv-details.toml", None),
             ("nansen", "providers/nansen.toml", None),
             ("netintel", "providers/netintel.toml", None),
             ("newsgurus", "providers/newsgurus/provider.toml", Some("providers/newsgurus/openapi.json")),

@@ -1,0 +1,22 @@
+description = "medRxiv preprint details for a publication-date window, with cursor pagination."
+spec = "https://x402-v2-mint-medrxiv-details.vercel.app/openapi.json"
+name = "medRxiv Preprint Details (x402 mint)"
+base_url = "https://x402-v2-mint-medrxiv-details.vercel.app"
+prefix = "medrxiv"
+include = ["/v1", ""]
+pricing_key = "x-payment-info"
+help_url = "https://x402-v2-mint-medrxiv-details.vercel.app/llms.txt"
+instructions_text = "Lists preprints posted in a date window rather than searching by keyword. Preprints are not peer-reviewed. Use science for broader paper search."
+
+[overrides.medrxiv_medrxiv_details]
+description = "List medRxiv preprint details for a from/to publication-date window. Pass cursor to continue. Returns an ok envelope whose data contains the records; empty or invalid request bodies are not charged. This is not keyword search or full-text retrieval."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.medrxiv_medrxiv_details.params]
+server = "Preprint server; the documented value is medrxiv."
+from = "Start publication date, as YYYY-MM-DD."
+to = "End publication date, as YYYY-MM-DD."
+cursor = "Continuation value from a previous response, when one is returned."
+
+[overrides.medrxiv_help]
+description = "Read the medRxiv preprint listing guide."

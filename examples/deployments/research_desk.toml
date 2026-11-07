@@ -1056,6 +1056,21 @@ send_tools = [
   { to = "exclude" },
 ]
 
+# Direct PubMed search is already covered by healthtravel_health_pubmed_abstracts
+# ($0.002; PMID, title, authors, journal, date and DOI) and 2s papers_search
+# ($0.006; cross-source results with abstracts). The x402 mint PubMed provider and
+# medical-codes are not routed here; medical-codes is kept as a reserve provider
+# because it only adds narrow ICD-10 parsing and an offline NPI checksum.
+
+# medRxiv date-window listings add a medical-preprint lane absent from 2s
+# papers_search. They list by publication date rather than keyword search.
+[sources.medrxiv]
+extends = "../../providers/medrxiv-details.toml"
+send_tools = [
+  { to = "exclude", tools = ["help"] },
+  { to = ["science", "health"] },
+]
+
 # Doctor search, hospital prices, assistance and HRSA reads delivered records.
 # The full read-only catalog is selected; other operations remain unqualified.
 [sources.findmydirectdoctor]
@@ -1108,7 +1123,15 @@ send_tools = [
   ] },
   # WebMD returned family-medicine listings; dentistry failed upstream HTTP 503.
   # ADA searches in New Orleans and Austin returned 404; leave ADA unselected.
-  { to = "health", tools = ["b2b_webmd_healthcare_provider_directory", "gov_healthcare_gov"] },
+  # Healthline adds a different upstream provider directory, not independent
+  # redundancy: both it and WebMD come from the same SiteCheck operator. HealthData.gov
+  # is a catalogue only, useful for discovering public-health datasets by keyword.
+  { to = "health", tools = [
+    "b2b_webmd_healthcare_provider_directory",
+    "b2b_healthline_medical_providers_directory",
+    "gov_healthcare_gov",
+    "gov_healthdata",
+  ] },
   { to = "exclude" },
 ]
 
@@ -1126,7 +1149,14 @@ send_tools = [
     "travel_amtrak_train_tracker", "travel_hk_mtr_realtime", "travel_seat61_routes",
     "travel_mbta_realtime", "travel_septa_train_view", "travel_michelin_restaurant_guide",
   ] },
-  { to = "health", tools = ["health_ema_shortages_safety"] },
+  # PubMed citation metadata is shared with science; HCPCS/LOINC fill code-family
+  # gaps that 2s does not cover, both at $0.002.
+  { to = ["science", "health"], tools = ["health_pubmed_abstracts"] },
+  { to = "health", tools = [
+    "health_cpt_hcpcs_procedure",
+    "health_loinc_laboratory_codes",
+    "health_ema_shortages_safety",
+  ] },
   # Wikivoyage failed upstream HTTP 503; Google Flights returned no fare data.
   # Aviation weather stays on world; cars, corporate data and other non-travel namespace reads stay omitted.
   { to = "exclude" },
@@ -1156,8 +1186,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
 discover_on_demand = true
-instructions_text = "Academic and scientific research: papers, citations, researchers, institutions, grants, and biological and chemical references. Preserve publication dates, identifiers and coverage. Use health for clinical trials, healthcare access, care costs, drug/device records and public-health datasets; web for general search and page retrieval."
-discovery_search_tool_instructions_text = "Science keywords: biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, x402 Atlas, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, 2s, twos."
+instructions_text = "Academic and scientific research: papers, citations, researchers, institutions, grants, and biological and chemical references. Preserve publication dates, identifiers and coverage. HealthTravel PubMed search returns citation metadata (PMID, authors, journal, date, DOI) without abstract text; 2s papers_search returns abstracts across sources. medRxiv listings are date-windowed preprint records, not keyword search, and preprints are not peer-reviewed. Use health for clinical trials, healthcare access, care costs, drug/device records and public-health datasets; web for general search and page retrieval."
+discovery_search_tool_instructions_text = "Science keywords: biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, x402 Atlas, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, PubMed E-utilities, PMID, medRxiv, preprint, date-window preprint listing, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, 2s, twos."
 
 [servers.health]
 listen = "127.0.0.1:3012"
@@ -1165,8 +1195,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
 discover_on_demand = true
-instructions_text = "Health research and care access: doctor and clinic directories, hospital cash prices, insurance plans, financial assistance, clinical trials, drug/device records, nutrition and public-health datasets. Preserve source dates, identifiers, evidence grades and coverage. Listed offices, fees and availability need confirmation. Keep hospital facility prices, Medicare benchmarks, drug acquisition costs and pre-subsidy insurance premiums distinct. WebMD listings can include related specialties and incomplete contacts; dentistry delivery remains unqualified. Use science for papers and research funding; business for investment-oriented pharma catalysts and general product recalls."
-discovery_search_tool_instructions_text = "Health keywords: FindMyDirectDoctor, find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, CompanyRecords, WebMD, HealthCare.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
+instructions_text = "Health research and care access: doctor and clinic directories, hospital cash prices, insurance plans, financial assistance, clinical trials, drug/device records, code references, nutrition and public-health datasets. Preserve source dates, identifiers, evidence grades and coverage. Listed offices, fees and availability need confirmation. Keep hospital facility prices, Medicare benchmarks, drug acquisition costs and pre-subsidy insurance premiums distinct. WebMD and Healthline directories can include related specialties and incomplete contacts; dentistry delivery remains unqualified. HCPCS and LOINC are reference codes: existence does not establish coverage, and LOINC results omit units and reference ranges. Use science for papers, preprints and research funding; business for investment-oriented pharma catalysts and general product recalls."
+discovery_search_tool_instructions_text = "Health keywords: FindMyDirectDoctor, find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, CompanyRecords, WebMD, Healthline, Healthline FindCare, HealthCare.gov, HealthData.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, HCPCS, HCPCS Level II, LOINC, lab test code, PubMed, PMID, medRxiv, preprint, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
 
 [servers.social]
 listen = "127.0.0.1:3013"

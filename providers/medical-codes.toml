@@ -1,0 +1,44 @@
+description = "US medical code reference: ICD-10-CM, HCPCS, LOINC, RxNorm drug names and NPI format checks."
+spec = "https://medical-codes.x402tookit.com/openapi.json"
+name = "Medical Codes (x402 Toolkit)"
+base_url = "https://medical-codes.x402tookit.com"
+prefix = "medical_codes"
+include = [""]
+pricing_key = "x-payment-info"
+help_url = "https://medical-codes.x402tookit.com/llms.txt"
+instructions_text = "Reference data only: preserve code sets, source dates and the distinction between a code existing and a payer covering it. Missing codes may be newer or older than the served data. Prefer 2s for ICD-10 and RxNorm, which include descriptions, billable status and drug profiles at lower prices."
+
+[overrides.medical_codes_icd10_lookup]
+description = "Look up an ICD-10-CM diagnosis code and return its official description, chapter and whether it is a complete code or a category header. This is a description lookup, not a claim that the code is payable."
+pricing_description = "Cost: ~$0.03/call [spec]."
+
+[overrides.medical_codes_icd10_parse]
+description = "Parse an ICD-10-CM code into category, subcategory and extension, name its chapter and check the format offline. Parsing does not establish that the code is valid or billable."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.medical_codes_icd10_search]
+description = "Search ICD-10-CM diagnosis codes by description keywords. Returns matching codes and their chapters; coverage and payment are payer-specific."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.medical_codes_hcpcs_lookup]
+description = "Look up HCPCS Level II billing codes (supplies, equipment, services) by code or description keywords. Returns matching codes and descriptions. Coverage and payment are payer-specific and are not checked."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.medical_codes_loinc_lookup]
+description = "Look up LOINC laboratory test codes by code or test name. Returns the long name, component and a deprecated-code warning. Units, reference ranges and clinical interpretation are not provided."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.medical_codes_drug_profile]
+description = "Return the RxNorm profile of a drug name: ingredient, brand names, available dose forms and the RxCUI identifier. Clinical guidance and interaction checks are not included."
+pricing_description = "Cost: ~$0.05/call [spec]."
+
+[overrides.medical_codes_drug_name_match]
+description = "Resolve a misspelled or branded drug name to RxNorm candidates with RxCUI identifiers, names and match scores. Review ambiguous candidates before acting on the result."
+pricing_description = "Cost: ~$0.03/call [spec]."
+
+[overrides.medical_codes_npi_check]
+description = "Validate a US National Provider Identifier format and check digit offline. This does not look up the provider, taxonomy or enrollment status."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.medical_codes_help]
+description = "Read the medical-code reference guide and coverage notes. Use exposed schemas for exact inputs."
