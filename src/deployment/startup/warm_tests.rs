@@ -12,7 +12,6 @@ async fn warm_prefers_fresh_relay_catalog_without_endpoint_requests() {
 version=1
 [treasury]
 state_dir='unused'
-max_refund_shielding_fee_zec='0.001'
 [wallets.w]
 mode='static'
 private_key_env='UNUSED'

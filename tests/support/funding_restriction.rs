@@ -583,7 +583,7 @@ fn qualification_snapshot_accepts_parent_alias_but_refuses_database_symlink() {
 }
 
 #[test]
-fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_submission() {
+fn accepted_jobless_bytes_retain_identity_but_job_permits_cannot_authorize_disclosure() {
     use crate::rotation::store::preparation::{CalculationInputs, InputPool, OwnedInput};
     use crate::rotation::transaction::PreparedTransaction;
     let (_restricted_dir, mut restricted, _) = fixture();
@@ -591,7 +591,6 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
         .install_funding_permits(Arc::new(TestPermits::new(restricted.id())))
         .unwrap();
     assert!(restricted.require_preparation_available().is_ok());
-    assert!(!restricted.automatic_shielding_available().unwrap());
     assert!(
         restricted
             .accept_preparation("unauthorized shield", None, 100, None)
@@ -603,6 +602,8 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
             .is_ok()
     );
     let (_dir, mut store, _) = fixture();
+    // A retained journal fixture checks decoding/ownership only; no SDK proposal
+    // or current shielding admission is created.
     let address = "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F";
     let facts = TransactionFacts {
         txid: crate::rotation::store::test_support::transaction_txid(100),
@@ -619,11 +620,9 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
             output_index: 0,
         }],
     };
-    assert!(store.automatic_shielding_available().unwrap());
     store
         .accept_preparation("shield", None, 100, Some(manifest))
         .unwrap();
-    assert!(store.automatic_shielding_available().unwrap());
     store
         .prepare_with_facts(
             "shield",
@@ -633,8 +632,6 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
             Some(facts),
         )
         .unwrap();
-    assert!(store.automatic_shielding_submission("shield", 100).unwrap());
-    assert!(!store.automatic_shielding_submission("shield", 99).unwrap());
     let identity = PreparedTransaction::load(&store, "shield")
         .unwrap()
         .network_identity()
@@ -656,7 +653,6 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
     store
         .install_funding_permits(Arc::new(TestPermits::new(store.id())))
         .unwrap();
-    assert!(!store.automatic_shielding_submission("shield", 100).unwrap());
     denied(store.request_broadcast("shield", 1, 1, false));
     assert_eq!(store.operation("shield").unwrap().attempts, 0);
     let retained = PreparedTransaction::load(&store, "shield").unwrap();

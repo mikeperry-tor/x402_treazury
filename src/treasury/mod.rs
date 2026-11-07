@@ -12,13 +12,12 @@ mod lifecycle_tests;
 mod notes;
 mod observation;
 pub(crate) use notes::inspect_notes;
-mod owned_transparent;
+mod pending_sources;
 mod prover;
 mod publication;
 mod reconstruction;
 pub mod recovery;
 mod refunds;
-pub use refunds::NoShieldingRequired;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
 mod send;
@@ -75,7 +74,6 @@ pub struct Treasury {
     #[cfg(test)]
     publication_retry_wait: Option<tokio::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
     sync_settings: Option<SyncSettings>,
-    automatic_shielding_fee: Option<u64>,
     reusable_sync_revision: Option<i64>,
     // Scheduling only; never used to date or authorize spending evidence.
     last_completed_sync: Option<tokio::time::Instant>,
@@ -198,7 +196,7 @@ impl Treasury {
         );
         tracing::info!("wallet init: offline wallet created; deriving shielded receive address");
         client
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("address derivation failed"))?;
         tracing::info!("wallet init: receive address derived; serializing wallet");
@@ -226,7 +224,6 @@ impl Treasury {
             #[cfg(test)]
             publication_retry_wait: None,
             sync_settings: None,
-            automatic_shielding_fee: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
             observation: Default::default(),
@@ -317,7 +314,6 @@ impl Treasury {
             #[cfg(test)]
             publication_retry_wait: None,
             sync_settings: None,
-            automatic_shielding_fee: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
             observation: Default::default(),
@@ -387,7 +383,7 @@ impl Treasury {
         self.client
             .as_mut()
             .context("treasury SDK view unavailable")?
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("address derivation failed"))?;
         let bytes = snapshot(
@@ -420,7 +416,7 @@ impl Treasury {
             .as_mut()
             .context("treasury client unavailable")?;
         let (_, address) = client
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("refund derivation failed"))?;
         let address = address.encode(&self.network.chain());
@@ -450,7 +446,7 @@ impl Treasury {
             .as_mut()
             .context("treasury client unavailable")?;
         let (_, address) = client
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("direct address derivation failed"))?;
         let address = address.encode(&self.network.chain());
@@ -522,9 +518,6 @@ impl Treasury {
         self.store
             .call(move |s| s.allocate_capacity_kind(&pool, kind, auto_fund))
             .await
-    }
-    pub(crate) fn configure_automatic_shielding(&mut self, max_fee: u64) {
-        self.automatic_shielding_fee = Some(max_fee);
     }
     pub fn configure_sync(&mut self, settings: SyncSettings) {
         self.reusable_sync_revision = None;
@@ -876,24 +869,16 @@ impl SyncSession {
         let wallet = self.client.wallet();
         let wallet = wallet.read().await;
         let balance = wallet
-            .account_balance(zip32::AccountId::ZERO)
+            .confirmed_balance::<pepper_sync::wallet::IronwoodNote>(zip32::AccountId::ZERO)
             .map_err(|_| anyhow::anyhow!("treasury balance unavailable"))?;
         observation.confirmed_pool_balances_zatoshis = Some(crate::rotation::store::PoolBalances {
-            ironwood: balance.confirmed_ironwood_balance.map(|z| z.into_u64()),
-            orchard: balance.confirmed_orchard_balance.map(|z| z.into_u64()),
-            sapling: balance.confirmed_sapling_balance.map(|z| z.into_u64()),
+            ironwood: Some(balance.into_u64()),
+            orchard: None,
+            sapling: None,
         });
-        observation.confirmed_shielded_zatoshis = [
-            balance.confirmed_ironwood_balance,
-            balance.confirmed_orchard_balance,
-            balance.confirmed_sapling_balance,
-        ]
-        .into_iter()
-        .flatten()
-        .map(|z| z.into_u64())
-        .sum();
+        observation.confirmed_shielded_zatoshis = balance.into_u64();
         observation.spendable_shielded_zatoshis = wallet
-            .shielded_spendable_balance(zip32::AccountId::ZERO, false)
+            .spendable_balance::<pepper_sync::wallet::IronwoodNote>(zip32::AccountId::ZERO, false)
             .map_err(|_| anyhow::anyhow!("treasury spendable balance unavailable"))?
             .into_u64();
         drop(wallet);
@@ -909,20 +894,20 @@ async fn address_info(client: &LightClient) -> Result<serde_json::Value> {
     for address in addresses.as_array_mut().context("invalid address list")? {
         let address = address.as_object_mut().context("invalid address record")?;
         let orchard = address.remove("has_orchard").unwrap_or(false.into());
-        let sapling = address.remove("has_sapling").unwrap_or(false.into());
+        address.remove("has_sapling");
         let transparent = address.remove("has_transparent").unwrap_or(false.into());
         address.insert(
             "receiver_capabilities".into(),
             serde_json::json!({
                 "orchard_protocol": orchard,
-                "sapling": sapling,
+                "ironwood": orchard,
                 "transparent": transparent,
             }),
         );
         address.insert(
             "orchard_protocol_pools".into(),
             if orchard.as_bool() == Some(true) {
-                serde_json::json!(["orchard", "ironwood"])
+                serde_json::json!(["ironwood"])
             } else {
                 serde_json::json!([])
             },

@@ -11,7 +11,6 @@ state_dir = "state/treasury"
 key_file = "secrets/treasury.key"
 indexer_url_env = "INDEXER"
 submission_url_env = "SUBMISSION"
-max_refund_shielding_fee_zec = "0.001"
 [funding]
 base_rpc_url_env = "BASE_RPC"
 [wallets.research]
@@ -311,7 +310,11 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
         shown["treasury"]["max_funding_transaction_fee_zec"],
         "0.0003"
     );
-    assert_eq!(shown["treasury"]["max_refund_shielding_fee_zec"], "0.0003");
+    assert!(
+        shown["treasury"]
+            .get("max_refund_shielding_fee_zec")
+            .is_none()
+    );
 }
 
 #[test]

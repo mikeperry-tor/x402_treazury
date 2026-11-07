@@ -7036,7 +7036,6 @@ dependencies = [
  "zcash_keys",
  "zcash_local_net",
  "zcash_primitives",
- "zcash_proofs",
  "zcash_protocol",
  "zeroize",
  "zingo-netutils",

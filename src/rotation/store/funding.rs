@@ -468,33 +468,36 @@ impl Store {
         input: u64,
         deadline: Option<u64>,
     ) -> Result<()> {
-        self.require_direct_preparation_binding(operation, pool, recipient, input, deadline)?;
+        if self.require_direct_preparation_binding(operation, pool, recipient, input, deadline)? {
+            return Ok(());
+        }
         let binding: Option<(String,String)> = self.db.query_row(
             "SELECT j.job_id,w.pool_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1",
             [operation], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if let Some((job, expected_pool)) = binding {
-            ensure!(
-                pool == Some(expected_pool.as_str()),
-                "funding source pool binding mismatch"
-            );
-            let quote: crate::rotation::near::Quote =
-                serde_json::from_slice(&self.funding_quote_for_operation(&job, operation)?)?;
-            ensure!(
-                quote.deposit.as_deref() == Some(recipient)
-                    && quote.input == input
-                    && Some(quote.deadline) == deadline,
-                "persisted funding source binding mismatch"
-            );
-            // This boundary follows require_unstarted_preparation: accepted work
-            // keeps its original authority, while cached quotes cannot grant new
-            // financial input ownership to a transparent refund receiver.
-            crate::rotation::near::require_shielded_refund(
-                &self.network().chain(),
-                quote.request["refundTo"]
-                    .as_str()
-                    .context("missing refund binding")?,
-            )?;
-        }
+        let (job, expected_pool) = binding.context(
+            "source preparation requires a saved funding quote or accepted direct payment",
+        )?;
+        ensure!(
+            pool == Some(expected_pool.as_str()),
+            "funding source pool binding mismatch"
+        );
+        let quote: crate::rotation::near::Quote =
+            serde_json::from_slice(&self.funding_quote_for_operation(&job, operation)?)?;
+        ensure!(
+            quote.deposit.as_deref() == Some(recipient)
+                && quote.input == input
+                && Some(quote.deadline) == deadline,
+            "persisted funding source binding mismatch"
+        );
+        // This boundary follows require_unstarted_preparation: accepted work
+        // keeps its original authority, while cached quotes cannot grant new
+        // financial input ownership to a transparent refund receiver.
+        crate::rotation::near::require_shielded_refund(
+            &self.network().chain(),
+            quote.request["refundTo"]
+                .as_str()
+                .context("missing refund binding")?,
+        )?;
         Ok(())
     }
 
@@ -2474,6 +2477,52 @@ mod completion_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn new_source_preparation_rejects_unbound_destinations_before_side_effects() {
+        let (_dir, mut store, _job) = fixture();
+        for pool in [None, Some("unrelated-pool")] {
+            let error = store
+                .require_preparation_binding(
+                    "unbound",
+                    pool,
+                    "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8",
+                    50,
+                    Some(1000),
+                )
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("saved funding quote or accepted direct payment")
+            );
+        }
+        let operation = store
+            .reserve_direct(
+                "owner",
+                "send",
+                "unaccepted",
+                serde_json::json!({"recipient":"external","amount":"50"}),
+            )
+            .unwrap()
+            .0;
+        assert!(
+            store
+                .require_preparation_binding(
+                    &operation.id,
+                    None,
+                    "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8",
+                    50,
+                    Some(1000)
+                )
+                .is_err()
+        );
+        let effects:bool=store.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing) OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|row|row.get(0)).unwrap();
+        assert!(
+            !effects,
+            "failed binding cannot accept inputs or publish signed bytes"
+        );
     }
 
     #[test]

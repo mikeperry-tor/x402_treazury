@@ -1,4 +1,4 @@
-//! Real Orchard proving against synthetic commitments, not consensus settlement.
+//! Real Ironwood proving against synthetic commitments, not consensus settlement.
 //! All keys are public test material; the only endpoint is a localhost info stub.
 use super::*;
 use crate::{
@@ -9,14 +9,69 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use zingolib::testutils::synthetic_wallet::{
-    SyntheticWalletBuilder, inject_confirmed_orchard_notes,
-};
+use zingolib::testutils::synthetic_wallet::SyntheticWalletBuilder;
 
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-// NU6.2: the injected V2 notes and the fixed Orchard circuit agree.
-const TIP: u32 = 3_400_000;
+// Post-NU6.3: all newly selected shielded funds and outputs use Ironwood.
+const TIP: u32 = 3_500_000;
+
+fn inject_ironwood_note(wallet: &mut zingolib::wallet::LightWallet) {
+    use incrementalmerkletree::{Position, Retention};
+    use pepper_sync::wallet::{IronwoodNote, OutputId, WalletTransaction};
+    use shardtree::store::{Checkpoint, ShardStore};
+    use zcash_protocol::{TxId, consensus::BlockHeight, memo::Memo};
+    let viewing: orchard::keys::FullViewingKey = wallet
+        .unified_key_store
+        .get(&zip32::AccountId::ZERO)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let note = zingolib::mocks::orchard_note::OrchardCryptoNoteBuilder::default()
+        .recipient(viewing.address_at(0u32, zip32::Scope::External))
+        .value(orchard::value::NoteValue::from_raw(100_000))
+        .build();
+    wallet
+        .shard_trees
+        .ironwood
+        .append(
+            orchard::tree::MerkleHashOrchard::from_cmx(&note.commitment().into()),
+            Retention::Marked,
+        )
+        .unwrap();
+    let txid = TxId::from_bytes([0x41; 32]);
+    let nullifier = note.nullifier(&viewing);
+    let note = IronwoodNote::new_for_test(
+        OutputId::new(txid, 0),
+        zip32::AccountId::ZERO,
+        zip32::Scope::External,
+        note,
+        Memo::Empty,
+        Some(Position::from(0u64)),
+    )
+    .with_nullifier_for_test(nullifier);
+    wallet.wallet_transactions.insert(
+        txid,
+        WalletTransaction::new_for_test_with_ironwood_notes(
+            txid,
+            zingo_status::confirmation_status::ConfirmationStatus::Confirmed(
+                BlockHeight::from_u32(2),
+            ),
+            vec![note],
+            vec![],
+        ),
+    );
+    let store = wallet.shard_trees.ironwood.store_mut();
+    store
+        .remove_checkpoint(&BlockHeight::from_u32(TIP))
+        .unwrap();
+    store
+        .add_checkpoint(
+            BlockHeight::from_u32(TIP),
+            Checkpoint::at_position(Position::from(0u64)),
+        )
+        .unwrap();
+}
 
 fn varint(mut n: u64) -> Vec<u8> {
     let mut out = vec![];
@@ -70,7 +125,7 @@ async fn qualify_preparation(case: PreparationCase) {
         wallet.sync_state = empty.sync_state;
         wallet.shard_trees = empty.shard_trees;
         if funded {
-            inject_confirmed_orchard_notes(&mut wallet, 1, 100_000, TIP);
+            inject_ironwood_note(&mut wallet);
         }
         wallet.wallet_settings.min_confirmations = 1.try_into().unwrap();
         assert_eq!(
@@ -149,14 +204,45 @@ async fn qualify_preparation(case: PreparationCase) {
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let operation = uuid::Uuid::new_v4().to_string();
+    let pool = treasury
+        .ensure_capacity_group(
+            "proof".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    let job = treasury
+        .allocate_capacity_kind(pool, crate::rotation::store::AllocationKind::Small, true)
+        .await
+        .unwrap()
+        .unwrap();
+    let job = treasury
+        .store
+        .call(move |s| Ok(s.funding_job(&job)?.unwrap()))
+        .await
+        .unwrap();
+    let operation = job.operation_id.clone();
+    let deadline = now().unwrap() + 600;
+    let quote_job = job.clone();
+    treasury.store.call(move |s| {
+        let quote=crate::rotation::near::Quote {sizing_preview:None,
+            request:serde_json::json!({"amount":quote_job.target,"recipient":quote_job.recipient,
+                "refundTo":crate::rotation::near::test_shielded_refund(&s.network().chain())}),
+            response:serde_json::json!({}),input:50_000,deadline,
+            deposit:Some("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into())};
+        s.save_funding_quote(&quote_job.id,&serde_json::to_vec(&quote)?)
+    }).await.unwrap();
     let request = || PrepareRequest {
-        managed_funding: None,
-
+        managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
+            job_id: job.id.clone(),
+            auto_fund: true,
+            max_attempts: 3,
+        }),
         operation_id: operation.clone(),
-        pool_id: None,
-
-        deadline: Some(now().unwrap() + 600),
+        pool_id: Some(job.pool_id.clone()),
+        deadline: Some(deadline),
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,
         max_fee_zatoshis: 120_000,
@@ -313,13 +399,13 @@ async fn qualify_preparation(case: PreparationCase) {
         "publication retains original inputs"
     );
     assert!(
-        tx.orchard_bundle().unwrap().actions().len() > selected.len(),
+        tx.ironwood_bundle().unwrap().actions().len() > selected.len(),
         "dummy actions are excluded from selected input ownership"
     );
-    tx.orchard_bundle()
+    tx.ironwood_bundle()
         .unwrap()
         .verify_proof(&orchard::circuit::VerifyingKey::build(
-            orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2,
+            orchard::circuit::OrchardCircuitVersion::PostNu6_3,
         ))
         .unwrap();
     assert_eq!(
@@ -376,17 +462,22 @@ async fn qualify_preparation(case: PreparationCase) {
 async fn synthetic_deposit_client(
     tip: u32,
     nu7: u32,
-    sapling: bool,
+    legacy: Option<crate::rotation::store::preparation::InputPool>,
 ) -> (tempfile::TempDir, zingolib::lightclient::LightClient) {
     let dir = tempfile::tempdir().unwrap();
     let heights = zingolib::testutils::mock_activation_heights_with(|era| era.set_nu7(Some(nu7)));
     let builder = SyntheticWalletBuilder::new(SEED)
         .tip(tip)
         .activation_heights(heights);
-    let mut wallet = if sapling {
-        builder.sapling_note(100_000)
-    } else {
-        builder.orchard_note(100_000)
+    let mut wallet = match legacy {
+        Some(crate::rotation::store::preparation::InputPool::Sapling) => {
+            builder.sapling_note(100_000)
+        }
+        Some(crate::rotation::store::preparation::InputPool::Orchard) => {
+            builder.orchard_note(100_000)
+        }
+        None => builder.ironwood_note(100_000),
+        _ => unreachable!("fixture only selects legacy shielded pool or Ironwood"),
     }
     .build();
     let chain = wallet.chain_type();
@@ -435,13 +526,6 @@ async fn deposit_proposal(client: &mut zingolib::lightclient::LightClient) -> De
 
 #[tokio::test]
 async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
-    if prover::isolated_scenario(
-        "treasury::send::proving_tests::backend_deposit_expiry_before_at_nu7_and_upgrade_boundary",
-    ) {
-        return;
-    }
-    assert_eq!(prover::parse_count(), 0);
-
     use zingolib::wallet::expiry::{tx_expiry_delta, tx_expiry_height};
 
     let chain = zingolib::config::ChainType::Regtest(
@@ -456,7 +540,7 @@ async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
     // Real backend transactions target immediately before and at activation.
     // Explicit custom schedules exercise ordinary expiry without offline retargeting.
     for (tip, nu7) in [(98, 100), (99, 100)] {
-        let (_dir, mut client) = synthetic_deposit_client(tip, nu7, false).await;
+        let (_dir, mut client) = synthetic_deposit_client(tip, nu7, None).await;
         let proposal = deposit_proposal(&mut client).await;
         let selected = super::super::inputs::selected_inputs(&proposal).unwrap();
         let target = u32::from(proposal.min_target_height());
@@ -466,11 +550,6 @@ async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
             let mut wallet = client.wallet().write().await;
             calculate_deposit(&mut wallet, &proposal).unwrap()
         };
-        assert_eq!(
-            prover::parse_count(),
-            0,
-            "Orchard-only work must not initialize Sapling parameters"
-        );
         client.clear_proposal().await;
         assert!(
             client.calculate_stored_proposal().await.is_err(),
@@ -493,15 +572,34 @@ async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
 }
 
 #[tokio::test]
-async fn backend_deposit_real_sapling_proving_and_public_failure_cleanup() {
-    use pepper_sync::wallet::OutputInterface as _;
-    if prover::isolated_scenario(
-        "treasury::send::proving_tests::backend_deposit_real_sapling_proving_and_public_failure_cleanup",
-    ) {
-        return;
+async fn ironwood_source_selection_rejects_legacy_only_capital_and_preserves_public_failure_cleanup()
+ {
+    use crate::rotation::store::preparation::InputPool;
+    for legacy in [InputPool::Sapling, InputPool::Orchard] {
+        let (_dir, client) = synthetic_deposit_client(80, 100, Some(legacy)).await;
+        // Existing SDK note decoding does not authorize new source inputs from
+        // unsupported shielded pools, even when their value covers the payment.
+        let payment = zcash_client_backend::zip321::Payment::new(
+            "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".parse().unwrap(),
+            Some(Zatoshis::from_u64(50_000).unwrap()),
+            None,
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+        let result = source_proposal(
+            &mut *client.wallet().write().await,
+            zcash_client_backend::zip321::TransactionRequest::new(vec![payment]).unwrap(),
+        );
+        assert!(matches!(
+            result,
+            Err(zingolib::wallet::error::ProposeSendError::Proposal(
+                zcash_client_backend::data_api::error::Error::InsufficientFunds { .. }
+            ))
+        ));
     }
-    assert_eq!(prover::parse_count(), 0);
-    let (_dir, mut client) = synthetic_deposit_client(80, 100, false).await;
+    let (_dir, mut client) = synthetic_deposit_client(80, 100, None).await;
     let proposal = deposit_proposal(&mut client).await;
     let key = {
         let mut wallet = client.wallet().write().await;
@@ -520,66 +618,12 @@ async fn backend_deposit_real_sapling_proving_and_public_failure_cleanup() {
         .unified_key_store
         .insert(zip32::AccountId::ZERO, key);
     assert!(client.calculate_stored_proposal().await.is_err());
-    // Declining the failed proposal leaves SDK selection usable.
-    let _ = deposit_proposal(&mut client).await;
+    let proposal = deposit_proposal(&mut client).await;
+    assert!(
+        super::super::inputs::selected_inputs(&proposal)
+            .unwrap()
+            .iter()
+            .all(|input| input.pool == InputPool::Ironwood)
+    );
     client.clear_proposal().await;
-    assert_eq!(
-        prover::parse_count(),
-        0,
-        "failure before proving must stay lazy"
-    );
-    prover::assert_concurrent_first_use();
-    for _ in 0..2 {
-        let (_dir, mut client) = synthetic_deposit_client(80, 100, true).await;
-        let proposal = deposit_proposal(&mut client).await;
-        let selected = super::super::inputs::selected_inputs(&proposal).unwrap();
-        assert_eq!(selected.len(), 1);
-        assert_eq!(
-            selected[0].pool,
-            crate::rotation::store::preparation::InputPool::Sapling
-        );
-        let ids = {
-            let mut wallet = client.wallet().write().await;
-            calculate_deposit(&mut wallet, &proposal).unwrap()
-        };
-        assert_eq!(prover::parse_count(), 1);
-        client.clear_proposal().await;
-        {
-            let wallet = client.wallet().read().await;
-            let record = wallet.wallet_transactions.get(&ids[0]).unwrap();
-            let transaction = record.transaction();
-            assert_eq!(transaction.transparent_bundle().unwrap().vout.len(), 1);
-            let sent = transaction.transparent_bundle().unwrap().vout[0]
-                .value()
-                .into_u64();
-            assert_eq!(sent, 50_000);
-            let change: u64 = record
-                .sapling_notes()
-                .iter()
-                .map(|note| note.value())
-                .chain(record.orchard_notes().iter().map(|note| note.value()))
-                .chain(record.ironwood_notes().iter().map(|note| note.value()))
-                .sum();
-            let fee = zingolib::data::proposal::total_fee(&proposal)
-                .unwrap()
-                .into_u64();
-            assert_eq!(sent + change + fee, 100_000);
-            assert!(
-                !transaction
-                    .sapling_bundle()
-                    .unwrap()
-                    .shielded_spends()
-                    .is_empty()
-            );
-            assert_eq!(
-                u32::from(transaction.expiry_height()),
-                u32::from(proposal.min_target_height()) + 40
-            );
-        }
-    }
-    assert_eq!(
-        prover::parse_count(),
-        1,
-        "two actual Sapling calculations reuse parsed public parameters"
-    );
 }

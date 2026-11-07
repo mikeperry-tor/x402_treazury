@@ -57,7 +57,6 @@ relays.GET=['missing-bootstrap.toml']
 wallet='w'
 [treasury]
 state_dir='state'
-max_refund_shielding_fee_zec='0.001'
 [wallets.w]
 mode='static'
 private_key_env='UNUSED_KEY'
@@ -342,7 +341,6 @@ trusted_ca_files=['{FIXTURE_CA}']
 catalog_concurrency=2
 [treasury]
 state_dir='state'
-max_refund_shielding_fee_zec='0.001'
 [wallets.w]
 mode='static'
 private_key_env='UNUSED_KEY'
@@ -473,7 +471,7 @@ async fn warming_rolls_forward_within_source_bound_and_sorts_completion_order() 
     });
     let path = dir.path().join("deployment.toml");
     let mut config = format!(
-        "version=1\n[network]\ntrusted_ca_files=['{FIXTURE_CA}']\n[startup]\ncatalog_concurrency=2\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_KEY'\nmax_api_payment_usdc='0.01'\n",
+        "version=1\n[network]\ntrusted_ca_files=['{FIXTURE_CA}']\n[startup]\ncatalog_concurrency=2\n[treasury]\nstate_dir='state'\n[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_KEY'\nmax_api_payment_usdc='0.01'\n",
     );
     for id in 0..3 {
         config.push_str(&format!(

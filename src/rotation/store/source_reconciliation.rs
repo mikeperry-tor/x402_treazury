@@ -95,7 +95,6 @@ mod tests {
         assert_eq!(indexed, vec!["legacy".to_owned(), "sibling".to_owned()]);
         assert!(s.source_previously_closed("legacy")?);
         assert!(s.request_broadcast("legacy", 1, 1, false).is_err());
-        assert!(!s.automatic_shielding_submission("legacy", 100)?);
         assert!(s.require_preparation_available().is_err());
         for _ in 0..3 {
             let revision = s.snapshot()?.0;

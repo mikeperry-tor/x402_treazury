@@ -2145,3 +2145,65 @@ fn qualification_probe_failure(error: std::io::Error) -> serde_json::Value {
         "error_kind": format!("{:?}", error.kind()),
     })
 }
+
+#[cfg(test)]
+mod transparent_address_tests {
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn transparent_address_methods_fail_before_transport_disclosure() {
+        use super::{GrpcIndexer, indexer::IndexerTransport};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+        use tonic::codegen::http;
+        use zingo_netutils::{TransparentIndexer, lightwallet_protocol::CompactTxStreamerClient};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let transport = tower::service_fn(move |_: http::Request<tonic::body::Body>| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            async {
+                Err::<http::Response<tonic::body::Body>, _>(tonic::Status::unavailable(
+                    "unexpected transport call",
+                ))
+            }
+        });
+        let mut indexer = GrpcIndexer {
+            clear_net_client: CompactTxStreamerClient::new(IndexerTransport::new(transport)),
+        };
+        fn denied<T>(result: Result<T, tonic::Status>) {
+            match result {
+                Err(status) => assert_eq!(status.code(), tonic::Code::Unimplemented),
+                Ok(_) => panic!("transparent address query was accepted"),
+            }
+        }
+        denied(
+            indexer
+                .get_taddress_txids(Default::default(), Duration::ZERO)
+                .await,
+        );
+        denied(
+            indexer
+                .get_taddress_transactions(Default::default(), Duration::ZERO)
+                .await,
+        );
+        denied(
+            indexer
+                .get_taddress_balance(Default::default(), Duration::ZERO)
+                .await,
+        );
+        denied(indexer.get_taddress_balance_stream(vec![]).await);
+        denied(
+            indexer
+                .get_address_utxos(Default::default(), Duration::ZERO)
+                .await,
+        );
+        denied(
+            indexer
+                .get_address_utxos_stream(Default::default(), Duration::ZERO)
+                .await,
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}

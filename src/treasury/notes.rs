@@ -104,13 +104,8 @@ pub(crate) fn native_receipt(
     let chain = wallet.chain_type();
     let bound = Address::decode(&chain, address).context("invalid native receiver")?;
     ensure!(
-        match &bound {
-            Address::Sapling(_) => true,
-            Address::Unified(ua) =>
-                ua.transparent().is_none() && (ua.sapling().is_some() || ua.orchard().is_some()),
-            _ => false,
-        },
-        "native receiver must be shielded"
+        matches!(&bound, Address::Unified(ua) if ua.transparent().is_none() && ua.orchard().is_some()),
+        "native receiver must contain the Orchard-format receiver used by Ironwood"
     );
     let inspection = evidence_for_receiver(wallet, None, Some(&bound))?;
     let mut received = 0u64;
@@ -197,11 +192,7 @@ fn selection(wallet: &LightWallet) -> Selection {
     let notes = wallet.select_spendable_notes(
         zip32::AccountId::ZERO,
         TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
-        &[
-            ShieldedPool::Sapling,
-            ShieldedPool::Orchard,
-            ShieldedPool::Ironwood,
-        ],
+        &[ShieldedPool::Ironwood],
         target,
         ConfirmationsPolicy::new_symmetrical(wallet.wallet_settings.min_confirmations, false),
         &[],
@@ -211,11 +202,9 @@ fn selection(wallet: &LightWallet) -> Selection {
         Ok(notes) => (
             Some(
                 notes
-                    .sapling()
+                    .ironwood()
                     .iter()
                     .map(|note| *note.internal_note_id())
-                    .chain(notes.orchard().iter().map(|note| *note.internal_note_id()))
-                    .chain(notes.ironwood().iter().map(|note| *note.internal_note_id()))
                     .collect(),
             ),
             None,
@@ -249,50 +238,6 @@ fn evidence_for_receiver(
     let chain = wallet.chain_type();
     let mut notes = Vec::new();
     for transaction in wallet.wallet_transactions.values() {
-        for note in transaction.sapling_notes() {
-            let matches = receiver.is_none_or(|address| match address {
-                Address::Sapling(expected) => expected.as_ref() == &note.note().recipient(),
-                Address::Unified(expected) => expected.sapling() == Some(&note.note().recipient()),
-                _ => false,
-            });
-            if matches && included(note, filter) {
-                let receiver =
-                    zcash_keys::address::Address::from(note.note().recipient()).encode(&chain);
-                notes.push(note_evidence(
-                    wallet,
-                    transaction,
-                    note,
-                    "sapling",
-                    receiver,
-                    &selected,
-                ));
-            }
-        }
-        for note in transaction.orchard_notes() {
-            let matches = receiver.is_none_or(|address| match address {
-                Address::Unified(expected) => expected.orchard() == Some(&note.note().recipient()),
-                _ => false,
-            });
-            if matches && included(note, filter) {
-                let receiver = zcash_keys::address::UnifiedAddress::from_receivers(
-                    Some(note.note().recipient()),
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .context("could not encode saved Orchard receiver")?
-                .encode(&chain);
-                notes.push(note_evidence(
-                    wallet,
-                    transaction,
-                    note,
-                    "orchard",
-                    receiver,
-                    &selected,
-                ));
-            }
-        }
         for note in transaction.ironwood_notes() {
             let matches = receiver.is_none_or(|address| match address {
                 Address::Unified(expected) => expected.orchard() == Some(&note.note().recipient()),
@@ -378,11 +323,7 @@ fn note_evidence<N: NoteInterface<KeyId = KeyId>>(
         },
         value_zatoshis: note.value(),
         receiver,
-        receiver_encoding: if pool == "sapling" {
-            "sapling_address"
-        } else {
-            "orchard_receiver_only_ua"
-        },
+        receiver_encoding: "orchard_receiver_only_ua",
         transaction: transaction_evidence(wallet, transaction),
         spend_status,
         spending_txid: spending.map(|txid| txid.to_string()),
@@ -603,7 +544,7 @@ mod tests {
     #[cfg(feature = "zcash-testutils")]
     mod sdk {
         use super::*;
-        use pepper_sync::wallet::{OrchardNote, OutputId};
+        use pepper_sync::wallet::{IronwoodNote, OutputId};
         use zcash_protocol::{TxId, memo::Memo};
         use zingo_status::confirmation_status::ConfirmationStatus;
         use zingolib::testutils::synthetic_wallet::SyntheticWalletBuilder;
@@ -611,27 +552,38 @@ mod tests {
         fn funded() -> LightWallet {
             SyntheticWalletBuilder::new(SEED)
                 .tip(30)
-                .sapling_note(50_000)
-                .orchard_note(100_000)
                 .ironwood_note(70_000)
-                .orchard_note(5_000)
+                .ironwood_note(5_000)
                 .build()
+        }
+        fn receiver(wallet: &LightWallet) -> String {
+            let note = wallet
+                .wallet_transactions
+                .values()
+                .flat_map(|tx| tx.ironwood_notes())
+                .next()
+                .unwrap();
+            zcash_keys::address::UnifiedAddress::from_receivers(
+                Some(note.note().recipient()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .encode(&wallet.chain_type())
         }
 
         #[test]
-        fn all_pools_receivers_and_membership_match_sdk_without_memos() {
+        fn ironwood_receivers_and_membership_match_sdk_without_memos() {
             let mut wallet = funded();
             let transaction = wallet
                 .wallet_transactions
                 .values_mut()
-                .find(|tx| {
-                    tx.orchard_notes()
-                        .iter()
-                        .any(|note| note.value() == 100_000)
-                })
+                .find(|tx| tx.ironwood_notes().iter().any(|n| n.value() == 70_000))
                 .unwrap();
-            let note = transaction.orchard_notes_mut().remove(0);
-            *note = OrchardNote::new_for_test(
+            let note = transaction.ironwood_notes_mut().remove(0);
+            *note = IronwoodNote::new_for_test(
                 note.output_id(),
                 note.key_id().account_id,
                 note.key_id().scope,
@@ -641,17 +593,10 @@ mod tests {
             )
             .with_nullifier_for_test(note.nullifier().unwrap());
             let result = evidence(&wallet, None).unwrap();
-            assert_eq!(result.notes.len(), 4);
+            assert_eq!(result.notes.len(), 2);
             assert_eq!(result.spendability_unavailable_reason, None);
-            assert_eq!(
-                result
-                    .notes
-                    .iter()
-                    .filter(|note| note.sdk_spendable_at_snapshot == Some(true))
-                    .count(),
-                3
-            );
             for note in &result.notes {
+                assert_eq!(note.pool, "ironwood");
                 assert_eq!(
                     note.sdk_spendable_at_snapshot,
                     Some(note.value_zatoshis > 5_000)
@@ -660,94 +605,71 @@ mod tests {
                 assert_eq!(note.account_id, 0);
                 assert_eq!(note.transaction.status, "confirmed");
                 assert_eq!(note.spend_status, "unspent");
-                if note.pool == "sapling" {
-                    assert!(note.receiver.starts_with("zregtestsapling"));
-                } else {
-                    assert!(note.receiver.starts_with("uregtest"));
-                }
+                assert!(note.receiver.starts_with("uregtest"));
                 let original = wallet
                     .wallet_transactions
                     .values()
                     .find(|tx| tx.txid().to_string() == note.txid)
                     .unwrap();
-                let height = original.status().get_confirmed_height().unwrap();
                 assert_eq!(
                     note.transaction.saved_confirmations,
-                    Some(31 - u32::from(height))
+                    Some(31 - u32::from(original.status().get_confirmed_height().unwrap()))
                 );
             }
             let encoded = serde_json::to_string(&result).unwrap();
-            assert!(!encoded.contains(SEED));
-            assert!(!encoded.contains(MEMO));
-            assert!(!encoded.contains("nullifier"));
+            assert!(
+                !encoded.contains(SEED)
+                    && !encoded.contains(MEMO)
+                    && !encoded.contains("nullifier")
+            );
             assert_eq!(
                 encoded,
                 serde_json::to_string(&evidence(&wallet, None).unwrap()).unwrap()
             );
-            let filter = &result.notes[0].txid;
-            let filtered = evidence(&wallet, Some(filter)).unwrap();
+            let filtered = evidence(&wallet, Some(&result.notes[0].txid)).unwrap();
             assert_eq!(filtered.notes.len(), 1);
-            assert_eq!(&filtered.notes[0].txid, filter);
-            // Receiver-only output must match the actual note recipient, never a stored UA.
-            let sapling = result
-                .notes
-                .iter()
-                .find(|note| note.pool == "sapling")
-                .unwrap();
-            let received = wallet
-                .wallet_transactions
-                .values()
-                .flat_map(|tx| tx.sapling_notes())
-                .next()
-                .unwrap();
-            assert_eq!(
-                sapling.receiver,
-                zcash_keys::address::Address::from(received.note().recipient())
-                    .encode(&wallet.chain_type())
-            );
+            assert_eq!(filtered.notes[0].txid, result.notes[0].txid);
         }
 
         #[test]
-        fn native_receipts_use_actual_receivers_and_retain_historical_spent_notes() {
-            let mut wallet = funded();
-            let sapling = wallet
+        fn native_receipts_count_only_ironwood_and_retain_historical_spent_notes() {
+            // Existing SDK snapshots may decode other pools. They grant neither
+            // native receipt credit nor application note-inspection support.
+            let mut wallet = SyntheticWalletBuilder::new(SEED)
+                .tip(30)
+                .ironwood_note(70_000)
+                .sapling_note(50_000)
+                .orchard_note(100_000)
+                .build();
+            let address = receiver(&wallet);
+            let ironwood_receiver = wallet
                 .wallet_transactions
                 .values()
-                .flat_map(|tx| tx.sapling_notes())
+                .flat_map(|tx| tx.ironwood_notes())
                 .next()
                 .unwrap()
                 .note()
                 .recipient();
-            let orchard = wallet
+            let unsupported = wallet
                 .wallet_transactions
                 .values()
                 .flat_map(|tx| tx.orchard_notes())
                 .next()
-                .unwrap()
-                .note()
-                .recipient();
-            let address = zcash_keys::address::UnifiedAddress::from_receivers(
-                Some(orchard),
-                Some(sapling),
-                None,
-                None,
-                None,
-            )
-            .unwrap()
-            .encode(&wallet.chain_type());
+                .unwrap();
+            assert_eq!(
+                unsupported.note().recipient(),
+                ironwood_receiver,
+                "same address encoding cannot credit a different pool"
+            );
             let before = native_receipt(&wallet, &address, 4).unwrap();
-            assert_eq!(before.received_zatoshis, 225_000);
-            assert_eq!(before.confirmed_zatoshis, 225_000);
-            assert_eq!(before.spendable_zatoshis, Some(220_000));
-            assert_eq!(before.notes.len(), 4);
+            assert_eq!(before.received_zatoshis, 70_000);
+            assert_eq!(before.confirmed_zatoshis, 70_000);
+            assert_eq!(before.spendable_zatoshis, Some(70_000));
+            assert_eq!(before.notes.len(), 1);
+            assert_eq!(evidence(&wallet, None).unwrap().notes.len(), 1);
+            assert_eq!(before.notes[0].pool, "ironwood");
             let spent = TxId::from_bytes([91; 32]);
             for transaction in wallet.wallet_transactions.values_mut() {
-                for note in transaction.sapling_notes_mut() {
-                    note.set_spending_transaction(Some(spent));
-                }
-                for note in transaction.orchard_notes_mut() {
-                    note.set_spending_transaction(Some(spent));
-                }
                 for note in transaction.ironwood_notes_mut() {
                     note.set_spending_transaction(Some(spent));
                 }
@@ -757,28 +679,16 @@ mod tests {
                 WalletTransaction::new_for_test(spent, ConfirmationStatus::Confirmed(25.into())),
             );
             let historical = native_receipt(&wallet, &address, 5).unwrap();
-            assert_eq!(historical.received_zatoshis, 225_000);
-            assert_eq!(historical.confirmed_zatoshis, 225_000);
+            assert_eq!(historical.received_zatoshis, 70_000);
+            assert_eq!(historical.confirmed_zatoshis, 70_000);
             assert_eq!(historical.spendable_zatoshis, Some(0));
-            assert!(
-                historical
-                    .notes
-                    .iter()
-                    .all(|note| note.spend_status == "spent")
-            );
-            let sapling_only =
-                zcash_keys::address::Address::from(sapling).encode(&wallet.chain_type());
-            let sapling_receipt = native_receipt(&wallet, &sapling_only, 5).unwrap();
-            assert_eq!(sapling_receipt.confirmed_zatoshis, 50_000);
-            assert_eq!(sapling_receipt.notes.len(), 1);
+            assert!(historical.notes.iter().all(|n| n.spend_status == "spent"));
         }
 
         #[test]
-        fn encrypted_mainnet_snapshot_preserves_three_pool_evidence_while_owner_is_held() {
+        fn encrypted_mainnet_snapshot_preserves_ironwood_evidence_while_owner_is_held() {
             let (_directory, mut store, state, key) = fixture();
             let mut synthetic = funded();
-            // Reuse real public SDK note/witness fixtures in an explicitly mainnet container.
-            // This exercises inspection serialization, not consensus or live chain evidence.
             let (_, original) = store.snapshot().unwrap();
             let mut wallet = LightWallet::read(original.as_slice(), ChainType::Mainnet).unwrap();
             wallet.wallet_transactions = std::mem::take(&mut synthetic.wallet_transactions);
@@ -793,55 +703,30 @@ mod tests {
             let before = saved_rows(&state);
             let key_before = std::fs::read(&key).unwrap();
             let notes = inspect_notes(&state, &key, Some(store.id()), None).unwrap();
-            assert_eq!(notes.notes.len(), 4);
             let mut identities = notes
                 .notes
                 .iter()
-                .map(|note| (note.pool, note.value_zatoshis))
+                .map(|n| (n.pool, n.value_zatoshis))
                 .collect::<Vec<_>>();
             identities.sort_unstable();
-            assert_eq!(
-                identities,
-                vec![
-                    ("ironwood", 70_000),
-                    ("orchard", 5_000),
-                    ("orchard", 100_000),
-                    ("sapling", 50_000)
-                ]
-            );
-            assert!(
-                notes
-                    .notes
-                    .iter()
-                    .any(|note| note.pool == "sapling" && note.receiver.starts_with("zs"))
-            );
-            assert!(
-                notes
-                    .notes
-                    .iter()
-                    .any(|note| note.pool == "orchard" && note.receiver.starts_with('u'))
-            );
-            assert!(
-                notes
-                    .notes
-                    .iter()
-                    .any(|note| note.pool == "ironwood" && note.receiver.starts_with('u'))
-            );
+            assert_eq!(identities, vec![("ironwood", 5_000), ("ironwood", 70_000)]);
+            assert!(notes.notes.iter().all(|n| n.receiver.starts_with('u')));
             assert_eq!(saved_rows(&state), before);
             assert_eq!(std::fs::read(&key).unwrap(), key_before);
         }
 
         #[test]
-        fn spent_pending_and_incomplete_notes_remain_visible_with_sdk_selection() {
+        fn spent_pending_and_incomplete_ironwood_notes_keep_sdk_selection_evidence() {
             let mut wallet = funded();
             let spent = TxId::from_bytes([81; 32]);
             let pending = TxId::from_bytes([82; 32]);
-            for transaction in wallet.wallet_transactions.values_mut() {
-                for note in transaction.sapling_notes_mut() {
-                    note.set_spending_transaction(Some(spent));
-                }
-                for note in transaction.ironwood_notes_mut() {
-                    note.set_spending_transaction(Some(pending));
+            for tx in wallet.wallet_transactions.values_mut() {
+                for note in tx.ironwood_notes_mut() {
+                    note.set_spending_transaction(Some(if note.value() == 70_000 {
+                        spent
+                    } else {
+                        pending
+                    }));
                 }
             }
             wallet.wallet_transactions.insert(
@@ -855,11 +740,12 @@ mod tests {
             let source = wallet
                 .wallet_transactions
                 .values()
-                .flat_map(|tx| tx.orchard_notes())
-                .next()
+                .flat_map(|tx| tx.ironwood_notes())
+                .find(|n| n.value() == 70_000)
                 .unwrap();
             let incomplete_id = TxId::from_bytes([83; 32]);
-            let incomplete = OrchardNote::new_for_test(
+            let unconfirmed_id = TxId::from_bytes([84; 32]);
+            let incomplete = IronwoodNote::new_for_test(
                 OutputId::new(incomplete_id, 0),
                 zip32::AccountId::ZERO,
                 zip32::Scope::Internal,
@@ -867,8 +753,7 @@ mod tests {
                 Memo::Empty,
                 None,
             );
-            let unconfirmed_id = TxId::from_bytes([84; 32]);
-            let unconfirmed = OrchardNote::new_for_test(
+            let unconfirmed = IronwoodNote::new_for_test(
                 OutputId::new(unconfirmed_id, 0),
                 zip32::AccountId::ZERO,
                 zip32::Scope::External,
@@ -879,7 +764,7 @@ mod tests {
             .with_nullifier_for_test(source.nullifier().unwrap());
             wallet.wallet_transactions.insert(
                 incomplete_id,
-                WalletTransaction::new_for_test_with_orchard_notes(
+                WalletTransaction::new_for_test_with_ironwood_notes(
                     incomplete_id,
                     ConfirmationStatus::Confirmed(26.into()),
                     vec![incomplete],
@@ -888,7 +773,7 @@ mod tests {
             );
             wallet.wallet_transactions.insert(
                 unconfirmed_id,
-                WalletTransaction::new_for_test_with_orchard_notes(
+                WalletTransaction::new_for_test_with_ironwood_notes(
                     unconfirmed_id,
                     ConfirmationStatus::Mempool(31.into()),
                     vec![unconfirmed],
@@ -896,43 +781,45 @@ mod tests {
                 ),
             );
             let result = evidence(&wallet, None).unwrap();
-            assert_eq!(result.notes.len(), 6);
-            let sapling = result
+            assert_eq!(result.notes.len(), 4);
+            let spent_note = result
                 .notes
                 .iter()
-                .find(|note| note.pool == "sapling")
+                .find(|n| {
+                    n.value_zatoshis == 70_000
+                        && n.txid != incomplete_id.to_string()
+                        && n.txid != unconfirmed_id.to_string()
+                })
                 .unwrap();
-            assert_eq!(sapling.spend_status, "spent");
-            assert_eq!(sapling.spending_txid, Some(spent.to_string()));
-            assert_eq!(sapling.sdk_spendable_at_snapshot, Some(false));
-            let ironwood = result
+            assert_eq!(spent_note.spend_status, "spent");
+            assert_eq!(spent_note.spending_txid, Some(spent.to_string()));
+            assert_eq!(spent_note.sdk_spendable_at_snapshot, Some(false));
+            let pending_note = result
                 .notes
                 .iter()
-                .find(|note| note.pool == "ironwood")
+                .find(|n| n.value_zatoshis == 5_000)
                 .unwrap();
-            assert_eq!(ironwood.spend_status, "pending_spend");
+            assert_eq!(pending_note.spend_status, "pending_spend");
             assert_eq!(
-                ironwood.spending_transaction.as_ref().unwrap().status,
+                pending_note.spending_transaction.as_ref().unwrap().status,
                 "pending"
             );
-            assert_eq!(ironwood.sdk_spendable_at_snapshot, Some(false));
             let incomplete = result
                 .notes
                 .iter()
-                .find(|note| note.txid == incomplete_id.to_string())
+                .find(|n| n.txid == incomplete_id.to_string())
                 .unwrap();
             assert_eq!(incomplete.scope, "internal");
             assert_eq!(incomplete.sdk_spendable_at_snapshot, Some(false));
             let unconfirmed = result
                 .notes
                 .iter()
-                .find(|note| note.txid == unconfirmed_id.to_string())
+                .find(|n| n.txid == unconfirmed_id.to_string())
                 .unwrap();
             assert_eq!(unconfirmed.transaction.status, "pending");
             assert_eq!(unconfirmed.transaction.confirmed_height, None);
             assert_eq!(unconfirmed.transaction.saved_confirmations, None);
             assert_eq!(unconfirmed.sdk_spendable_at_snapshot, Some(false));
-            // Removing saved sync coverage makes membership unknown rather than false.
             wallet.sync_state = pepper_sync::wallet::SyncState::new();
             let unavailable = evidence(&wallet, None).unwrap();
             assert!(unavailable.spendability_unavailable_reason.is_some());
@@ -940,9 +827,9 @@ mod tests {
                 unavailable
                     .notes
                     .iter()
-                    .all(|note| note.sdk_spendable_at_snapshot.is_none())
+                    .all(|n| n.sdk_spendable_at_snapshot.is_none())
             );
-            assert_eq!(unavailable.notes.len(), 6);
+            assert_eq!(unavailable.notes.len(), 4);
         }
     }
 }

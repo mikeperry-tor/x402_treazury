@@ -1509,7 +1509,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
-max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=false
 base_rpc_url_env="BASE"
@@ -2399,7 +2398,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMIT"
-max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=true
 base_rpc_url_env="BASE"

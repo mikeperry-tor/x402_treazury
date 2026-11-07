@@ -671,18 +671,17 @@ quiet. The startup SOCKS owner fixture verifies command-first failure followed
 by periodic retry shares that transition without creating financial work.
 
 Synthetic proving checks actual-fee affordability and exact saved bytes through
-failed publication, lost acknowledgement, cancellation and reopen. First-use Sapling
-parameter assertions run as exact isolated child test processes with a checked
-nonzero test result, so unrelated tests and future worker-thread placement cannot
-make an ambient counter pass or fail. A process AtomicUsize records the existing
-lazy initializer; concurrent callers share its instance, and two actual Sapling
-deposits check the selected Sapling pool and actual spends, with value/fee
-conservation and ordinary expiry.
-Orchard-only and actual transparent-shielding scenarios remain lazy. These checks
-use embedded public parameter bytes, not wallet secrets or runtime parameter-file
-loading; they do not measure proving latency or establish CPU offload. The optional synthetic-chain lifecycle exercises two
-managed recipients through the real treasury actor, scan reuse, confirmation depth,
-restart, cancellation after submission intent and funded same-height reorgs.
+failed publication, lost acknowledgement, cancellation and reopen. Actual Ironwood
+proofs verify recipient, principal, fee and expiry under the same SDK proposal.
+Negative tests reject legacy-pool selection and unsupported wallet shielding
+before inputs, bytes or network side effects. The required Sapling prover adapter
+has no parameter initialization; actual Ironwood calculations run through it
+without invoking an unsupported proof. SDK build-time parameter acquisition is a
+separate unavoidable pinned-dependency input, not runtime transfer support.
+The optional synthetic-chain lifecycle exercises managed and direct recipients
+through the real treasury actor, scan reuse, confirmation depth, restart,
+cancellation after submission intent and funded same-height reorgs. These tests
+do not establish proving latency, consensus validation or live settlement.
 The production funding worker also runs against local bridge/Base fixtures through
 range-aware nominal selection, saved-choice reuse, provider-floor redraw before the
 next request, executable EXACT_INPUT route-minimum errors without a USDC redraw,
@@ -950,22 +949,21 @@ and actually runs with the intended feature/platform gates. A successful filtere
 Cargo command can run zero tests; a complete complexity report can analyze a file
 the compiler never reaches. Source metrics do not establish test execution.
 
-The R01/R02 owner follow-ups add focused default-build recovery tests and real
-SDK synthetic-chain shielding tests under `treasury::lifecycle_tests::shielding`.
-They cover same-Store reconstruction, actual task replacement, cancelled waiters,
-per-address ownership, fee-only cost accounting, rejection of zero-net proposals
-before accepting inputs, qualification denial, lost submission response
-and restart without duplicate calculation. The pinned SDK may promote shielding
-change from Orchard to Ironwood after an upgrade; ownership checks use decrypted
-account-zero notes across supported shielded pools. These tests use public unfunded
-keys and do not establish consensus or live-funded settlement qualification.
+Focused recovery tests and real SDK Ironwood lifecycle tests cover same-Store
+reconstruction, task replacement, cancelled waiters, accepted input ownership,
+qualification denial, lost submission response and restart without duplicate
+calculation. Unsupported pool/input/receiver paths and transparent address RPCs
+reject without acquiring new inputs, creating bytes or disclosing addresses.
+Financial scenarios use genuine managed or native Ironwood transactions; SDK raw
+state remains unchanged. These fixtures use public deterministic keys and do not
+establish consensus or live-funded settlement qualification.
 
 ## Optional proving, consensus and live work
 
 - [LIFECYCLE.md](../tests/LIFECYCLE.md) covers synthetic-note proof and exact-byte
   restore assertions without mainnet funds.
-- [REGTEST.md](../tests/REGTEST.md) covers mined local deposits, reorgs, refund
-  shielding, expiry proof and recovery CLI behavior.
+- [REGTEST.md](../tests/REGTEST.md) covers mined local Ironwood deposits, reorgs, unsupported-shielding rejection,
+  expiry proof and recovery CLI behavior.
 - [TOR.md](../tests/TOR.md) covers controlled real-Tor circuits and per-process OS
   confinement using an independently installed Tor binary. A local SOCKS fixture
   cannot prove actual Tor circuit assignment or host firewall behavior.

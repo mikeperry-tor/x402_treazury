@@ -62,7 +62,6 @@ zingo-status = { git = "https://github.com/zingolabs/zingolib", rev = "81d799775
 pepper-sync = { git = "https://github.com/zingolabs/zingolib", rev = "81d799775f11e882896e8710e8af12d6d4d29a41" }
 shardtree = { version = "0.8.0", default-features = false }
 bip0039 = { version = "0.14" }
-zcash_proofs = { version = "=0.31.0" }
 tonic = { version = "0.14", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 tokio-stream = "0.1"

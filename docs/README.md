@@ -22,7 +22,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Direct swap control](configuration.md#direct-swap-control) describes opt-in first-party
-financial tools and listener ownership.
+financial tools and listener ownership. The [Ironwood-only policy](zingo-integration.md#ironwood-only-policy)
+owns allowed Zcash pools, the narrow NEAR deposit exception and unavoidable SDK activity.
 
 [Plans](plans/) describe unfinished work, including artifact storage,
 [stale cache expiry](plans/stale_cache_expiry.md),
@@ -60,7 +61,7 @@ The maintained
 removal blockers and upstream/candidate follow-up.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
 describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
-funds, owner recovery and automatic owned-transparent shielding. The
+funds, accepted-work recovery and Ironwood-only treasury authority. The
 [reconciliation policy](wallet-rotation.md#recovery-and-reconciliation-policy)
 requires repair from established facts and forbids redundant consistency gates
 that obstruct otherwise authorized progress. The

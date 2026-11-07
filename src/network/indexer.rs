@@ -231,89 +231,54 @@ impl Indexer for GrpcIndexer {
     }
 }
 
+// Required by the SDK trait bound; address-indexed wallet discovery is forbidden.
+fn transparent_queries_disabled() -> tonic::Status {
+    tonic::Status::unimplemented(
+        "Transparent address RPC queries are disabled by the Ironwood-only wallet policy",
+    )
+}
 impl TransparentIndexer for GrpcIndexer {
     #[allow(deprecated)]
     async fn get_taddress_txids(
         &mut self,
-        filter: TransparentAddressBlockFilter,
+        _filter: TransparentAddressBlockFilter,
         _timeout: Duration,
     ) -> Result<tonic::Streaming<RawTransaction>, tonic::Status> {
-        let request = Request::new(filter);
-        Ok(self
-            .clear_net_client
-            .get_taddress_txids(request)
-            .await
-            .inspect_err(warn_resource_status)?
-            .into_inner())
+        Err(transparent_queries_disabled())
     }
-
     async fn get_taddress_transactions(
         &mut self,
-        filter: TransparentAddressBlockFilter,
+        _filter: TransparentAddressBlockFilter,
         _timeout: Duration,
     ) -> Result<tonic::Streaming<RawTransaction>, tonic::Status> {
-        let request = Request::new(filter);
-        Ok(self
-            .clear_net_client
-            .get_taddress_transactions(request)
-            .await
-            .inspect_err(warn_resource_status)?
-            .into_inner())
+        Err(transparent_queries_disabled())
     }
-
     async fn get_taddress_balance(
         &mut self,
-        addresses: AddressList,
+        _addresses: AddressList,
         _timeout: Duration,
     ) -> Result<Balance, tonic::Status> {
-        let request = Request::new(addresses);
-        Ok(self
-            .clear_net_client
-            .get_taddress_balance(request)
-            .await
-            .inspect_err(warn_resource_status)?
-            .into_inner())
+        Err(transparent_queries_disabled())
     }
-
     async fn get_taddress_balance_stream(
         &mut self,
-        addresses: Vec<Address>,
+        _addresses: Vec<Address>,
     ) -> Result<Balance, tonic::Status> {
-        let stream = tokio_stream::iter(addresses);
-        Ok(self
-            .clear_net_client
-            .get_taddress_balance_stream(stream)
-            .await
-            .inspect_err(warn_resource_status)?
-            .into_inner())
+        Err(transparent_queries_disabled())
     }
-
     async fn get_address_utxos(
         &mut self,
-        arg: GetAddressUtxosArg,
+        _arg: GetAddressUtxosArg,
         _timeout: Duration,
     ) -> Result<GetAddressUtxosReplyList, tonic::Status> {
-        let request = Request::new(arg);
-        Ok(self
-            .clear_net_client
-            .get_address_utxos(request)
-            .await
-            .inspect_err(warn_resource_status)?
-            .into_inner())
+        Err(transparent_queries_disabled())
     }
-
     async fn get_address_utxos_stream(
         &mut self,
-        arg: GetAddressUtxosArg,
+        _arg: GetAddressUtxosArg,
         _timeout: Duration,
     ) -> Result<tonic::Streaming<GetAddressUtxosReply>, tonic::Status> {
-        let request = Request::new(arg);
-        Ok(self
-            .clear_net_client
-            .get_address_utxos_stream(request)
-            .await
-            .inspect_err(warn_resource_status)?
-            .into_inner())
+        Err(transparent_queries_disabled())
     }
 }
 

@@ -798,7 +798,6 @@ async fn bootstrap_is_catalog_free_requires_policy_and_resumes_completed_pairs()
     let config = r#"version=1
 [treasury]
 state_dir="state"
-max_refund_shielding_fee_zec="0.001"
 indexer_url="https://127.0.0.1:1"
 [funding]
 auto_fund=false
@@ -1917,7 +1916,6 @@ async fn recovery_cli_does_not_require_unrelated_disclosure_status_to_be_rendera
     let config = r#"version=1
 [treasury]
 state_dir="state"
-max_refund_shielding_fee_zec="0.001"
 indexer_url="https://127.0.0.1:1"
 [funding]
 auto_fund=false

@@ -450,15 +450,14 @@ through the same Store owner. Interrupted commands never replay; queued commands
 and accepted work remain owned across caller cancellation. Exited funding and
 reconciliation tasks reuse existing gates and retry cadences; shutdown stops replacement.
 Unavailable shared Store/authentication state may still require restart while
-listeners and usable Base payers remain available. Enabled ordinary auto-funding
-also attempts per-address shielding after successful persisted sync, including
-unattributed owned transparent returns. Pending inputs and bytes take priority;
-uncertain broadcasts never replay automatically. SDK-selected confirmed spendable
-inputs, actual fee safeguards and decrypted owned shielded outputs govern new
-calculation. A proposal must recover positive shielded value before accepting
-inputs; a fee-only proposal cannot strand an input owner. Qualification job permits
-do not authorize jobless shielding. These paths have local SDK fixture coverage,
-without live-funded, consensus or Tor qualification; see [testing](testing.md#qualification-status).
+listeners and usable Base payers remain available. Enabled ordinary auto-funding uses actual supported Ironwood funds and existing
+quote authority. New wallet transparent-input shielding is unsupported. Generic
+pending-source observation and accepted byte/input ownership retain their original
+recovery rules; canonical closure never grants replacement authority. Source
+selection and actual calculated outputs obey the
+[Ironwood-only policy](zingo-integration.md#ironwood-only-policy). These paths have
+local SDK fixture coverage without live-funded, consensus or Tor qualification;
+see [testing](testing.md#qualification-status).
 
 Single-wallet Base canonical proofs use the wallet identity for headers, exact
 contract reads and canonical rechecks across each configured endpoint. Genuine

@@ -51,7 +51,6 @@ HEAD = ["../../providers/agproxy.toml"]
 state_dir = "../../state/privacy"
 # Standard network fees are calculated by the wallet; these reject high-fee proposals.
 # max_funding_transaction_fee_zec = "0.0003" # default per funding transaction
-# max_refund_shielding_fee_zec = "0.0003"     # default per refund shielding transaction
 
 [funding]
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.

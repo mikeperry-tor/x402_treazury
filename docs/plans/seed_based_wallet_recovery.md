@@ -160,10 +160,13 @@ the existing random Base keys. It does not depend on choosing HD or ratcheting.
    otherwise use a separately reviewed explicit new-root/namespace transition.
    Existing local store ownership does not coordinate cloned stores on separate
    machines. Do not add a distributed allocator to solve this implicitly.
-4. For legacy transparent mnemonic-only recovery, support an explicit external-index
-   range prederivation before scanning. Increasing the ordinary discovery gap alone
-   cannot guarantee completeness. Preserve the current shielded-only refund model,
-   old quote bindings, owned-transparent shielding and separate source-deposit codec.
+4. The previously proposed transparent mnemonic-range recovery and preservation
+   of owned-transparent shielding are superseded by the
+   [Ironwood-only policy](../zingo-integration.md#ironwood-only-policy). Do not
+   implement transparent address scanning, historical Sapling/Orchard transfer
+   support or wallet transparent-input shielding. Future Zcash discovery work is
+   limited to Ironwood, preserving exact accepted journals and the narrow external
+   NEAR deposit-output codec without granting new transfer authority.
 5. Scan Zcash from a known birthday no later than relevant receipts. If unknown,
    use the supported network activation boundary rather than a recent tip. Let
    the SDK discover shielded notes by account keys, including fresh refund UAs

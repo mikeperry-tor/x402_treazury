@@ -291,10 +291,10 @@ impl Treasury {
                 && self.last_completed_sync.is_some()
                 && self.last_completed_sync != observed_sync
             {
-                if let Err(error) = self.maintain_owned_transparent(submission, stop).await
+                if let Err(error) = self.maintain_pending_sources(submission, stop).await
                     && !stop.is_cancelled()
                 {
-                    super::diagnostics::report_shielding_failure(&error, None);
+                    super::diagnostics::report_pending_source_failure(&error, None);
                 }
                 // Maintenance may itself complete canonical validation/proof
                 // scans. They are part of this pass, not another wakeup.
@@ -367,7 +367,7 @@ mod tests {
         else {
             panic!("refund must be a unified address");
         };
-        assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+        assert!(receivers.orchard().is_some() && receivers.sapling().is_none());
         assert!(receivers.transparent().is_none());
     }
 

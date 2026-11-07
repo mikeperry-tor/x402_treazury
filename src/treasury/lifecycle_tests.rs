@@ -8,14 +8,13 @@ mod direct_send;
 mod discovery;
 mod indexer_recovery;
 mod indexer_regression;
+mod ironwood;
 mod native_receive;
 mod native_send;
 mod refund_addresses;
-mod sapling;
 mod scan_bounds;
 mod shielding;
 mod terminal;
-mod transparent_fixtures;
 mod worker;
 use super::*;
 use crate::rotation::{
@@ -977,9 +976,7 @@ async fn same_height_tip_reorg_rebuilds_sdk_without_reopening_historical_source_
 #[tokio::test]
 async fn sdk_reorg_rescan_preserves_original_signed_work() {
     use crate::rotation::store::preparation::{InputPool, OwnedInput};
-    use pepper_sync::wallet::{
-        IronwoodNote, OrchardNote, OutputInterface, SaplingNote, TransparentCoin,
-    };
+    use pepper_sync::wallet::{IronwoodNote, OutputInterface};
     use shardtree::store::ShardStore as _;
     use zingo_netutils::lightwallet_protocol::{BlockId, CompactTxStreamer as _};
     use zingolib::testutils::mock_indexer::MockIndexerService;
@@ -1084,7 +1081,7 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
             // missing-checkpoint fallback rather than the known-deep-tip reset.
             {
                 let mut wallet = owner.client.as_ref().unwrap().wallet().write().await;
-                let tree = &mut wallet.shard_trees.orchard;
+                let tree = &mut wallet.shard_trees.ironwood;
                 let tip = tree.store().max_checkpoint_id().unwrap().unwrap();
                 let rollback_height = 23.into();
                 assert!(
@@ -1163,7 +1160,7 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
                 assert_eq!(
                     wallet
                         .shard_trees
-                        .orchard
+                        .ironwood
                         .store()
                         .get_checkpoint(&23.into())
                         .unwrap()
@@ -1287,12 +1284,8 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
                 "this fixture selects its one original funding note"
             );
             let input = &original_inputs[0];
-            match &input.pool {
-                InputPool::Transparent => canonical_input::<TransparentCoin>(&wallet, input),
-                InputPool::Sapling => canonical_input::<SaplingNote>(&wallet, input),
-                InputPool::Orchard => canonical_input::<OrchardNote>(&wallet, input),
-                InputPool::Ironwood => canonical_input::<IronwoodNote>(&wallet, input),
-            }
+            assert!(matches!(input.pool, InputPool::Ironwood));
+            canonical_input::<IronwoodNote>(&wallet, input)
         };
         assert_eq!(
             funding_value, 1_000_000,

@@ -169,7 +169,6 @@ state_dir="absent_state"
 key_file="absent_key"
 indexer_url_env="UNSET_INDEXER"
 submission_url_env="UNSET_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [funding]
 confidentiality="public"
 [wallets.pool]

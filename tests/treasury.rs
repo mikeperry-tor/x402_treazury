@@ -22,9 +22,11 @@ async fn encrypted_zingolib_treasury_restores_addresses_and_pool_keys_offline() 
     assert_eq!(before[0]["receiver_capabilities"]["orchard_protocol"], true);
     assert_eq!(
         before[0]["orchard_protocol_pools"],
-        serde_json::json!(["orchard", "ironwood"])
+        serde_json::json!(["ironwood"])
     );
     assert!(before[0].get("has_orchard").is_none());
+    assert_eq!(before[0]["receiver_capabilities"]["ironwood"], true);
+    assert!(before[0]["receiver_capabilities"].get("sapling").is_none());
     crate::capacity_fixture::treasury_pair(
         &wallet,
         "research",

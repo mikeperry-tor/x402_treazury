@@ -88,7 +88,8 @@ enum Action {
         #[arg(long)]
         operation_id: String,
     },
-    /// Prepare transparent refund shielding; already-shielded refunds need no action.
+    /// Unsupported: wallet transparent-input shielding is disabled.
+    #[command(hide = true)]
     ShieldRefunds {
         #[arg(long)]
         job_id: String,
@@ -125,11 +126,20 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
     resolve_args_with_network(args, policy.as_ref())
 }
 
+fn require_supported_action(action: &Action) -> Result<()> {
+    anyhow::ensure!(
+        !matches!(action, Action::ShieldRefunds { .. }),
+        "Transparent refund shielding is unsupported; ZEC treasury operations use Ironwood only"
+    );
+    Ok(())
+}
+
 fn resolve_args_with_network(
     args: WalletArgs,
     policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<Command> {
     use anyhow::Context;
+    require_supported_action(&args.command)?;
     let settings = load_wallet_settings(
         args.config.as_ref(),
         policy,
@@ -287,12 +297,6 @@ fn configured_command(action: &Action, config: Option<&PathBuf>) -> Result<Optio
                 operation_id: operation_id.clone(),
             }));
         }
-        Action::ShieldRefunds { job_id } => {
-            return Ok(Some(Command::ShieldRefunds {
-                meta_config: configured_path()?,
-                job_id: job_id.clone(),
-            }));
-        }
         _ => {}
     }
     Ok(None)
@@ -370,11 +374,6 @@ enum Command {
         meta_config: PathBuf,
         operation_id: String,
     },
-    /// Prepare shielding for one refund address; use reconcile --rebroadcast to submit.
-    ShieldRefunds {
-        meta_config: PathBuf,
-        job_id: String,
-    },
     /// Close proven-unprepared work without authorizing a new funding attempt.
     RecoverUnprepared {
         state_dir: PathBuf,
@@ -440,6 +439,7 @@ async fn run_args(
     args: WalletArgs,
     network: crate::rotation::store::TreasuryNetwork,
 ) -> Result<()> {
+    require_supported_action(&args.command)?;
     let json = match &args.command {
         Action::Init { json, .. }
         | Action::Sync { json, .. }
@@ -614,11 +614,6 @@ async fn execute_wallet_command(
             operation_id,
         } => recover_expired(meta_config, operation_id, network, policy).await?,
 
-        Command::ShieldRefunds {
-            meta_config,
-            job_id,
-        } => shield_refunds(meta_config, job_id, network, policy).await?,
-
         Command::Reconcile {
             meta_config,
             operation_id,
@@ -729,42 +724,6 @@ async fn recover_expired(
     )
     .await;
     if let Err(error) = result {
-        if error.is::<crate::server::ForcedShutdown>() {
-            return Err(error);
-        }
-        treasury.close().await?;
-        return Err(error);
-    }
-    Ok(treasury)
-}
-
-async fn shield_refunds(
-    meta_config: PathBuf,
-    job_id: String,
-    network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkConfig>,
-) -> Result<crate::treasury::Treasury> {
-    let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
-    let stop = tokio_util::sync::CancellationToken::new();
-    let result = finish_on_shutdown(
-        "wallet_command",
-        &stop,
-        treasury.shield_refund(
-            job_id,
-            u64::try_from(crate::rotation::config::zatoshis(
-                &settings.max_refund_shielding_fee_zec,
-            )?)?,
-            &stop,
-        ),
-    )
-    .await;
-    if let Err(error) = result {
-        if error.is::<crate::treasury::NoShieldingRequired>() {
-            tracing::info!(
-                "Refund address receives shielded funds; no transparent shielding is needed"
-            );
-            return Ok(treasury);
-        }
         if error.is::<crate::server::ForcedShutdown>() {
             return Err(error);
         }

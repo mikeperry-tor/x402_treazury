@@ -158,33 +158,6 @@ impl Store {
         preparation_pending(&self.db)
     }
 
-    /// Read-only authority/readiness check. Qualification permits currently
-    /// authorize funding jobs only, so they cannot authorize jobless shielding.
-    pub(crate) fn automatic_shielding_available(&self) -> Result<bool> {
-        if self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
-            || self.funding_permits.is_some()
-        {
-            return Ok(false);
-        }
-        Ok(!self.preparation_pending()?)
-    }
-
-    pub(crate) fn automatic_shielding_submission(&self, id: &str, max_fee: u64) -> Result<bool> {
-        if self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
-            || self.funding_permits.is_some()
-        {
-            return Ok(false);
-        }
-        let operation = self.operation(id)?;
-        Ok(!self.source_previously_closed(id)?
-            && operation.attempts == 0
-            && operation.submission == "PREPARED"
-            && operation.facts.fee_zatoshis <= max_fee
-            && self
-                .shielding_identity(id, Some(&operation.facts))?
-                .is_some())
-    }
-
     pub(crate) fn shielding_identity(
         &self,
         id: &str,

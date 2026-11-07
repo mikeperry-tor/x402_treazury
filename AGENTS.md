@@ -66,6 +66,13 @@ quirks, workarounds, and compatibility exemptions are documented in
 
 ## Financial and execution boundaries
 
+- **ZEC is Ironwood only.** Reject Sapling/legacy Orchard transfers, historical-pool
+  fallback, transparent wallet receiving/shielding and transparent-address RPC
+  queries. The sole external-output exception is a NEAR-issued transparent deposit
+  address paid from Ironwood under its saved quote. Do not initialize or download
+  legacy proving parameters in application code. Keep only SDK-unavoidable types,
+  decoding/build activity and accepted-work ownership, documented in the
+  [Ironwood-only policy](docs/zingo-integration.md#ironwood-only-policy).
 - Reconcile from established blockchain/SDK facts instead of parallel local
   monetary tracking. Repair derived state and finish proven work; stale phases,
   reporting differences and missing optional evidence must not halt otherwise
@@ -81,7 +88,9 @@ quirks, workarounds, and compatibility exemptions are documented in
   nominal USDC sizing only. Per-payment authority, actual network-fee caps,
   accepted-work ownership and separately authorized qualification API budgets
   protect distinct things. Qualification funding has no separate ZEC spending budget;
-  reviewed job counts, reserve sizing and actual treasury funds govern new allocations.
+  reviewed job counts, reserve sizing and actual supported treasury funds govern new allocations.
+  Explicit listener `swap_control.max_send_zec` bounds only direct-tool per-call debit;
+  never apply it to managed funding or other ZEC usage.
 - Ordinary USDC payment selection treats balances and price hints as advisory;
   current payer ownership and amount authority govern signing.
 - After recognized structured insufficient funds, try each existing eligible wallet
@@ -93,9 +102,9 @@ quirks, workarounds, and compatibility exemptions are documented in
 - Journal before disclosure. Preserve exact accepted inputs, signed bytes, original
   identities and liabilities through cancellation/restart; missing results do not
   prove nothing happened.
-- SDK/blockchain state owns current ZEC spendability. Automatic shielding can recover
-  owned transparent funds without refund attribution; refunds do not authorize
-  another funding deposit.
+- SDK/blockchain state owns current supported Ironwood spendability. Refunds do
+  not authorize another funding deposit. Unsupported pool holdings do not grant
+  spending, shielding or fallback authority.
 - Each wallet's initial funding claim is consumed by its first positive USDC
   observation; low estimates never reopen it or authorize top-ups.
 - All production outbound HTTP/gRPC constructors belong in `src/network.rs`.
@@ -233,7 +242,7 @@ links other maintained guides.
 | --- | --- | --- |
 | Resource limits, cache lifetimes, readiness gates or polling | [Local resource limits](docs/local-resource-limits.md), [timer inventory](docs/network-egress.md#remaining-timers-and-budgets), [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy) | `src/limits.rs`, owning module |
 | Payments, selection, funding or recovery | [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy), relevant sections of [wallet ownership](docs/wallet-rotation.md), [selection/isolation design](docs/architecture.md#wallet-selection-and-network-isolation) | `src/payment.rs`, `src/rotation/`, `src/treasury/`; `tests/LIFECYCLE.md` |
-| Direct swap control | [Direct swaps](docs/configuration.md#direct-swap-control), [receive ownership](docs/wallet-rotation.md#direct-receive-ownership), [send ownership](docs/wallet-rotation.md#direct-send-ownership), [SDK receivers](docs/zingo-integration.md#refund-receivers-and-seed-recovery), [network policy](docs/network-egress.md) | `src/direct_swap/`, `src/rotation/store/direct_swap.rs`, `src/treasury/`, `src/server.rs` |
+| Direct swap control | [Direct swaps](docs/configuration.md#direct-swap-control), [receive ownership](docs/wallet-rotation.md#direct-receive-ownership), [send ownership](docs/wallet-rotation.md#direct-send-ownership), [Ironwood policy](docs/zingo-integration.md#ironwood-only-policy), [SDK receivers](docs/zingo-integration.md#refund-receivers-and-seed-recovery), [network policy](docs/network-egress.md) | `src/direct_swap/`, `src/rotation/store/direct_swap.rs`, `src/treasury/`, `src/server.rs` |
 | Wallet CLI, initialization, keys or state conversion | [Wallet administration](docs/wallet-cli.md), [configuration](docs/configuration.md) | `src/wallet_cli/`, `src/cli.rs` |
 | Network clients, HTTP/gRPC timeouts or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
 | Deployment startup, catalog publication or shutdown | [Runtime architecture](docs/architecture.md), [configuration](docs/configuration.md), [startup tests](tests/STARTUP.md) | `src/deployment/`, `src/server/`, `src/catalog_state.rs` |

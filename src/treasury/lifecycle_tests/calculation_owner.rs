@@ -1,4 +1,4 @@
-//! Actual deposit/shield calculation remains owned after its async waiter leaves.
+//! Actual bridge/native calculation remains owned after its async waiter leaves.
 use super::*;
 use std::sync::{
     Arc,
@@ -21,7 +21,7 @@ impl Drop for Release {
 #[derive(Clone, Copy)]
 enum Kind {
     Deposit,
-    Shield,
+    Native,
 }
 
 fn hold(
@@ -49,33 +49,18 @@ fn hold(
 }
 
 async fn fixture(kind: Kind) -> (tempfile::TempDir, MockNet, Treasury, String) {
-    let (dir, net, mut owner, _) = funded_fixture(2).await;
+    let (dir, net, owner, _) = funded_fixture(2).await;
     let destination = match kind {
         Kind::Deposit => DEPOSIT.to_owned(),
-        Kind::Shield => {
-            let (_, receiver) = owner
-                .client
-                .as_mut()
-                .unwrap()
-                .generate_transparent_address(zip32::AccountId::ZERO, false)
-                .await
-                .unwrap();
-            let address =
-                zcash_keys::address::Address::Transparent(receiver).encode(&owner.network.chain());
-            let credit = super::transparent_fixtures::transparent_fixture(
-                &net,
-                &owner,
-                vec![(&address, 1_000_000, None)],
-            )
-            .await;
-            {
-                let mut chain = net.chain.write().await;
-                chain.mine_block(vec![credit]);
-                chain.mine_empty_blocks(2);
-            }
-            owner.sync_once(&CancellationToken::new()).await.unwrap();
-            address
-        }
+        Kind::Native => owner
+            .client
+            .as_ref()
+            .unwrap()
+            .unified_addresses_json()
+            .await[0]["encoded_address"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
     };
     net.chain
         .write()
@@ -114,32 +99,77 @@ async fn no_send(net: &MockNet) {
     );
 }
 
+async fn managed_request(owner: &mut Treasury) -> Result<PrepareRequest> {
+    let pool = owner
+        .ensure_capacity_group(
+            format!("calculation_{}", uuid::Uuid::new_v4().simple()),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await?;
+    let job = owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await?
+        .unwrap();
+    let job = owner
+        .store
+        .call(move |s| s.funding_job(&job)?.context("fixture job missing"))
+        .await?;
+    let deadline = now()? + 600;
+    save_quotes(&owner.store, vec![job.clone()], deadline).await;
+    Ok(request(&job, deadline))
+}
+async fn native_request(owner: &Treasury, destination: String) -> Result<PrepareRequest> {
+    let id = owner
+        .store
+        .call(move |s| {
+            let request = uuid::Uuid::new_v4().to_string();
+            let operation = s
+                .reserve_native(
+                    "owner",
+                    "send",
+                    &request,
+                    serde_json::json!({
+            "asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"50000",
+            "recipient":destination,"max_source_zatoshis":null}),
+                )?
+                .0;
+            s.accept_direct_send(
+                &operation.id,
+                None,
+                crate::rotation::store::DirectSendAuthority {
+                    max_fee_zatoshis: 50_000,
+                    max_debit_zatoshis: None,
+                },
+            )?;
+            Ok((
+                operation.id,
+                operation.terms["recipient"].as_str().unwrap().to_owned(),
+            ))
+        })
+        .await?;
+    Ok(PrepareRequest {
+        managed_funding: None,
+        operation_id: id.0,
+        pool_id: None,
+        deadline: None,
+        recipient: id.1,
+        amount_zatoshis: 50_000,
+        max_fee_zatoshis: 50_000,
+        max_input_zatoshis: 100_000,
+    })
+}
 async fn prepare(
     owner: &mut Treasury,
     kind: Kind,
     destination: String,
 ) -> Result<PreparedTransaction> {
-    match kind {
-        Kind::Deposit => {
-            owner
-                .prepare(PrepareRequest {
-                    managed_funding: None,
-                    operation_id: uuid::Uuid::new_v4().to_string(),
-                    pool_id: None,
-                    recipient: destination,
-                    amount_zatoshis: 50_000,
-                    max_fee_zatoshis: 50_000,
-                    max_input_zatoshis: 100_000,
-                    deadline: Some(now()? + 600),
-                })
-                .await
-        }
-        Kind::Shield => {
-            owner
-                .shield_address(destination, None, 30_000, &CancellationToken::new())
-                .await
-        }
-    }
+    let request = match kind {
+        Kind::Deposit => managed_request(owner).await?,
+        Kind::Native => native_request(owner, destination).await?,
+    };
+    owner.prepare(request).await
 }
 
 #[test]
@@ -245,8 +275,8 @@ async fn evidence(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn dropped_deposit_and_shield_waiters_keep_one_owned_calculation_and_unrelated_progress() {
-    for kind in [Kind::Deposit, Kind::Shield] {
+async fn dropped_deposit_and_native_waiters_keep_one_owned_calculation_and_unrelated_progress() {
+    for kind in [Kind::Deposit, Kind::Native] {
         let (dir, net, mut owner, destination) = fixture(kind).await;
         let (reached, mut release, calls) = hold(&mut owner, false, false, false);
         {
@@ -321,13 +351,7 @@ async fn dropped_deposit_and_shield_waiters_keep_one_owned_calculation_and_unrel
         assert!(owner.healthy && owner.running.is_none());
         assert_eq!(prepared.operation_id(), id);
         let facts = prepared.facts().unwrap();
-        assert_eq!(
-            facts.amount_zatoshis,
-            match kind {
-                Kind::Deposit => 50_000,
-                Kind::Shield => 0,
-            }
-        );
+        assert_eq!(facts.amount_zatoshis, 50_000);
         assert!(facts.fee_zatoshis > 0 && facts.fee_zatoshis <= 50_000);
         evidence(&owner, id.clone(), inputs.clone(), &prepared).await;
         let raw = prepared.bytes().to_vec();
@@ -634,8 +658,8 @@ async fn calculation_panic_terminates_before_reconstruction_and_facts_panic_reta
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn whole_treasury_drop_keeps_deposit_and_shield_bytes_owned_until_local_commit() {
-    for kind in [Kind::Deposit, Kind::Shield] {
+async fn whole_treasury_drop_keeps_deposit_and_native_bytes_owned_until_local_commit() {
+    for kind in [Kind::Deposit, Kind::Native] {
         let (dir, net, mut owner, destination) = fixture(kind).await;
         let identity = owner.status().await.unwrap().treasury_id;
         let (reached, mut release, calls) = hold(&mut owner, false, false, false);
@@ -691,14 +715,14 @@ async fn whole_treasury_drop_keeps_deposit_and_shield_bytes_owned_until_local_co
 }
 
 #[test]
-fn normal_runtime_drop_drains_started_deposit_and_shield_without_an_external_store_sender() {
+fn normal_runtime_drop_drains_started_deposit_and_native_without_an_external_store_sender() {
     struct Aborted(std::sync::mpsc::Sender<()>);
     impl Drop for Aborted {
         fn drop(&mut self) {
             let _ = self.0.send(());
         }
     }
-    for kind in [Kind::Deposit, Kind::Shield] {
+    for kind in [Kind::Deposit, Kind::Native] {
         let (handoff, receive) = std::sync::mpsc::channel();
         let (aborted, runtime_aborted) = std::sync::mpsc::channel();
         let (finished, runtime_finished) = std::sync::mpsc::channel();
@@ -781,18 +805,17 @@ fn normal_runtime_drop_drains_started_deposit_and_shield_without_an_external_sto
 #[tokio::test(flavor = "current_thread")]
 async fn canceled_unsigned_preflight_leaves_unstarted_intent_and_next_selection_clears_the_proposal()
  {
-    let (_dir, net, mut owner, destination) = fixture(Kind::Deposit).await;
-    let id = uuid::Uuid::new_v4().to_string();
-    let request = || PrepareRequest {
-        managed_funding: None,
-        operation_id: id.clone(),
-        pool_id: None,
-        recipient: destination.clone(),
-        amount_zatoshis: 50_000,
-        max_fee_zatoshis: 50_000,
-        max_input_zatoshis: 100_000,
-        deadline: Some(now().unwrap() + 600),
-    };
+    let (_dir, net, mut owner, _destination) = fixture(Kind::Deposit).await;
+    let accepted = managed_request(&mut owner).await.unwrap();
+    let id = accepted.operation_id.clone();
+    let job_id = accepted.managed_funding.as_ref().unwrap().job_id.clone();
+    let job = owner
+        .store
+        .call(move |s| s.funding_job(&job_id)?.context("fixture job missing"))
+        .await
+        .unwrap();
+    let deadline = accepted.deadline.unwrap();
+    let request = || super::request(&job, deadline);
     let revision = owner.revision;
     net.chain.write().await.faults.inject(
         Rpc::LightdInfo,
@@ -849,23 +872,24 @@ async fn canceled_unsigned_preflight_leaves_unstarted_intent_and_next_selection_
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn canceled_shield_waiter_with_preaccept_stop_closes_cleanly_without_accepting_inputs() {
-    let (dir, net, mut owner, destination) = fixture(Kind::Shield).await;
+async fn canceled_native_waiter_with_preaccept_shutdown_closes_cleanly_without_accepting_inputs() {
+    let (dir, net, mut owner, destination) = fixture(Kind::Native).await;
     let identity = owner.status().await.unwrap().treasury_id;
     let (reached, mut release, calls) = hold(&mut owner, false, false, true);
     let stop = CancellationToken::new();
+    let accepted = native_request(&owner, destination).await.unwrap();
     let operation = {
-        let calculation = owner.shield_address(destination, None, 30_000, &stop);
+        let calculation = owner.prepare_with_observation(accepted, None, Some(&stop));
         tokio::pin!(calculation);
         tokio::select! {
-            result = &mut calculation => panic!("shielding returned before handoff barrier: {}", result.is_ok()),
+            result = &mut calculation => panic!("native preparation returned before handoff barrier: {}", result.is_ok()),
             result = reached => result.unwrap(),
         }
     };
     assert!(owner.running.is_some() && owner.client.is_none());
     stop.cancel();
     release.release();
-    // This joins the real owner: its existing shielding stop check rejects SQL
+    // This joins the real owner: its actor shutdown check rejects SQL
     // acceptance and its serialized unstarted proof yields typed Deferred.
     // That expected abandoned operation is not a physical shutdown failure.
     owner.close().await.unwrap();
@@ -878,6 +902,14 @@ async fn canceled_shield_waiter_with_preaccept_stop_closes_cleanly_without_accep
     )
     .unwrap();
     store.require_unstarted_preparation(&operation).unwrap();
+    assert!(
+        store
+            .direct_operation("owner", &operation)
+            .unwrap()
+            .authority
+            .is_some(),
+        "accepted native admission survives shutdown for restart"
+    );
     assert!(store.prepared_inputs(&operation).is_err());
     assert!(store.prepared_bytes(&operation).is_err());
     assert!(store.operation(&operation).is_err());
@@ -886,11 +918,11 @@ async fn canceled_shield_waiter_with_preaccept_stop_closes_cleanly_without_accep
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn actual_mcp_help_completes_on_same_runtime_while_deposit_and_shield_calculation_are_held() {
+async fn actual_mcp_help_completes_on_same_runtime_while_deposit_and_native_calculation_are_held() {
     use crate::mcp_wire::McpResponse;
     const HELP: &str =
         "Receive addresses and current wallet ownership remain available in local documentation.";
-    for kind in [Kind::Deposit, Kind::Shield] {
+    for kind in [Kind::Deposit, Kind::Native] {
         let (dir, net, mut owner, destination) = fixture(kind).await;
         let identity = owner.status().await.unwrap().treasury_id;
         let tool = crate::catalog::build_tools(
@@ -1019,7 +1051,16 @@ async fn actual_mcp_help_completes_on_same_runtime_while_deposit_and_shield_calc
         assert_eq!(store.operation(&operation).unwrap().attempts, 0);
         assert_eq!(store.operation(&operation).unwrap().submission, "PREPARED");
         let status = store.status().unwrap();
-        assert!(status.pools.is_empty() && status.funding_jobs.is_empty());
+        match kind {
+            Kind::Deposit => {
+                assert_eq!(status.pools.len(), 1);
+                assert_eq!(status.funding_jobs.len(), 1);
+                assert_eq!(status.funding_jobs[0].operation_id, operation);
+            }
+            Kind::Native => {
+                assert!(status.pools.is_empty() && status.funding_jobs.is_empty());
+            }
+        }
         assert_eq!(status.treasury_operations.len(), 1);
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
         assert_eq!(

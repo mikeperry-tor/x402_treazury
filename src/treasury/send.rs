@@ -27,13 +27,9 @@ pub(crate) fn native_recipient(
 ) -> Result<Address> {
     let address = Address::decode(chain, encoded).context("invalid native Zcash recipient")?;
     ensure!(
-        match &address {
-            Address::Sapling(_) => true,
-            Address::Unified(ua) =>
-                ua.transparent().is_none() && (ua.sapling().is_some() || ua.orchard().is_some()),
-            _ => false,
-        },
-        "native Zcash recipient must be Sapling or a shielded-only unified address"
+        matches!(&address, Address::Unified(ua)
+        if ua.transparent().is_none() && ua.orchard().is_some()),
+        "native Zcash recipient requires a shielded-only unified address with an Orchard receiver for Ironwood delivery"
     );
     Ok(address)
 }
@@ -43,39 +39,34 @@ fn validate_native_outputs(
     recipient: &Address,
     amount: u64,
 ) -> Result<()> {
-    let sapling = record.outgoing_sapling_notes().iter().map(|note| {
-        let matches = match recipient {
-            Address::Sapling(address) => address.as_ref() == &note.recipient(),
-            Address::Unified(ua) => ua.sapling() == Some(&note.recipient()),
-            _ => false,
-        };
-        (matches, note.value())
-    });
-    let orchard = record.outgoing_orchard_notes().iter().map(|note| {
-        (
-            matches!(recipient, Address::Unified(ua) if ua.orchard() == Some(&note.recipient())),
-            note.value(),
-        )
-    });
-    // Ironwood uses Orchard receivers with its own output namespace.
-    let ironwood = record.outgoing_ironwood_notes().iter().map(|note| {
-        (
-            matches!(recipient, Address::Unified(ua) if ua.orchard() == Some(&note.recipient())),
-            note.value(),
-        )
-    });
-    // Pinned Sender OVK policy encrypts the requested payment, while implicit
-    // change has no OVK encryption in any shielded pool. Self-payment remains
-    // one outgoing payment even when incoming payment and change are identical.
-    let mut outputs = sapling
-        .chain(orchard)
-        .chain(ironwood)
-        .filter(|(_, value)| *value > 0);
-    let (matches, value) = outputs
-        .next()
-        .context("calculated native payment missing")?;
     ensure!(
-        matches && value == amount && outputs.next().is_none(),
+        record
+            .outgoing_sapling_notes()
+            .iter()
+            .all(|note| note.value() == 0)
+            && record
+                .outgoing_orchard_notes()
+                .iter()
+                .all(|note| note.value() == 0),
+        "native Zcash delivery requires Ironwood outputs"
+    );
+    let Address::Unified(address) = recipient else {
+        anyhow::bail!("native Zcash recipient requires a unified address");
+    };
+    let receiver = address
+        .orchard()
+        .context("native Zcash recipient lacks an Ironwood-compatible receiver")?;
+    // Sender encrypts the payment with an OVK and leaves implicit change without
+    // OVK encryption. Equal incoming self-payment/change notes remain one payment.
+    let mut outputs = record
+        .outgoing_ironwood_notes()
+        .iter()
+        .filter(|note| note.value() > 0);
+    let output = outputs
+        .next()
+        .context("calculated native Ironwood payment missing")?;
+    ensure!(
+        output.recipient() == *receiver && output.value() == amount && outputs.next().is_none(),
         "calculated native recipient, amount or output count mismatch"
     );
     Ok(())
@@ -88,6 +79,10 @@ fn validate_calculated_payment(
     fee: u64,
 ) -> Result<()> {
     let transaction = record.transaction();
+    ensure!(
+        transaction.sapling_bundle().is_none() && transaction.orchard_bundle().is_none(),
+        "new source transactions require Ironwood-only shielded bundles"
+    );
     let transparent_principal = match recipient {
         Address::Transparent(receiver) => {
             let transparent = transaction
@@ -115,27 +110,60 @@ fn validate_calculated_payment(
             0
         }
     };
-    let shielded_value = [
-        transaction
-            .sapling_bundle()
-            .map(|b| i64::from(*b.value_balance())),
-        transaction
-            .orchard_bundle()
-            .map(|b| i64::from(*b.value_balance())),
-        transaction
+    let shielded_value = i64::from(
+        *transaction
             .ironwood_bundle()
-            .map(|b| i64::from(*b.value_balance())),
-    ]
-    .into_iter()
-    .flatten()
-    .try_fold(0i64, |total, value| total.checked_add(value))
-    .context("transaction value overflow")?;
+            .context("Ironwood source bundle missing")?
+            .value_balance(),
+    );
     ensure!(
         shielded_value.checked_sub(i64::try_from(transparent_principal)?)
             == Some(i64::try_from(fee)?),
         "calculated fee mismatch"
     );
     Ok(())
+}
+
+fn source_proposal(
+    wallet: &mut zingolib::wallet::LightWallet,
+    request: zcash_client_backend::zip321::TransactionRequest,
+) -> std::result::Result<DepositProposal, zingolib::wallet::error::ProposeSendError> {
+    use zcash_client_backend::{
+        data_api::wallet::{
+            ConfirmationsPolicy,
+            input_selection::{GreedyInputSelector, SpendPolicy},
+        },
+        fees::{DustAction, DustOutputPolicy},
+    };
+    let chain = wallet.chain_type();
+    let confirmations =
+        ConfirmationsPolicy::new_symmetrical(wallet.wallet_settings.min_confirmations, false);
+    let selector = GreedyInputSelector::new();
+    let strategy = zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new(
+        zcash_primitives::transaction::fees::zip317::FeeRule::standard(),
+        Some(zcash_protocol::memo::MemoBytes::empty()),
+        zcash_protocol::ShieldedPool::Ironwood,
+        DustOutputPolicy::new(DustAction::AllowDustChange, None),
+    );
+    zcash_client_backend::data_api::wallet::propose_transfer::<
+        _,
+        _,
+        _,
+        _,
+        zingolib::wallet::error::WalletError,
+    >(
+        wallet,
+        &chain,
+        zip32::AccountId::ZERO,
+        &selector,
+        &strategy,
+        request,
+        confirmations,
+        &SpendPolicy::shielded_pools([zcash_protocol::ShieldedPool::Ironwood]),
+        None,
+        None,
+    )
+    .map_err(zingolib::wallet::error::ProposeSendError::Proposal)
 }
 
 fn calculate_deposit(
@@ -161,8 +189,8 @@ fn calculate_deposit(
         &chain,
         &zcash_client_backend::util::SystemClock,
         &mut zingolib::utils::system_rng(),
-        &prover::SAPLING_PROVER,
-        &prover::SAPLING_PROVER,
+        &prover::UNSUPPORTED_SAPLING,
+        &prover::UNSUPPORTED_SAPLING,
         &zcash_client_backend::data_api::wallet::SpendingKeys::new(usk),
         zcash_client_backend::wallet::OvkPolicy::Sender,
         proposal,
@@ -293,6 +321,7 @@ impl Treasury {
                 validation.map_err(|error| {
                     error.context(crate::rotation::transaction::PreparationDeferred)
                 })?;
+                drop(selected);
                 self.sync_once(stop).await.map_err(|error| {
                     error.context(crate::rotation::transaction::PreparationDeferred)
                 })?;
@@ -336,7 +365,7 @@ impl Treasury {
             .client
             .as_mut()
             .context("treasury client unavailable")?;
-        let (calculation, authorized_cost, fee, proposal) = selected;
+        let (calculation, authorized_cost, fee, proposal, pause) = selected;
         // Spendability and actual fees are known before destination discovery.
         // This advisory one-pass read cannot gate valid preparation on RPC health;
         // its positive result consumes the claim checked again at acceptance.
@@ -356,9 +385,16 @@ impl Treasury {
         let pool = request.pool_id.clone();
         let deadline = request.deadline;
         let authority = request.managed_funding;
+        let stop_for_acceptance = stop.cloned();
         self.calculate_owned(
             request.operation_id.clone(),
             move |s| {
+                ensure!(
+                    stop_for_acceptance
+                        .as_ref()
+                        .is_none_or(|stop| !stop.is_cancelled()),
+                    "treasury stopping before input acceptance"
+                );
                 if let Some(deadline) = deadline {
                     ensure!(now()? < deadline, "funding_deadline_expired");
                 }
@@ -368,7 +404,10 @@ impl Treasury {
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(())
             },
-            move |wallet| calculate_deposit(wallet, &proposal),
+            move |wallet| {
+                let _pause = pause;
+                calculate_deposit(wallet, &proposal)
+            },
             move |wallet, id| {
                 let record = wallet
                     .wallet_transactions
@@ -399,6 +438,7 @@ impl Treasury {
         i64,
         u64,
         DepositProposal,
+        zingolib::lightclient::sync::SyncPauseGuard,
     )> {
         // SyncSession returns an offline client after stopping its isolated
         // runtime; create/open/reconstruction also restore offline clients.
@@ -415,12 +455,13 @@ impl Treasury {
             None,
             vec![],
         )?;
-        let proposal = client
-            .propose_send(
-                zcash_client_backend::zip321::TransactionRequest::new(vec![payment])?,
-                zip32::AccountId::ZERO,
-            )
-            .await;
+        let pause = client
+            .pause_sync_scoped()
+            .map_err(|_| anyhow::anyhow!("cannot pause sync"))?;
+        let proposal = source_proposal(
+            &mut *client.wallet().write().await,
+            zcash_client_backend::zip321::TransactionRequest::new(vec![payment])?,
+        );
         let proposal = match proposal {
             Ok(proposal) => proposal,
             Err(zingolib::wallet::error::ProposeSendError::Proposal(
@@ -462,6 +503,13 @@ impl Treasury {
             step.transparent_inputs().is_empty() && step.shielded_inputs().is_some(),
             "deposit must use shielded inputs"
         );
+        if request.deadline.is_none() {
+            ensure!(step.payment_pools().len() == 1
+                && step.payment_pools().get(&0) == Some(&zcash_protocol::PoolType::IRONWOOD),
+                "native Zcash delivery requires an Ironwood payment proposal");
+        }
+        ensure!(step.balance().proposed_change().iter().all(|change| change.output_pool() == zcash_protocol::PoolType::IRONWOOD),
+            "new shielded source change must use Ironwood");
         let fee = zingolib::data::proposal::total_fee(&proposal)?.into_u64();
         let total = request
             .amount_zatoshis
@@ -486,7 +534,7 @@ impl Treasury {
             destination: request.recipient.clone(),
             inputs: selected,
         };
-        Ok((calculation, i64::try_from(total)?, fee, proposal))
+        Ok((calculation, i64::try_from(total)?, fee, proposal, pause))
         }.await;
         match selected_proposal {
             Ok(value) => Ok(value),
@@ -738,7 +786,7 @@ mod tests {
         let id = treasury.status().await.unwrap().treasury_id;
         let addresses = treasury.addresses().await.unwrap();
         // Deliberately optimistic cached funds: the real empty zingolib wallet
-        // must reject the proposal without producing bytes or a budget reservation.
+        // must reject the proposal without producing bytes or accepting inputs.
         let bytes = snapshot(treasury.client.as_ref().unwrap()).await.unwrap();
         treasury.revision = treasury
             .store
@@ -811,24 +859,68 @@ mod tests {
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let request = || PrepareRequest {
-            managed_funding: None,
-
-            operation_id: uuid::Uuid::new_v4().to_string(),
-            pool_id: None,
-
-            deadline: Some(now().unwrap() + 600),
-            recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
-            amount_zatoshis: 50_000,
-            max_fee_zatoshis: 20_000,
-            max_input_zatoshis: 70_000,
-        };
-        for _ in 0..2 {
-            let attempt = request();
+        for index in 0..2 {
+            let pool = treasury
+                .ensure_capacity_group(
+                    format!("unfunded_{index}"),
+                    crate::rotation::test_capacity::small_reserve("5"),
+                    None,
+                    0,
+                )
+                .await
+                .unwrap();
+            let job = treasury
+                .allocate_capacity_kind(pool, crate::rotation::store::AllocationKind::Small, true)
+                .await
+                .unwrap()
+                .unwrap();
+            let job = treasury
+                .store
+                .call(move |s| Ok(s.funding_job(&job)?.unwrap()))
+                .await
+                .unwrap();
+            let deadline = now().unwrap() + 600;
+            let saved = job.clone();
+            treasury.store.call(move |s| {
+                let quote=crate::rotation::near::Quote {sizing_preview:None,
+                    request:serde_json::json!({"amount":saved.target,"recipient":saved.recipient,
+                        "refundTo":crate::rotation::near::test_shielded_refund(&s.network().chain())}),
+                    response:serde_json::json!({}),input:50_000,deadline,
+                    deposit:Some("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into())};
+                s.save_funding_quote(&saved.id,&serde_json::to_vec(&quote)?)
+            }).await.unwrap();
+            let attempt = PrepareRequest {
+                managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
+                    job_id: job.id,
+                    auto_fund: true,
+                    max_attempts: 3,
+                }),
+                operation_id: job.operation_id,
+                pool_id: Some(job.pool_id),
+                deadline: Some(deadline),
+                recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+                amount_zatoshis: 50_000,
+                max_fee_zatoshis: 20_000,
+                max_input_zatoshis: 70_000,
+            };
             let operation = attempt.operation_id.clone();
             let error = treasury.prepare(attempt).await.err().unwrap();
             assert!(
                 error.is::<crate::rotation::transaction::PreparationDeferred>(),
+                "{error:#}"
+            );
+            // A cached report cannot invent an SDK scan. This unscanned wallet
+            // rejects locally before selection, rather than proving a shortfall.
+            assert!(
+                error
+                    .downcast_ref::<crate::rotation::error::FundingCondition>()
+                    .is_none(),
+                "{error:#}"
+            );
+            assert!(
+                error
+                    .chain()
+                    .any(|cause| cause.to_string() == "treasury proposal failed"),
                 "{error:#}"
             );
             assert!(treasury.healthy);
@@ -866,14 +958,11 @@ mod native_output_tests {
     const SEED: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
     #[tokio::test]
-    async fn orchard_self_payment_accepts_same_receiver_same_value_internal_change_and_proves_actual_fee()
+    async fn ironwood_self_payment_accepts_same_receiver_same_value_internal_change_and_proves_actual_fee()
      {
         for extra_payment in [false, true] {
             let wallet = SyntheticWalletBuilder::new(SEED)
-                .activation_heights(
-                    zingolib::testutils::mock_activation_heights_deferring_nu6_3(1000),
-                )
-                .orchard_note(if extra_payment { 210_000 } else { 110_000 })
+                .ironwood_note(if extra_payment { 210_000 } else { 110_000 })
                 .build();
             let chain = wallet.chain_type();
             let spending: zcash_keys::keys::UnifiedSpendingKey = wallet
@@ -930,11 +1019,11 @@ mod native_output_tests {
                 let ids = calculate_deposit(&mut wallet, &proposal).unwrap();
                 assert_eq!(ids.len(), 1);
                 let record = wallet.wallet_transactions.get(&ids[0]).unwrap();
-                assert!(record.transaction().orchard_bundle().is_some());
-                assert!(record.transaction().ironwood_bundle().is_none());
+                assert!(record.transaction().orchard_bundle().is_none());
+                assert!(record.transaction().ironwood_bundle().is_some());
                 assert_eq!(
                     record
-                        .outgoing_orchard_notes()
+                        .outgoing_ironwood_notes()
                         .iter()
                         .filter(|note| note.recipient() == receiver && note.value() == 50_000)
                         .count(),
@@ -942,7 +1031,7 @@ mod native_output_tests {
                 );
                 assert_eq!(
                     record
-                        .orchard_notes()
+                        .ironwood_notes()
                         .iter()
                         .filter(|note| note.note().recipient() == receiver
                             && note.value() == 50_000

@@ -12,12 +12,11 @@ pub(super) fn selected_inputs(proposal: &ProportionalFeeProposal) -> Result<Vec<
         if let Some(shielded) = step.shielded_inputs() {
             for note in shielded.notes() {
                 let id = note.internal_note_id();
-                let pool = match id.pool_type() {
-                    zcash_protocol::PoolType::SAPLING => InputPool::Sapling,
-                    zcash_protocol::PoolType::ORCHARD => InputPool::Orchard,
-                    zcash_protocol::PoolType::IRONWOOD => InputPool::Ironwood,
-                    _ => anyhow::bail!("unsupported selected input pool"),
-                };
+                ensure!(
+                    id.pool_type() == zcash_protocol::PoolType::IRONWOOD,
+                    "new shielded source inputs must use Ironwood"
+                );
+                let pool = InputPool::Ironwood;
                 result.push(OwnedInput {
                     pool,
                     txid: id.txid().to_string(),

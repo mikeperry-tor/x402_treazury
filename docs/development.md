@@ -409,14 +409,11 @@ successful-scan INFO makes recovery visible and resets the transition. This adds
 no readiness gate, scan, retry or financial authority. One-pass CLI callers can
 observe this capability transition before their terminal WARN. Shutdown cancellation
 does not announce a new recovery state or reset the existing backoff.
-Background treasury sync and shielding attempts with automatic observation/retry
-remaining log failures at DEBUG, including fixed safe categories and available
-sanitized details. Per-address shielding preparation failures must also reach
-that diagnostic while healthy SDK ownership permits trying the next address.
-Preparation diagnostics identify the preparation stage and a fixed safe reason,
-separate from pending-transaction observation. Empty/uneconomic selection,
-fee-limit and fee-only proposals remain expected DEBUG outcomes; typed SDK
-proposal failures retain only safe categories, never private SDK prose or sources.
+Background treasury sync and accepted-source observation with retry remaining
+log failures at DEBUG, including fixed safe categories and available sanitized
+details. Unsupported transfer methods fail explicitly; they do not start a
+background shielding attempt. Preparation failures retain safe categories without
+private SDK prose or credential-bearing sources.
 Proposal fee refusals retain numeric fee/limit detail at DEBUG; the caller owns
 any terminal failure report. Explicit one-pass sync failures remain WARN because that
 command has no automatic retry. Unreconstructible original transaction/input

@@ -18,7 +18,6 @@ state_dir = "../../../state/qualification-template"
 key_file = "../../../secrets/qualification-template.key"
 indexer_url_env = "ZCASH_INDEXER_URL"
 submission_url_env = "ZCASH_SUBMISSION_URL"
-max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
 [funding]
 auto_fund = false

@@ -423,7 +423,6 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
             "max_funding_transaction_fee_zec='invalid'",
             true,
         ),
-        ("[treasury]", "max_refund_shielding_fee_zec='invalid'", true),
         ("[treasury]", "indexer_url='http://untrusted.example'", true),
         ("[funding]", "near_api_key_env='invalid-name'", true),
         ("[funding]", "near_user_session_env='MISSING'", true),
@@ -443,9 +442,7 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
         drop(store);
         write_spec(dir.path());
         let path = dir.path().join("deployment.toml");
-        let config = managed_config()
-            .replace("max_refund_shielding_fee_zec='0.001'\n", "")
-            .replace(section, &format!("{section}\n{declaration}"));
+        let config = managed_config().replace(section, &format!("{section}\n{declaration}"));
         std::fs::write(&path, config).unwrap();
         let loaded =
             Deployment::load_for_serving_with_relay(&path, &env(), Default::default()).await;

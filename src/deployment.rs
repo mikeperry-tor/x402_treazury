@@ -1074,18 +1074,12 @@ impl Deployment {
             only_wallets.is_none_or(|selected| selected.contains(name)) && wallet.managed()
         }) {
             use crate::rotation::manager::ManagedPool;
-            let t = self.config.treasury.as_ref().unwrap();
             let mut capabilities = self.wallet_setup(env, true, allow_store_only).await?;
             let store = capabilities.store();
             let setup: Result<()> = async {
             let auto_fund = self.config.funding.as_ref().is_some_and(|f| f.auto_fund) && capabilities.funding_available();
             if let ManagedSetup::Treasury(treasury) = &mut capabilities {
                 treasury.owner.configure_sync(treasury.source.sync_settings.clone());
-                if auto_fund {
-                    treasury.owner.configure_automatic_shielding(crate::rotation::config::zatoshis(
-                        &t.max_refund_shielding_fee_zec,
-                    )? as u64);
-                }
             }
             install_funding_restrictions(&store, restriction, auto_fund)
                 .await?;

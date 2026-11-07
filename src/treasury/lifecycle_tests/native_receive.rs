@@ -64,7 +64,7 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         panic!("expected shielded UA");
     };
     assert!(receivers.transparent().is_none());
-    assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+    assert!(receivers.orchard().is_some() && receivers.sapling().is_none());
     let partial = net
         .funding_transaction(vec![
             (&address, 20_000, None),
@@ -195,12 +195,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         let spent = zcash_protocol::TxId::from_bytes([95; 32]);
         for txid in &received_transactions {
             let transaction = wallet.wallet_transactions.get_mut(txid).unwrap();
-            for note in transaction.sapling_notes_mut() {
-                note.set_spending_transaction(Some(spent));
-            }
-            for note in transaction.orchard_notes_mut() {
-                note.set_spending_transaction(Some(spent));
-            }
             for note in transaction.ironwood_notes_mut() {
                 note.set_spending_transaction(Some(spent));
             }

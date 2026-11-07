@@ -1,6 +1,6 @@
 //! SDK observations for reporting only; proposal selection owns spendability.
 use crate::rotation::error::TreasuryFunds;
-use pepper_sync::wallet::{IronwoodNote, OrchardNote, SaplingNote, TransparentCoin};
+use pepper_sync::wallet::IronwoodNote;
 use zingolib::wallet::LightWallet;
 
 /// Computed on demand from an existing SDK snapshot; never persisted separately.
@@ -15,42 +15,22 @@ pub(crate) struct SnapshotBalances {
 impl SnapshotBalances {
     pub(super) fn read(wallet: &LightWallet) -> Self {
         let account = zip32::AccountId::ZERO;
-        let balance = wallet.account_balance(account).ok();
         Self {
-            confirmed_shielded: balance.as_ref().and_then(|b| {
-                [
-                    b.confirmed_ironwood_balance,
-                    b.confirmed_orchard_balance,
-                    b.confirmed_sapling_balance,
-                ]
-                .into_iter()
-                .try_fold(0u64, |sum, value| sum.checked_add(value?.into_u64()))
-            }),
-            pending_shielded: balance.as_ref().and_then(|b| {
-                [
-                    b.unconfirmed_ironwood_balance,
-                    b.unconfirmed_orchard_balance,
-                    b.unconfirmed_sapling_balance,
-                ]
-                .into_iter()
-                .try_fold(0u64, |sum, value| sum.checked_add(value?.into_u64()))
-            }),
+            confirmed_shielded: wallet
+                .confirmed_balance::<IronwoodNote>(account)
+                .ok()
+                .map(|v| v.into_u64()),
+            pending_shielded: wallet
+                .unconfirmed_balance::<IronwoodNote>(account)
+                .ok()
+                .map(|v| v.into_u64()),
             spendable_shielded: wallet
-                .shielded_spendable_balance(account, false)
+                .spendable_balance::<IronwoodNote>(account, false)
                 .ok()
                 .map(|v| v.into_u64()),
-            // Unlike account_balance, include dust and immature coinbase funds.
-            confirmed_transparent: wallet
-                .get_filtered_balance::<TransparentCoin, _>(
-                    |_, tx| tx.status().is_confirmed(),
-                    account,
-                )
-                .ok()
-                .map(|v| v.into_u64()),
-            pending_transparent: wallet
-                .unconfirmed_balance::<TransparentCoin>(account)
-                .ok()
-                .map(|v| v.into_u64()),
+            // Stable report fields do not advertise unsupported input pools.
+            confirmed_transparent: None,
+            pending_transparent: None,
         }
     }
 }
@@ -63,32 +43,18 @@ pub(super) fn funding_assessment(
     if !complete_scan {
         return TreasuryFunds::Unavailable;
     }
-    // Calculated, transmitted and mempool transactions include incoming/change
-    // and live reservations. Historical confirmed spenders are not pending work.
-    if wallet
-        .wallet_transactions
-        .values()
-        .any(|tx| tx.status().is_pending())
-    {
-        return TreasuryFunds::Waiting;
-    }
     let account = zip32::AccountId::ZERO;
-    // Include dust and transparent holdings when explaining a capital shortage.
-    // These SDK totals are not an additional spending check or durable ledger.
-    let confirmed = [
+    // SDK balances exclude outputs already linked to a spender. Only actual
+    // owned Ironwood capital can resolve a supported payment shortage.
+    let owned = [
         wallet.confirmed_balance::<IronwoodNote>(account),
-        wallet.confirmed_balance::<OrchardNote>(account),
-        wallet.confirmed_balance::<SaplingNote>(account),
-        wallet.get_filtered_balance::<TransparentCoin, _>(
-            |_, tx| tx.status().is_confirmed(),
-            account,
-        ),
+        wallet.unconfirmed_balance::<IronwoodNote>(account),
     ]
     .into_iter()
     .try_fold(0u64, |sum, balance| {
         sum.checked_add(balance.ok()?.into_u64())
     });
-    match confirmed {
+    match owned {
         Some(total) if total < required => TreasuryFunds::Shortfall,
         Some(_) => TreasuryFunds::Waiting,
         None => TreasuryFunds::Unavailable,
@@ -108,7 +74,7 @@ mod tests {
     #[test]
     fn sdk_capital_assessment_distinguishes_shortage_from_waits_and_unknown() {
         let mut wallet = SyntheticWalletBuilder::new(SEED)
-            .orchard_note(1_000)
+            .ironwood_note(1_000)
             .build();
         assert_eq!(
             funding_assessment(&wallet, false, 50_000),
@@ -130,7 +96,7 @@ mod tests {
             .values_mut()
             .next()
             .unwrap()
-            .orchard_notes_mut()[0]
+            .ironwood_notes_mut()[0]
             .set_spending_transaction(Some(spender));
         for status in [
             ConfirmationStatus::Calculated(10.into()),
@@ -142,12 +108,8 @@ mod tests {
                 .insert(spender, WalletTransaction::new_for_test(spender, status));
             assert_eq!(
                 funding_assessment(&wallet, true, 50_000),
-                if status.is_pending() {
-                    TreasuryFunds::Waiting
-                } else {
-                    TreasuryFunds::Shortfall
-                },
-                "historical spent inputs must not hide a new shortage"
+                TreasuryFunds::Shortfall,
+                "spent original inputs without owned change cannot resolve a shortage"
             );
         }
         let wallet = SyntheticWalletBuilder::new(SEED)
@@ -155,11 +117,12 @@ mod tests {
             .build();
         assert_eq!(
             funding_assessment(&wallet, true, 50_000),
-            TreasuryFunds::Waiting,
-            "owned transparent funds need shielding, not another deposit"
+            TreasuryFunds::Shortfall,
+            "unsupported transparent holdings do not authorize shielding or hide an Ironwood shortage"
         );
+        assert_eq!(SnapshotBalances::read(&wallet).confirmed_transparent, None);
         let wallet = SyntheticWalletBuilder::new(SEED)
-            .orchard_note(100_000)
+            .ironwood_note(100_000)
             .build();
         assert_eq!(
             funding_assessment(&wallet, true, 50_000),
@@ -169,68 +132,64 @@ mod tests {
     }
 
     #[test]
-    fn immature_coinbase_is_owned_capital_waiting_for_maturity() {
-        use std::io::{Cursor, Read};
-        use zcash_primitives::transaction::Transaction;
-        use zcash_protocol::consensus::BranchId;
-
+    fn unsupported_history_cannot_inflate_ironwood_balances_or_hide_shortfalls() {
         let mut wallet = SyntheticWalletBuilder::new(SEED)
-            .tip(10)
+            .tip(30)
+            .ironwood_note(20_000)
+            .sapling_note(80_000)
+            .orchard_note(100_000)
             .transparent_coin(100_000)
             .build();
-        let (txid, original) = wallet.wallet_transactions.iter().next().unwrap();
-        let txid = *txid;
-        let coin = &original.transparent_coins()[0];
-        // A small V1 transparent coinbase with the fixture's owned output.
-        // Parsing and maturity are exercised here, not consensus validity.
-        let mut raw_coinbase = 1u32.to_le_bytes().to_vec();
-        raw_coinbase.push(1); // one input
-        raw_coinbase.extend_from_slice(&[0; 32]);
-        raw_coinbase.extend_from_slice(&u32::MAX.to_le_bytes());
-        raw_coinbase.extend_from_slice(&[2, 1, 1]); // coinbase script
-        raw_coinbase.extend_from_slice(&u32::MAX.to_le_bytes());
-        raw_coinbase.push(1); // one output
-        raw_coinbase.extend_from_slice(&coin.value().to_le_bytes());
-        coin.script().write(&mut raw_coinbase).unwrap();
-        raw_coinbase.extend_from_slice(&0u32.to_le_bytes()); // lock time
-        let transaction = Transaction::read(raw_coinbase.as_slice(), BranchId::Sprout).unwrap();
-        // Public serialization preserves SDK-owned received-coin metadata while
-        // making this synthetic transaction a real transparent coinbase.
-        let mut bytes = Vec::new();
-        original.write(&mut bytes, &wallet.chain_type()).unwrap();
-        let mut reader = Cursor::new(bytes.as_slice());
-        reader.read_exact(&mut [0; 1]).unwrap();
-        TxId::read(&mut reader).unwrap();
-        ConfirmationStatus::read(&mut reader).unwrap();
-        let start = reader.position() as usize;
-        Transaction::read(&mut reader, BranchId::Nu6_3).unwrap();
-        let end = reader.position() as usize;
-        let mut replacement = bytes[..start].to_vec();
-        transaction.write(&mut replacement).unwrap();
-        replacement.extend_from_slice(&bytes[end..]);
-        let record = WalletTransaction::read(replacement.as_slice(), &wallet.chain_type()).unwrap();
-        assert!(
-            record
-                .transaction()
-                .transparent_bundle()
-                .unwrap()
-                .is_coinbase()
-        );
-        wallet.wallet_transactions.insert(txid, record);
+        let balances = SnapshotBalances::read(&wallet);
+        assert_eq!(balances.confirmed_shielded, Some(20_000));
+        assert_eq!(balances.spendable_shielded, Some(20_000));
         assert_eq!(
-            wallet
-                .confirmed_balance::<TransparentCoin>(zip32::AccountId::ZERO)
-                .unwrap()
-                .into_u64(),
-            0
+            funding_assessment(&wallet, true, 50_000),
+            TreasuryFunds::Shortfall
+        );
+        let unsupported = wallet
+            .wallet_transactions
+            .values_mut()
+            .find(|tx| !tx.orchard_notes().is_empty())
+            .unwrap();
+        *unsupported = WalletTransaction::new_for_test_with_orchard_notes(
+            unsupported.txid(),
+            ConfirmationStatus::Mempool(31.into()),
+            unsupported.orchard_notes().to_vec(),
+            vec![],
         );
         assert_eq!(
-            SnapshotBalances::read(&wallet).confirmed_transparent,
-            Some(100_000)
+            funding_assessment(&wallet, true, 50_000),
+            TreasuryFunds::Shortfall,
+            "unsupported pending funds are not a supported capital wait"
+        );
+        assert_eq!(SnapshotBalances::read(&wallet).pending_shielded, Some(0));
+    }
+
+    #[test]
+    fn actual_supported_pending_capital_can_resolve_a_shortfall() {
+        let mut wallet = SyntheticWalletBuilder::new(SEED)
+            .tip(30)
+            .ironwood_note(70_000)
+            .build();
+        let transaction = wallet.wallet_transactions.values_mut().next().unwrap();
+        *transaction = WalletTransaction::new_for_test_with_ironwood_notes(
+            transaction.txid(),
+            ConfirmationStatus::Mempool(31.into()),
+            transaction.ironwood_notes().to_vec(),
+            vec![],
+        );
+        assert_eq!(
+            SnapshotBalances::read(&wallet).pending_shielded,
+            Some(70_000)
         );
         assert_eq!(
             funding_assessment(&wallet, true, 50_000),
             TreasuryFunds::Waiting
+        );
+        assert_eq!(
+            funding_assessment(&wallet, true, 80_000),
+            TreasuryFunds::Shortfall
         );
     }
 }

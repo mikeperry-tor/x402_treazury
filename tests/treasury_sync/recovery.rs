@@ -15,7 +15,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="UNUSED_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [sources.unloaded]
 spec="nonexistent.json"
 "#

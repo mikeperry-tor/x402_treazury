@@ -291,16 +291,7 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
                 .concat(),
             ]
         }
-        "GetAddressUtxos" | "GetTaddressBalance" => vec![vec![]],
-        "GetSubtreeRoots" | "GetTaddressTransactions" => vec![],
-        "GetTaddressTxids" => {
-            // Extend discovery, without exceeding any per-RPC deadline, so the
-            // stalled block fetch overlaps the 30-second checkpoint tick.
-            if mock.stall_blocks.load(Ordering::SeqCst) {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            vec![]
-        }
+        "GetSubtreeRoots" => vec![],
         "GetMempoolStream" => {
             std::future::pending::<()>().await;
             vec![]
@@ -454,8 +445,8 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         .as_ref()
         .unwrap();
     assert_eq!(pools.ironwood, Some(0));
-    assert_eq!(pools.orchard, Some(0));
-    assert_eq!(pools.sapling, Some(0));
+    assert_eq!(pools.orchard, None);
+    assert_eq!(pools.sapling, None);
     let mut legacy = serde_json::to_value(&observation).unwrap();
     legacy
         .as_object_mut()
@@ -469,25 +460,67 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
         serde_json::from_value(legacy).unwrap();
     assert!(legacy.confirmed_pool_balances_zatoshis.is_none());
     assert!(legacy.observed_tip_height.is_none());
+    let recipient = treasury.addresses().await.unwrap()[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    treasury.close().await.unwrap();
+    // Bind authority while the already-required reopen has released ownership.
+    let operation = {
+        use x402_treazury::rotation::store::{DirectSendAuthority, Store};
+        let mut store =
+            Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+        let operation = store
+            .reserve_native(
+                "owner",
+                "send",
+                "empty-proposal",
+                serde_json::json!({"asset_id":"nep141:zec.omft.near", "chain":"zec",
+                "amount":"50000", "recipient":recipient.clone(), "max_source_zatoshis":null}),
+            )
+            .unwrap()
+            .0;
+        store
+            .accept_direct_send(
+                &operation.id,
+                None,
+                DirectSendAuthority {
+                    max_fee_zatoshis: 20_000,
+                    max_debit_zatoshis: Some(70_000),
+                },
+            )
+            .unwrap()
+            .id
+    };
+    let mut restored = Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Offline
+    );
+    restored.configure_sync(settings);
+    restored.sync_once(&CancellationToken::new()).await.unwrap();
     {
         use x402_treazury::rotation::transaction::{PrepareRequest, TransactionPreparer};
         let before = calls.lock().unwrap().len();
-        let error = treasury
+        let before_revision = restored.status().await.unwrap().snapshot_revision;
+        let error = restored
             .prepare(PrepareRequest {
                 managed_funding: None,
 
-                operation_id: uuid::Uuid::new_v4().to_string(),
+                operation_id: operation,
                 pool_id: None,
 
-                deadline: Some(x402_treazury::rotation::base::now().unwrap() + 600),
-                recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+                deadline: None,
+                recipient,
                 amount_zatoshis: 50_000,
                 max_fee_zatoshis: 20_000,
                 max_input_zatoshis: 70_000,
             })
             .await
             .err()
-            .expect("empty wallet prepared a deposit");
+            .expect("empty wallet prepared a native payment");
         assert!(
             error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
             "{error:#}"
@@ -506,20 +539,10 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
                 "an empty SDK proposal must not probe the indexer"
             );
         }
-        let after = treasury.status().await.unwrap();
-        assert_eq!(after.snapshot_revision, status.snapshot_revision);
+        let after = restored.status().await.unwrap();
+        assert_eq!(after.snapshot_revision, before_revision);
         assert!(after.treasury_operations.is_empty() && !after.outgoing_pending);
     }
-    treasury.close().await.unwrap();
-    let mut restored = Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
-        .await
-        .unwrap();
-    assert_eq!(
-        restored.status().await.unwrap().sync.unwrap().phase,
-        SyncPhase::Offline
-    );
-    restored.configure_sync(settings);
-    restored.sync_once(&CancellationToken::new()).await.unwrap();
     assert!(restored.status().await.unwrap().snapshot_revision > observation.snapshot_revision);
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     restored.close().await.unwrap();
@@ -543,7 +566,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
 socks_endpoint="{proxy_address}"
@@ -590,8 +612,15 @@ spec="nonexistent.json"
         )
     );
     assert!(human.contains("Saved pending shielded incoming/change: 0.00000000 ZEC"));
-    assert!(human.contains("Saved confirmed transparent balance: 0.00000000 ZEC"));
-    assert!(human.contains("Saved pending transparent balance: 0.00000000 ZEC"));
+    assert!(
+        human.contains(
+            "Saved confirmed transparent balance: unknown (snapshot balance unavailable)"
+        )
+    );
+    assert!(
+        human.contains("Saved pending transparent balance: unknown (snapshot balance unavailable)")
+    );
+    assert!(human.contains("Only Ironwood funds are supported."));
     assert!(human.contains("Primary ZEC address:"));
     assert!(
         output.status.success(),
@@ -649,6 +678,12 @@ spec="nonexistent.json"
             .all(|r| (r.user.clone(), r.password.clone()) == credentials)
     );
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    assert!(
+        !calls.lock().unwrap().iter().any(
+            |method| method.starts_with("GetTaddress") || method.starts_with("GetAddressUtxos")
+        ),
+        "synchronization must not disclose transparent addresses"
+    );
     server.abort();
 }
 
@@ -896,7 +931,7 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     .unwrap() else {
         panic!("new refund must be a unified address");
     };
-    assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+    assert!(receivers.orchard().is_some() && receivers.sapling().is_none());
     assert!(receivers.transparent().is_none());
 
     assert_eq!(
@@ -923,7 +958,7 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
         panic!("new refund must be a unified address");
     };
     assert_ne!(receivers.orchard(), second_receivers.orchard());
-    assert_ne!(receivers.sapling(), second_receivers.sapling());
+    assert!(receivers.sapling().is_none() && second_receivers.sapling().is_none());
     assert!(second_receivers.transparent().is_none());
     let (endpoint, calls, server, _) = mock("main").await;
     treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
@@ -941,8 +976,8 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
             .shield_refund(job.id.clone(), 0, &CancellationToken::new())
             .await
             .err()
-            .expect("shielded refund needs no shielding transaction");
-        assert!(error.is::<x402_treazury::treasury::NoShieldingRequired>());
+            .expect("transparent-input shielding must be unsupported");
+        assert!(error.to_string().contains("unsupported"));
     }
     assert!(
         calls.lock().unwrap().is_empty(),
@@ -975,18 +1010,14 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
         .await
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(output.status.success(), "{stderr}");
+    assert!(!output.status.success(), "{stderr}");
     assert!(
-        stderr.contains("INFO") && stderr.contains("no transparent shielding is needed"),
-        "{stderr}"
-    );
-    assert!(
-        !stderr.contains("WARN") && !stderr.contains("ERROR"),
+        stderr.contains("unsupported") && stderr.contains("Ironwood"),
         "{stderr}"
     );
     assert!(
         calls.lock().unwrap().is_empty(),
-        "CLI noop must not contact the indexer"
+        "unsupported CLI operation must not contact the indexer"
     );
     assert_eq!(rows(), before_rows);
     let reopened = Treasury::open(
@@ -1069,7 +1100,6 @@ servers={{}}
 [treasury]
 state_dir="wallet"
 indexer_url="{endpoint}"
-max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
 socks_endpoint="{}"
@@ -1298,7 +1328,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="MISSING_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [sources.unloaded]
 spec="nonexistent.json"
 "#
@@ -2024,7 +2053,7 @@ async fn sync_cli_reports_independent_assets_without_provider_or_near_credential
             "invalid" => "indexer_url='http://off-machine.invalid'".into(),
             "conflicting" => format!("indexer_url='{indexer}'\nindexer_url_env='SYNC_INDEXER'"),
             "unrelated" => format!(
-                "indexer_url='{indexer}'\nsubmission_url='http://off-machine.invalid'\nsubmission_url_env='MISSING_SUBMISSION'\nmax_funding_transaction_fee_zec='invalid'\nmax_refund_shielding_fee_zec='invalid'"
+                "indexer_url='{indexer}'\nsubmission_url='http://off-machine.invalid'\nsubmission_url_env='MISSING_SUBMISSION'\nmax_funding_transaction_fee_zec='invalid'\n"
             ),
             _ => format!("indexer_url='{indexer}'"),
         };

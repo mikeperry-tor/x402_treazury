@@ -1,7 +1,6 @@
 //! Native direct sends use real SDK proofs and the same durable source owner.
 use super::*;
 use crate::rotation::store::DirectSendAuthority;
-use pepper_sync::wallet::{OutgoingNoteInterface, OutputInterface};
 use serde_json::json;
 use std::sync::{
     Arc,
@@ -220,9 +219,17 @@ async fn native_self_payment_uses_actual_total_cap_and_retains_bytes_after_cance
 }
 
 #[tokio::test]
-async fn native_sapling_payment_has_shielded_outputs_and_rejects_mixed_addresses_before_acceptance()
-{
+async fn native_unsupported_receivers_and_unbound_work_fail_before_input_ownership() {
     let (_dir, net, mut owner, _) = funded_fixture(2).await;
+    let native_ua = owner
+        .client
+        .as_ref()
+        .unwrap()
+        .unified_addresses_json()
+        .await[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     owner
         .client
         .as_mut()
@@ -242,58 +249,70 @@ async fn native_sapling_payment_has_shielded_outputs_and_rejects_mixed_addresses
         .as_str()
         .unwrap()
         .to_owned();
-    let zcash_keys::address::Address::Unified(receivers) =
+    let zcash_keys::address::Address::Unified(sapling) =
         zcash_keys::address::Address::decode(&owner.network.chain(), &sapling_ua).unwrap()
     else {
-        panic!("expected Sapling UA")
+        panic!("expected Sapling-only negative fixture")
     };
-    let recipient = zcash_keys::address::Address::from(*receivers.sapling().unwrap())
+    let sapling_address = zcash_keys::address::Address::from(*sapling.sapling().unwrap())
         .encode(&owner.network.chain());
+    let zcash_keys::address::Address::Unified(native) =
+        zcash_keys::address::Address::decode(&owner.network.chain(), &native_ua).unwrap()
+    else {
+        panic!("expected Ironwood-compatible fixture")
+    };
     let zcash_keys::address::Address::Transparent(transparent) =
         zcash_keys::address::Address::decode(&owner.network.chain(), DEPOSIT).unwrap()
     else {
-        panic!("expected transparent fixture")
+        panic!("expected transparent negative fixture")
     };
     let mixed = zcash_keys::address::UnifiedAddress::from_receivers(
+        native.orchard().copied(),
         None,
-        Some(*receivers.sapling().unwrap()),
         Some(transparent),
         None,
         None,
     )
     .unwrap()
     .encode(&owner.network.chain());
-    assert!(crate::treasury::native_recipient(&owner.network.chain(), &mixed).is_err());
-    let invalid = native_request(uuid::Uuid::new_v4().to_string(), mixed, 50_000);
-    assert!(owner.prepare(invalid).await.is_err());
-    let unbound = native_request(uuid::Uuid::new_v4().to_string(), recipient.clone(), 50_000);
+    let tex = zcash_keys::address::Address::Tex([1; 20]).encode(&owner.network.chain());
+    for recipient in [sapling_address, sapling_ua, mixed, DEPOSIT.to_owned(), tex] {
+        assert!(crate::treasury::native_recipient(&owner.network.chain(), &recipient).is_err());
+        let id = uuid::Uuid::new_v4().to_string();
+        assert!(
+            owner
+                .prepare(native_request(id.clone(), recipient, 50_000))
+                .await
+                .is_err()
+        );
+        owner
+            .store
+            .call(move |s| {
+                s.require_unstarted_preparation(&id)?;
+                assert!(!s.operation_pending(&id)?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    let id = uuid::Uuid::new_v4().to_string();
     assert!(
-        owner.prepare(unbound).await.is_err(),
-        "native work needs a durable direct identity"
+        owner
+            .prepare(native_request(id.clone(), native_ua, 50_000))
+            .await
+            .is_err(),
+        "native work needs an accepted durable direct binding"
     );
-    let id = accept(&owner, recipient.clone(), "sapling", None).await;
-    let prepared = owner
-        .prepare(native_request(id, recipient, 50_000))
+    owner
+        .store
+        .call(move |s| {
+            s.require_unstarted_preparation(&id)?;
+            assert!(s.status()?.treasury_operations.is_empty());
+            assert!(s.funding_jobs()?.is_empty());
+            Ok(())
+        })
         .await
         .unwrap();
-    let transaction = submission::decode(prepared.bytes()).unwrap();
-    assert!(transaction.transparent_bundle().is_none());
-    assert!(transaction.sapling_bundle().is_some());
-    let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-    let record = wallet.wallet_transactions.get(&transaction.txid()).unwrap();
-    assert!(
-        record
-            .outgoing_sapling_notes()
-            .iter()
-            .any(|note| note.value() == 50_000)
-    );
-    assert!(
-        record
-            .sapling_notes()
-            .iter()
-            .any(|note| note.value() == 50_000)
-    );
-    drop(wallet);
     assert!(net.chain.read().await.taddr_request_log().is_empty());
     owner.close().await.unwrap();
 }

@@ -24,7 +24,7 @@ async fn direct_invoice_receipt_survives_reopen_and_finishes_observation_after_s
     else {
         panic!("direct receive requires shielded receivers");
     };
-    assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+    assert!(receivers.orchard().is_some() && receivers.sapling().is_none());
     assert!(receivers.transparent().is_none());
     let saved = operation.clone();
     owner.store.call(move |s| {

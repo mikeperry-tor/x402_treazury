@@ -125,7 +125,7 @@ mod tests {
             .client
             .as_mut()
             .unwrap()
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
             .await
             .unwrap();
         let committed_addresses = owner.addresses().await.unwrap();

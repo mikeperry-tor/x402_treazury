@@ -37,7 +37,7 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
             .client
             .as_mut()
             .unwrap()
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
             .await
             .unwrap();
     }
@@ -55,7 +55,7 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
     else {
         panic!("new refund must be a unified address");
     };
-    assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+    assert!(receivers.orchard().is_some() && receivers.sapling().is_none());
     assert!(receivers.transparent().is_none());
     assert_eq!(original.refund_address(job.id).await.unwrap(), refund);
     let receipt = net.funding_transaction(vec![(&refund, 40_000, None)]).await;
@@ -242,7 +242,7 @@ async fn reopened_discovery_enabled_snapshot_preserves_binding_without_transpare
             .await
             .unwrap()
             .confirmed_transparent,
-        Some(0)
+        None
     );
     let status = restored.status().await.unwrap();
     assert!(status.snapshot_revision > expected_revision);
@@ -327,111 +327,67 @@ async fn refund_binding_failure_returns_no_address_and_reopens_original_snapshot
 }
 
 #[tokio::test]
-async fn mixed_ua_refund_shields_owned_transparent_receiver_without_rebinding() {
-    if crate::treasury::prover::isolated_scenario(
-        "treasury::lifecycle_tests::refund_addresses::mixed_ua_refund_shields_owned_transparent_receiver_without_rebinding",
-    ) {
-        return;
-    }
-    assert_eq!(crate::treasury::prover::parse_count(), 0);
-
-    use crate::rotation::store::preparation::InputPool;
-    use zcash_keys::address::{Address, UnifiedAddress};
-    for orchard in [true, false] {
-        let (_dir, net, mut owner, _endpoint) = funded_fixture(2).await;
-        crate::rotation::test_capacity::treasury_pair(&owner, "mixed_refund", "5", None, 0)
-            .await
-            .unwrap();
-        let job = owner
-            .store
-            .call(|s| Ok(s.funding_jobs()?.remove(0)))
-            .await
-            .unwrap();
-        let client = owner.client.as_mut().unwrap();
-        let (_, shielded) = client
-            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
-            .await
-            .unwrap();
-        let (_, transparent) = client
-            .generate_transparent_address(zip32::AccountId::ZERO, false)
-            .await
-            .unwrap();
-        // Current SDK generation keeps these separate. Compose a cached legacy
-        // UA from genuinely owned receivers, retaining its exact encoding.
-        let mixed = UnifiedAddress::from_receivers(
-            orchard.then(|| shielded.orchard().cloned().unwrap()),
-            (!orchard).then(|| shielded.sapling().cloned().unwrap()),
-            Some(transparent),
-            None,
-            None,
-        )
-        .unwrap()
-        .encode(&owner.network.chain());
-        let Address::Unified(decoded) = Address::decode(&owner.network.chain(), &mixed).unwrap()
-        else {
-            panic!("mixed refund fixture must preserve its transparent receiver");
-        };
-        assert_eq!(decoded.transparent(), Some(&transparent));
-        let bytes = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
-        let revision = owner.revision;
-        let (job_id, saved) = (job.id.clone(), mixed.clone());
-        owner.revision = owner
-            .store
-            .call(move |s| s.save_refund_address(&job_id, &saved, revision, &bytes))
-            .await
-            .unwrap();
-        let receiver = Address::Transparent(transparent).encode(&owner.network.chain());
-        let funding = super::transparent_fixtures::transparent_fixture(
-            &net,
-            &owner,
-            vec![(&receiver, 1_000_000, None)],
-        )
-        .await;
-        let funding_id = submission::decode(&funding).unwrap().txid().to_string();
-        {
-            let mut chain = net.chain.write().await;
-            chain.mine_block(vec![funding]);
-            chain.mine_empty_blocks(2);
-        }
-        let prepared = owner
-            .shield_refund(job.id.clone(), 30_000, &CancellationToken::new())
-            .await
-            .unwrap();
-        assert_eq!(
-            crate::treasury::prover::parse_count(),
-            0,
-            "transparent shielding must not initialize Sapling parameters"
-        );
-        let transaction = submission::decode(prepared.bytes()).unwrap();
-        let inputs = transaction.transparent_bundle().unwrap();
-        assert_eq!(inputs.vin.len(), 1);
-        assert!(inputs.vout.is_empty());
-        assert_eq!(prepared.facts().unwrap().amount_zatoshis, 0);
-        assert!(prepared.facts().unwrap().fee_zatoshis > 0);
-        let (operation, job_id, saved) = (prepared.operation_id().to_owned(), job.id, mixed);
-        let exact_raw = prepared.bytes().to_vec();
-        owner
-            .store
-            .call(move |s| {
-                assert_eq!(s.refund_address(&job_id)?.as_deref(), Some(saved.as_str()));
-                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), exact_raw);
-                assert_eq!(
-                    s.operation(&operation)?.attempts,
-                    0,
-                    "calculation must not broadcast"
-                );
-                assert_eq!(s.operation(&operation)?.submission, "PREPARED");
-                let selected = s.prepared_inputs(&operation)?;
-                assert_eq!(selected.len(), 1);
-                assert_eq!(selected[0].pool, InputPool::Transparent);
-                assert_eq!(selected[0].txid, funding_id);
-                assert_eq!(selected[0].output_index, 0);
-                Ok(())
-            })
-            .await
-            .unwrap();
-        owner.close().await.unwrap();
-    }
+async fn saved_mixed_refund_rejects_new_transparent_shielding_without_side_effects() {
+    use zcash_keys::address::UnifiedAddress;
+    let (_dir, mut owner) = unfunded_fixture().await;
+    let net = MockNet::launch().await;
+    forbid_transparent_address_rpcs(&net).await;
+    owner.configure_sync(SyncSettings::new(net.indexer_uri().to_string(), 2).unwrap());
+    crate::rotation::test_capacity::treasury_pair(&owner, "mixed_refund", "5", None, 0)
+        .await
+        .unwrap();
+    let job = owner
+        .store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let client = owner.client.as_mut().unwrap();
+    let (_, shielded) = client
+        .generate_unified_address(ReceiverSelection::orchard_only(), zip32::AccountId::ZERO)
+        .await
+        .unwrap();
+    let (_, transparent) = client
+        .generate_transparent_address(zip32::AccountId::ZERO, false)
+        .await
+        .unwrap();
+    // Existing cached receiver facts are retained; they grant no new T-input work.
+    let mixed = UnifiedAddress::from_receivers(
+        Some(*shielded.orchard().unwrap()),
+        None,
+        Some(transparent),
+        None,
+        None,
+    )
+    .unwrap()
+    .encode(&owner.network.chain());
+    let bytes = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
+    let revision = owner.revision;
+    let (job_id, saved) = (job.id.clone(), mixed.clone());
+    owner.revision = owner
+        .store
+        .call(move |s| s.save_refund_address(&job_id, &saved, revision, &bytes))
+        .await
+        .unwrap();
+    let before = owner.store.call(|s| Ok(s.snapshot()?.0)).await.unwrap();
+    let error = owner
+        .shield_refund(job.id.clone(), 30_000, &CancellationToken::new())
+        .await
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("unsupported"), "{error:#}");
+    owner
+        .store
+        .call(move |s| {
+            assert_eq!(s.snapshot()?.0, before);
+            assert_eq!(s.refund_address(&job.id)?.as_deref(), Some(mixed.as_str()));
+            assert!(!s.status()?.outgoing_pending);
+            assert!(s.status()?.treasury_operations.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_no_transparent_address_rpcs(&net).await;
+    owner.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -476,15 +432,7 @@ async fn unsupported_refund_binding_is_rejected_before_sync_or_preparation() {
             .await
             .err()
             .expect("unsupported refund must be rejected");
-        assert!(!error.is::<crate::treasury::NoShieldingRequired>());
-        assert!(
-            error.to_string().contains(if invalid {
-                "invalid refund address"
-            } else {
-                "TEX addresses are unsupported for refunds"
-            }),
-            "{error:#}"
-        );
+        assert!(error.to_string().contains("unsupported"), "{error:#}");
         assert!(owner.healthy);
         let after = owner.status().await.unwrap();
         assert_eq!(after.snapshot_revision, before.snapshot_revision);
@@ -530,18 +478,13 @@ async fn fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy(
     let addresses = addresses.as_array().unwrap();
     for address in addresses {
         assert_eq!(address["receiver_capabilities"]["transparent"], false);
-        assert!(
-            address["receiver_capabilities"]["orchard_protocol"] == true
-                || address["receiver_capabilities"]["sapling"] == true
-        );
+        assert_eq!(address["receiver_capabilities"]["ironwood"], true);
+        assert!(address["receiver_capabilities"].get("sapling").is_none());
     }
     let receive = addresses
         .iter()
-        .find(|address| {
-            address["receiver_capabilities"]["orchard_protocol"] == true
-                && address["receiver_capabilities"]["sapling"] == true
-        })
-        .expect("fresh wallet must publish a Sapling and Orchard receive address");
+        .find(|address| address["receiver_capabilities"]["ironwood"] == true)
+        .expect("fresh wallet must publish an Ironwood receive address");
     let recipient = receive["encoded_address"].as_str().unwrap().to_owned();
     let receipt = net
         .funding_transaction(vec![(&recipient, 100_000, None)])

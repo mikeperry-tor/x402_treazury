@@ -46,17 +46,16 @@ recovery outside retained history.
 
 ## Adapted application code and attribution
 
-Two application files retain implementations adapted from the former v7 revision
+The network adapter retains an implementation adapted from the former v7 revision
 `bfb0a2156819ea7f75a9b09b1724abfd06c8925e`; the current v8 cohort is assessed
-against those retained adapters:
+against that retained adapter:
 
 | Application code | Upstream origin | Purpose of the local adapter |
 | --- | --- | --- |
-| [`src/network/indexer.rs`](../src/network/indexer.rs) | `zingo-netutils/src/lib.rs`: `GrpcIndexer` and its `Indexer` implementation; `zingo-netutils/src/globally_public.rs`: its `TransparentIndexer` implementation | Thirteen indexer and six transparent-indexer RPC delegations use the application's identity-bound SOCKS/progress transport. Upstream's private client uses tonic `Channel` and its constructors establish the SDK's transport. The adapter retains request/response conventions while the application owns network construction and inactivity handling. |
-| [`src/treasury/prover.rs`](../src/treasury/prover.rs) | `zingolib/src/wallet/utils.rs`: `LazySaplingProver` | One process-owned adapter retains a `OnceLock` that initializes embedded public Sapling parameters on first use, and `SpendProver`/`OutputProver` implementations delegate to `zcash_proofs::prover::LocalTxProver`. Upstream's adapter is crate-private; deposit and shielding calculations borrow that same static adapter when calling backend transaction creation directly. Immutable parameters stay resident for the process; compilation requires their Send/Sync contract. No Sapling parsing occurs when a Sapling proof is not requested. |
+| [`src/network/indexer.rs`](../src/network/indexer.rs) | `zingo-netutils/src/lib.rs`: `GrpcIndexer` and its `Indexer` implementation; `zingo-netutils/src/globally_public.rs`: its `TransparentIndexer` implementation | Thirteen indexer RPC delegations use the application's identity-bound SOCKS/progress transport. The six required transparent-indexer methods refuse locally without constructing a request. Upstream's private client uses tonic `Channel`; the application owns network construction, privacy authority and inactivity handling. |
 
-Both files retain upstream copyright and revision attribution in their source
-headers. [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT) preserves the
+The network adapter retains upstream copyright and revision attribution in its
+source header. [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT) preserves the
 upstream copyright and permission notice for these adapted implementations.
 The notice matches the pinned upstream repository's root `LICENSE`. Its MIT terms
 require retaining that notice with copies or substantial portions of the code.
@@ -64,6 +63,52 @@ These application implementations remain after removal of the Zingolib/netutils
 vendor checkouts, so the notice remains relevant independently of Pepper's
 checkout. Calls into ordinary upstream SDK dependencies are separate from these
 locally adapted implementations.
+
+## Ironwood-only policy
+
+Ironwood is the application's only supported Zcash shielded pool. New treasury
+inputs, native payments, change, receive requests and refunds use Ironwood. Reject
+Sapling and legacy Orchard transfers, pool fallback and historical-fund support;
+unsupported balances cannot become spendable capital or a reason to wait for new
+funding. This applies to ordinary funding, direct tools and wallet administration.
+There is no operator or agent pool selector that re-enables another pool.
+
+Ironwood uses the Orchard **receiver format**. New addresses are unified addresses
+containing only that receiver, without Sapling or transparent receivers. Its
+encoding does not authorize legacy Orchard-pool payments. The SDK proposal must
+select Ironwood before input ownership is accepted, and calculated transaction
+validation checks actual Ironwood outputs and fees. Use the public backend's
+Ironwood-only spending policy instead of LightClient's unrestricted selection.
+
+The only external transparent-output exception is the exact NEAR-issued deposit
+address bound to an accepted managed/direct swap quote, paid from Ironwood funds.
+It does not authorize arbitrary transparent destinations, treasury transparent
+receiving, transparent-input shielding or address-indexed RPC queries. All six
+required `TransparentIndexer` methods fail locally, and wallet discovery remains
+disabled across creation, import, reopen and reconstruction. Ordinary transaction
+lookup/broadcast and compact-block synchronization retain their separate roles.
+
+The application has no Sapling parameter parser, initialized prover, runtime
+parameter cache or parameter downloader. Backend transaction APIs unavoidably
+require Sapling prover traits: a parameter-free refusing adapter supplies those
+types, with an uninhabited proof result. Proposal restrictions prevent normal calls;
+any unexpected proof request fails closed rather than signing unsupported work.
+
+The pinned SDK still derives unused keys, decodes global chain/old wallet formats
+and can recognize unsupported outputs while scanning. Raw SDK snapshots and
+accepted transaction/input journals remain exact; decoding is not permission for
+fresh preparation, replacement or disclosure. Application balances and note
+inspection project Ironwood only. No application legacy-pool transfer or recovery
+implementation is retained for new work.
+
+One build-only exception is unavoidable with the unchanged pinned SDK: Zingolib
+`81d7997` calls `get_zcash_params` unconditionally in `build.rs`, and embeds Sapling
+parameter bytes in `lib.rs`. It exposes no feature to disable this. An uncached SDK
+build can therefore acquire them even though the application never initializes or
+uses them. Do not add a maintained dependency checkout/fork to conceal this fact;
+see [build-time parameters](#build-time-parameter-downloads) and the dependency
+policy for any separately proposed upstream remedy. Existing parameter-cache
+integrity and reproducibility checks remain necessary for the SDK build's inputs.
 
 ## Application SDK boundaries
 
@@ -73,8 +118,9 @@ transmitters, price fetchers or optional nym workers.
 
 `src/network.rs` alone constructs the generated gRPC client over the existing
 progress transport and returns `network::GrpcIndexer`. The thirteen `Indexer`
-and six `TransparentIndexer` methods in `src/network/indexer.rs` retain generated
-request defaults, concrete streams, clone ownership and request metadata. Pepper
+methods in `src/network/indexer.rs` retain generated request defaults, concrete
+streams, clone ownership and request metadata. Its six required transparent-address
+methods return a fixed local unsupported error without transport activity. Pepper
 still calls deprecated aliases. Nonzero submission codes produce
 `Status::Unknown` with the original message; successful transaction IDs retain
 safe quote stripping. Submission validates the result against the durable exact
@@ -105,11 +151,11 @@ high-level SDK calculation offline would instead choose epoch-end expiry.
 Public `clear_proposal` runs after releasing the wallet guard; no private proposal
 manager or parallel input ledger is needed. The actor reuses canonical validation
 without a redundant connection; direct preparation retains network validation.
-The process-owned lazy Sapling prover parses embedded public parameter bytes only
-when first needed and reuses the immutable result for subsequent deposits and
-shielding. It reads no runtime parameter file and holds no keys, proposals, circuits
-or RNG state. Calculation still follows the existing serialized wallet owner;
-parameter reuse alone does not offload CPU work from the serving runtime.
+The application selects Ironwood inputs and change through the public backend API.
+An empty change memo replaces the SDK's private advisory full-UA serializer; exact
+accepted terms and actual note receivers own financial attribution. No additional
+memo dependency or parallel proposal manager is needed. The required Sapling prover
+adapter refuses operations without loading parameter bytes.
 Financial authority, retained bytes, publication and recovery remain in [wallet ownership](wallet-rotation.md) and
 [lifecycle coverage](../tests/LIFECYCLE.md).
 
@@ -282,8 +328,7 @@ NEAR owns the outcome of a bound swap; a validated SUCCESS closes source work
 without requiring a local CONFIRMED label. Current SDK state independently owns
 spendability. Actual unfinished sources retain their exact journals and existing
 observation/finite-expiry recovery owner. Production deposits use the SDK's finite
-expiry (40 blocks before NU7, 120 afterward); shielding uses the backend's ordinary
-finite default. No production zero-expiry constructor requires a parallel recovery
+expiry (40 blocks before NU7, 120 afterward). No production zero-expiry constructor requires a parallel recovery
 framework.
 
 Application owner opens and read-only inspection accept database schema 23 only.
@@ -305,9 +350,9 @@ financial work.
 The upstream SDK build script obtains and embeds standard parameter-cache files
 through `SAPLING_SPEND_PARAMS` and `SAPLING_OUTPUT_PARAMS`; it does not copy them
 into its source checkout. Pre-populate the standard cache for an offline first
-build. Deposit and shielding proving read embedded bytes lazily when a Sapling
-proof is requested; neither requires a runtime parameter cache or downloads
-parameters. Legacy v6 `vendor/zingolib/zcash-params/*.params`
+build. The application never parses or uses these legacy parameters and has no
+runtime parameter cache or downloader; its required prover adapter refuses Sapling
+requests. These files remain an unavoidable input of the pinned SDK build. Legacy v6 `vendor/zingolib/zcash-params/*.params`
 copies remain ignored, unused and preserved. Build-time acquisition is outside
 runtime Tor routing.
 
@@ -338,7 +383,8 @@ next ordinary save persists it. Read-only inspection retains the original facts.
 This disables known-address RPCs and address-gap recovery without a legacy recovery
 mode. Shielded trial decryption and already accepted transaction ownership remain.
 The SDK still derives unused transparent keys separately from its initial
-Orchard-only UA; the application also derives a Sapling+Orchard receive UA.
+Orchard-receiver-only UA. Every application-issued UA uses that same Ironwood
+receiver format without Sapling or transparent components.
 Current storage accepts schema23 only; the SDK owns historical snapshot decoding,
 which is separate from an application pre-seed migration path.
 
@@ -357,8 +403,8 @@ does not prove that no transparent query occurred.
 Complete SDK transparent removal is not required for this contract.
 `LightWallet::new` still derives a local transparent key/address, and shielded-
 relevant compact/full/pending scanning can recognize already-owned transparent
-outputs. Existing owned-fund handling preserves those identities and accepted
-work without enabling address-specific discovery. Do not clear keys or maps to
+outputs. Raw SDK snapshots preserve those identities and accepted work; they
+never authorize new wallet transparent-input work. Do not clear keys or maps to
 simulate retirement. Bridge-owned transparent outbound deposits retain their
 separate destination/output validation. This contract does not establish blanket
 network unlinkability or live-funded refund qualification; see
@@ -370,11 +416,12 @@ and consensus-derived signed block expiry remain independent, including across N
 existing accepted deadlines and bytes survive restart unchanged.
 
 New refund derivation calls the pinned SDK's existing
-`generate_unified_address(ReceiverSelection::all_shielded(), AccountId::ZERO)`.
-The result contains Sapling and Orchard receivers without a transparent fallback.
+`generate_unified_address(ReceiverSelection::orchard_only(), AccountId::ZERO)`.
+The result contains only the Orchard-format receiver used by Ironwood, without
+Sapling or transparent fallback.
 The application persists the SDK snapshot and exact job/address binding together
-before quote disclosure. Existing transparent bindings are returned unchanged;
-their SDK discovery and owned-fund shielding paths remain necessary.
+before quote disclosure. Saved transparent/mixed refund bindings remain exact
+evidence but fail new refund selection; they do not enable discovery or shielding.
 
 Compact-block trial decryption uses account viewing keys, so shielded receipt
 discovery does not depend on a sequential transparent-address gap scan.
@@ -383,8 +430,8 @@ receives at a later generated address, then recovers the actual note and spendab
 value into a fresh wallet using only the public test mnemonic and early birthday.
 It imports no original address list, jobs or snapshot. This synthetic-chain test
 does not validate consensus or live bridge delivery. See the maintained
-[refund contract](wallet-rotation.md#refunds-state-and-recovery) for legacy
-transparent recovery limits and financial-authority boundaries.
+[refund contract](wallet-rotation.md#refunds-state-and-recovery) for exact saved
+bindings and financial-authority boundaries.
 
 The [NEAR native bridge implementation](https://github.com/Near-One/bridge-sdk-rs/blob/d1361ac1c68fa579ed1a498d30f2124bc16e09cc/bridge-sdk/connectors/omni-connector/src/zcash.rs#L612)
 constructs shielded refunds using an Orchard receiver. Zodl also supplies shielded
@@ -395,8 +442,8 @@ transparent-only source-deposit contract; mixed UAs may select a transparent pat
 
 Native direct sends accept shielded-only recipients and use the existing SDK
 proposal, accepted-input ownership, calculation and publication path. The direct
-recipient proof checks exactly one positive OVK-recovered payment across Sapling,
-Orchard and Ironwood against the accepted receiver and amount. The pinned backend's
+recipient proof checks exactly one positive OVK-recovered Ironwood payment against
+the accepted receiver and amount, and rejects legacy-pool bundles. The pinned backend's
 `OvkPolicy::Sender` uses an external OVK for payments and no OVK encryption for
 implicit change in all three pools; Pepper's outgoing inventory therefore excludes
 that change, including same-receiver self-payment change. Incoming note ownership

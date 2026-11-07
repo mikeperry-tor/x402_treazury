@@ -614,7 +614,8 @@ production-key, scan, submission or funded-experiment authority.
 If offline artifacts do not prove selected-SDK discovery/recovery, separately
 review and authorize an isolated copy scan. Disable transparent discovery, retain
 the configured identity-bound indexer/Tor policy and prevent all submission,
-funding, automatic shielding and calculation execution. No such inspection mode
+funding and calculation execution. Wallet transparent-input shielding is already
+unsupported under the Ironwood-only policy. No such inspection mode
 is currently supplied by this recipe. Its implementation must enforce those
 boundaries before use; disabling `auto_fund` alone does not prevent every accepted
 operation from being observed or submitted by an ordinary owner.

@@ -34,7 +34,6 @@ fn one_config_initializes_inspects_and_backs_up_without_ids_keys_endpoints_or_ca
 servers={}
 [treasury]
 state_dir="nested/wallet"
-max_refund_shielding_fee_zec="0.0003"
 [funding]
 confidentiality="public"
 [sources.never_fetch]
@@ -200,7 +199,7 @@ fn status_displays_receive_address_while_owned_and_keeps_metadata_without_a_key(
 fn conflicting_wallet_inputs_and_missing_explicit_endpoint_fail_before_creation() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("deployment.toml");
-    std::fs::write(&config, "version=1\nservers={}\n[treasury]\nstate_dir='wallet'\nmax_refund_shielding_fee_zec='0.001'\nindexer_url_env='TREAZURY_TEST_ABSENT_INDEXER'\n").unwrap();
+    std::fs::write(&config, "version=1\nservers={}\n[treasury]\nstate_dir='wallet'\nindexer_url_env='TREAZURY_TEST_ABSENT_INDEXER'\n").unwrap();
     let failed = wallet(&config, &["init"]);
     assert!(!failed.status.success());
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing or empty"));
@@ -290,7 +289,7 @@ fn wallet_clap_conflicts_and_config_placement_preserve_resolution_boundaries() {
         );
     }
     let config = dir.path().join("deployment.toml");
-    std::fs::write(&config,"version=1\nservers={}\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\nid='11111111-1111-4111-8111-111111111111'\nindexer_url_env='MISSING'\n").unwrap();
+    std::fs::write(&config,"version=1\nservers={}\n[treasury]\nstate_dir='state'\nid='11111111-1111-4111-8111-111111111111'\nindexer_url_env='MISSING'\n").unwrap();
     for args in [
         vec!["wallet", "--config", "deployment.toml", "init"],
         vec!["wallet", "init", "--config", "deployment.toml"],
@@ -328,7 +327,7 @@ async fn wallet_rejections_and_saved_inspection_never_request_catalogs() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("deployment.toml");
     let ca = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem");
-    std::fs::write(&config,format!("version=1\nservers={{}}\n[network]\ntrusted_ca_files=[{ca:?}]\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\n[sources.unused]\nspec='{endpoint}'\n")).unwrap();
+    std::fs::write(&config,format!("version=1\nservers={{}}\n[network]\ntrusted_ca_files=[{ca:?}]\n[treasury]\nstate_dir='state'\n[sources.unused]\nspec='{endpoint}'\n")).unwrap();
     let initialized = wallet(&config, &["init", "--birthday", "1"]);
     assert!(initialized.status.success());
     let initialized = String::from_utf8(initialized.stdout).unwrap();

@@ -10,7 +10,6 @@ version = 1
 state_dir = "../../../state/public-demo"
 # wallet.key lives inside state_dir; the treasury ID is read from existing state.
 # Zcash endpoints use the built-in default unless explicitly overridden.
-max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
 
 [funding]

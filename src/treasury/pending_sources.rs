@@ -1,12 +1,11 @@
-//! Best-effort per-address recovery of SDK-owned transparent capital.
+//! Generic recovery of already accepted source bytes, with no new allocations.
 use super::*;
 use crate::rotation::transaction::{TransactionPresence, TransactionSubmission};
-use pepper_sync::wallet::KeyIdInterface;
 
 impl Treasury {
     /// Called only after a new successfully persisted sync, by the existing
     /// mutable owner. Pending work always precedes new proposal selection.
-    pub(super) async fn maintain_owned_transparent(
+    pub(super) async fn maintain_pending_sources(
         &mut self,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
@@ -30,50 +29,8 @@ impl Treasury {
                     if !self.healthy {
                         return Err(error);
                     }
-                    diagnostics::report_shielding_failure(&error, Some(&id));
+                    diagnostics::report_pending_source_failure(&error, Some(&id));
                 }
-            }
-        }
-        let Some(max_fee) = self.automatic_shielding_fee else {
-            return Ok(());
-        };
-        if stop.is_cancelled()
-            || !self
-                .store
-                .call(|s| s.automatic_shielding_available())
-                .await?
-        {
-            return Ok(());
-        }
-        let addresses: Vec<String> = self
-            .client
-            .as_ref()
-            .context("treasury unavailable")?
-            .wallet()
-            .read()
-            .await
-            .transparent_addresses()
-            .iter()
-            .filter(|(id, _)| id.account_id() == zip32::AccountId::ZERO)
-            .map(|(_, address)| address.clone())
-            .collect();
-        for address in addresses {
-            if stop.is_cancelled() {
-                break;
-            }
-            match self.shield_address(address, None, max_fee, stop).await {
-                Ok(prepared) => {
-                    self.submit_prepared(prepared.operation_id().to_owned(), sender, false, stop)
-                        .await?;
-                    break;
-                }
-                // No calculation has been accepted while the SDK is healthy.
-                // A bad/empty address must not starve another independent one.
-                Err(error) if self.healthy => {
-                    diagnostics::report_shielding_preparation_failure(&error);
-                    continue;
-                }
-                Err(error) => return Err(error),
             }
         }
         Ok(())
@@ -114,18 +71,6 @@ impl Treasury {
                 // A completed canonical SDK tip and authenticated buried
                 // signed expiry close this work; lookup absence alone does not.
                 self.recover_expired_scanned(id, stop).await?;
-            } else if let Some(max_fee) = self
-                .automatic_shielding_fee
-                .filter(|_| status.attempts == 0 && status.submission == "PREPARED")
-            {
-                let operation = id.clone();
-                let allowed = self
-                    .store
-                    .call(move |s| s.automatic_shielding_submission(&operation, max_fee))
-                    .await?;
-                if allowed {
-                    self.submit_prepared(id, sender, false, stop).await?;
-                }
             }
         }
         Ok(())

@@ -392,7 +392,6 @@ async fn deployment_uses_existing_state_only_and_qualification_bypasses() {
 version=1
 [treasury]
 state_dir="state"
-max_refund_shielding_fee_zec="0.001"
 [wallets.w]
 mode="static"
 private_key_env="UNUSED_TEST_KEY"

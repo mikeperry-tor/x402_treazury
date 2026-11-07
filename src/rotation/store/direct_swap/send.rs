@@ -264,9 +264,9 @@ impl Store {
         recipient: &str,
         principal: u64,
         deadline: Option<u64>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let Some(record) = self.optional_direct(id)? else {
-            return Ok(());
+            return Ok(false);
         };
         let binding = self.binding_for_record(&record)?;
         ensure!(
@@ -283,7 +283,7 @@ impl Store {
             ),
             "direct provider outcome closes new source preparation"
         );
-        Ok(())
+        Ok(true)
     }
     fn direct_source_started(&self, id: &str) -> Result<bool> {
         Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)", [id], |row| row.get(0))?)

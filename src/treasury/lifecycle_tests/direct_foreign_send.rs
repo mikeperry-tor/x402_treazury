@@ -238,7 +238,7 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
                 crate::network::IsolationId::direct_swap(&treasury_id, &saved)
             );
             assert_eq!(prepared.facts().unwrap().amount_zatoshis, 50_000);
-            assert_eq!(s.operation_recipient(&saved)?.as_deref(), Some(DEPOSIT));
+            assert_eq!(s.direct_send_binding(&saved)?.unwrap().recipient, DEPOSIT);
             assert_eq!(s.operation(&saved)?.submission, "BROADCAST");
             assert!(s.funding_jobs()?.is_empty());
             assert!(s.status()?.pools.is_empty());

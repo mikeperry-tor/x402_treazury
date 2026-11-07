@@ -247,10 +247,10 @@ impl ServerHandler for Server {
         }
         if let Some((_, config)) = &self.direct_swap {
             if config.receive {
-                instructions.push_str("\n\nReceive native ZEC directly at a shielded Zcash address, or request a foreign asset payment converted into this treasury. Native receiving needs no swap provider. Keep payment instructions and operation IDs; status separates provider progress from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
+                instructions.push_str("\n\nReceive native ZEC directly at an Ironwood-capable shielded Zcash address, or request a foreign asset payment converted into this treasury. Native receiving needs no swap provider. Keep payment instructions and operation IDs; status separates provider progress from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
             }
             if config.send {
-                instructions.push_str("\n\nPreview or send native shielded Zcash (ZEC), or swap treasury ZEC to a foreign asset. Preview grants no payment authority. Send binds the exact recipient and amount; retain its operation ID and inspect status before considering a retry. Native sending needs no swap provider.");
+                instructions.push_str("\n\nPreview or send native shielded Zcash (ZEC) through Ironwood, or swap treasury ZEC to a foreign asset. Preview grants no payment authority. Send binds the exact recipient and amount; retain its operation ID and inspect status before considering a retry. Native sending needs no swap provider.");
             }
             if !config.enabled() {
                 instructions.push_str("\n\nInspect saved Zcash payments with swap_status. Status separates provider progress from Zcash receipt and spendability; disclosed payment routes may receive late payments.");

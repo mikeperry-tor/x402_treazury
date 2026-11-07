@@ -875,6 +875,11 @@ automatic NEAR funding is controlled by `funding.auto_fund`.
 
 ## Direct swap control
 
+The [Ironwood-only policy](zingo-integration.md#ironwood-only-policy) applies to all
+Zcash operations, including this toolset and managed funding. NEAR-owned external
+deposit addresses are its sole transparent-output exception; wallet transparent
+receiving, shielding and RPC address queries are unsupported.
+
 A listener can opt into native shielded Zcash payments and foreign-asset swaps.
 Native work requires `auth = true` and configured `[treasury]`, with no NEAR
 credentials, `[funding]`, Base wallet, provider registration or Base RPC prerequisite.
@@ -911,7 +916,7 @@ affect managed Base service independently of direct receive availability.
 amount and a caller request ID. Native ZEC uses asset ID `nep141:zec.omft.near` and
 chain `zec`; this selects the embedded treasury directly, without any NEAR request.
 Omit `refund_address` for native ZEC. Each new ID derives a fresh shielded-only
-Sapling/Orchard UA; retries return the same saved address and can safely resume an
+Ironwood-capable, Orchard-receiver-only UA; retries return the same saved address and can safely resume an
 address-less reservation. Native receipts report actual SDK receiver matches,
 confirmations, historical spent funds and separate snapshot spendability. Partial
 receipts remain pending until confirmed funds reach the requested amount. Public

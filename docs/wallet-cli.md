@@ -33,18 +33,20 @@ and persist disabled transparent address discovery. Runtime reopening and SDK
 reconstruction disable known-address queries and gap recovery regardless of saved
 settings. Historical receive/refund identities and accepted work remain intact;
 transparent/mixed refunds cannot authorize new quotes or managed deposits.
-The SDK's initial receive address is Orchard-only; initialization also derives a
-Sapling+Orchard receive address. `wallet sync` and `wallet status` show readable summaries by default, with
+All issued receive addresses contain only the Orchard-format receiver used by
+Ironwood. The [Ironwood-only policy](zingo-integration.md#ironwood-only-policy)
+applies to wallet commands as well as serving. `wallet sync` and `wallet status` show readable summaries by default, with
 saved balance observations distinguished from current spending authority.
 The human summary computes ZEC balances from the existing saved SDK snapshot,
 using the same read that supplies receive addresses. It groups them with the
 snapshot revision, last completed observation time and saved scanned height:
-local transaction changes can follow that observation. Confirmed shielded balance is labeled **excluding
-reserved inputs**; pending shielded incoming funds/change, spendable shielded
-balance, confirmed transparent balance and pending transparent balance appear
-separately. SDK confirmed and pending shielded account balances exclude reserved
-inputs and dust. Transparent amounts include dust; confirmed transparent funds
-also include immature coinbase outputs and can still need maturity or shielding.
+local transaction changes can follow that observation. Confirmed shielded balance
+is labeled **excluding reserved inputs**; the SDK excludes notes already linked to
+a spending transaction. Confirmed and pending shielded totals include only Ironwood,
+including dust. Spendable shielded balance excludes dust and follows the SDK's
+confirmation and witness requirements. Pending incoming funds/change and spendable
+balance appear separately. The stable transparent balance fields display `unknown`:
+transparent holdings are unsupported and are not queried.
 An outgoing transaction can therefore leave both confirmed and spendable shielded
 balances at zero while its change is pending. If the key or SDK snapshot is
 unavailable, the summary explicitly falls back to saved sync amounts for confirmed
@@ -128,8 +130,9 @@ credited low-balance wallets are never topped up.
 
 Only `treasury.state_dir` is required in the treasury table.
 Actual spendable funds after reservations, confirmations and fees govern enabled funding;
-`max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` each default to
-`"0.0003"` and reject proposals above that fee. See
+`max_funding_transaction_fee_zec` defaults to `"0.0003"` and rejects proposals
+above that fee. There is no transparent-shielding fee setting because that
+operation is unsupported. See
 [funding limits](wallet-rotation.md#funding-limits-and-fees).
 The default key is `wallet.key` inside the wallet directory;
 set `key_file` for separate storage. Possession of the complete default directory
@@ -192,7 +195,7 @@ unauthenticated or repaired data.
 
 The versioned output binds the treasury UUID, snapshot revision, saved SDK fully
 scanned height, saved minimum-confirmation policy and SDK selection target/anchor.
-`notes` includes every retained account-zero Sapling, Orchard and Ironwood note,
+`notes` includes retained account-zero Ironwood notes,
 including spent history, sorted by pool, transaction ID and output index. Optional
 `--txid` accepts a canonical 64-hex-digit transaction ID and filters receiving
 transactions only. There is no silent truncation or history cap. Absence means
@@ -204,14 +207,14 @@ classes are grouped as `pending`; they are not labeled confirmed. Confirmation
 counts use the saved fully scanned height and remain unknown when it cannot
 establish a count. A block hash appears only if the corresponding block remains
 in the SDK snapshot; it is not a fresh canonical-chain proof. The `receiver` is
-the decrypted Sapling address or an Orchard-receiver-only UA, labeled by
+an Orchard-receiver-only UA encoding the actual Ironwood receiver, labeled by
 `receiver_encoding`. Ironwood shares Orchard's receiver format but retains its
 separate pool identity. This reconstructed receiver is **not** the original
 multi-receiver refund UA. Seeds, keys, memos, raw transactions and unrelated
 funding/payment history are excluded.
 
 `sdk_spendable_at_snapshot` records membership in the SDK's read-only
-`AllFunds(MaxSpendable)` selection over all three pools, using saved policy and
+`AllFunds(MaxSpendable)` selection restricted to Ironwood, using saved policy and
 witness/nullifier coverage. Selection unavailability produces `null` membership
 and a fixed reason; confirmed or unspent alone never implies spendability.
 The output explicitly records that live process locks are unavailable and
@@ -560,13 +563,12 @@ static wallets. Bounded qualification examples explicitly opt out. `near_api_key
 Tokens stay in environment variables and are sent only to the fixed NEAR origin.
 Session issuance/refresh and authenticated access still require qualification.
 
-The coordinator persists a unique Sapling+Orchard unified refund address without a
-transparent receiver, along with the SDK snapshot, before obtaining a quote.
+The coordinator persists a unique Ironwood-capable unified refund address with
+only its Orchard-format receiver, along with the SDK snapshot, before obtaining a quote.
 Existing transparent refund addresses remain unchanged. Shielded receipts need
 ordinary wallet synchronization and confirmations, without an extra shielding
-transaction. `wallet shield-refunds --job-id UUID` finishes normally with an INFO
-message when its refund address is already shielded; it does not scan, calculate
-or broadcast. Legacy transparent refunds retain explicit and automatic shielding.
+transaction. `wallet shield-refunds` is unsupported and fails without preparing or
+broadcasting a transparent-input transaction.
 Unsigned quote failures use per-pass backoff,
 without consuming `max_attempts` for transaction recovery. A quote refresh must
 prove no accepted calculation or outgoing record exists; it archives its old bindings, records
@@ -604,26 +606,13 @@ revoking that completion proof. The SDK owns incoming returns and current spenda
 principal caps and historical refund revalidation are removed; provider status alone
 never proves an on-chain return or authorizes a new deposit.
 
-With `funding.auto_fund=true`, serving and bootstrap attempt shielding of confirmed
-spendable owned transparent funds after persisted sync, one address per transaction,
-including returns without job attribution. Paused funding and qualification permits
-do not authorize new automatic shielding. Pending exact bytes remain observable;
-uncertain submissions are never automatically replayed.
+Wallet transparent receiving and shielding are unsupported. Serving does not
+allocate automatic shielding work, and `wallet shield-refunds` fails explicitly.
+Raw SDK recognition of an unsupported output does not make it supported capital.
+Already accepted transaction bytes retain their canonical reconciliation owner;
+this never authorizes a new shielding transaction or a replacement deposit.
 
-With serving stopped, explicitly prepare shielding for exactly one refund address:
-
-```sh
-target/debug/x402_treazury wallet shield-refunds \
-  --config servers.toml --job-id JOB_UUID
-```
-
-This calculates and journals one transaction without broadcasting. Submit its
-operation ID with `wallet reconcile --config servers.toml --operation-id UUID
---rebroadcast`. The command enforces `max_refund_shielding_fee_zec` and actual pending input ownership;
-only the fee counts as new expense. Each proposal selects one address, never
-combining unrelated swaps. Both calculation and submission use the existing
-restart-safe outgoing journal. Refund principal becomes shielded spendable only
-after the shielding transaction confirms. Expired funding deposits use automatic
+Expired funding deposits use automatic
 recovery or `wallet recover --config servers.toml`. For an individual shielding
 operation, the advanced `wallet recover-expired --config servers.toml --operation-id UUID`
 remains available with serving stopped. It never submits or rebroadcasts a
@@ -1039,9 +1028,8 @@ Canonical authorization/debit proofs remain a qualification observation, preserv
 all attempts and the existing case permit; seller success does not prove a debit.
 
 Pools use existing eligible Base wallets and consume initially funded reserves.
-Queued replacements and automatic per-address shielding require
-`funding.auto_fund = true`. Explicit refund shielding remains available with serving
-stopped. Eligible source-expiry recovery runs automatically
+Queued replacements require `funding.auto_fund = true`. Transparent-input
+shielding is unsupported, including while serving is stopped. Eligible source-expiry recovery runs automatically
 with funding, or through `wallet recover` while serving is stopped.
 
 The [lifecycle qualification matrix](../tests/LIFECYCLE.md) maps each recovery and

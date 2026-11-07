@@ -58,7 +58,7 @@ Native requests have no provider quote or deadline. Each new request derives a
 fresh all-shielded UA through the same serialized SDK and snapshot transaction.
 Repeating native inputs resumes an address-less reservation or returns its
 original receiver; it never creates another address under the same request ID.
-SDK receipt evidence matches actual Sapling/Orchard/Ironwood note receivers,
+SDK receipt evidence matches actual Ironwood note receivers,
 retains historical confirmed receipts after spending, and reports current snapshot
 spendability separately. Partial confirmed receipts remain pending; native scan
 demand ends when confirmed receipts reach the requested amount. Public status
@@ -194,32 +194,24 @@ genuine safeguard against the actual proposal fee.
 ```toml
 [treasury]
 max_funding_transaction_fee_zec = "0.0003"
-max_refund_shielding_fee_zec = "0.0003"
 
 # Within an existing managed profile:
 ```
 
-Immutable transaction facts report confirmed principal and actual fees. Shielding
-records principal zero and charges only its fee. There is no mutable gross/net cost,
-returned-principal credit or historical monetary equality gate. Missing swap
-attribution does not invalidate owned SDK funds. Enabled automatic funding also shields confirmed spendable owned transparent
-outputs after a successful persisted sync, including unattributed returns. Each
-proposal uses one address and the actual standard fee under
-`max_refund_shielding_fee_zec`; the SDK determines confirmations, maturity and input
-availability. Selected inputs must exceed the actual proposed fee before accepting
-input ownership: the pinned SDK permits fee-only proposals, which cannot recover
-capital. Uneconomic/empty addresses do not block independent addresses. No
-principal reservation, attribution requirement or funding-claim reopening is added.
-The explicit per-address command remains available.
-When maintenance closes the last pending source obligation, independent shielding
-can proceed in that same pass under the existing pending-work, input and fee checks.
+Immutable transaction facts report confirmed principal and actual fees. Supported
+capital is the SDK's owned Ironwood balance, including real pending owned change
+when explaining a wait. Unsupported pools and transparent holdings do not authorize
+new preparation or count as capital that shielding might recover. No local refund
+credit, historical monetary equality check or separate spending ledger is added.
+See the [Ironwood-only policy](zingo-integration.md#ironwood-only-policy).
 
 Zingolib selects inputs and calculates standard network fees. The application
 checks the actual proposal against the configured network-fee cap,
 then persists the exact input owner before calculation. Backend calculation
 borrows that same public proposal and retains ordinary consensus expiry, including
 the SDK's NU7 delta, rather than the offline high-level API's epoch-end expiry.
-Sapling proving uses lazily parsed embedded parameters. The blocking calculation clears the public wallet proposal before saving; the
+Ironwood proving uses the exact SDK proposal; the required legacy prover adapter
+refuses unsupported work without initializing parameters. The blocking calculation clears the public wallet proposal before saving; the
 returned client releases its proposal pause through public cleanup after the join.
 Accepted input ownership remains durable.
 Canonical actor validation supplies the network/anchor check without an additional
@@ -1036,7 +1028,7 @@ The requested quote window defaults to 1,800 seconds; explicit overrides, return
 quote deadlines and the SDK's signed block expiry retain their separate authority.
 
 New swaps use a persisted unique shielded-only unified refund address, containing
-Sapling and Orchard receivers derived from treasury account zero. The same Zcash
+the Orchard-format Ironwood receiver derived from treasury account zero. The same Zcash
 seed also derives transparent addresses and unified addresses with transparent
 receivers; no additional seed is needed. Compact-block scanning with the account's
 viewing keys discovers shielded receipts without enumerating every issued address.
@@ -1067,33 +1059,20 @@ gap scanning; a seed does not recover off-chain liabilities or undisclosed issua
 frontiers, so retain the complete encrypted state and key backup.
 
 Refund visibility does not make funds automatically spendable for another deposit.
-For legacy or other owned transparent funds, serving and bootstrap with
-enabled automatic funding attempt per-address shielding
-through the existing treasury owner. `auto_fund=false` and qualification restrictions
-prevent new shielding; existing prepared bytes remain observable. Positive
-qualification funding permits authorize jobs only and do not authorize automatic
-jobless shielding. Explicit shielding remains available while serving is stopped,
-with its original job recipient network binding. Unattributed automatic shielding
-uses a stable per-address/network/treasury identity. Both paths retain observed
-inputs, fee caps and exact prepared-byte recovery.
-Explicit `wallet shield-refunds` reports that a shielded-only refund needs no
-shielding and finishes normally, without a scan, calculation or new operation.
-For mixed unified addresses, explicit shielding uses the owned transparent receiver.
-The remaining `funding_refunds` records store previously derived addresses for
-quote routing and explicit per-job administration. They store no returned amount
-or spendability. Automatic shielding does not consult refund attribution or
-provider status: the SDK discovers owned coins and determines when they become
-spendable. A return does not reopen an initial funding claim, since it cannot prove
-the swap will not also deliver USDC.
-The pinned SDK's `WalletWrite::store_transactions_to_be_sent` scans calculated
-transactions with the wallet's viewing keys. Validation requires the exact selected
-outpoints, no transparent outputs and decrypted account-zero shielded notes equal
-to inputs less actual fee. Check all supported shielded pools: the SDK may promote
-change from Orchard to Ironwood after an upgrade.
-The SDK owns return outputs, spent state, fees and chain corrections. There is no
-local refund credit, principal cap or historical refund/source revalidation gate.
-Source confirmation remains a distinct audit fact. A refund or stale workflow phase
-cannot erase an uncertain input owner or authorize a replacement deposit.
+Only actual owned Ironwood funds enter supported spendability. A returned payment
+never reopens an initial funding claim or authorizes another deposit. The saved
+`funding_refunds` records retain exact routing evidence; they are not a refund
+balance ledger. New transparent-input shielding and `wallet shield-refunds` are
+unsupported and fail before calculation or network work. Serving never allocates
+that work automatically. Raw SDK recognition of unsupported outputs does not
+change this policy.
+
+Existing accepted transaction bytes, selected inputs and original transport
+identity remain under their generic canonical observation/reconciliation owner.
+No missing optional evidence, refund report or stale workflow phase erases a
+liability or authorizes a replacement payment. The narrow NEAR output exception
+requires its original saved quote and Ironwood source funds; it grants no wallet
+transparent receiving or address-query authority.
 
 `rotation/store.rs` keeps treasury snapshots, EVM keys, funding/outgoing records,
 roles, accepted calculations and payment authorizations in one versioned database.
@@ -1367,9 +1346,8 @@ network scan or create a global input fence. Invalid retained outgoing bytes kee
 their actual pending-source fence, while local publication and reconstruction
 handle recoverable failures without network scans. Completed-result publication and SDK reconstruction retry
 locally at their own 60-second cadence. A successful needed persisted scan may
-recover owned transparent funds through automatic shielding under existing
-permission/fee checks; accepted shielding keeps observation even after its original
-funding demand vanishes. Once source work closes, destination/provider waiting
+advance canonical observation of already accepted source bytes without creating
+new shielding work. Once source work closes, destination/provider waiting
 alone does not keep ZEC discovery running.
 
 ## Best-effort wallet rules
@@ -1482,8 +1460,7 @@ exact accepted bytes, identities, snapshot references and liabilities remain
 preserved; initialization does not reopen completed work or authorize disclosure.
 
 Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resume
-through existing ownership. Automatic shielding recovers owned transparent capital
-per address under existing authority. Local tests cover these paths without live-funded,
+through existing ownership. New wallet transparent-input shielding is unsupported. Local tests cover these paths without live-funded,
 consensus or Tor qualification; see [testing](testing.md#qualification-status).
 Reopening preserves accepted evidence and does not recover unpublished bytes lost
 with a process. A pending signed shielding original keeps its source-work fence

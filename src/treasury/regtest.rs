@@ -40,6 +40,42 @@ fn docker(args: &[&str]) -> Result<String> {
     }
     Ok(text.trim().to_string())
 }
+async fn native_payment(
+    treasury: &mut Treasury,
+) -> Result<crate::rotation::transaction::PreparedTransaction> {
+    let recipient = treasury.preview_address().await?;
+    let destination = recipient.clone();
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let id = treasury.store.call(move |s| {
+        let operation = s.reserve_native("regtest", "send", &request_id,
+            json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"50000","recipient":destination,"max_source_zatoshis":null}))?.0;
+        Ok(s.accept_direct_send(&operation.id, None, crate::rotation::store::DirectSendAuthority { max_fee_zatoshis:50_000,max_debit_zatoshis:Some(100_000) })?.id)
+    }).await?;
+    let prepared = treasury
+        .prepare(PrepareRequest {
+            managed_funding: None,
+            operation_id: id.clone(),
+            pool_id: None,
+            deadline: None,
+            recipient,
+            amount_zatoshis: 50_000,
+            max_fee_zatoshis: 50_000,
+            max_input_zatoshis: 100_000,
+        })
+        .await?;
+    let inputs = treasury.store.call(move |s| s.prepared_inputs(&id)).await?;
+    ensure!(!inputs.is_empty() && inputs.iter().all(|input| input.pool==crate::rotation::store::preparation::InputPool::Ironwood), "consensus funding fixture did not supply selectable Ironwood inputs");
+    let transaction = submission::decode(prepared.bytes())?;
+    ensure!(
+        transaction.transparent_bundle().is_none()
+            && transaction.sapling_bundle().is_none()
+            && transaction.orchard_bundle().is_none()
+            && transaction.ironwood_bundle().is_some(),
+        "consensus payment did not remain Ironwood-only"
+    );
+    Ok(prepared)
+}
+
 fn operation_cost(state: &Path, operation: &str) -> Result<(i64, i64)> {
     let db = rusqlite::Connection::open_with_flags(
         state.join("state.sqlite"),
@@ -352,28 +388,8 @@ async fn run() -> Result<()> {
             .spendable_shielded_zatoshis
             > 100_000
     );
-    let op = uuid::Uuid::new_v4().to_string();
-    let identity_op = op.clone();
-    treasury
-        .store
-        .call(move |s| {
-            s.bind_operation_recipient(&identity_op, "0x0000000000000000000000000000000000000001")
-        })
-        .await?;
-    let prepared = treasury
-        .prepare(PrepareRequest {
-            managed_funding: None,
-
-            operation_id: op.clone(),
-            pool_id: None,
-
-            deadline: Some(now()? + 3600),
-            recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
-            amount_zatoshis: 50_000,
-            max_fee_zatoshis: 50_000,
-            max_input_zatoshis: 100_000,
-        })
-        .await?;
+    let prepared = native_payment(&mut treasury).await?;
+    let op = prepared.operation_id().to_owned();
     let facts = prepared.facts().unwrap();
     let cost = i64::try_from(facts.amount_zatoshis + facts.fee_zatoshis)?;
     assert_eq!(operation_cost(&state, &op)?, (cost, 0));
@@ -477,11 +493,14 @@ async fn run() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires Docker; isolated refund discovery and per-address shielding"]
-async fn high_index_refunds_and_separate_shielding() -> Result<()> {
+#[ignore = "opt-in regtest API compatibility; transparent shielding must reject without side effects"]
+async fn transparent_refund_shielding_is_unsupported() -> Result<()> {
     tokio::time::timeout(Duration::from_secs(900), refunds_run(false)).await?
 }
 async fn refunds_run(cli: bool) -> Result<()> {
+    // The old positive per-address transparent shielding fixture is intentionally
+    // unsupported. Generic restart, expiry, reorg and submission ownership remain
+    // covered by native Ironwood fixtures below and the synthetic-chain suite.
     let dir = tempfile::tempdir()?;
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -494,339 +513,39 @@ async fn refunds_run(cli: bool) -> Result<()> {
     )
     .await?;
     let id = treasury.status().await?.treasury_id;
-    for n in 0..16 {
-        crate::rotation::test_capacity::treasury_pair(
-            &treasury,
-            &format!("refund_{n}"),
-            "5.00",
-            Some(alloy_primitives::U256::from(1_000_000)),
-            0,
-        )
-        .await?;
-    }
-    let jobs = treasury.store.call(|s| s.funding_jobs()).await?;
-    let mut addresses = vec![];
-    // This consensus fixture deliberately retains legacy transparent refunds;
-    // normal new refund generation is shielded and needs no shielding step.
-    for job in &jobs {
-        let (_, receiver) = treasury
-            .client
-            .as_mut()
-            .context("treasury client missing")?
-            .generate_transparent_address(zip32::AccountId::ZERO, false)
-            .await?;
-        let address =
-            zcash_keys::address::Address::Transparent(receiver).encode(&treasury.network.chain());
-        let bytes = snapshot(
-            treasury
-                .client
-                .as_ref()
-                .context("treasury client missing")?,
-        )
-        .await?;
-        let revision = treasury.revision;
-        let (job_id, saved) = (job.id.clone(), address.clone());
-        treasury.revision = treasury
-            .store
-            .call(move |s| s.save_refund_address(&job_id, &saved, revision, &bytes))
-            .await?;
-        assert_eq!(treasury.refund_address(job.id.clone()).await?, address);
-        addresses.push(address);
-    }
-    assert_eq!(
-        addresses
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len(),
-        32
-    );
-    let miner = treasury
-        .client
-        .as_ref()
-        .unwrap()
-        .unified_addresses_json()
-        .await[0]["encoded_address"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    treasury.close().await?;
-    let mut chain = Chain::launch(&miner).await?;
-    Chain::mine(&chain.rpc, 7).await?;
-    chain.indexer_ready(8).await?;
-    let cli_fixture = RecoveryCli::new(dir.path(), &id, &chain.endpoint)?;
-    let settings = SyncSettings::new(chain.endpoint.clone(), 2)?;
+    let snapshot = treasury.store.call(|s| s.snapshot()).await?;
     let stop = CancellationToken::new();
-    let mut treasury = Treasury::open_with_network(
-        state.clone(),
-        key.clone(),
-        id.clone(),
-        TreasuryNetwork::Regtest,
-    )
-    .await?;
-    treasury.configure_sync(settings.clone());
-    let mut sender = submission::GrpcSubmission::with_network(
-        chain.endpoint.clone(),
-        chain.endpoint.clone(),
-        TreasuryNetwork::Regtest,
-    )?;
-    for n in [30usize, 31] {
-        treasury.sync_once(&stop).await?;
-        let job = jobs[n].clone();
-        let jid = job.id.clone();
-        let deadline = now()? + 3600;
-        let quote = serde_json::to_vec(&crate::rotation::near::Quote {
-            sizing_preview: None,
-            request: serde_json::json!({"amount":job.target,"recipient":job.recipient,"refundTo":crate::rotation::near::test_shielded_refund(&TreasuryNetwork::Regtest.chain())}),
-            response: serde_json::json!({}),
-            input: 50_000,
-            deadline,
-            deposit: Some(addresses[n].clone()),
-        })?;
-        treasury
-            .store
-            .call(move |s| s.save_funding_quote(&jid, &quote))
-            .await?;
-        treasury
-            .prepare(PrepareRequest {
-                managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
-                    job_id: job.id.clone(),
-                    auto_fund: true,
-                    max_attempts: 0,
-                }),
-
-                operation_id: job.operation_id.clone(),
-                pool_id: Some(job.pool_id),
-
-                deadline: Some(deadline),
-                recipient: addresses[n].clone(),
-                amount_zatoshis: 50_000,
-                max_fee_zatoshis: 50_000,
-                max_input_zatoshis: 100_000,
-            })
-            .await?;
-        assert_eq!(
-            treasury
-                .submit_prepared(job.operation_id.clone(), &mut sender, false, &stop)
-                .await?,
-            SubmissionOutcome::Accepted
-        );
-        Chain::mine(&chain.rpc, 2).await?;
-        chain.indexer_ready(if n == 30 { 10 } else { 12 }).await?;
-        treasury
-            .reconcile_prepared(job.operation_id, &mut sender, &stop)
-            .await?;
-    }
+    let error = treasury
+        .shield_refund("unsupported-transparent-refund".into(), 30_000, &stop)
+        .await
+        .err()
+        .context("transparent shielding unexpectedly succeeded")?;
+    ensure!(error.to_string().contains("unsupported"), "{error}");
+    ensure!(
+        treasury.running.is_none() && treasury.status().await?.treasury_operations.is_empty(),
+        "unsupported shielding accepted financial work"
+    );
+    assert_eq!(treasury.store.call(|s| s.snapshot()).await?, snapshot);
     treasury.close().await?;
-    let mut treasury = Treasury::open_with_network(
-        state.clone(),
-        key.clone(),
-        id.clone(),
-        TreasuryNetwork::Regtest,
-    )
-    .await?;
-    treasury.configure_sync(settings.clone());
-    treasury.sync_once(&stop).await?;
-    let mut retained_shield = None;
-    for fail_commit in [false, true] {
-        let before = treasury.status().await?.treasury_operations.len();
-        let mempool: Value = chain
-            .rpc
-            .json_result_from_call("getrawmempool", "[]")
-            .await?;
-        let db = rusqlite::Connection::open(state.join("state.sqlite"))?;
-        if fail_commit {
-            db.execute_batch("CREATE TRIGGER reject_shield BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture shield commit failure'); END;")?;
-            treasury.enable_publication_retry();
-        }
-        let error = treasury
-            .shield_refund(
-                jobs[30].id.clone(),
-                if fail_commit { 30_000 } else { 1 },
-                &stop,
+    if cli {
+        let fixture = RecoveryCli::new(dir.path(), &id, "http://127.0.0.1:1")?;
+        fixture
+            .call(
+                "shield-refunds",
+                "--job-id",
+                "unsupported-transparent-refund",
+                false,
+                Some("Transparent-input shielding is unsupported"),
             )
-            .await
-            .err()
-            .expect("shielding failure was not injected");
-        if !fail_commit {
-            assert!(
-                error.to_string().contains("max_refund_shielding_fee_zec"),
-                "{error}"
-            );
-        }
-        if fail_commit {
-            db.execute_batch("DROP TRIGGER reject_shield;")?;
-            assert!(treasury.running.is_some());
-            retained_shield = Some(
-                treasury
-                    .publish_completed()
-                    .await?
-                    .context("retained shielding unexpectedly fulfilled")?,
-            );
-        }
-        assert_eq!(
-            treasury.status().await?.treasury_operations.len(),
-            before + usize::from(fail_commit)
-        );
-        assert_eq!(treasury.status().await?.outgoing_pending, fail_commit);
-        let after: Value = chain
-            .rpc
-            .json_result_from_call("getrawmempool", "[]")
             .await?;
-        assert_eq!(
-            mempool, after,
-            "calculate-only failure broadcast a transaction"
+        let reopened = fixture.open().await?;
+        assert_eq!(reopened.store.call(|s| s.snapshot()).await?, snapshot);
+        ensure!(
+            reopened.status().await?.treasury_operations.is_empty(),
+            "unsupported CLI shielding accepted financial work"
         );
-        let abandoned: Vec<String> = db.prepare("SELECT operation_id FROM operation_network WHERE preparation IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE outgoing.id=operation_network.operation_id)")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        drop(db);
-        treasury.close().await?;
-        treasury = Treasury::open_with_network(
-            state.clone(),
-            key.clone(),
-            id.clone(),
-            TreasuryNetwork::Regtest,
-        )
-        .await?;
-        treasury.configure_sync(settings.clone());
-        treasury
-            .store
-            .call(move |s| {
-                for id in abandoned {
-                    s.abandon_unprepared(&id)?;
-                }
-                Ok(())
-            })
-            .await?;
+        reopened.close().await?;
     }
-    // Both unrelated transparent addresses are funded. Each shield must consume
-    // exactly its selected address, even when the helper's default would combine.
-    for (n, height) in [(30usize, 14), (31usize, 16)] {
-        let prepared = if n == 30 {
-            let saved = retained_shield.take().context("retained shield missing")?;
-            let operation = saved.operation_id().to_owned();
-            assert_eq!(
-                treasury
-                    .store
-                    .call(move |s| s.prepared_bytes(&operation))
-                    .await?
-                    .as_slice(),
-                saved.bytes()
-            );
-            saved
-        } else if cli {
-            let before: Value = chain
-                .rpc
-                .json_result_from_call("getrawmempool", "[]")
-                .await?;
-            treasury.close().await?;
-            let output = cli_fixture
-                .call("shield-refunds", "--job-id", &jobs[n].id, false, None)
-                .await?;
-            assert_eq!(output["state"]["outgoing_pending"], true);
-            let op = output["state"]["treasury_operations"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|op| op["submission"] == "PREPARED")
-                .unwrap()["operation_id"]
-                .as_str()
-                .unwrap()
-                .to_owned();
-            treasury = cli_fixture.open().await?;
-            assert_eq!(
-                before,
-                chain
-                    .rpc
-                    .json_result_from_call::<Value>("getrawmempool", "[]")
-                    .await?,
-                "shield CLI broadcast without permission"
-            );
-            treasury
-                .store
-                .call(move |s| crate::rotation::transaction::PreparedTransaction::load(s, &op))
-                .await?
-        } else {
-            treasury
-                .shield_refund(jobs[n].id.clone(), 30_000, &stop)
-                .await?
-        };
-        let tx = submission::decode(prepared.bytes())?;
-        assert_eq!(tx.transparent_bundle().unwrap().vin.len(), 1);
-        assert!(tx.transparent_bundle().unwrap().vout.is_empty());
-        assert_eq!(prepared.facts().unwrap().amount_zatoshis, 0);
-        let op = prepared.operation_id().to_owned();
-        if cli {
-            let mempool: Value = chain
-                .rpc
-                .json_result_from_call("getrawmempool", "[]")
-                .await?;
-            treasury.close().await?;
-            let read_only = cli_fixture
-                .call("reconcile", "--operation-id", &op, false, None)
-                .await?;
-            assert_operation(&read_only, &op, "PREPARED", 0);
-            assert_eq!(
-                mempool,
-                chain
-                    .rpc
-                    .json_result_from_call::<Value>("getrawmempool", "[]")
-                    .await?,
-                "read-only CLI submitted a transaction"
-            );
-            let sent = cli_fixture
-                .call("reconcile", "--operation-id", &op, true, None)
-                .await?;
-            assert_operation(&sent, &op, "BROADCAST", 1);
-            treasury = cli_fixture.open().await?;
-            let lookup = op.clone();
-            let saved = treasury
-                .store
-                .call(move |s| s.prepared_bytes(&lookup))
-                .await?;
-            assert_eq!(
-                saved.as_slice(),
-                prepared.bytes(),
-                "CLI rebuilt saved transaction"
-            );
-        } else {
-            assert_eq!(
-                treasury
-                    .submit_prepared(op.clone(), &mut sender, false, &stop)
-                    .await?,
-                SubmissionOutcome::Accepted
-            );
-        }
-        Chain::mine(&chain.rpc, 2).await?;
-        chain.indexer_ready(height).await?;
-        if cli {
-            treasury.close().await?;
-            let confirmed = cli_fixture
-                .call("reconcile", "--operation-id", &op, false, None)
-                .await?;
-            assert_operation(&confirmed, &op, "CONFIRMED", 1);
-            cli_fixture
-                .call(
-                    "reconcile",
-                    "--operation-id",
-                    &op,
-                    true,
-                    Some("transaction is not pending"),
-                )
-                .await?;
-            treasury = cli_fixture.open().await?;
-            let status = serde_json::json!({"state": treasury.status().await?});
-            assert_operation(&status, &op, "CONFIRMED", 1);
-        } else {
-            treasury
-                .reconcile_prepared(op.clone(), &mut sender, &stop)
-                .await?;
-        }
-        assert_eq!(
-            operation_cost(&state, &op)?,
-            (0, i64::try_from(prepared.facts().unwrap().fee_zatoshis)?)
-        );
-    }
-    treasury.close().await?;
-    chain.passed = true;
     Ok(())
 }
 
@@ -865,28 +584,8 @@ async fn expiry_run(cli: bool) -> Result<()> {
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
     treasury.sync_once(&stop).await?;
-    let op = uuid::Uuid::new_v4().to_string();
-    let identity_op = op.clone();
-    treasury
-        .store
-        .call(move |s| {
-            s.bind_operation_recipient(&identity_op, "0x0000000000000000000000000000000000000001")
-        })
-        .await?;
-    let prepared = treasury
-        .prepare(PrepareRequest {
-            managed_funding: None,
-
-            operation_id: op.clone(),
-            pool_id: None,
-
-            deadline: Some(now()? + 3600),
-            recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
-            amount_zatoshis: 50_000,
-            max_fee_zatoshis: 50_000,
-            max_input_zatoshis: 100_000,
-        })
-        .await?;
+    let prepared = native_payment(&mut treasury).await?;
+    let op = prepared.operation_id().to_owned();
     // Simulate a crash after committing the send intent, before handing bytes to
     // transport. Recovery must treat this exactly like a lost broadcast response.
     let operation = op.clone();
@@ -1075,7 +774,7 @@ impl RecoveryCli {
         std::fs::write(
             directory.join("recovery.toml"),
             format!(
-                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\nmax_refund_shielding_fee_zec = '0.0003'\nconfirmations = 2\n"
+                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\nconfirmations = 2\n"
             ),
         )?;
         Ok(Self {
@@ -1125,7 +824,7 @@ impl RecoveryCli {
                 "--quiet",
             ])
             .kill_on_drop(true);
-        // Read-only reconciliation and expiry/shielding work without this secret.
+        // Read-only reconciliation and expiry work without this secret.
         if rebroadcast {
             command.env("TEST_SUBMISSION", &self.endpoint);
         }

@@ -116,7 +116,7 @@ pub(super) fn status(
             }
             writeln!(
                 text,
-                "These SDK balances exclude reserved inputs; shielded balances also exclude dust. Selected inputs can leave the confirmed balance before broadcast; incoming funds and change may remain pending.\nSpendable funds require sufficient confirmations and usable inputs. Transparent funds may need maturity and shielding. Available funds are checked again before spending."
+                "These SDK balances exclude reserved inputs; shielded balances also exclude dust. Selected inputs can leave the confirmed balance before broadcast; incoming funds and change may remain pending.\nSpendable funds require sufficient confirmations and usable inputs. Only Ironwood funds are supported. Unsupported pool balances are unavailable; available funds are checked again before spending."
             )
             .unwrap();
             if balances.is_none() {

@@ -21,10 +21,6 @@ fn command_value(command: Command) -> Value {
             meta_config,
             operation_id,
         } => json!({"kind":"recover-expired","config":meta_config,"operation":operation_id}),
-        Command::ShieldRefunds {
-            meta_config,
-            job_id,
-        } => json!({"kind":"shield-refunds","config":meta_config,"job":job_id}),
         Command::Init {
             state_dir,
             key_file,
@@ -159,7 +155,7 @@ fn resolved(dir: &Path, args: &[&str]) -> Value {
     resolve_in(dir, args, &[], false, false)["result"].clone()
 }
 fn config(dir: &Path, extra: &str) {
-    std::fs::write(dir.join("deployment.toml"),format!("version=1\nservers={{}}\n[treasury]\nstate_dir='absent'\nmax_refund_shielding_fee_zec='0.001'\n{extra}\n[sources.unused]\nspec='https://unreachable.invalid/catalog'\n")).unwrap();
+    std::fs::write(dir.join("deployment.toml"),format!("version=1\nservers={{}}\n[treasury]\nstate_dir='absent'\n{extra}\n[sources.unused]\nspec='https://unreachable.invalid/catalog'\n")).unwrap();
 }
 
 #[test]
@@ -194,10 +190,6 @@ fn configured_actions_return_exact_arguments_before_general_state_access() {
         (
             vec!["recover-expired", "--operation-id", "operation"],
             json!({"kind":"recover-expired","config":"deployment.toml","operation":"operation"}),
-        ),
-        (
-            vec!["shield-refunds", "--job-id", "job"],
-            json!({"kind":"shield-refunds","config":"deployment.toml","job":"job"}),
         ),
     ];
     for (mut args, expected) in cases {
@@ -616,7 +608,6 @@ fn external_policy_replaces_embedded_network_and_survives_wallet_reloads() {
         vec!["sync"],
         vec!["recover"],
         vec!["recover-expired", "--operation-id", "unfunded"],
-        vec!["shield-refunds", "--job-id", "unfunded"],
         vec!["reconcile", "--operation-id", "unfunded"],
     ] {
         let mut args = action;
@@ -639,6 +630,32 @@ fn external_policy_replaces_embedded_network_and_survives_wallet_reloads() {
         assert_eq!(executed["default_install"], "ok");
         assert!(!dir.path().join("absent").exists());
     }
+}
+
+#[test]
+fn transparent_shielding_rejects_before_config_or_wallet_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = resolve_in(
+        dir.path(),
+        &[
+            "shield-refunds",
+            "--job-id",
+            "unfunded",
+            "--config",
+            "missing.toml",
+        ],
+        &[("X402_RESOLUTION_EXECUTE", "1")],
+        false,
+        true,
+    );
+    assert!(
+        result["result"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported"),
+        "{result}"
+    );
+    assert!(!dir.path().join("missing.toml").exists());
 }
 
 #[test]

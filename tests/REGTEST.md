@@ -8,7 +8,7 @@ operator wallets, external indexers, or real funds.
 
 Docker must be running. Pull these images before running the test; the test uses
 `--pull never`. The digests and activation schedule retain the NU6.3 infrastructure
-selected with zingolib v6.0.0. They have not been requalified against the v7 SDK;
+selected with zingolib v6.0.0. They have not been requalified against the current pinned v8 SDK;
 offline synthetic-chain tests do not establish Docker consensus compatibility.
 Zaino requires amd64 emulation on ARM hosts.
 
@@ -27,8 +27,9 @@ associated-data format.
 
 The scenario exercises the shared treasury, journal and submission code:
 
-1. Mine a transparent first block, then shielded coinbase funds through NU6.3.
-2. Sync the treasury, prepare one transparent deposit and reopen its encrypted
+1. Mine through NU6.3 activation so the external validator coinbase can fund Ironwood.
+   The application never prepares transparent-input shielding.
+2. Sync the treasury, prepare one bound native Ironwood payment and reopen its encrypted
    state. No transaction is submitted by preparation.
 3. Submit saved bytes, mine one confirmation, and retain the reservation because
    two confirmations are required.
@@ -60,16 +61,16 @@ Run each scenario in its own test process, using its complete name and `--exact`
 
 | Test in `treasury::regtest` | Evidence |
 | --- | --- |
-| `high_index_refunds_and_separate_shielding` | High-index transparent discovery after restore and independent shielding of two addresses |
+| `transparent_refund_shielding_is_unsupported` | Wallet API and CLI reject transparent-input shielding without state, mempool or network effects |
 | `expired_ambiguous_deposit_releases_only_after_chain_proof` | Authenticated finite expiry requires completed canonical SDK coverage at configured depth; current spendability remains SDK-owned and archived bytes cannot submit again |
 | `indexer_non_inclusion_response` | Missing transaction response remains ambiguous |
-| `recovery_cli_lifecycle` | Shared production Clap parser and recovery handlers in test-only child processes: shielding, read-only reconciliation, same-byte rebroadcast, confirmed rebroadcast refusal and expiry recovery |
+| `recovery_cli_lifecycle` | Shared production Clap parser and recovery handlers in test-only child processes: native Ironwood preparation, read-only reconciliation, same-byte rebroadcast, confirmed rebroadcast refusal and expiry recovery |
 | `tor_consensus_lifecycle` | Deposit, refund and expiry scenarios through authenticated fake SOCKS; run alone because it installs process policy |
 
 For an instrumented run of exactly one scenario:
 
 ```sh
-make coverage-consensus TEST=high_index_refunds_and_separate_shielding
+make coverage-consensus TEST=transparent_refund_shielding_is_unsupported
 ```
 
 Use `make coverage-proving` for the synthetic proving test without Docker.

@@ -453,8 +453,6 @@ pub struct TreasuryConfig {
     pub submission_url: Option<String>,
     #[serde(default = "network_fee_limit")]
     pub max_funding_transaction_fee_zec: String,
-    #[serde(default = "network_fee_limit")]
-    pub max_refund_shielding_fee_zec: String,
     #[serde(default = "confirmations")]
     pub confirmations: u64,
 }
@@ -532,8 +530,6 @@ impl TreasuryConfig {
         }
         zatoshis(&self.max_funding_transaction_fee_zec)
             .context("invalid max_funding_transaction_fee_zec")?;
-        zatoshis(&self.max_refund_shielding_fee_zec)
-            .context("invalid max_refund_shielding_fee_zec")?;
         ensure!(
             self.confirmations > 0 && self.confirmations <= u32::MAX as u64,
             "invalid treasury limits"

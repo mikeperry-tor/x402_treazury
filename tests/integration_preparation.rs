@@ -35,7 +35,6 @@ state_dir="state"
 key_file="nonexistent-key"
 indexer_url_env="ABSENT_INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [wallets.test]
 mode="static"
 private_key_env="ABSENT_KEY"
@@ -494,7 +493,6 @@ state_dir="state"
 key_file="nonexistent-key"
 indexer_url_env="ABSENT_INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [network]
 mode="tor"
 socks_endpoint="127.0.0.1:19950"
@@ -822,7 +820,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [funding]
 auto_fund=false
 confidentiality="public"
@@ -1004,7 +1001,6 @@ state_dir="state"
 key_file="key"
 indexer_url_env="INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [sources.unused]
 spec="missing.json"
 "#

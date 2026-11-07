@@ -66,7 +66,6 @@ state_dir="must-not-be-created"
 key_file="must-not-be-opened"
 indexer_url_env="ABSENT_INDEXER"
 submission_url_env="ABSENT_SUBMISSION"
-max_refund_shielding_fee_zec="0.001"
 [wallets.test]
 mode="static"
 private_key_env="ABSENT_KEY"

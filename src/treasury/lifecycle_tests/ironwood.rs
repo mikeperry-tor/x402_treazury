@@ -1,20 +1,15 @@
-//! Real Sapling proofs and canonical SDK scans on a fabricated localhost chain.
+//! Real Ironwood proofs and canonical SDK scans on a fabricated localhost chain.
 //! The mock does not provide consensus or live settlement qualification.
 use super::*;
-use pepper_sync::wallet::{NoteInterface, OutputInterface, SaplingNote};
+use pepper_sync::wallet::{IronwoodNote, NoteInterface, OutputInterface};
 
-async fn sapling_address(owner: &mut Treasury) -> String {
-    let client = owner.client.as_mut().unwrap();
-    client
-        .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
-        .await
-        .unwrap();
-    client
+async fn ironwood_address(owner: &mut Treasury) -> String {
+    owner
+        .client
+        .as_ref()
+        .unwrap()
         .unified_addresses_json()
-        .await
-        .members()
-        .find(|address| address["has_sapling"] == true && address["has_orchard"] == false)
-        .unwrap()["encoded_address"]
+        .await[0]["encoded_address"]
         .as_str()
         .unwrap()
         .to_owned()
@@ -52,7 +47,7 @@ async fn finish_scan(owner: &mut Treasury, stop: &CancellationToken) {
 }
 
 #[tokio::test]
-async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_canonically() {
+async fn relocated_ironwood_note_closes_expired_original_when_unspent_or_spent_canonically() {
     for competing_spend in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let net = MockNet::launch().await;
@@ -66,7 +61,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
         )
         .await
         .unwrap();
-        let address = sapling_address(&mut owner).await;
+        let address = ironwood_address(&mut owner).await;
         net.chain.write().await.mine_empty_blocks(20);
         let funding = net
             .funding_transaction(vec![(&address, 1_000_000, None)])
@@ -84,7 +79,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
         let (old_id, old_value, old_position, old_nullifier) = {
             let wallet = owner.client.as_ref().unwrap().wallet().read().await;
             let note = wallet
-                .wallet_outputs::<SaplingNote>()
+                .wallet_outputs::<IronwoodNote>()
                 .into_iter()
                 .find(|note| note.output_id().txid() == funding_id)
                 .unwrap();
@@ -103,7 +98,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
             .await
             .unwrap();
         assert!(original_inputs.iter().any(|input| input.pool
-            == crate::rotation::store::preparation::InputPool::Sapling
+            == crate::rotation::store::preparation::InputPool::Ironwood
             && input.txid == funding_id.to_string()
             && input.output_index == old_id.output_index()));
         let padding = net.funding_transaction(vec![(&address, 1, None)]).await;
@@ -119,7 +114,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
         let current_nullifier = {
             let wallet = owner.client.as_ref().unwrap().wallet().read().await;
             let note = wallet
-                .wallet_outputs::<SaplingNote>()
+                .wallet_outputs::<IronwoodNote>()
                 .into_iter()
                 .find(|note| note.output_id() == old_id)
                 .unwrap();
@@ -129,10 +124,10 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
                 old_position,
                 "actual canonical commitment position must change"
             );
-            assert_ne!(
+            assert_eq!(
                 note.nullifier(),
                 old_nullifier,
-                "Sapling nullifier derives from the canonical note position"
+                "Ironwood nullifier follows the note independently of commitment position"
             );
             assert!(wallet.output_spend_status(note).is_unspent());
             note.nullifier().unwrap()
@@ -174,18 +169,18 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
             )
             .await
             .unwrap();
-            assert_eq!(sapling_address(&mut spender).await, address);
+            assert_eq!(ironwood_address(&mut spender).await, address);
             spender.configure_sync(SyncSettings::new(endpoint.clone(), 2).unwrap());
             spender.sync_once(&stop).await.unwrap();
             let (other_job, competing) = prepare(&mut spender, "competing").await;
             let signed = submission::decode(competing.bytes()).unwrap();
             assert!(
                 signed
-                    .sapling_bundle()
+                    .ironwood_bundle()
                     .unwrap()
-                    .shielded_spends()
+                    .actions()
                     .iter()
-                    .any(|spend| spend.nullifier() == &current_nullifier)
+                    .any(|action| action.nullifier() == &current_nullifier)
             );
             assert_ne!(
                 signed.txid(),
@@ -217,7 +212,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
         {
             let wallet = owner.client.as_ref().unwrap().wallet().read().await;
             let note = wallet
-                .wallet_outputs::<SaplingNote>()
+                .wallet_outputs::<IronwoodNote>()
                 .into_iter()
                 .find(|note| note.output_id() == old_id)
                 .unwrap();
