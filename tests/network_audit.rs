@@ -70,6 +70,7 @@ fn runtime_egress_constructors_are_centralized() {
             "set_indexer_uri(",
             "Endpoint::from_shared(",
             "TcpStream::connect(",
+            "UnixStream::connect(",
             "UdpSocket::bind(",
             "lookup_host(",
         ] {

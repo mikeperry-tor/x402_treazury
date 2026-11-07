@@ -583,7 +583,7 @@ a shared startup-wait diagnostic with the configured endpoint, safe I/O kind, re
 cadence and reminder interval. While startup recovery remains pending, the
 condition is INFO; repetitive probe details belong at DEBUG. The existing probe
 schedule and reminder interval do not grant terminal failure severity. Recovery
-emits INFO describing TCP reachability, without asserting Tor bootstrap or remote
+emits INFO describing endpoint reachability, without asserting Tor bootstrap or remote
 service health. No upstream prose, credentials or destination URLs are included.
 
 Managed extension omission is diagnostic detail (`bazaar` discovery metadata also

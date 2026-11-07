@@ -10,6 +10,28 @@ fn tor_context(endpoint: std::net::SocketAddr) -> NetworkContext {
     .unwrap()
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_socks_startup_observation_reaches_socket() {
+    let dir = tempfile::Builder::new()
+        .prefix("x402socks")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let path = dir.path().join("s");
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(format!("unix:{}", path.display()).parse().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), context.wait_for_startup_socks())
+        .await
+        .unwrap();
+    assert!(context.startup_socks.initialized());
+    drop(listener);
+}
+
 #[tokio::test]
 async fn direct_startup_needs_no_socks_observation() {
     let context = NetworkContext::new(NetworkPolicy::default()).unwrap();

@@ -144,10 +144,15 @@ async fn supervise(state: &Path, m: &Manifest, allow: bool, prepare_only: bool) 
     };
     let config: MetaConfig = toml::from_str(std::str::from_utf8(&files::read(&m.deployment)?)?)?;
     let policy: NetworkPolicy = config.network;
-    let socks: std::net::SocketAddr = policy
+    let endpoint = policy
         .socks_endpoint
         .as_ref()
-        .context("SOCKS endpoint missing")?
+        .context("SOCKS endpoint missing")?;
+    ensure!(
+        endpoint.tcp().is_some(),
+        "owned Tor qualification requires a TCP SOCKS endpoint"
+    );
+    let socks: std::net::SocketAddr = endpoint
         .to_string()
         .parse()
         .context("owned Tor qualification requires a literal SOCKS endpoint")?;

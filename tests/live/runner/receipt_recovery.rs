@@ -294,7 +294,9 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
                 .socks_endpoint
                 .as_ref()
                 .context("SOCKS endpoint missing")?
-                .port(),
+                .tcp()
+                .context("owned Tor requires a TCP SOCKS endpoint")?
+                .1,
             &[],
         )?
         .as_bytes(),

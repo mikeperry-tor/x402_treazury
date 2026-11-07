@@ -75,6 +75,7 @@ fn deterministic_tokens_and_strict_policy() {
         "[2001:db8::1]:9150",
         "tor:9150",
         "tor.local:9050",
+        "unix:9050",
     ] {
         let policy = NetworkPolicy {
             mode: Mode::Tor,
@@ -84,7 +85,38 @@ fn deterministic_tokens_and_strict_policy() {
         policy.validate().unwrap();
         assert_eq!(policy.inspection()["socks_endpoint"], endpoint);
     }
-    for endpoint in ["127.0.0.1:0", "tor", "tor:", "", "tor:70000", "a/b:9150"] {
+    #[cfg(unix)]
+    {
+        let endpoint = "unix:/run/tor/socks";
+        let policy = NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(endpoint.parse().unwrap()),
+            ..Default::default()
+        };
+        policy.validate().unwrap();
+        assert_eq!(policy.inspection()["socks_endpoint"], endpoint);
+        assert!(
+            NetworkPolicy {
+                mode: Mode::Tor,
+                socks_endpoint: Some(x402_treazury::network::SocksEndpoint::Unix(
+                    "relative".into()
+                )),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
+    }
+    for endpoint in [
+        "127.0.0.1:0",
+        "tor",
+        "tor:",
+        "",
+        "tor:70000",
+        "a/b:9150",
+        "unix:",
+        "unix:relative/path",
+    ] {
         assert!(
             endpoint
                 .parse::<x402_treazury::network::SocksEndpoint>()
@@ -183,6 +215,121 @@ async fn network_name_socks_endpoint_resolves_and_connects() {
     );
     server.abort();
 }
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_socks_endpoint_resolves_remote_dns_and_connects() {
+    let (address, server) = origin().await;
+    let dir = tempfile::Builder::new()
+        .prefix("x402socks")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let path = dir.path().join("s");
+    let proxy = Socks::start_unix(
+        BTreeMap::from([("service.invalid".into(), address)]),
+        Fault::None,
+        &path,
+    )
+    .await;
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(format!("unix:{}", path.display()).parse().unwrap()),
+        connect_timeout_seconds: Some(2),
+        ..Default::default()
+    })
+    .unwrap();
+    let id = IsolationId::evm("0x0000000000000000000000000000000000000004").unwrap();
+    let url = "http://service.invalid/";
+    assert_eq!(
+        context
+            .http(&id, url, Duration::from_secs(2))
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "ok"
+    );
+    let records = proxy.records.lock().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].host, "service.invalid");
+    assert_eq!(records[0].address_type, 3);
+    assert_eq!(
+        (records[0].user.clone(), records[0].password.clone()),
+        context.credentials(&id)
+    );
+    drop(records);
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_socks_endpoint_routes_grpc_without_direct_fallback() {
+    use zingo_netutils::{
+        Indexer,
+        lightwallet_protocol::{BlockId, BlockRange},
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = axum::Router::new().fallback(|| async {
+        let frames = vec![0, 0, 0, 0, 2, 16, 1, 0, 0, 0, 0, 2, 16, 2];
+        (
+            [("content-type", "application/grpc"), ("grpc-status", "0")],
+            frames,
+        )
+    });
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let dir = tempfile::Builder::new()
+        .prefix("x402socks")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let path = dir.path().join("s");
+    let proxy = Socks::start_unix(
+        BTreeMap::from([("grpc.invalid".into(), addr)]),
+        Fault::None,
+        &path,
+    )
+    .await;
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(format!("unix:{}", path.display()).parse().unwrap()),
+        connect_timeout_seconds: Some(2),
+        ..Default::default()
+    })
+    .unwrap();
+    let id = IsolationId::treasury("unix");
+    let mut client = context.grpc(&id, "http://grpc.invalid:1234").await.unwrap();
+    let mut stream = client
+        .get_block_range(
+            BlockRange {
+                pool_types: vec![],
+                start: Some(BlockId {
+                    height: 1,
+                    hash: vec![],
+                }),
+                end: Some(BlockId {
+                    height: 2,
+                    hash: vec![],
+                }),
+            },
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream.message().await.unwrap().unwrap().height, 1);
+    assert_eq!(stream.message().await.unwrap().unwrap().height, 2);
+    let records = proxy.records.lock().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].host, "grpc.invalid");
+    assert_eq!(records[0].address_type, 3);
+    drop(records);
+    server.abort();
+}
+
 #[tokio::test]
 async fn auth_downgrades_refusals_and_timeouts_never_go_direct() {
     let (address, server) = origin().await;
@@ -438,6 +585,29 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert_eq!(value["network"]["cover_traffic_enabled"], true);
     assert_eq!(value["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(value["network"]["socks_auth"], "tor_extended");
+    #[cfg(unix)]
+    {
+        let unix_policy = dir.path().join("unix.toml");
+        std::fs::write(
+            &unix_policy,
+            "[network]\nmode='tor'\nsocks_endpoint='unix:/run/tor/socks'\n",
+        )
+        .unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+            .args(["config", "show", "--provider"])
+            .arg(&source)
+            .arg("--network-config")
+            .arg(&unix_policy)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["network"]["socks_endpoint"], "unix:/run/tor/socks");
+    }
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .args(["serve", "--config", "missing.toml", "--network-config"])
         .arg(policy)

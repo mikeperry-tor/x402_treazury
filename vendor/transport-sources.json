@@ -204,6 +204,6 @@
       "src/wasm/request.rs": "51f71c622a95f78c0d2251353bca0ac428caf8ee7ea34c1285e4d50fee515aa6",
       "src/wasm/response.rs": "c7931612eb1c370345e938c8ce8a1f600f42b479ae81441f20d8832948cdd7c6"
     },
-    "patch_sha256": "6d7728b4fa79cca784e7a41e4f82b91a2b4023f09e6ca70d2366eaeb227d58e5"
+    "patch_sha256": "ad12c4b1dd3b9ece2477241f13021dff9f88635084e59d31345f127102e8b66b"
   }
 }

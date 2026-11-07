@@ -1,4 +1,4 @@
-//! Authenticated loopback SOCKS fixture; never resolves a destination hostname.
+//! Authenticated loopback TCP or Unix SOCKS fixture; never resolves a destination hostname.
 #![allow(dead_code)]
 use std::{
     collections::BTreeMap,
@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 use tokio_util::sync::CancellationToken;
@@ -30,6 +30,8 @@ pub struct Record {
 }
 pub struct Socks {
     pub address: SocketAddr,
+    #[cfg(unix)]
+    pub unix_path: Option<std::path::PathBuf>,
     pub records: Arc<Mutex<Vec<Record>>>,
     pub accepted: Arc<std::sync::atomic::AtomicUsize>,
     stop: CancellationToken,
@@ -37,6 +39,10 @@ pub struct Socks {
 impl Drop for Socks {
     fn drop(&mut self) {
         self.stop.cancel();
+        #[cfg(unix)]
+        if let Some(path) = &self.unix_path {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 impl Socks {
@@ -67,24 +73,62 @@ impl Socks {
         });
         Self {
             address,
+            #[cfg(unix)]
+            unix_path: None,
+            records,
+            accepted,
+            stop,
+        }
+    }
+    #[cfg(unix)]
+    pub async fn start_unix(
+        routes: BTreeMap<String, SocketAddr>,
+        fault: Fault,
+        path: impl AsRef<std::path::Path>,
+    ) -> Self {
+        let path = path.as_ref().to_path_buf();
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let records = Arc::new(Mutex::new(Vec::new()));
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let stop = CancellationToken::new();
+        let (logs, count, cancel) = (records.clone(), accepted.clone(), stop.clone());
+        tokio::spawn(async move {
+            loop {
+                let socket = tokio::select! { _ = cancel.cancelled() => break, result = listener.accept() => match result { Ok((s,_)) => s, Err(_) => break } };
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let (records, routes, stop) = (logs.clone(), routes.clone(), cancel.clone());
+                tokio::spawn(async move {
+                    tokio::select! { _ = stop.cancelled() => {}, _ = serve(socket, routes, fault, records) => {} }
+                });
+            }
+        });
+        Self {
+            address: SocketAddr::from(([127, 0, 0, 1], 0)),
+            unix_path: Some(path),
             records,
             accepted,
             stop,
         }
     }
 }
-async fn string(socket: &mut TcpStream) -> std::io::Result<String> {
+async fn string<S>(socket: &mut S) -> std::io::Result<String>
+where
+    S: AsyncRead + Unpin,
+{
     let size = socket.read_u8().await?;
     let mut bytes = vec![0; size as usize];
     socket.read_exact(&mut bytes).await?;
     String::from_utf8(bytes).map_err(|_| std::io::Error::other("invalid string"))
 }
-async fn serve(
-    mut socket: TcpStream,
+async fn serve<S>(
+    mut socket: S,
     routes: BTreeMap<String, SocketAddr>,
     fault: Fault,
     records: Arc<Mutex<Vec<Record>>>,
-) -> std::io::Result<()> {
+) -> std::io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     if let Fault::Delay(delay) = fault {
         tokio::time::sleep(delay).await;
     }

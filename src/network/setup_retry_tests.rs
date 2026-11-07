@@ -21,6 +21,7 @@ impl Error for Cause {
 fn only_proven_local_refusal_is_permanent() {
     for kind in [
         ErrorKind::ConnectionRefused,
+        ErrorKind::NotFound,
         ErrorKind::TimedOut,
         ErrorKind::ConnectionReset,
     ] {
@@ -30,7 +31,7 @@ fn only_proven_local_refusal_is_permanent() {
         );
         assert_eq!(
             eligible_retry_cause(&retained),
-            kind != ErrorKind::ConnectionRefused
+            !matches!(kind, ErrorKind::ConnectionRefused | ErrorKind::NotFound)
         );
         assert!(
             eligible_retry_cause(&std::io::Error::from(kind)),
@@ -62,6 +63,43 @@ async fn failure(context: &NetworkContext, url: &str) -> reqwest::Error {
         .send()
         .await
         .unwrap_err()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn missing_unix_socks_socket_is_a_permanent_local_failure() {
+    let dir = tempfile::Builder::new()
+        .prefix("x402socks")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let path = dir.path().join("missing");
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(format!("unix:{}", path.display()).parse().unwrap()),
+        connect_timeout_seconds: Some(1),
+        cover_traffic_enabled: Some(false),
+        ..Default::default()
+    })
+    .unwrap();
+    let error = failure(&context, "http://127.0.0.1:1/").await;
+    assert!(!eligible_retry_transport(&error));
+    let mut source: &(dyn Error + 'static) = &error;
+    let mut local = false;
+    let mut missing = false;
+    loop {
+        local |= source.to_string() == "SOCKS local proxy connection failed";
+        missing |= source
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == ErrorKind::NotFound);
+        match source.source() {
+            Some(next) => source = next,
+            None => break,
+        }
+    }
+    assert!(
+        local && missing,
+        "Unix connector must retain stage and typed missing path"
+    );
 }
 
 #[tokio::test]

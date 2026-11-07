@@ -51,28 +51,41 @@ pub enum SocksAuth {
     TorExtended,
     Legacy,
 }
-/// A SOCKS proxy endpoint: any IP literal or network name with a nonzero port.
+/// A SOCKS proxy endpoint: a TCP host and nonzero port, or an absolute Unix socket path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub struct SocksEndpoint {
-    host: String,
-    port: u16,
+pub enum SocksEndpoint {
+    Tcp {
+        host: String,
+        port: u16,
+    },
+    #[cfg(unix)]
+    Unix(std::path::PathBuf),
 }
 impl SocksEndpoint {
-    pub fn host(&self) -> &str {
-        &self.host
+    pub fn tcp(&self) -> Option<(&str, u16)> {
+        match self {
+            Self::Tcp { host, port } => Some((host, *port)),
+            #[cfg(unix)]
+            Self::Unix(_) => None,
+        }
     }
 
-    pub fn port(&self) -> u16 {
-        self.port
+    #[cfg(unix)]
+    pub fn unix(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Tcp { .. } => None,
+            Self::Unix(path) => Some(path),
+        }
     }
 }
 impl std::fmt::Display for SocksEndpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.host.contains(':') {
-            write!(f, "[{}]:{}", self.host, self.port)
-        } else {
-            write!(f, "{}:{}", self.host, self.port)
+        match self {
+            Self::Tcp { host, port } if host.contains(':') => write!(f, "[{host}]:{port}"),
+            Self::Tcp { host, port } => write!(f, "{host}:{port}"),
+            #[cfg(unix)]
+            Self::Unix(path) => write!(f, "unix:{}", path.display()),
         }
     }
 }
@@ -80,12 +93,23 @@ impl std::str::FromStr for SocksEndpoint {
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> Result<Self> {
-        let value = value.trim();
         let invalid = || {
             anyhow::anyhow!(
-                "SOCKS endpoint must be an IP literal or network name with a nonzero port"
+                "SOCKS endpoint must be an IP literal or network name with a nonzero port, or unix:/absolute/path"
             )
         };
+        let value = value.trim();
+        if let Some(path) = value.strip_prefix("unix:")
+            && path.starts_with('/')
+        {
+            #[cfg(unix)]
+            {
+                ensure!(!path.contains('\0'), invalid());
+                return Ok(Self::Unix(std::path::PathBuf::from(path)));
+            }
+            #[cfg(not(unix))]
+            anyhow::bail!("Unix SOCKS endpoints are only supported on Unix platforms");
+        }
         ensure!(
             !value.is_empty()
                 && !value.bytes().any(|byte| {
@@ -122,7 +146,7 @@ impl std::str::FromStr for SocksEndpoint {
             invalid()
         );
         ensure!(port != 0, invalid());
-        Ok(Self { host, port })
+        Ok(Self::Tcp { host, port })
     }
 }
 impl TryFrom<String> for SocksEndpoint {
@@ -139,7 +163,7 @@ impl From<SocksEndpoint> for String {
 }
 impl From<SocketAddr> for SocksEndpoint {
     fn from(value: SocketAddr) -> Self {
-        Self {
+        Self::Tcp {
             host: value.ip().to_string(),
             port: value.port(),
         }
@@ -190,10 +214,19 @@ impl NetworkPolicy {
                 .socks_endpoint
                 .as_ref()
                 .context("network.socks_endpoint is required in Tor mode")?;
-            ensure!(
-                endpoint.port() != 0,
-                "SOCKS endpoint must be an IP literal or network name with a nonzero port"
-            );
+            if let Some((_, port)) = endpoint.tcp() {
+                ensure!(
+                    port != 0,
+                    "SOCKS endpoint must be an IP literal or network name with a nonzero port"
+                );
+            }
+            #[cfg(unix)]
+            if let Some(path) = endpoint.unix() {
+                ensure!(
+                    path.is_absolute(),
+                    "Unix SOCKS endpoint must be an absolute path"
+                );
+            }
             let namespace = self.namespace();
             ensure!(
                 !namespace.is_empty()
@@ -453,13 +486,22 @@ pub struct NetworkContext {
 impl NetworkContext {
     /// Local startup prerequisite only; no destination or SOCKS credentials cross it.
     async fn connect_startup_socks(&self, endpoint: &SocksEndpoint) -> std::io::Result<()> {
-        tokio::time::timeout(
-            self.policy.connect_timeout(),
-            tokio::net::TcpStream::connect((endpoint.host(), endpoint.port())),
-        )
-        .await
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?
-        .map(drop)
+        let connect = async {
+            match endpoint {
+                SocksEndpoint::Tcp { host, port } => {
+                    tokio::net::TcpStream::connect((host.as_str(), *port))
+                        .await
+                        .map(|_| ())
+                }
+                #[cfg(unix)]
+                SocksEndpoint::Unix(path) => {
+                    tokio::net::UnixStream::connect(path).await.map(|_| ())
+                }
+            }
+        };
+        tokio::time::timeout(self.policy.connect_timeout(), connect)
+            .await
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?
     }
     #[cfg(test)]
     pub(crate) fn http_cache_len(&self) -> usize {
@@ -754,9 +796,15 @@ impl NetworkContext {
                 .socks_endpoint
                 .as_ref()
                 .context("SOCKS endpoint missing")?;
-            let proxy =
-                reqwest::Proxy::all(format!("socks5h://{endpoint}"))?.basic_auth(&user, &pass);
-            builder = builder.proxy(proxy);
+            let proxy = match endpoint {
+                SocksEndpoint::Tcp { .. } => reqwest::Proxy::all(format!("socks5h://{endpoint}"))?,
+                #[cfg(unix)]
+                SocksEndpoint::Unix(path) => {
+                    builder = builder.socks_proxy_unix_socket(path);
+                    reqwest::Proxy::all("socks5h://localhost:1080")?
+                }
+            };
+            builder = builder.proxy(proxy.basic_auth(&user, &pass));
         }
         let client = builder
             .build()
@@ -905,7 +953,9 @@ fn eligible_retry_cause(mut error: &(dyn std::error::Error + 'static)) -> bool {
             && error.downcast_ref::<std::io::Error>().is_some_and(|io| {
                 matches!(
                     io.kind(),
-                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::InvalidInput
+                    std::io::ErrorKind::ConnectionRefused
+                        | std::io::ErrorKind::InvalidInput
+                        | std::io::ErrorKind::NotFound
                 )
             })
         {
@@ -1040,17 +1090,52 @@ impl NetworkContext {
                 .as_ref()
                 .context("SOCKS endpoint missing")?;
             let (user, pass) = self.credentials(id);
-            let mut tcp = hyper_util::client::legacy::connect::HttpConnector::new();
-            tcp.enforce_http(false);
-            let proxy_uri = format!("http://{proxy}")
-                .parse()
-                .context("invalid SOCKS endpoint")?;
-            let connector =
-                hyper_util::client::legacy::connect::proxy::SocksV5::new(proxy_uri, tcp)
-                    .with_auth(user, pass)
-                    .local_dns(false);
-            endpoint
-                .connect_with_connector(readiness.connector(connector))
+            let proxy_uri: tonic::codegen::http::Uri = match proxy {
+                SocksEndpoint::Tcp { .. } => format!("http://{proxy}")
+                    .parse()
+                    .context("invalid SOCKS endpoint")?,
+                #[cfg(unix)]
+                SocksEndpoint::Unix(_) => "http://localhost"
+                    .parse()
+                    .context("invalid Unix SOCKS endpoint")?,
+            };
+            let connect = async {
+                match proxy {
+                    SocksEndpoint::Tcp { .. } => {
+                        let mut tcp = hyper_util::client::legacy::connect::HttpConnector::new();
+                        tcp.enforce_http(false);
+                        let connector = hyper_util::client::legacy::connect::proxy::SocksV5::new(
+                            proxy_uri, tcp,
+                        )
+                        .with_auth(user.clone(), pass.clone())
+                        .local_dns(false);
+                        endpoint
+                            .connect_with_connector(readiness.connector(connector))
+                            .await
+                    }
+                    #[cfg(unix)]
+                    SocksEndpoint::Unix(path) => {
+                        let path = path.clone();
+                        let connector = tower::service_fn(move |_| {
+                            let path = path.clone();
+                            async move {
+                                tokio::net::UnixStream::connect(path)
+                                    .await
+                                    .map(hyper_util::rt::TokioIo::new)
+                            }
+                        });
+                        let connector = hyper_util::client::legacy::connect::proxy::SocksV5::new(
+                            proxy_uri, connector,
+                        )
+                        .with_auth(user.clone(), pass.clone())
+                        .local_dns(false);
+                        endpoint
+                            .connect_with_connector(readiness.connector(connector))
+                            .await
+                    }
+                }
+            };
+            connect
                 .await
                 .map_err(|error| grpc::connection_failure(&error, "tor_grpc_connection_failed"))?
         } else {

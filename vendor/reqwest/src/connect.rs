@@ -82,6 +82,8 @@ pub(crate) struct ConnectorBuilder {
     resolver: Option<DynResolver>,
     #[cfg(unix)]
     unix_socket: Option<Arc<std::path::Path>>,
+    #[cfg(all(unix, feature = "socks"))]
+    socks_unix_socket: Option<Arc<std::path::Path>>,
     #[cfg(target_os = "windows")]
     windows_named_pipe: Option<Arc<std::ffi::OsStr>>,
 }
@@ -105,6 +107,8 @@ where {
             resolver: self.resolver.unwrap_or_else(DynResolver::gai),
             #[cfg(unix)]
             unix_socket: self.unix_socket,
+            #[cfg(all(unix, feature = "socks"))]
+            socks_unix_socket: self.socks_unix_socket,
             #[cfg(target_os = "windows")]
             windows_named_pipe: self.windows_named_pipe,
         };
@@ -217,6 +221,8 @@ where {
             resolver: None,
             #[cfg(unix)]
             unix_socket: None,
+            #[cfg(all(unix, feature = "socks"))]
+            socks_unix_socket: None,
             #[cfg(target_os = "windows")]
             windows_named_pipe: None,
         }
@@ -330,6 +336,8 @@ where {
             resolver: None,
             #[cfg(unix)]
             unix_socket: None,
+            #[cfg(all(unix, feature = "socks"))]
+            socks_unix_socket: None,
             #[cfg(target_os = "windows")]
             windows_named_pipe: None,
         }
@@ -405,6 +413,8 @@ where {
             resolver: None,
             #[cfg(unix)]
             unix_socket: None,
+            #[cfg(all(unix, feature = "socks"))]
+            socks_unix_socket: None,
             #[cfg(target_os = "windows")]
             windows_named_pipe: None,
         }
@@ -473,6 +483,11 @@ where {
         self.unix_socket = path;
     }
 
+    #[cfg(all(unix, feature = "socks"))]
+    pub(crate) fn set_socks_unix_socket(&mut self, path: Option<Arc<std::path::Path>>) {
+        self.socks_unix_socket = path;
+    }
+
     #[cfg(target_os = "windows")]
     pub(crate) fn set_windows_named_pipe(&mut self, pipe: Option<Arc<std::ffi::OsStr>>) {
         self.windows_named_pipe = pipe;
@@ -501,6 +516,9 @@ pub(crate) struct ConnectorService {
     /// If set, this always takes priority over TCP.
     #[cfg(unix)]
     unix_socket: Option<Arc<std::path::Path>>,
+    /// Connect to a SOCKS proxy through this Unix socket instead of TCP.
+    #[cfg(all(unix, feature = "socks"))]
+    socks_unix_socket: Option<Arc<std::path::Path>>,
     #[cfg(target_os = "windows")]
     windows_named_pipe: Option<Arc<std::ffi::OsStr>>,
 }
@@ -536,6 +554,10 @@ impl Inner {
 impl ConnectorService {
     #[cfg(feature = "socks")]
     async fn connect_socks(mut self, dst: Uri, proxy: Intercepted) -> Result<Conn, BoxError> {
+        #[cfg(unix)]
+        if let Some(path) = self.socks_unix_socket.clone() {
+            return self.connect_socks_unix(dst, proxy, path).await;
+        }
         let dns = match proxy.uri().scheme_str() {
             Some("socks4") | Some("socks5") => socks::DnsResolve::Local,
             Some("socks4a") | Some("socks5h") => socks::DnsResolve::Proxy,
@@ -608,6 +630,78 @@ impl ConnectorService {
                 tls_info: false,
             })
             .map_err(Into::into)
+    }
+
+    #[cfg(all(unix, feature = "socks"))]
+    async fn connect_socks_unix(
+        mut self,
+        dst: Uri,
+        proxy: Intercepted,
+        path: Arc<std::path::Path>,
+    ) -> Result<Conn, BoxError> {
+        let https = dst.scheme() == Some(&Scheme::HTTPS);
+        match &mut self.inner {
+            #[cfg(feature = "__native-tls")]
+            Inner::NativeTls(_, tls) => {
+                if https {
+                    let host = dst.host().ok_or("no host in url")?.to_string();
+                    let conn =
+                        socks::connect_unix(proxy, dst, path).await?;
+                    let conn = TokioIo::new(conn);
+                    let conn = TokioIo::new(conn);
+                    let tls_connector = tokio_native_tls::TlsConnector::from(tls.clone());
+                    let io = tls_connector.connect(&host, conn).await?;
+                    let io = TokioIo::new(io);
+                    return Ok(Conn {
+                        inner: self.verbose.wrap(NativeTlsConn { inner: io }),
+                        is_proxy: false,
+                        tls_info: self.tls_info,
+                    });
+                }
+            }
+            #[cfg(feature = "__rustls")]
+            Inner::RustlsTls { tls, .. } => {
+                if https {
+                    use std::convert::TryFrom;
+                    use tokio_rustls::TlsConnector as RustlsConnector;
+
+                    let tls = tls.clone();
+                    let host = dst.host().ok_or("no host in url")?.to_string();
+                    let conn =
+                        socks::connect_unix(proxy, dst, path).await?;
+                    let conn = TokioIo::new(conn);
+                    let conn = TokioIo::new(conn);
+                    let server_name =
+                        rustls_pki_types::ServerName::try_from(host.as_str().to_owned())
+                            .map_err(|_| "Invalid Server Name")?;
+                    let io = RustlsConnector::from(tls)
+                        .connect(server_name, conn)
+                        .await?;
+                    let io = TokioIo::new(io);
+                    return Ok(Conn {
+                        inner: self.verbose.wrap(RustlsTlsConn { inner: io }),
+                        is_proxy: false,
+                        tls_info: false,
+                    });
+                }
+            }
+            #[cfg(not(feature = "__tls"))]
+            Inner::Http(_) => {
+                let conn = socks::connect_unix(proxy, dst, path).await?;
+                return Ok(Conn {
+                    inner: self.verbose.wrap(TokioIo::new(conn)),
+                    is_proxy: false,
+                    tls_info: false,
+                });
+            }
+        }
+
+        let conn = socks::connect_unix(proxy, dst, path).await?;
+        Ok(Conn {
+            inner: self.verbose.wrap(TokioIo::new(conn)),
+            is_proxy: false,
+            tls_info: false,
+        })
     }
 
     async fn connect_with_maybe_proxy(self, dst: Uri, is_proxy: bool) -> Result<Conn, BoxError> {
@@ -1982,6 +2076,71 @@ mod socks {
                     .map(|stream| stream.into_inner())
             }
             _ => unreachable!(),
+        };
+        connected.map_err(|error| {
+            match local_failure.lock().expect("SOCKS connector cause").take() {
+                Some(cause) => SocksProxyError::SocksLocalConnect(cause),
+                None => SocksProxyError::SocksConnect(error.into()),
+            }
+        })
+    }
+
+    #[cfg(unix)]
+    pub(super) async fn connect_unix(
+        proxy: Intercepted,
+        dst: Uri,
+        path: Arc<std::path::Path>,
+    ) -> Result<tokio::net::UnixStream, SocksProxyError> {
+        // A Unix SOCKS proxy has no proxy scheme; remote destination DNS is the
+        // only supported behavior for this transport.
+        let https = dst.scheme() == Some(&Scheme::HTTPS);
+        let host = dst.host().ok_or(SocksProxyError::SocksNoHostInUrl)?;
+        let port = match dst.port() {
+            Some(p) => p.as_u16(),
+            None if https => 443u16,
+            _ => 80u16,
+        };
+        let proxy_uri = proxy.uri().clone();
+        let dst_uri = format!(
+            "{}://{}:{}",
+            if https { "https" } else { "http" },
+            host,
+            port
+        )
+        .parse::<Uri>()
+        .map_err(|e| SocksProxyError::SocksConnect(e.into()))?;
+
+        let local_failure = Arc::new(Mutex::new(None));
+        let failure = local_failure.clone();
+        let mut connector = tower::service_fn(move |_| {
+            let path = path.clone();
+            let failure = failure.clone();
+            async move {
+                tokio::net::UnixStream::connect(&*path)
+                    .await
+                    .map(hyper_util::rt::TokioIo::new)
+                    .map_err(|error| {
+                        let error: Arc<dyn std::error::Error + Send + Sync> = Arc::new(error);
+                        *failure.lock().expect("SOCKS connector cause") = Some(error.clone());
+                        error
+                    })
+            }
+        });
+
+        let connected = match proxy.uri().scheme_str() {
+            Some("socks5") | Some("socks5h") => {
+                let mut svc = if let Some((username, password)) = proxy.raw_auth() {
+                    SocksV5::new(proxy_uri, &mut connector)
+                        .with_auth(username.to_string(), password.to_string())
+                        .local_dns(false)
+                } else {
+                    SocksV5::new(proxy_uri, &mut connector).local_dns(false)
+                };
+                Service::call(&mut svc, dst_uri)
+                    .await
+                    .map(|stream| stream.into_inner())
+            }
+            _ => return Err(SocksProxyError::SocksConnect(std::io::Error::other("Unix SOCKS requires SOCKS5").into())),
         };
         connected.map_err(|error| {
             match local_failure.lock().expect("SOCKS connector cause").take() {

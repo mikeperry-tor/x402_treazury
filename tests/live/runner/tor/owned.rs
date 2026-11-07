@@ -87,10 +87,15 @@ impl Tor {
             !port.try_exists()? && !cookie.try_exists()?,
             "Tor control artifacts already exist; refusing stale ownership"
         );
-        let socks: std::net::SocketAddr = policy
+        let endpoint = policy
             .socks_endpoint
             .as_ref()
-            .context("SOCKS endpoint missing")?
+            .context("SOCKS endpoint missing")?;
+        ensure!(
+            endpoint.tcp().is_some(),
+            "owned Tor requires a TCP SOCKS endpoint"
+        );
+        let socks: std::net::SocketAddr = endpoint
             .to_string()
             .parse()
             .context("owned Tor requires a literal SOCKS endpoint")?;

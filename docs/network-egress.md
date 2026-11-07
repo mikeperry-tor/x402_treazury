@@ -683,7 +683,7 @@ controlled Tor daemon with `IsolateSOCKSAuth` and observation via its control po
 The application itself never uses a control port or sends NEWNYM.
 
 For enforcement beyond these application tests, run the executable under an OS
-firewall or container egress rule permitting only the configured SOCKS endpoint,
+firewall or container egress rule permitting only the configured SOCKS TCP endpoint or Unix socket path,
 while allowing the MCP listener's local inbound/reply traffic. Put Tor outside that
 restricted process/container boundary so its relay connections remain possible.
 Rules must cover IPv4 and IPv6 and reject destination DNS/UDP egress. Do not enable
@@ -806,17 +806,18 @@ No production trust changes, real Tor, live provider calls or payments are invol
 
 ## Serving startup SOCKS prerequisite
 
-Ordinary serving startup can also make a TCP-only connection to its configured
+Ordinary serving startup can also make a connection-only probe to its configured
 SOCKS endpoint, resolving an IP literal or network name through the system
-resolver. This shared, cancellation-owned prerequisite check carries no
-credentials or destination and performs no SOCKS handshake.
+resolver or connecting the configured Unix filesystem socket. This shared,
+cancellation-owned prerequisite check carries no credentials or destination and
+performs no SOCKS handshake.
 An unreachable endpoint emits an immediate ERROR naming the endpoint and
 safe I/O kind, then repeats it on the next failed probe at least 60 seconds after
 the preceding ERROR while the shared startup wait remains pending. No separate
 logging timer or probe is created. Retry cadence is five seconds after a failed connection attempt, using the
 existing network connection timeout. Pending startup catalog network
 misses and captured wallet discovery resume after the first reachable observation;
-an INFO after a failure reports TCP reachability, never Tor bootstrap success.
+an INFO after a failure reports endpoint reachability, never Tor bootstrap success.
 Fresh caches, listener binding, commands and independently demanded financial
 work do not wait. The check ends on success or cancellation, creates no permanent
 monitor and grants no HTTP replay, financial authority or direct fallback.
@@ -825,7 +826,9 @@ monitor and grants no HTTP replay, financial authority or direct fallback.
 
 The opt-in Rust integration runner keeps local MCP and authenticated Tor-control
 connections outside the confined application. `network::local_control` accepts
-only literal loopback addresses with a bounded connection deadline.
+only literal loopback addresses with a bounded connection deadline. The owned-Tor
+runner remains TCP-only and rejects Unix SOCKS endpoints; Unix transport is covered
+by local HTTP/gRPC/startup fixtures rather than real-Tor qualification.
 `QualificationProbes` and `qualification_probe` implement positive/negative
 loopback TCP/UDP controls for IPv4 and IPv6; they are supervisor test facilities,
 not provider-configurable transports. External catalogs/help/API requests still
@@ -881,7 +884,7 @@ financial or qualification authority.
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Normal expiry is ordinary freshness policy. HTTP disk cache limits are 128 MiB / 4,096 entries / 16 KiB metadata / 144 MiB database; pressure eviction logs DEBUG, while persistence/read failures WARN. Store Busy/Locked failures WARN before command reply; this grants no mutation retry. Cache persistence failure does not invalidate a complete response. |
 | Optional cover episode bounds | Bound optional unsigned work; cannot cut off the real paid call. Actual process-budget refusals WARN; owner-cache pressure eviction logs DEBUG; ordinary completed episode budgets/deadlines and cached refusals use DEBUG; fresh retained resource refusals and optional task/sampling failures use INFO. Local deadlines/preemption preserve successful qualification and return interrupted checks to unknown after cleanup, without renewing episode/process budgets. The three-second cleanup wait in `wait_experiment_idle` is a test-only fixture bound; production cleanup has no such cutoff. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. Actual deadline expiry WARNs with a safe stage and numeric allowance. |
-| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed TCP connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
+| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
 | Sync mempool drain window | Bounds initial mempool-stream settling before requesting its shutdown. Received work drains and workers join before sync returns; it is not a whole-sync deadline. |
 

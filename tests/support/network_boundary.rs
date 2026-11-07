@@ -207,6 +207,92 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
     server.abort();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn http_and_grpc_keep_tls_over_unix_socks() {
+    let (address, server) = crate::test_tls::serve(axum::Router::new().fallback(|| async {
+        (
+            [("content-type", "application/grpc"), ("grpc-status", "0")],
+            vec![0u8, 0, 0, 0, 2, 16, 1],
+        )
+    }))
+    .await;
+    let dir = tempfile::Builder::new()
+        .prefix("x402socks")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let path = dir.path().join("s");
+    let proxy = Socks::start_unix(
+        BTreeMap::from([("grpc.example.com".into(), address)]),
+        Fault::None,
+        &path,
+    )
+    .await;
+    let ctx = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(format!("unix:{}", path.display()).parse().unwrap()),
+        connect_timeout_seconds: Some(1),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_trusted_roots([crate::test_tls::CA])
+    .unwrap();
+    let identity = IsolationId::treasury("unix-tls");
+    assert!(
+        ctx.http(
+            &identity,
+            "https://grpc.example.com",
+            Duration::from_secs(2)
+        )
+        .unwrap()
+        .get("https://grpc.example.com")
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success()
+    );
+    {
+        use zingo_netutils::{
+            Indexer,
+            lightwallet_protocol::{BlockId, BlockRange},
+        };
+        let mut client = ctx
+            .grpc(&identity, "https://grpc.example.com")
+            .await
+            .unwrap();
+        let mut stream = client
+            .get_block_range(
+                BlockRange {
+                    pool_types: vec![],
+                    start: Some(BlockId {
+                        height: 1,
+                        hash: vec![],
+                    }),
+                    end: Some(BlockId {
+                        height: 1,
+                        hash: vec![],
+                    }),
+                },
+                Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stream.message().await.unwrap().unwrap().height, 1);
+    }
+    assert!(
+        proxy
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r.address_type == 3
+                && r.host == "grpc.example.com"
+                && (r.user.clone(), r.password.clone()) == ctx.credentials(&identity))
+    );
+    server.abort();
+}
+
 #[tokio::test]
 async fn socks_failures_never_reach_a_direct_http_or_grpc_target() {
     let hits = Arc::new(AtomicUsize::new(0));

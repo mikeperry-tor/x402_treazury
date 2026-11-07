@@ -6,7 +6,7 @@ const ERROR_REPEAT: Duration = Duration::from_secs(60);
 
 impl NetworkContext {
     /// Keep finite serving discovery pending until its Tor prerequisite exists.
-    /// This is one TCP observation, not a Tor bootstrap check or a permanent monitor.
+    /// This is one connection observation, not a Tor bootstrap check or a permanent monitor.
     /// Drop the future with its startup owner; no detached task or HTTP replay exists.
     pub(crate) async fn wait_for_startup_socks(&self) {
         if self.policy.mode != Mode::Tor || crate::qualification::active() {
