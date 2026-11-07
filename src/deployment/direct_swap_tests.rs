@@ -211,6 +211,112 @@ async fn saved_status_with_unavailable_sdk(receive: bool) {
 }
 
 #[tokio::test]
+async fn local_connection_warnings_report_configuration_causes_without_values() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::direct_swap_tests::local_connection_warnings_report_configuration_causes_without_values",
+    ) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::rotation::store::Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"unavailable SDK fixture",
+    )
+    .unwrap();
+    drop(store);
+    super::initialization_tests::write_spec(dir.path());
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(
+        &path,
+        super::initialization_tests::managed_config().replace(
+            "auto_fund=false",
+            "auto_fund=false\nnear_api_key_env='NEAR'",
+        ),
+    )
+    .unwrap();
+    let deployment = Deployment::load(&path).await.unwrap();
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
+    for (key, value, category, reason) in [
+        (
+            "BASE",
+            None,
+            "base_configuration_unavailable",
+            "configured Base RPC environment variable is missing or empty",
+        ),
+        (
+            "BASE",
+            Some("http://user:configuration-secret@provider.invalid/path?key=configuration-secret"),
+            "base_configuration_unavailable",
+            "endpoint requires TLS",
+        ),
+        (
+            "NEAR",
+            None,
+            "funding_configuration_unavailable",
+            "required environment variable NEAR is missing or empty",
+        ),
+        (
+            "NEAR",
+            Some("configuration-secret\ninvalid"),
+            "funding_configuration_unavailable",
+            "invalid NEAR API key",
+        ),
+        (
+            "INDEXER",
+            None,
+            "funding_configuration_unavailable",
+            "required endpoint environment variable INDEXER is missing or empty",
+        ),
+        (
+            "INDEXER",
+            Some("http://user:configuration-secret@provider.invalid/path?key=configuration-secret"),
+            "funding_configuration_unavailable",
+            "endpoint requires TLS",
+        ),
+    ] {
+        let before = std::fs::metadata(log.path()).unwrap().len() as usize;
+        let mut env = super::initialization_tests::env();
+        env.insert("NEAR".into(), "fixture".into());
+        if let Some(value) = value {
+            env.insert(key.into(), value.into());
+        } else {
+            env.remove(key);
+        }
+        let setup = deployment.wallet_setup(&env, true, true).await.unwrap();
+        assert!(matches!(setup, ManagedSetup::StoreOnly { .. }));
+        assert!(!setup.funding_available());
+        assert!(
+            setup
+                .store()
+                .call(|s| s.funding_jobs())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        setup.close().await.unwrap();
+        let output = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            output[before..].contains(category),
+            "{key}: expected category"
+        );
+        assert!(output[before..].contains(reason), "{key}: expected cause");
+    }
+    let output = std::fs::read_to_string(log.path()).unwrap();
+    assert!(output.contains("WARN"));
+    for secret in ["configuration-secret", "provider.invalid", "user:"] {
+        assert!(!output.contains(secret), "preflight logs must omit values");
+    }
+}
+
+#[tokio::test]
 async fn direct_receive_retains_sdk_while_missing_base_only_disables_managed_clients() {
     let dir = tempfile::tempdir().unwrap();
     let owner = crate::treasury::Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000, Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();

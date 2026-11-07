@@ -11,6 +11,10 @@ must not affect inspection; actual binding restores only authenticated owned
 status, retains removed-listener background work and preserves identity/schema
 guards. The public-demo inventory fixture rewrites authored paths into temporary
 state before loading either profile, so it never opens operator wallet state.
+Its isolated local-preflight diagnostic fixture checks Base, NEAR and treasury
+causes without an SDK wallet or network calls. Warnings show only safe top-level
+configuration errors, omit endpoint/header values and retain scoped degradation
+without allocating funding jobs.
 
 `tests/startup.rs` checks rolling replenishment, the default two-request catalog bound,
 failure and caller cancellation closing active requests, untouched queued sources,

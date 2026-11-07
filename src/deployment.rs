@@ -1277,9 +1277,9 @@ impl Deployment {
         let base = if with_base {
             match self.base_connection_preflight(env) {
                 Ok(base) => Some(base),
-                Err(_) => {
+                Err(error) => {
                     tracing::warn!(
-                        category = "base_configuration_unavailable",
+                        category = "base_configuration_unavailable", reason = %error,
                         "Managed Base configuration unavailable; independent tools remain available; correct Base configuration and restart"
                     );
                     None
