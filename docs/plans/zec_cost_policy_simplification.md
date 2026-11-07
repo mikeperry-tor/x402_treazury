@@ -144,3 +144,53 @@ compatibility stage passed on b8ab6a7d; final affected compiler/lint continuatio
 and preview consumers remain required. The financial compile was restarted with
 socket-capable permissions before any fixture execution; no sandbox-denied test
 was used as a permission probe.
+
+## Final integration evidence and completion
+
+Final Rust source: `7790f08b120726d9be5276a5263106eb9c58e70e`. All exact
+implementation/fixup SHAs (2f0297fc, eff27c69, b8ab6a7d, 7790f08b) and accumulated
+financial/SDK/quote/preview consumers independently reviewed and accepted. Separate
+remaining-controls audit accepted the inventory and its corrected examples/metadata
+semantics. No unresolved material finding, compelling simplification or implementation
+portion is deferred. G1 source/review/selected-validation closure independently
+accepted by zec_fee_limits_audit after inspecting actual logs and hashes.
+
+| Evidence | Result |
+| --- | --- |
+| Final production compiler/all-target zcash-regtest Clippy | Passed with clean diagnostics (1m50/5m30), `target/zec-cost-policy-clippy-final.log`. |
+| SDK missing-scan/fee/balance preview continuation | Passed5, `target/zec-cost-policy-preview-fixed.log`; includes original failing assertion and populated-wallet restoration. |
+| Final native/foreign service consumers | Passed2 in30.95s, `target/zec-cost-policy-consumers-final.log`. |
+| Earlier selected synthetic financial/proving/lifecycle | Nine successful non-preview cases carry forward; original13 selection was12pass/1previewfailure now resolved above. SDK fee>30000 accepted, explicit direct actual total-debit limits and signed-byte ownership/cancellation/restart tested. `target/zec-cost-policy-financial.log`. |
+| Fixed compatibility stage | Passed31 (crypto2/payment15/SDK3/MCP11), plus Pepper35-file verification, `target/zec-cost-policy-compat.log`. Unaffected by the final private preview-only correction. |
+| Cheap direct/NEAR contracts | Passed73/ignored1 explicit child helper, `target/zec-cost-policy-contracts-fixed.log`. |
+| Configuration/CLI/assignment/integration-preparation | Passed299/ignored8 separately authorized cases, `target/zec-cost-policy-config-contracts.log`; eight changed tracked TOMLs parsed. |
+| Complexity | Exact final source hashes verified independently; complete486 files/10728 spaces, zero exclusions/new warnings, `target/complexity-runs/20261107T080157Z-c18dee5b`. wallet_preview1/3; other financial hotspot dispositions carry forward. |
+| Formatting/default development executable | Final fmt-check passed (`target/zec-cost-policy-fmt-final.log`); `make build-dev` passed cleanly in1m23 (`target/zec-cost-policy-build.log`). |
+
+Test executables emit the existing macOS large __eh_frame linker performance
+warning; it remains visible. Production compiler/Clippy/build diagnostics are clean.
+No full make check, Docker consensus, live settlement or Tor qualification is claimed.
+The initial test compile was restarted with socket permissions before fixture
+execution, not after a denied socket attempt. All test keys/state were public
+unfunded fixtures, not operator wallet state.
+
+Enduring rules, complete remaining-control inventory, configuration/tool descriptions
+and examples are maintained in AGENTS, README, configuration, wallet rotation,
+wallet CLI, SDK integration, agent-source and testing/live guides. The inventory
+explicitly distinguishes optional direct debit authority, nominal USDC sizing,
+API authority/300s signing lifetime, retirement thresholds, managed recovery limits,
+slippage (including the unproven application10%maximum), provider/signed expiry,
+confirmation and monetary domains, and qualification-only budgets/counts/windows.
+Observation cadence/health reporting are identified as scheduling, not money limits.
+No local price oracle, USD-overhead gate or commission-metadata veto remains.
+
+The operator's unrelated four tool-enablement changes in research_desk.toml remain
+unstaged exactly; only its four retired overhead lines were removed in the commit.
+Untracked .vscode/TODO, ignored local overrides, reference checkouts and private
+financial evidence remain untouched. Local overrides that still use retired fields
+must remove them; strict unknown-setting validation is intentional, with no legacy
+adapter. No runtime restart, push or merge occurred.
+
+P0-P3 and G1 are complete. P4 final remaining-controls audit is complete; delete
+this completed plan, commit cleanup and independently review exact cleanup and
+final combined branch. Preserve unsquashed history and all financial evidence.
