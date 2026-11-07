@@ -51,7 +51,23 @@ demand, so provider observation cannot steal a treasury wakeup. Removing admissi
 configuration or the listener retains accepted background observation; only the
 original authenticated owner can retrieve its status.
 
-Concurrent duplicate acceptance returns one operation;
+Foreign receives use `EXACT_INPUT`. Counterparty instructions require the exact
+source atomic amount in one deposit, network fees additional and any mandatory
+memo; under/excess payment can fail or refund. Never reuse a swap receive address.
+Another payment requires a new request ID and fresh quote/address; retrying an
+identical ID only retrieves the original operation, without executing its quote
+again. Native ZEC addresses may be reused; `address_reusable` distinguishes these
+instructions. The optional relative
+`refund_after_seconds` defaults to a two-hour application preference, independently
+of managed/send quote windows. It requests refund-start handling, not completion,
+and is not a claimed NEAR maximum. Native requests reject the provider-only field.
+
+Common create/retry/status presentation derives UTC-Z times and nonnegative
+countdowns from immutable saved terms, accompanied by current UTC time from the
+same clock. Requested refund start, returned deposit-address expiry and optional
+cold-address time have distinct meanings. Unknown times remain null; zero does
+not create a local terminal state, stop observation or authorize replacement.
+Concurrent duplicate acceptance returns one operation with its original deadline;
 a lost creation response grants no automatic replacement quote.
 
 Native requests have no provider quote or deadline. Each new request derives a

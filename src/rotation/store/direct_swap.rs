@@ -149,7 +149,25 @@ impl Store {
         request_id: &str,
         terms: Value,
     ) -> Result<(DirectOperation, bool)> {
-        self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Near)
+        self.reserve_direct_checked(owner, kind, request_id, terms, || Ok(()))
+    }
+    /// Validate fresh admission after resolving exact retries, before reserving any new work.
+    pub(crate) fn reserve_direct_checked(
+        &mut self,
+        owner: &str,
+        kind: &str,
+        request_id: &str,
+        terms: Value,
+        validate_new: impl FnOnce() -> Result<()>,
+    ) -> Result<(DirectOperation, bool)> {
+        self.reserve_direct_route(
+            owner,
+            kind,
+            request_id,
+            terms,
+            DirectRoute::Near,
+            validate_new,
+        )
     }
     pub fn reserve_native(
         &mut self,
@@ -159,7 +177,9 @@ impl Store {
         terms: Value,
     ) -> Result<(DirectOperation, bool)> {
         native_amount(&terms)?;
-        self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Native)
+        self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Native, || {
+            Ok(())
+        })
     }
     fn reserve_direct_route(
         &mut self,
@@ -168,6 +188,7 @@ impl Store {
         request_id: &str,
         terms: Value,
         route: DirectRoute,
+        validate_new: impl FnOnce() -> Result<()>,
     ) -> Result<(DirectOperation, bool)> {
         ensure!(
             !owner.is_empty() && !request_id.is_empty(),
@@ -193,6 +214,7 @@ impl Store {
             );
             return Ok((record, false));
         }
+        validate_new()?;
         let record = DirectOperation {
             id: Uuid::new_v4().to_string(),
             route,

@@ -925,9 +925,20 @@ without requesting another scan. `receipt_matches_saved_snapshot` distinguishes
 current saved evidence from fallback history when the SDK is unavailable. No
 transparent-address lookup RPC is enabled.
 
-Foreign assets additionally require a payer-owned source refund address. It fixes the
-source amount; ZEC output and fees remain estimates/minimums until settlement.
-Use the returned deposit address and mandatory memo exactly once for that request.
+Foreign assets additionally require a payer-owned source refund address. Each uses
+an `EXACT_INPUT` swap: tell the counterparty to deliver **exactly** `amount` atomic
+units to the returned deposit address, with network fees paid in addition, including
+the mandatory memo when present. Send once; a different amount can fail or refund.
+ZEC output and swap fees remain estimates/minimums until settlement.
+Optional `refund_after_seconds` requests when refund handling should begin, relative
+to quote creation. It defaults to 7200 seconds (two hours), an application preference,
+not a documented NEAR maximum or a promise of refund completion. Native requests
+reject this field. Managed-funding and foreign-send quote windows remain separate.
+Use the returned deposit address and mandatory memo exactly once for that request. Never reuse a swap receive address.
+Another payment requires a new request ID and fresh quote/address; retrying an
+identical ID only retrieves the original operation, without executing its quote
+again. Native ZEC addresses may be reused; `address_reusable` distinguishes these
+instructions.
 Stellar sources use the service's required `MEMO` deposit mode; other supported
 source routes default to `SIMPLE`, retaining any returned mandatory memo.
 A repeated request ID with identical terms returns the same saved operation;
@@ -950,7 +961,18 @@ shielding authority.
 `swap_status` accepts either `operation_id` or `kind` plus the original
 `request_id`, allowing recovery after a lost response with admissions disabled. It
 reports native SDK receipts, or the saved exact foreign quote/provider outcome and
-separate SDK wallet observations; attributable receipt can remain unknown. A local deadline
+separate SDK wallet observations; attributable receipt can remain unknown.
+Foreign `payment_instructions` contain the payer's source asset, exact atomic amount,
+provider deposit address and required memo, together with requested refund-start,
+returned deposit-address expiry and optional cold-address time. Native instructions
+retain partial-receipt semantics and have no provider expiry. Create, identical retry
+and status lookup share this presentation, including status-only operation without
+the SDK or NEAR. `current_time_utc` accompanies UTC-Z timestamps and nonnegative
+`seconds_until_*` countdowns sampled from the same clock; missing optional times
+remain null. The saved original quote remains untouched. Cold-address time means
+processing may be slower, not that the address has expired. Zero time remaining
+does not prove nonpayment, refund or terminal provider status and does not stop
+observation or renew instructions. A local deadline
 does not prove nonpayment, revoke disclosed instructions, or manufacture a provider
 expiry. Disabled admissions and process restart preserve these bindings.
 

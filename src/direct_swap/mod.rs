@@ -1,4 +1,7 @@
 //! First-party deposit-funded swaps. Provider settlement and SDK funds are separate facts.
+mod receive;
+#[cfg(test)]
+mod receive_tests;
 pub(crate) mod route;
 mod send;
 #[cfg(test)]
@@ -63,15 +66,6 @@ struct NearSource {
     funding: FundingConfig,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Receive {
-    asset_id: String,
-    chain: String,
-    amount: String,
-    refund_address: Option<String>,
-    request_id: String,
-}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Status {
@@ -91,7 +85,7 @@ pub fn definitions(config: &Config) -> Vec<rmcp::model::Tool> {
     let text = |description: &str| json!({"type":"string","minLength":1,"description":description});
     let mut specs = vec![(
         "x402_treazury_swap_status",
-        "Inspect your saved native Zcash payment or swap and its delivery/receipt evidence. Recover a lost response using kind and original request_id. Creates no payment.",
+        "Inspect saved Zcash (ZEC) sends or receive requests, delivery/receipt evidence and receive instructions. Includes current UTC time and available expiry/refund-start countdowns; expiry does not prove refund. Recover lost responses using kind and request_id. Creates no payment.",
         json!({"operation_id":text("Saved operation ID; omit when using kind and request_id."),"kind":{"type":"string","enum":["receive","send"],"description":"Operation kind when looking up request_id."},"request_id":text("Original caller request ID; requires kind and no operation_id.")}),
         vec![],
     )];
@@ -99,7 +93,7 @@ pub fn definitions(config: &Config) -> Vec<rmcp::model::Tool> {
         specs.push(("x402_treazury_swap_assets", "Search native Ironwood Zcash (ZEC) and supported foreign assets by symbol, chain, asset ID or available names. Case-insensitive literal matches rank before BM25 keyword matches; token support does not guarantee liquidity.", json!({"query":text("Symbol, chain, asset ID or available name keywords; separate words with spaces."),"offset":{"type":"integer","minimum":0,"description":"Result offset; keep the same query."},"limit":{"type":"integer","minimum":1,"default":25,"description":"Number of assets to return."}}), vec![]));
     }
     if config.receive {
-        specs.push(("x402_treazury_payment_request_create", "Receive native Ironwood Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh Ironwood address per new request_id with no NEAR call. Foreign assets use one exact-input swap; ZEC value is estimated until settlement. Identical retries return the original request.", json!({"asset_id":text("Full source assetId from swap_assets."),"chain":text("Exact source blockchain from swap_assets."),"amount":text("Positive atomic amount as decimal digits; native ZEC uses zatoshis."),"refund_address":text("Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported."),"request_id":text("Unique caller request ID for these exact terms.")}), vec!["asset_id","chain","amount","request_id"]));
+        specs.push(("x402_treazury_payment_request_create", "Receive native Ironwood Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh shielded address per new request_id, without NEAR. Tell foreign payers to send the exact atomic amount once, paying network fees separately and including the required memo; a different amount can fail or refund. Swap receive addresses must never be reused: another payment requires a new request_id and fresh quote/address. Native ZEC addresses may be reused. Identical retries retrieve the original request only.", json!({"asset_id":text("Full source assetId from swap_assets."),"chain":text("Exact source blockchain from swap_assets."),"amount":text("Positive atomic amount as decimal digits; native ZEC uses zatoshis. Foreign payer must deliver exactly this amount, with network fees additional."),"refund_address":text("Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported."),"refund_after_seconds":{"type":"integer","minimum":1,"default":7200,"description":"Foreign only: request refund handling after this many seconds (default two hours, not a NEAR maximum or refund-completion guarantee). Status shows actual deposit-address expiry separately."},"request_id":text("Unique caller request ID for these exact terms.")}), vec!["asset_id","chain","amount","request_id"]));
     }
     if config.send {
         specs.push(("x402_treazury_swap_preview", "Preview a native Ironwood Zcash (ZEC) payment or an exact-output foreign swap. Creates no payment authority. Inspect configured total-debit and network-fee limits, quoted principal and advisory SDK fees. Foreign fees estimate a standard NEAR deposit output; actual fees are checked during preparation.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported.")}), vec!["asset_id","chain","amount","recipient"]));
@@ -224,103 +218,6 @@ impl Service {
             _ => anyhow::bail!("unknown swap tool"),
         }
     }
-    async fn receive(&self, owner: &str, args: Receive) -> Result<Value> {
-        ensure!(!args.request_id.trim().is_empty(), "request_id is required");
-        ensure!(
-            route::atomic(&args.amount)? > alloy_primitives::U256::ZERO,
-            "amount must be positive"
-        );
-        let native = args.asset_id == route::ZEC;
-        if native {
-            ensure!(args.chain == "zec", "native ZEC requires chain zec");
-            native_amount(&args.amount)?;
-            ensure!(
-                args.refund_address.is_none(),
-                "native ZEC does not use a refund_address"
-            );
-        } else {
-            self.near()?;
-            ensure!(
-                args.refund_address
-                    .as_deref()
-                    .is_some_and(|a| !a.trim().is_empty()),
-                "foreign payment requests require a payer-owned refund_address"
-            );
-        }
-        let terms = serde_json::to_value(&args)?;
-        let owner_owned = owner.to_owned();
-        let request = args.request_id.clone();
-        let (operation, created) = self
-            .store
-            .call(move |s| {
-                if native {
-                    s.reserve_native(&owner_owned, "receive", &request, terms)
-                } else {
-                    s.reserve_direct(&owner_owned, "receive", &request, terms)
-                }
-            })
-            .await?;
-        if native {
-            // A native reservation has no uncertain remote creation: finish its original derivation.
-            if operation.address.is_none() {
-                self.backend()?
-                    .treasury
-                    .direct_address(operation.id.clone())
-                    .await?;
-            }
-            return self.status(owner, &operation.id).await;
-        }
-        if !created {
-            return self.status(owner, &operation.id).await;
-        }
-        self.receive_swap(owner, operation, args).await
-    }
-    async fn receive_swap(
-        &self,
-        owner: &str,
-        operation: DirectOperation,
-        args: Receive,
-    ) -> Result<Value> {
-        let near = self.near()?;
-        // Any interruption retains this reservation; an uncertain provider quote is never replaced.
-        let address = self
-            .backend()?
-            .treasury
-            .direct_address(operation.id.clone())
-            .await?;
-        let identity = self.identity(&operation.id).await?;
-        let assets = route::assets(&near.client, &identity).await?;
-        let origin = route::select_asset(&assets, &args.asset_id, &args.chain)?;
-        let destination = assets
-            .iter()
-            .find(|a| a.asset_id == route::ZEC)
-            .context("ZEC asset unavailable")?;
-        let now = crate::rotation::base::now()?;
-        let deadline = now
-            .checked_add(near.funding.quote_deadline_seconds)
-            .context("invalid quote deadline")?;
-        let mut request = route::request_on(
-            &near.client.chain(),
-            origin,
-            destination,
-            &address,
-            args.refund_address
-                .as_deref()
-                .context("missing refund address")?,
-            &args.amount,
-            route::SwapType::ExactInput,
-            near.funding.slippage_bps,
-            deadline,
-            false,
-        )?;
-        request["confidentiality"] = json!(near.funding.confidentiality);
-        let quote = route::quote(&near.client, &identity, request, now).await?;
-        let id = operation.id.clone();
-        self.store
-            .call(move |s| s.save_direct_quote(&id, serde_json::to_value(quote)?))
-            .await?;
-        self.status(owner, &operation.id).await
-    }
     async fn status_reference(&self, owner: &str, reference: Status) -> Result<Value> {
         match (reference.operation_id, reference.kind, reference.request_id) {
             (Some(id), None, None) => self.status(owner, &id).await,
@@ -355,14 +252,15 @@ impl Service {
         };
         let owner = owner.to_owned();
         let id = id.to_owned();
+        let now = crate::rotation::base::now().ok();
         self.store.call(move |s| {
             let operation = s.direct_operation(&owner,&id)?;
             let saved = s.treasury_sync_state()?;
             let receipt = if operation.route == DirectRoute::Native { operation.status.as_ref().map(|s| s["receipt"].clone()).unwrap_or(Value::Null) } else { json!({"attribution":"unknown"}) };
             let matches_snapshot = receipt["snapshot_revision"].as_i64() == Some(saved.snapshot_revision);
-            let instructions = native_receive.then(|| json!({"asset_id":route::ZEC,"chain":"zec","amount_zatoshis":operation.terms["amount"],"recipient":operation.address}));
+            let instructions = receive::instructions(&operation, now);
             let source = if operation.kind == "send" { s.direct_source_status(&id).unwrap_or_else(|_| json!({"unavailable":true})) } else { Value::Null };
-            Ok(json!({"source":source,"operation":operation,"zec_receipt":receipt,"receipt_matches_saved_snapshot":native_receive.then_some(matches_snapshot),"receipt_refresh_unavailable":native_receive.then_some(refresh_unavailable && !matches_snapshot),"payment_instructions":instructions,"treasury_observation":saved.sync}))
+            Ok(json!({"current_time_utc":now.and_then(receive::utc),"source":source,"operation":operation,"zec_receipt":receipt,"receipt_matches_saved_snapshot":native_receive.then_some(matches_snapshot),"receipt_refresh_unavailable":native_receive.then_some(refresh_unavailable && !matches_snapshot),"payment_instructions":instructions,"treasury_observation":saved.sync}))
         }).await
     }
     async fn refresh_native(&self, operation: &DirectOperation) -> Result<DirectOperation> {

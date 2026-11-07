@@ -126,6 +126,20 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
     .unwrap();
     assert_eq!(disabled["total"], 1);
     assert_eq!(disabled["items"][0]["tool_id"], "x402_treazury_swap_status");
+    for query in ["Zcash", "ZEC"] {
+        let found: Value = serde_json::from_str(
+            &server
+                .invoke(
+                    "x402_treazury_tools_search",
+                    json!({"query":query}).as_object().unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(found["total"], 1);
+        assert_eq!(found["items"][0]["tool_id"], "x402_treazury_swap_status");
+    }
     assert!(
         server
             .invoke(
