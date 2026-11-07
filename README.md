@@ -400,6 +400,45 @@ See the [automatic assignment reference](docs/configuration.md#multiple-mcp-port
 and [comprehensive deployment](examples/deployments/comprehensive.toml) for
 multiple listeners sharing explicit named pools.
 
+## Agent Zcash payments and swaps
+
+Optionally let agents receive payments into your Zcash treasury and send ZEC or
+foreign assets from it. These tools are disabled by default. Native ZEC transfers
+use shielded Ironwood; foreign assets use NEAR swaps.
+
+Use an initialized `[treasury]` and an authenticated MCP endpoint (`auth = true`).
+Add this to your deployment file, replacing `research` with the endpoint name
+(`research` in the quickstart, `toolbox` in the comprehensive example):
+
+```toml
+[servers.research.swap_control]
+receive = true
+send = true
+max_send_zec = "0.05" # Optional per-send ZEC limit, including the network fee.
+```
+
+Enable `receive` and `send` independently. `max_send_zec` limits only sends and
+swaps through these tools; it does not limit managed wallet funding or other ZEC
+usage. Omit it or set it to `"none"` for no total-debit limit. Native ZEC needs no
+NEAR setup; foreign assets require the [NEAR swap settings](docs/configuration.md#direct-swap-control)
+under `[funding]`. Start or restart `serve` to expose the enabled tools.
+
+| Tool | Enabled by | What it does |
+| --- | --- | --- |
+| `x402_treazury_swap_assets` | Either flag | Search native ZEC and supported foreign assets by symbol, chain or keywords. |
+| `x402_treazury_payment_request_create` | `receive` | Create a fresh shielded ZEC receive address or a single-use foreign swap deposit request. |
+| `x402_treazury_swap_preview` | `send` | Preview an outgoing payment, exchange rate, estimated fees and applicable limits without sending funds. |
+| `x402_treazury_swap_send` | `send` | Send native ZEC or swap treasury ZEC for a specified foreign amount. |
+| `x402_treazury_swap_status` | Either flag; retained for saved requests | Check sent payments or receive requests, including current UTC time and available expiry countdowns. |
+
+Foreign payers must send the **exact requested amount**, with network fees
+additional and any required memo included. Never reuse a swap receive address:
+another payment needs a new `request_id` and fresh quote/address. Native ZEC
+addresses may be reused, and partial receipts accumulate toward the requested
+amount. Saved requests remain accessible through status after disabling new sends
+or receives. See the [direct payment and swap reference](docs/configuration.md#direct-swap-control)
+for parameters and timing details.
+
 ## Adding API Providers
 
 The [provider catalog](providers/README.md) contains reusable TOML definitions,
