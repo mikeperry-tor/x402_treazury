@@ -330,6 +330,49 @@ bytes/identity, quote deadline versus signed expiry, late provider success/refun
 disablement and independent progress. Assert no duplicate deposits, automatic
 replacement swaps, extra native signers, allocation/top-up or consumed-claim reset.
 
+### D2I — Ironwood-only application policy (user amendment)
+
+The user explicitly rejected newly added Sapling destination and historical-fund
+support, then required a findable application-wide Ironwood-only rule. The new
+native feature is unshipped and has no historical production Sapling admissions.
+Remove its positive Sapling/Orchard branches and tests instead of adding a legacy
+compatibility path. Audit the existing application as well: Ironwood is the only
+supported shielded spending/payment/receipt pool. Do not add historical Sapling or
+Orchard transfer support. Preserve raw SDK/transaction/state decoding and accepted
+journals without inventing fresh authority or erasing financial evidence.
+
+Fresh independent `combined_review` approved Orchard-only UAs (the receiver
+encoding Ironwood uses), Ironwood-only actual native receipt/payment evidence and
+SDK proposal pool validation before input ownership. The global audit found the
+public backend `SpendPolicy::shielded_pools([Ironwood])`; use it instead of the
+LightClient wrapper's unrestricted policy, preserving confirmations, input
+exclusions, SDK change strategy, serialized mutation and existing journals. No
+arbitrary height gate, additional monetary cap, new dependency checkout or fork.
+
+Remove the application LazySaplingProver/parameter parser, positive legacy-pool
+proving support and avoidable legacy address/projection logic. A parameter-free
+rejecting trait adapter is unavoidable because backend transaction APIs require
+Sapling prover type arguments; normal proposal selection must reject disallowed
+inputs/payments/change before acceptance. Pinned Zingolib's build script
+unconditionally downloads/caches and embeds Sapling parameters with no feature to
+disable that behavior. Document that exact SDK-only exception; do not introduce a
+maintained checkout or patch to claim it is absent. Keep reproducibility handling
+for inputs the unchanged SDK still consumes.
+
+Owning policy: `docs/zingo-integration.md#ironwood-only-policy`, with a direct
+AGENTS.md financial-boundary rule/link and updated wallet/configuration/CLI and
+validation guidance. Audit new and existing application Sapling/Orchard call chains,
+including actual proposal pools and absence of application parameter initialization.
+Replace positive native legacy tests with rejection tests and real Ironwood proofs.
+Reopen affected exact-SHA, complexity, compiler/Clippy and financial gates.
+
+Transparent NEAR-owned source deposits are a separate unresolved scope question:
+they were already validated before this branch and the November 6 privacy change
+explicitly retained them while disabling treasury transparent refund selection and
+RPC address discovery. The user requested evidence; Git provenance and current
+code/docs were supplied. Do not silently disable managed funding or authorize a new
+transparent wallet/scanning path while clarifying this boundary.
+
 ### G2 — Final combined implementation and correction gate
 
 Independently review the full D0–D2 change including D1N, every accumulated commit/fixup, complete
@@ -410,6 +453,7 @@ a mandatory research project or a source of artificial expiry rules.
 | D2 preliminary review | Fresh read-only `send_review` traced Store, SDK, treasury actor, source/provider, startup and MCP call chains against pinned dependency contracts. Material finding: removing NEAR incorrectly skipped accepted foreign source preparation/submission; corrected source-only scheduling and provider-only gating, covered by funded synthetic Service reopen regression. Root found optional diagnostic writes could orphan source handoff; saves are now best effort, covered by a targeted SQLite failure trigger plus real automatic submission. Native/foreign Service, actual-fee/cap, output and recovery regressions authored. No remaining preliminary production finding; final combined review and selected validation pending. Production compile probe passed (`target/direct-swap-send-compile.log`); later recovery edit requires final compiler gate. |
 | D2 exact/complexity review | Fresh read-only `send_review` and `combined_review` accepted exact `b70ac619`, evidence-only `c3c6d639`, accumulated history and complete affected call chains. `cdd00cc2` reviewed independently: parent scheduler access to child `source_action` required `pub(super)` (initial compiler E0624); worker failure messages now cover source processing as well as observation. No remaining material code finding or compelling simplification. Refreshed `target/complexity-runs/20261107T020749Z-d5f7d975` verifies all 484 current / 471 baseline blobs, lockfile/analyzer and zero exclusions. Retained warnings: serve Cog33/Cyc46 coherent worker shutdown; receiver evidence Cog31/own19 explicit three-pool matching; prepare_with_observation Cyc51→53/Cog18 native binding and optional deadline. Score-only extraction would move coherent ownership rather than remove fragility. Production compiler continuation passed; all-target Clippy and selected runtime validation pending. |
 | D2 runtime/design correction | Full production compiler/all-target `zcash-regtest` Clippy passed (`target/direct-swap-send-clippy-continuation.log`), and compatibility passed 31 tests (`target/direct-swap-send-compat.log`). Focused changed contracts passed37; the new Orchard test failed its assumption that implicit change appears in outgoing OVK notes (`target/direct-swap-send-focused.log`). Pinned backend `Sender` encrypts requested payments under external OVK and implicit change without an internal OVK for all three pools; Zingolib rescans actual bytes and Pepper reports outgoing notes only after successful OVK recovery. Fresh `combined_review` verified these contracts and approved a simplification: require exactly one positive actual outgoing payment, preserving actual receiver/value/fee and transparent-output checks. This supersedes D2 extra-output owned-change candidate matching; internal self-payment still produces one outgoing payment and owned incoming payment/change. Remove unreachable change-selection machinery and test real Sender self-payment plus an unauthorized extra-payment proposal. Correction, exact review and affected validation pending; unchanged compiler/compatibility evidence is retained only for unaffected consumers. |
+| D2I design/amendment | New user scope as above; independent global pool/input/prover audit found public SDK Ironwood selection and removable application Sapling parsing. No D2I implementation/validation claimed. Before amendment, fixed lifecycle selection completed63pass/oneforeignfixturefailure/oneisolatedhelperignore (`target/direct-swap-send-lifecycle.log`); failure is the test using EVM-only operation_recipient for a direct ZEC deposit after successful automatic broadcast. Correct against direct binding in the affected continuation. |
 | D3 | Pending final implementation/user review and documentation handoff. |
 
 ## External references to recheck
