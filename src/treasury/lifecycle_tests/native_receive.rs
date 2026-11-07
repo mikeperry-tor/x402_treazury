@@ -5,8 +5,107 @@ use serde_json::json;
 use zingo_status::confirmation_status::ConfirmationStatus;
 
 #[tokio::test]
-async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_after_reopen() {
-    let (dir, net, owner, endpoint) = funded_fixture(2).await;
+async fn native_creation_recovers_reserved_request_and_reuses_only_its_own_address() {
+    let (dir, owner) = unfunded_fixture().await;
+    let terms = json!({"asset_id":"nep141:zec.omft.near","chain":"zec","amount":"70000","refund_address":null,"request_id":"lost-reply"});
+    let reserved = owner
+        .store
+        .call({
+            let terms = terms.clone();
+            move |s| {
+                Ok(s.reserve_native("owner", "receive", "lost-reply", terms)?
+                    .0
+                    .id)
+            }
+        })
+        .await
+        .unwrap();
+    let identity = owner.status().await.unwrap().treasury_id;
+    owner.close().await.unwrap();
+    let owner = Treasury::open_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        identity,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    let store = owner.store.clone();
+    let (handle, commands) = super::super::actor::channel();
+    let stop = CancellationToken::new();
+    let actor = tokio::spawn(owner.run_commands(commands, NoNativeSpend, stop.clone()));
+    // Native creation needs neither indexer configuration nor a working bridge.
+    let service = crate::direct_swap::Service::new(
+        store.clone(),
+        handle.clone(),
+        crate::rotation::near::NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
+        serde_json::from_value(json!({})).unwrap(),
+    );
+    let config = crate::direct_swap::Config {
+        receive: true,
+        ..Default::default()
+    };
+    let create = |terms| {
+        service.invoke(
+            "owner",
+            &config,
+            "x402_treazury_payment_request_create",
+            terms,
+        )
+    };
+    let accepted = create(terms.clone()).await.unwrap();
+    assert_eq!(accepted["operation"]["id"], reserved);
+    assert_eq!(accepted["operation"]["route"], "native");
+    assert!(accepted["operation"]["quote"].is_null());
+    assert!(
+        !accepted["payment_instructions"]["recipient"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
+    let same = create(terms.clone()).await.unwrap();
+    assert_eq!(same["operation"]["id"], reserved);
+    assert_eq!(
+        same["payment_instructions"],
+        accepted["payment_instructions"]
+    );
+    let mut fresh_terms = terms;
+    fresh_terms["request_id"] = json!("fresh");
+    let fresh = create(fresh_terms).await.unwrap();
+    assert_ne!(fresh["operation"]["id"], accepted["operation"]["id"]);
+    assert_ne!(
+        fresh["payment_instructions"]["recipient"],
+        accepted["payment_instructions"]["recipient"]
+    );
+    let cached = service
+        .invoke(
+            "owner",
+            &config,
+            "x402_treazury_swap_status",
+            json!({"kind":"receive","request_id":"lost-reply"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cached["operation"]["id"], reserved);
+    assert_eq!(cached["zec_receipt"]["received_zatoshis"], 0);
+    store
+        .call(|s| {
+            assert!(s.funding_jobs()?.is_empty());
+            assert!(s.status()?.treasury_operations.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    stop.cancel();
+    drop(service);
+    drop(handle);
+    drop(store);
+    actor.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn native_receipts_survive_reopen_and_status_refreshes_spent_and_reconstructed_snapshots() {
+    let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let operation = owner
         .store
         .call(|s| {
@@ -19,32 +118,7 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         .await
         .unwrap();
     let identity = owner.status().await.unwrap().treasury_id;
-    owner.close().await.unwrap();
-    let mut owner = Treasury::open_with_network(
-        dir.path().join("state"),
-        dir.path().join("key"),
-        identity.clone(),
-        TreasuryNetwork::Synthetic,
-    )
-    .await
-    .unwrap();
-    let retry = owner
-        .store
-        .call(|s| {
-            Ok(
-                s.reserve_native("owner", "receive", "native", json!({"amount":"40000"}))?
-                    .0
-                    .id,
-            )
-        })
-        .await
-        .unwrap();
-    assert_eq!(operation, retry);
     let address = owner.direct_address(operation.clone()).await.unwrap();
-    assert_eq!(
-        owner.direct_address(operation.clone()).await.unwrap(),
-        address
-    );
     let other = owner
         .store
         .call(|s| {
@@ -128,20 +202,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         })
         .await
         .unwrap();
-    // Model a creation reply lost after reservation but before deriving its address.
-    let service_terms = json!({"asset_id":"nep141:zec.omft.near","chain":"zec","amount":"70000","refund_address":null,"request_id":"service-restart"});
-    let pending_terms = service_terms.clone();
-    let reserved_service = owner
-        .store
-        .call(move |s| {
-            Ok(
-                s.reserve_native("owner", "receive", "service-restart", pending_terms)?
-                    .0
-                    .id,
-            )
-        })
-        .await
-        .unwrap();
     owner.close().await.unwrap();
     let mut reopened = Treasury::open_with_network(
         dir.path().join("state"),
@@ -169,19 +229,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
             .treasury_operations
             .is_empty()
     );
-    let cached_service = crate::direct_swap::Service::status_only(reopened.store.clone());
-    let cached_paid = cached_service
-        .invoke(
-            "owner",
-            &crate::direct_swap::Config::default(),
-            "x402_treazury_swap_status",
-            json!({"operation_id":operation}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(cached_paid["zec_receipt"]["confirmed_zatoshis"], 50_000);
-    assert_eq!(cached_paid["zec_receipt"]["spendable_zatoshis"], 50_000);
-    drop(cached_service);
     let received_transactions = historical["notes"]
         .as_array()
         .unwrap()
@@ -216,10 +263,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         crate::rotation::near::NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
         serde_json::from_value(json!({})).unwrap(),
     );
-    let config = crate::direct_swap::Config {
-        receive: true,
-        ..Default::default()
-    };
     let spent_status = service
         .invoke(
             "owner",
@@ -232,67 +275,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
     assert_eq!(spent_status["operation"]["state"], "confirmed");
     assert_eq!(spent_status["zec_receipt"]["confirmed_zatoshis"], 50_000);
     assert_eq!(spent_status["zec_receipt"]["spendable_zatoshis"], 0);
-    let accepted = service
-        .invoke(
-            "owner",
-            &config,
-            "x402_treazury_payment_request_create",
-            service_terms.clone(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(accepted["operation"]["id"], reserved_service);
-    assert_eq!(accepted["operation"]["route"], "native");
-    assert!(accepted["operation"]["quote"].is_null());
-    let recovered_address = accepted["payment_instructions"]["recipient"]
-        .as_str()
-        .unwrap();
-    assert!(!recovered_address.is_empty());
-    let same = service
-        .invoke(
-            "owner",
-            &config,
-            "x402_treazury_payment_request_create",
-            service_terms.clone(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(same["operation"]["id"], reserved_service);
-    assert_eq!(
-        same["payment_instructions"],
-        accepted["payment_instructions"]
-    );
-    let mut fresh_terms = service_terms;
-    fresh_terms["request_id"] = json!("service-fresh");
-    let fresh = service
-        .invoke(
-            "owner",
-            &config,
-            "x402_treazury_payment_request_create",
-            fresh_terms,
-        )
-        .await
-        .unwrap();
-    assert_ne!(fresh["operation"]["id"], accepted["operation"]["id"]);
-    assert_ne!(
-        fresh["payment_instructions"]["recipient"],
-        accepted["payment_instructions"]["recipient"]
-    );
-    let empty_receipt = handle
-        .native_receipt(reserved_service.clone())
-        .await
-        .unwrap();
-    assert_eq!(empty_receipt["received_zatoshis"], 0);
-    let cached = service
-        .invoke(
-            "owner",
-            &crate::direct_swap::Config::default(),
-            "x402_treazury_swap_status",
-            json!({"kind":"receive","request_id":"service-restart"}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(cached["operation"]["id"], reserved_service);
     store
         .call(|s| {
             assert!(s.funding_jobs()?.is_empty());

@@ -775,6 +775,42 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
+    #[test]
+    fn native_recipient_requires_an_ironwood_receiver_without_transparent_receivers() {
+        let chain = zingolib::config::ChainType::Mainnet;
+        let Address::Unified(public) =
+            Address::decode(&chain, crate::rotation::near::PUBLIC_REFUND_UA).unwrap()
+        else {
+            panic!("expected public unified address fixture");
+        };
+        let encoded = |orchard, sapling, transparent| {
+            zcash_keys::address::UnifiedAddress::from_receivers(
+                orchard,
+                sapling,
+                transparent,
+                None,
+                None,
+            )
+            .unwrap()
+            .encode(&chain)
+        };
+        let Address::Transparent(transparent) =
+            Address::decode(&chain, "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F").unwrap()
+        else {
+            panic!("expected public transparent address fixture");
+        };
+        assert!(native_recipient(&chain, &encoded(public.orchard().copied(), None, None)).is_ok());
+        for recipient in [
+            Address::from(*public.sapling().unwrap()).encode(&chain),
+            encoded(None, public.sapling().copied(), None),
+            encoded(public.orchard().copied(), None, Some(transparent)),
+            Address::Transparent(transparent).encode(&chain),
+            Address::Tex([1; 20]).encode(&chain),
+        ] {
+            assert!(native_recipient(&chain, &recipient).is_err(), "{recipient}");
+        }
+    }
+
     #[tokio::test]
     async fn known_sdk_proposal_rejection_defers_without_poisoning_or_accepting_inputs() {
         let dir = tempfile::tempdir().unwrap();

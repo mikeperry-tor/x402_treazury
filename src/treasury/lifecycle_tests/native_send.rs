@@ -2,10 +2,6 @@
 use super::*;
 use crate::rotation::store::DirectSendAuthority;
 use serde_json::json;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
 
 fn native_request(id: String, recipient: String, amount: u64) -> PrepareRequest {
     PrepareRequest {
@@ -74,9 +70,8 @@ async fn fee(owner: &Treasury, recipient: &str) -> u64 {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn native_self_payment_uses_actual_total_cap_and_retains_bytes_after_cancellation_and_reopen()
-{
-    let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
+async fn native_self_payment_enforces_actual_total_cap_and_confirms() {
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let recipient = owner
         .client
         .as_ref()
@@ -109,29 +104,10 @@ async fn native_self_payment_uses_actual_total_cap_and_retains_bytes_after_cance
     let id = accept(&owner, recipient.clone(), "accepted", Some(total)).await;
     let treasury_id = owner.status().await.unwrap().treasury_id;
     let expected_identity = crate::network::IsolationId::direct_swap(&treasury_id, &id);
-    let (entered, reached) = tokio::sync::oneshot::channel();
-    let (release, wait) = std::sync::mpsc::channel();
-    let calls = Arc::new(AtomicUsize::new(0));
-    owner.calculation_control = Some(tokio::sync::Mutex::new(publication::CalculationControl {
-        entered: Some(entered),
-        before_acceptance: false,
-        release: wait,
-        calls: calls.clone(),
-        panic_calculation: false,
-        panic_facts: false,
-    }));
-    {
-        let preparation = owner.prepare(native_request(id.clone(), recipient, 50_000));
-        tokio::pin!(preparation);
-        tokio::select! {
-            result = &mut preparation => panic!("preparation returned before accepted barrier: {}",result.is_ok()),
-            result = reached => assert_eq!(result.unwrap(), id),
-        }
-    }
-    // The waiter is gone; the existing blocking owner still owns its exact inputs.
-    release.send(()).unwrap();
-    let prepared = owner.finish_calculation().await.unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let prepared = owner
+        .prepare(native_request(id.clone(), recipient, 50_000))
+        .await
+        .unwrap();
     assert_eq!(prepared.network_identity().unwrap(), expected_identity);
     assert_eq!(prepared.facts().unwrap().fee_zatoshis, actual_fee);
     assert_eq!(prepared.facts().unwrap().deadline, None);
@@ -146,29 +122,6 @@ async fn native_self_payment_uses_actual_total_cap_and_retains_bytes_after_cance
             assert!(!s.prepared_inputs(&saved)?.is_empty());
             assert!(s.funding_jobs()?.is_empty());
             assert!(s.direct_operation("owner", &saved)?.quote.is_none());
-            Ok(())
-        })
-        .await
-        .unwrap();
-    owner.close().await.unwrap();
-    let mut owner = Treasury::open_with_network(
-        dir.path().join("state"),
-        dir.path().join("key"),
-        treasury_id,
-        TreasuryNetwork::Synthetic,
-    )
-    .await
-    .unwrap();
-    owner.configure_sync(SyncSettings::new(endpoint.clone(), 2).unwrap());
-    let operation = id.clone();
-    let bytes = original.clone();
-    owner
-        .store
-        .call(move |s| {
-            let restored = PreparedTransaction::load(s, &operation)?;
-            assert_eq!(restored.bytes(), bytes);
-            assert_eq!(restored.network_identity()?, expected_identity);
-            assert_eq!(restored.facts().unwrap().deadline, None);
             Ok(())
         })
         .await
@@ -212,8 +165,8 @@ async fn native_self_payment_uses_actual_total_cap_and_retains_bytes_after_cance
 }
 
 #[tokio::test]
-async fn native_unsupported_receivers_and_unbound_work_fail_before_input_ownership() {
-    let (_dir, net, mut owner, _) = funded_fixture(2).await;
+async fn native_invalid_recipient_and_unbound_work_fail_before_input_ownership() {
+    let (_dir, mut owner) = unfunded_fixture().await;
     let native_ua = owner
         .client
         .as_ref()
@@ -223,89 +176,34 @@ async fn native_unsupported_receivers_and_unbound_work_fail_before_input_ownersh
         .as_str()
         .unwrap()
         .to_owned();
-    owner
-        .client
-        .as_mut()
-        .unwrap()
-        .generate_unified_address(ReceiverSelection::sapling_only(), zip32::AccountId::ZERO)
-        .await
-        .unwrap();
-    let sapling_ua = owner
-        .client
-        .as_ref()
-        .unwrap()
-        .unified_addresses_json()
-        .await
-        .members()
-        .find(|address| address["has_sapling"] == true && address["has_orchard"] == false)
-        .unwrap()["encoded_address"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let zcash_keys::address::Address::Unified(sapling) =
-        zcash_keys::address::Address::decode(&owner.network.chain(), &sapling_ua).unwrap()
-    else {
-        panic!("expected Sapling-only negative fixture")
-    };
-    let sapling_address = zcash_keys::address::Address::from(*sapling.sapling().unwrap())
-        .encode(&owner.network.chain());
-    let zcash_keys::address::Address::Unified(native) =
-        zcash_keys::address::Address::decode(&owner.network.chain(), &native_ua).unwrap()
-    else {
-        panic!("expected Ironwood-compatible fixture")
-    };
-    let zcash_keys::address::Address::Transparent(transparent) =
-        zcash_keys::address::Address::decode(&owner.network.chain(), DEPOSIT).unwrap()
-    else {
-        panic!("expected transparent negative fixture")
-    };
-    let mixed = zcash_keys::address::UnifiedAddress::from_receivers(
-        native.orchard().copied(),
-        None,
-        Some(transparent),
-        None,
-        None,
-    )
-    .unwrap()
-    .encode(&owner.network.chain());
-    let tex = zcash_keys::address::Address::Tex([1; 20]).encode(&owner.network.chain());
-    for recipient in [sapling_address, sapling_ua, mixed, DEPOSIT.to_owned(), tex] {
-        assert!(crate::treasury::native_recipient(&owner.network.chain(), &recipient).is_err());
+    // Binding validation must run before any indexer request. A missing sync
+    // configuration would reject for the wrong reason.
+    owner.configure_sync(SyncSettings::new("http://127.0.0.1:1".into(), 2).unwrap());
+    for (recipient, expected) in [
+        (DEPOSIT.to_owned(), "native Zcash recipient requires"),
+        (
+            native_ua,
+            "native send requires an accepted direct operation",
+        ),
+    ] {
         let id = uuid::Uuid::new_v4().to_string();
-        assert!(
-            owner
-                .prepare(native_request(id.clone(), recipient, 50_000))
-                .await
-                .is_err()
-        );
+        let error = owner
+            .prepare(native_request(id.clone(), recipient, 50_000))
+            .await
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains(expected), "{error:#}");
         owner
             .store
             .call(move |s| {
                 s.require_unstarted_preparation(&id)?;
                 assert!(!s.operation_pending(&id)?);
+                assert!(s.status()?.treasury_operations.is_empty());
+                assert!(s.funding_jobs()?.is_empty());
                 Ok(())
             })
             .await
             .unwrap();
     }
-    let id = uuid::Uuid::new_v4().to_string();
-    assert!(
-        owner
-            .prepare(native_request(id.clone(), native_ua, 50_000))
-            .await
-            .is_err(),
-        "native work needs an accepted durable direct binding"
-    );
-    owner
-        .store
-        .call(move |s| {
-            s.require_unstarted_preparation(&id)?;
-            assert!(s.status()?.treasury_operations.is_empty());
-            assert!(s.funding_jobs()?.is_empty());
-            Ok(())
-        })
-        .await
-        .unwrap();
-    assert!(net.chain.read().await.taddr_request_log().is_empty());
     owner.close().await.unwrap();
 }

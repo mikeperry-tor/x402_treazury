@@ -20,6 +20,15 @@ fixtures cover unsupported receiver forms and transparent-input shielding, with
 unchanged snapshots/journals and no RPC disclosure. All six transparent-address
 RPC adapter methods also fail locally before transport activity.
 
+Direct native sends retain actual SDK principal-plus-fee authority and one
+submission/confirmation path. The shared calculation-owner tests cover native
+cancellation and exact-byte restart. Receiver classification is socket-free;
+unfunded preparation checks the actual recipient/binding rejection before input
+ownership. Native receive creation/retry uses an unfunded owner separately from
+the actual partial/excess receipt scan. The receipt test retains successful
+actor/service refresh after spent and reconstructed SDK snapshots, including
+renewed observation demand and absence of transparent RPCs or outgoing work.
+
 The [Ironwood-only policy](../docs/zingo-integration.md#ironwood-only-policy) applies
 to new proposals, actual signed outputs and supported-capital projections.
 Cancellation, blocking calculation, failed publication, restart and expiry tests
