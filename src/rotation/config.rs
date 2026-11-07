@@ -41,7 +41,7 @@ fn confidentiality() -> String {
 fn slippage() -> u32 {
     500
 }
-fn poll() -> u64 {
+pub(crate) fn poll() -> u64 {
     5
 }
 fn deadline() -> u64 {

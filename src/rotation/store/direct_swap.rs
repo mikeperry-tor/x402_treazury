@@ -37,9 +37,19 @@ pub(crate) fn direct_operation_owners(
     })
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DirectRoute {
+    #[default]
+    Near,
+    Native,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DirectOperation {
     pub id: String,
+    #[serde(default)]
+    pub route: DirectRoute,
     pub owner: String,
     pub kind: String,
     pub request_id: String,
@@ -109,12 +119,49 @@ impl Store {
         ensure!(record.owner == owner, "direct operation owner mismatch");
         Ok(record)
     }
+    pub fn direct_request(
+        &self,
+        owner: &str,
+        kind: &str,
+        request_id: &str,
+    ) -> Result<DirectOperation> {
+        let id: String = self
+            .db
+            .query_row(
+                "SELECT id FROM direct_operations WHERE owner=?1 AND kind=?2 AND request_id=?3",
+                params![owner, kind, request_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .context("unknown direct operation")?;
+        self.direct_operation(owner, &id)
+    }
     pub fn reserve_direct(
         &mut self,
         owner: &str,
         kind: &str,
         request_id: &str,
         terms: Value,
+    ) -> Result<(DirectOperation, bool)> {
+        self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Near)
+    }
+    pub fn reserve_native(
+        &mut self,
+        owner: &str,
+        kind: &str,
+        request_id: &str,
+        terms: Value,
+    ) -> Result<(DirectOperation, bool)> {
+        native_amount(&terms)?;
+        self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Native)
+    }
+    fn reserve_direct_route(
+        &mut self,
+        owner: &str,
+        kind: &str,
+        request_id: &str,
+        terms: Value,
+        route: DirectRoute,
     ) -> Result<(DirectOperation, bool)> {
         ensure!(
             !owner.is_empty() && !request_id.is_empty(),
@@ -135,13 +182,14 @@ impl Store {
         if let Some(id) = existing {
             let record = self.direct_operation(owner, &id)?;
             ensure!(
-                record.terms == terms,
+                record.terms == terms && record.route == route,
                 "request ID already used with different terms"
             );
             return Ok((record, false));
         }
         let record = DirectOperation {
             id: Uuid::new_v4().to_string(),
+            route,
             owner: owner.into(),
             kind: kind.into(),
             request_id: request_id.into(),
@@ -149,7 +197,12 @@ impl Store {
             address: None,
             quote: None,
             status: None,
-            state: "unknown_create".into(),
+            state: if route == DirectRoute::Native {
+                "reserved"
+            } else {
+                "unknown_create"
+            }
+            .into(),
         };
         let payload = seal(
             &self.key,
@@ -166,7 +219,11 @@ impl Store {
             &serde_json::to_vec(record)?,
         )?;
         let terminal = matches!(provider_state(record), Some("FAILED" | "REFUNDED"));
-        let observe = record.kind == "receive" && record.quote.is_some() && !terminal;
+        let observe = record.kind == "receive"
+            && match record.route {
+                DirectRoute::Near => record.quote.is_some() && !terminal,
+                DirectRoute::Native => record.address.is_some() && record.state != "confirmed",
+            };
         self.db.execute(
             "UPDATE direct_operations SET payload=?2,observe_receive=?3 WHERE id=?1",
             params![record.id, payload, observe],
@@ -178,6 +235,10 @@ impl Store {
     }
     pub fn save_direct_quote(&mut self, id: &str, quote: Value) -> Result<()> {
         let mut record = self.direct_by_id(id)?;
+        ensure!(
+            record.route == DirectRoute::Near,
+            "native operations have no provider quote"
+        );
         if let Some(original) = &record.quote {
             ensure!(*original == quote, "direct operation quote is immutable");
             return Ok(());
@@ -194,6 +255,10 @@ impl Store {
     }
     pub fn save_direct_status(&mut self, id: &str, mut status: Value) -> Result<()> {
         let mut record = self.direct_by_id(id)?;
+        ensure!(
+            record.route == DirectRoute::Near,
+            "native operations have no provider status"
+        );
         ensure!(
             record.quote.is_some(),
             "direct operation has no saved quote"
@@ -219,7 +284,59 @@ impl Store {
         record.status = Some(status);
         self.save_direct(&record)
     }
-    /// Exact remote operations still awaiting a provider outcome.
+    pub fn save_native_status(&mut self, id: &str, receipt: Value) -> Result<()> {
+        let mut record = self.direct_by_id(id)?;
+        ensure!(
+            record.route == DirectRoute::Native
+                && record.kind == "receive"
+                && record.address.is_some(),
+            "native receive address is unavailable"
+        );
+        let revision = receipt
+            .get("snapshot_revision")
+            .and_then(Value::as_i64)
+            .context("native receipt snapshot revision is required")?;
+        let previous = record
+            .status
+            .as_ref()
+            .and_then(|status| status.get("receipt"));
+        if previous
+            .and_then(|receipt| receipt.get("snapshot_revision"))
+            .and_then(Value::as_i64)
+            .is_some_and(|saved| saved > revision)
+            || previous == Some(&receipt)
+        {
+            return Ok(());
+        }
+        let was_confirmed = record.state == "confirmed";
+        let confirmed = receipt
+            .get("confirmed_zatoshis")
+            .and_then(Value::as_u64)
+            .context("invalid native receipt")?;
+        record.state = if confirmed >= native_amount(&record.terms)? {
+            "confirmed"
+        } else {
+            "pending"
+        }
+        .into();
+        record.status = Some(serde_json::json!({"receipt":receipt}));
+        self.save_direct(&record)?;
+        if was_confirmed && record.state == "pending" {
+            self.direct_changes.notify_one();
+        }
+        Ok(())
+    }
+    pub(crate) fn native_receive_binding(&self, id: &str) -> Result<String> {
+        let record = self.direct_by_id(id)?;
+        ensure!(
+            record.route == DirectRoute::Native && record.kind == "receive",
+            "operation is not a native receive"
+        );
+        record
+            .address
+            .context("native receive address is unavailable")
+    }
+    /// Exact remote operations still awaiting a provider outcome, or native receipt.
     pub fn direct_pending(&self) -> Result<Vec<DirectOperation>> {
         let mut statement = self
             .db
@@ -229,11 +346,16 @@ impl Store {
             let Some(record) = self.direct_inventory_record(&id?)? else {
                 continue;
             };
-            if record.quote.is_some()
-                && !matches!(
-                    provider_state(&record),
-                    Some("SUCCESS" | "FAILED" | "REFUNDED")
-                )
+            if (record.route == DirectRoute::Native
+                && record.kind == "receive"
+                && record.address.is_some()
+                && record.state != "confirmed")
+                || (record.route == DirectRoute::Near
+                    && record.quote.is_some()
+                    && !matches!(
+                        provider_state(&record),
+                        Some("SUCCESS" | "FAILED" | "REFUNDED")
+                    ))
             {
                 records.push(record);
             }
@@ -254,6 +376,10 @@ impl Store {
             let Some(record) = self.direct_inventory_record(&id)? else {
                 continue;
             };
+            if record.route == DirectRoute::Native {
+                needed |= record.address.is_some() && record.state != "confirmed";
+                continue;
+            }
             let observed = record
                 .status
                 .as_ref()
@@ -296,13 +422,41 @@ impl Store {
         let mut record = self.direct_by_id(id)?;
         ensure!(record.address.is_none(), "direct address is immutable");
         record.address = Some(address.into());
+        let native_receive = record.route == DirectRoute::Native && record.kind == "receive";
+        if native_receive {
+            record.state = "pending".into();
+        }
         let payload = seal(
             &self.key,
             &self.direct_aad(id),
             &serde_json::to_vec(&record)?,
         )?;
-        self.save_bound_snapshot(expected, snapshot, None, None, Some((id, payload)))
+        let revision = self.save_bound_snapshot(
+            expected,
+            snapshot,
+            None,
+            None,
+            Some((id, payload, native_receive)),
+        )?;
+        if native_receive {
+            self.treasury_changes.notify_one();
+            self.direct_changes.notify_one();
+        }
+        Ok(revision)
     }
+}
+
+fn native_amount(terms: &Value) -> Result<u64> {
+    let amount: u64 = terms
+        .get("amount")
+        .and_then(Value::as_str)
+        .context("native amount is required")?
+        .parse()
+        .context("invalid native amount")?;
+    ensure!(amount > 0, "native amount must be positive");
+    zcash_protocol::value::Zatoshis::from_u64(amount)
+        .context("native amount exceeds SDK monetary range")?;
+    Ok(amount)
 }
 
 fn provider_state(record: &DirectOperation) -> Option<&str> {
@@ -645,6 +799,221 @@ mod tests {
                 .unwrap()
         );
         assert!(direct_operation_owners(&state, Some("different-treasury")).is_err());
+    }
+    #[test]
+    fn native_reservation_address_and_partial_receipt_are_durable_without_provider_quotes() {
+        let (dir, mut store) = fixture();
+        let id = store.id().to_owned();
+        let terms = json!({"amount":"40000"});
+        let (reserved, fresh) = store
+            .reserve_native("owner", "receive", "native", terms.clone())
+            .unwrap();
+        assert!(fresh);
+        assert_eq!(reserved.state, "reserved");
+        assert!(store.direct_pending().unwrap().is_empty());
+        drop(store);
+        let mut store =
+            Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+        let (resumed, fresh) = store
+            .reserve_native("owner", "receive", "native", terms.clone())
+            .unwrap();
+        assert!(!fresh);
+        assert_eq!(reserved, resumed);
+        assert!(
+            store
+                .reserve_direct("owner", "receive", "native", terms)
+                .is_err()
+        );
+        store
+            .save_direct_address(&reserved.id, "shielded-native", 1, b"native-address")
+            .unwrap();
+        assert_eq!(
+            store.native_receive_binding(&reserved.id).unwrap(),
+            "shielded-native"
+        );
+        assert_eq!(store.direct_pending().unwrap().len(), 1);
+        assert!(store.treasury_observation_needed(&[]).unwrap());
+        assert!(store.save_direct_quote(&reserved.id, json!({})).is_err());
+        store
+            .save_native_status(
+                &reserved.id,
+                json!({"confirmed_zatoshis":20000,"spendable_zatoshis":20000,"snapshot_revision":2}),
+            )
+            .unwrap();
+        assert_eq!(
+            store.direct_operation("owner", &reserved.id).unwrap().state,
+            "pending"
+        );
+        assert_eq!(store.direct_pending().unwrap().len(), 1);
+        store
+            .save_native_status(
+                &reserved.id,
+                json!({"confirmed_zatoshis":50000,"spendable_zatoshis":0,"snapshot_revision":3}),
+            )
+            .unwrap();
+        assert_eq!(
+            store.direct_operation("owner", &reserved.id).unwrap().state,
+            "confirmed"
+        );
+        assert!(store.direct_pending().unwrap().is_empty());
+        assert!(!store.treasury_observation_needed(&[]).unwrap());
+        assert!(store.funding_jobs().unwrap().is_empty());
+    }
+    #[test]
+    fn native_receipt_publication_preserves_newer_sdk_facts_and_reopens_reorg_demand() {
+        use futures_util::FutureExt;
+        let (_dir, mut store) = fixture();
+        let (op, _) = store
+            .reserve_native("owner", "receive", "ordered", json!({"amount":"40000"}))
+            .unwrap();
+        store
+            .save_direct_address(&op.id, "shielded", 1, b"address")
+            .unwrap();
+        let partial = json!({"confirmed_zatoshis":20000,"snapshot_revision":4});
+        store.save_native_status(&op.id, partial.clone()).unwrap();
+        store
+            .save_native_status(
+                &op.id,
+                json!({"confirmed_zatoshis":50000,"snapshot_revision":3}),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .direct_operation("owner", &op.id)
+                .unwrap()
+                .status
+                .unwrap()["receipt"],
+            partial
+        );
+        let paid = json!({"confirmed_zatoshis":50000,"snapshot_revision":5});
+        store.save_native_status(&op.id, paid.clone()).unwrap();
+        store.save_native_status(&op.id, partial).unwrap();
+        let record = store.direct_operation("owner", &op.id).unwrap();
+        assert_eq!(record.status.unwrap()["receipt"], paid);
+        assert_eq!(record.state, "confirmed");
+        let _ = store.direct_changes.notified().now_or_never();
+        let _ = store.treasury_changes.notified().now_or_never();
+        store
+            .save_native_status(
+                &op.id,
+                json!({"confirmed_zatoshis":0,"snapshot_revision":6}),
+            )
+            .unwrap();
+        assert_eq!(
+            store.direct_operation("owner", &op.id).unwrap().state,
+            "pending"
+        );
+        assert!(store.direct_receive_needed().unwrap());
+        assert!(store.direct_changes.notified().now_or_never().is_some());
+        assert!(store.treasury_changes.notified().now_or_never().is_some());
+    }
+    #[test]
+    fn corrupt_direct_payload_cannot_stop_valid_sibling_observation_or_release_its_record() {
+        let (_dir, mut store) = fixture();
+        let (bad, _) = store
+            .reserve_native("owner", "receive", "corrupt", json!({"amount":"1"}))
+            .unwrap();
+        store
+            .save_direct_address(&bad.id, "bad-address", 1, b"bad-address")
+            .unwrap();
+        let (valid, _) = store
+            .reserve_native("owner", "receive", "valid", json!({"amount":"1"}))
+            .unwrap();
+        store
+            .save_direct_address(&valid.id, "valid-address", 2, b"valid-address")
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE direct_operations SET payload=X'0102' WHERE id=?1",
+                [&bad.id],
+            )
+            .unwrap();
+        let revision = store.snapshot().unwrap().0;
+        assert_eq!(
+            store
+                .direct_pending()
+                .unwrap()
+                .iter()
+                .map(|record| &record.id)
+                .collect::<Vec<_>>(),
+            vec![&valid.id]
+        );
+        assert!(store.direct_receive_needed().unwrap());
+        assert!(store.treasury_observation_needed(&[]).unwrap());
+        assert!(
+            store
+                .direct_operation("owner", &bad.id)
+                .unwrap_err()
+                .is::<DirectDecodeFailure>()
+        );
+        store
+            .save_native_status(
+                &valid.id,
+                json!({"confirmed_zatoshis":1,"snapshot_revision":revision}),
+            )
+            .unwrap();
+        assert!(store.direct_pending().unwrap().is_empty());
+        assert!(!store.direct_receive_needed().unwrap());
+        assert!(!store.treasury_observation_needed(&[]).unwrap());
+        let (payload, observe): (Vec<u8>, bool) = store
+            .db
+            .query_row(
+                "SELECT payload,observe_receive FROM direct_operations WHERE id=?1",
+                [&bad.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(payload, vec![1, 2]);
+        assert!(observe);
+        assert_eq!(store.snapshot().unwrap().0, revision);
+        assert!(store.funding_jobs().unwrap().is_empty());
+        assert!(!store.status().unwrap().outgoing_pending);
+    }
+    #[test]
+    fn caller_request_lookup_is_scoped_to_owner_and_operation_kind() {
+        let (_dir, mut store) = fixture();
+        let (receive, _) = store
+            .reserve_native("owner", "receive", "same", json!({"amount":"1"}))
+            .unwrap();
+        let (send, _) = store
+            .reserve_native("owner", "send", "same", json!({"amount":"1"}))
+            .unwrap();
+        let (other, _) = store
+            .reserve_native("other", "receive", "same", json!({"amount":"2"}))
+            .unwrap();
+        assert_eq!(
+            store.direct_request("owner", "receive", "same").unwrap().id,
+            receive.id
+        );
+        assert_eq!(
+            store.direct_request("owner", "send", "same").unwrap().id,
+            send.id
+        );
+        assert_eq!(
+            store.direct_request("other", "receive", "same").unwrap().id,
+            other.id
+        );
+        assert!(store.direct_request("unknown", "receive", "same").is_err());
+        assert!(store.direct_request("other", "send", "same").is_err());
+    }
+    #[test]
+    fn old_direct_records_default_to_near_and_native_amounts_are_sdk_bounded() {
+        let (_dir, mut store) = fixture();
+        let (operation, _) = store
+            .reserve_direct("owner", "receive", "legacy", json!({}))
+            .unwrap();
+        let mut historical = serde_json::to_value(operation).unwrap();
+        historical.as_object_mut().unwrap().remove("route");
+        let decoded: DirectOperation = serde_json::from_value(historical).unwrap();
+        assert_eq!(decoded.route, DirectRoute::Near);
+        for amount in ["0", "2100000000000001", "18446744073709551616", "-1"] {
+            assert!(
+                store
+                    .reserve_native("owner", "receive", amount, json!({"amount":amount}))
+                    .is_err()
+            );
+        }
     }
     #[test]
     fn old_schema23_without_extension_opens_and_backups_preserve_records() {

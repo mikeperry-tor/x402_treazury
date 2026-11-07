@@ -875,14 +875,16 @@ automatic NEAR funding is controlled by `funding.auto_fund`.
 
 ## Direct swap control
 
-A listener can opt into receiving foreign assets as shielded ZEC. This capability
-requires `auth = true`, configured `[treasury]` and `[funding]`, but no Base wallet,
-source registration or Base RPC configuration:
+A listener can opt into native shielded Zcash payments and foreign-asset swaps.
+Native work requires `auth = true` and configured `[treasury]`, with no NEAR
+credentials, `[funding]`, Base wallet, provider registration or Base RPC prerequisite.
+Foreign routes use the optional `[funding]` NEAR settings:
 
 ```toml
 [servers.toolbox.swap_control]
 receive = true
 send = false
+# max_send_zec = "0.05" # Optional per-send total debit; omit or use "none" for no limit.
 ```
 
 Omitting `swap_control` grants no new financial authority. Persisted operations
@@ -905,7 +907,19 @@ direct work while saved status remains available from the Store. Base outages
 affect managed Base service independently of direct receive availability.
 
 `payment_request_create` accepts a full source asset ID, its chain, an atomic decimal
-amount, a payer-owned source refund address and a caller request ID. It fixes the
+amount and a caller request ID. Native ZEC uses asset ID `nep141:zec.omft.near` and
+chain `zec`; this selects the embedded treasury directly, without any NEAR request.
+Omit `refund_address` for native ZEC. Each new ID derives a fresh shielded-only
+Sapling/Orchard UA; retries return the same saved address and can safely resume an
+address-less reservation. Native receipts report actual SDK receiver matches,
+confirmations, historical spent funds and separate snapshot spendability. Partial
+receipts remain pending until confirmed funds reach the requested amount. Public
+status refreshes derived native evidence from a newer available SDK snapshot
+without requesting another scan. `receipt_matches_saved_snapshot` distinguishes
+current saved evidence from fallback history when the SDK is unavailable. No
+transparent-address lookup RPC is enabled.
+
+Foreign assets additionally require a payer-owned source refund address. It fixes the
 source amount; ZEC output and fees remain estimates/minimums until settlement.
 Use the returned deposit address and mandatory memo exactly once for that request.
 Stellar sources use the service's required `MEMO` deposit mode; other supported
@@ -914,11 +928,23 @@ A repeated request ID with identical terms returns the same saved operation;
 conflicting terms fail. An uncertain quote-creation response is retained without
 automatically creating another payment request. A fresh ID is a separate request.
 
-`swap_assets` lists current service metadata, not guaranteed route liquidity.
-`swap_status` reports the saved exact quote, provider outcome, and separate SDK
-wallet observations; attributable receipt can remain unknown. A local deadline
+`swap_assets` always includes native ZEC locally; foreign metadata reports its
+availability/completeness explicitly, without promising route liquidity. Missing
+or invalid NEAR configuration affects foreign work while native work remains
+available. Optional native polling uses the positive configured funding cadence
+or the existing default when absent; it grants no automatic managed funding or
+shielding authority.
+`swap_status` accepts either `operation_id` or `kind` plus the original
+`request_id`, allowing recovery after a lost response with admissions disabled. It
+reports native SDK receipts, or the saved exact foreign quote/provider outcome and
+separate SDK wallet observations; attributable receipt can remain unknown. A local deadline
 does not prove nonpayment, revoke disclosed instructions, or manufacture a provider
 expiry. Disabled admissions and process restart preserve these bindings.
+
+Native request addresses and receipts are independent of NEAR configuration.
+Direct sends have a separate optional `max_send_zec` total-debit preference; it
+never changes managed funding, shielding or other ZEC usage. Quoted `"none"` and
+omission mean unlimited; TOML has no null literal. No new fee preference is added.
 
 The host owns 1Click credentials configured through the existing `[funding]` NEAR
 credential environment names. Direct quotes retain provider-added fee metadata

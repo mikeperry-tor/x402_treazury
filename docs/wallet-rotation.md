@@ -39,7 +39,8 @@ wallet saves or SDK quick-send helpers to bypass this owner and journal path.
 
 ## Direct receive ownership
 
-Opt-in [direct swap control](configuration.md#direct-swap-control) stores invoices
+Opt-in [direct payment control](configuration.md#direct-swap-control) stores native
+ZEC requests and foreign invoices
 independently of managed Base wallets and initial funding claims. Its encrypted
 operation binds the authenticated listener, original caller request ID and terms,
 shielded receiver, exact provider quote, deposit address/memo and deadlines. A
@@ -53,6 +54,22 @@ original authenticated owner can retrieve its status.
 Concurrent duplicate acceptance returns one operation;
 a lost creation response grants no automatic replacement quote.
 
+Native requests have no provider quote or deadline. Each new request derives a
+fresh all-shielded UA through the same serialized SDK and snapshot transaction.
+Repeating native inputs resumes an address-less reservation or returns its
+original receiver; it never creates another address under the same request ID.
+SDK receipt evidence matches actual Sapling/Orchard/Ironwood note receivers,
+retains historical confirmed receipts after spending, and reports current snapshot
+spendability separately. Partial confirmed receipts remain pending; native scan
+demand ends when confirmed receipts reach the requested amount. Public status
+refreshes from already available newer SDK snapshots, including after completion,
+without forcing another scan. Older derived receipt publications cannot overwrite
+newer SDK revisions. A recorded reorg can restore the original invoice's incoming
+observation demand without creating a payment, allocation or outgoing authority. The receiver's
+amount does not authorize any treasury spend. No NEAR call or transparent-address
+RPC participates in native receiving. Status accepts the original kind/request ID
+when a response containing the operation UUID was lost.
+
 Provider status owns the swap outcome. SDK scanning owns received ZEC and current
 spendability, independently of optional receipt attribution. Disclosed unsettled
 receive requests request ordinary treasury scans at the existing consensus cadence;
@@ -62,6 +79,11 @@ scan checkpoint records its existing snapshot revision; a post-success scan must
 start after the snapshot revision observed when SUCCESS was saved. Progress or
 completion of an already-running scan cannot satisfy that demand. Late delivery and
 under/excess deposits retain provider facts without creating local expiry outcomes.
+A corrupt direct-operation payload is isolated during pending/demand inventory;
+its original row and obligations remain retained, while valid sibling operations
+and the shared treasury owner continue. SQL/Store capability failures retain their
+existing scope. Direct lookup of an unreadable operation still fails explicitly.
+
 No receive operation spends ZEC, allocates a Base wallet, reopens a claim, or enables
 transparent-address discovery.
 

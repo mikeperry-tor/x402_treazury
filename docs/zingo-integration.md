@@ -393,6 +393,14 @@ refund UAs on our native-ZEC/Base-USDC route. These establish format compatibili
 not funded settlement. Refund receiver validation is separate from the
 transparent-only source-deposit contract; mixed UAs may select a transparent path.
 
+Native direct receiving uses the same persisted shielded derivation, with a fresh
+UA per new request ID and no NEAR transport. Native receipt inspection matches
+actual note receiver components before projection and reuses the SDK's saved
+confirmations, spent links and selection evidence. Historical received funds and
+snapshot spendability are separate facts; no local balance replica or transparent
+address discovery is introduced. Shielded compact-block scanning remains the only
+incoming-address discovery path.
+
 Direct receive invoices use the same all-shielded derivation and encrypted snapshot
 boundary, with their own persisted operation bindings. A public unfunded reverse
 Base-USDC-to-ZEC dry quote accepted the shielded-only UA on 2026-11-07. The pinned

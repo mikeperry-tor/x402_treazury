@@ -74,7 +74,10 @@ fn direct_only_listener_requires_treasury_and_auth_but_no_base_wallet() {
 fn direct_only_inventory_and_validation_reject_unknown_authority() {
     let mut config = config();
     config.funding = None;
-    assert!(format!("{:#}", config.validate().err().unwrap()).contains("requires [funding]"));
+    assert!(
+        config.validate().is_ok(),
+        "native receiving needs no funding settings"
+    );
     let listener = config.servers.get_mut("control").unwrap();
     listener.swap_control.as_mut().unwrap().send = true;
     config.funding = Some(serde_json::from_value(serde_json::json!({})).unwrap());
@@ -151,7 +154,7 @@ async fn saved_status_with_unavailable_sdk(receive: bool) {
         .await
         .unwrap();
     assert_eq!(status["operation"]["terms"]["original"], true);
-    let error = service.invoke("one", &crate::direct_swap::Config {receive:true,send:false}, "x402_treazury_payment_request_create", serde_json::json!({"asset_id":"source","chain":"source_chain","amount":"1","refund_address":"refund","request_id":"denied"})).await.unwrap_err();
+    let error = service.invoke("one", &crate::direct_swap::Config {receive:true,send:false,..Default::default()}, "x402_treazury_payment_request_create", serde_json::json!({"asset_id":"source","chain":"source_chain","amount":"1","refund_address":"refund","request_id":"denied"})).await.unwrap_err();
     assert!(error.to_string().contains("unavailable"));
     let store = initialized.runtime.store().unwrap();
     let created = store
@@ -385,6 +388,96 @@ fn recovery_config(listener: &str, auth: bool, funding: bool) -> String {
         },
         if auth { "bearer_token_env='TOKEN'" } else { "" }
     )
+}
+
+#[tokio::test]
+async fn native_sdk_remains_available_without_usable_near_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = crate::treasury::Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+    owner.close().await.unwrap();
+    super::initialization_tests::write_spec(dir.path());
+    let path = dir.path().join("deployment.toml");
+    let mut env = BTreeMap::from([
+        ("TOKEN".into(), "fixture".into()),
+        ("STATIC".into(), format!("{:064x}", 1)),
+        ("INDEXER".into(), "http://127.0.0.1:1".into()),
+        ("SUBMIT".into(), "http://127.0.0.1:1".into()),
+    ]);
+    for near in [
+        None,
+        Some("near_api_key_env='MISSING'"),
+        Some("near_api_key_env='BAD'"),
+        Some("slippage_bps=1001"),
+        Some("poll_seconds=99"),
+        Some("poll_seconds=0"),
+    ] {
+        let mut text = recovery_config("native", true, near.is_some());
+        if let Some(settings) = near {
+            text = text.replace("auto_fund=false", &format!("auto_fund=false\n{settings}"));
+        }
+        text.push_str("\n[servers.native.swap_control]\nreceive=true\n");
+        env.insert("BAD".into(), "malformed\nheader".into());
+        std::fs::write(&path, text).unwrap();
+        let deployment = Deployment::load(&path).await.unwrap();
+        let initialized = deployment
+            .initialize_wallets_mode(&env, Default::default(), None, &BTreeSet::new(), true)
+            .await
+            .unwrap();
+        assert!(matches!(initialized.runtime, ManagedRuntime::Direct(_)));
+        assert!(!initialized.runtime.funding_available());
+        let service = initialized.runtime.direct_service().unwrap();
+        let assets = service
+            .invoke(
+                "native",
+                &crate::direct_swap::Config {
+                    receive: true,
+                    ..Default::default()
+                },
+                "x402_treazury_swap_assets",
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(assets["complete"], false);
+        assert_eq!(assets["foreign_assets_available"], false);
+        assert!(
+            assets["assets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|asset| asset["assetId"] == crate::direct_swap::route::ZEC)
+        );
+        let store = initialized.runtime.store().unwrap();
+        assert!(store.call(|s| s.funding_jobs()).await.unwrap().is_empty());
+        drop(store);
+        drop(service);
+        initialized.shutdown().await.unwrap();
+    }
+    // Ordinary serving may retain mixed managed declarations without their Base
+    // funding configuration; native capability does not grant funding authority.
+    let mut text = super::initialization_tests::managed_config();
+    text = text.replace(
+        "[funding]\nauto_fund=false\nbase_rpc_url_env='BASE'\nbase_rpc_fallback_url_envs=[]\n",
+        "",
+    );
+    text.push_str(STATIC_LISTENER);
+    text.push_str("\n[servers.one.swap_control]\nreceive=true\n");
+    std::fs::write(&path, text).unwrap();
+    let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+        .await
+        .unwrap();
+    let initialized = deployment
+        .initialize_wallets_mode(&env, Default::default(), None, &BTreeSet::new(), true)
+        .await
+        .unwrap();
+    assert!(matches!(initialized.runtime, ManagedRuntime::Direct(_)));
+    assert!(initialized.wallets.contains_key("static"));
+    assert!(initialized.managed_pools.is_empty());
+    assert!(!initialized.runtime.funding_available());
+    let store = initialized.runtime.store().unwrap();
+    assert!(store.call(|s| s.funding_jobs()).await.unwrap().is_empty());
+    drop(store);
+    initialized.shutdown().await.unwrap();
 }
 
 #[tokio::test]

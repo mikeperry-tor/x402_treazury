@@ -178,6 +178,7 @@ async fn receive_service_http_actor_and_store_preserve_one_invoice_across_duplic
     let config = Config {
         receive: true,
         send: false,
+        ..Default::default()
     };
     let arguments = json!({"asset_id":"foreign:usd","chain":"foreign","amount":"5000000","refund_address":"payer-refund","request_id":"one-invoice"});
     let first_service = service.clone();

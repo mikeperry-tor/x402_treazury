@@ -463,6 +463,21 @@ impl Treasury {
         self.healthy = true;
         Ok(address)
     }
+    pub async fn native_receipt(&mut self, id: String) -> Result<serde_json::Value> {
+        self.drain_calculation().await;
+        ensure!(self.healthy, "treasury requires reopen");
+        let address = self
+            .store
+            .call(move |s| s.native_receive_binding(&id))
+            .await?;
+        let client = self.client.as_ref().context("treasury unavailable")?;
+        let wallet = client.wallet().read().await;
+        Ok(serde_json::to_value(notes::native_receipt(
+            &wallet,
+            &address,
+            self.revision,
+        )?)?)
+    }
     /// Declare configured capacity without allocating wallets or funding work.
     pub async fn ensure_capacity_group(
         &self,

@@ -40,8 +40,16 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
         crate::direct_swap::Config {
             receive: true,
             send: false,
+            ..Default::default()
         },
     ));
+    assert!(
+        server
+            .get_info()
+            .instructions
+            .unwrap()
+            .contains("Native receiving needs no swap provider")
+    );
     assert!(
         server
             .management_tools()
@@ -74,6 +82,23 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
     )
     .unwrap();
     assert_ne!(search["items"][0]["tool_id"], next["items"][0]["tool_id"]);
+    let native: Value = serde_json::from_str(
+        &server
+            .invoke(
+                "x402_treazury_tools_search",
+                json!({"query":"Zcash receive"}).as_object().unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        native["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["tool_id"] == "x402_treazury_payment_request_create")
+    );
     server.direct_swap.as_mut().unwrap().1.receive = false;
     let disabled: Value = serde_json::from_str(
         &server

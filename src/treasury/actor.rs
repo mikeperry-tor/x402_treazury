@@ -21,6 +21,7 @@ enum Command {
     ),
     Refund(String, oneshot::Sender<Result<String>>),
     DirectAddress(String, oneshot::Sender<Result<String>>),
+    NativeReceipt(String, oneshot::Sender<Result<serde_json::Value>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(
         Box<PrepareRequest>,
@@ -65,6 +66,9 @@ impl TreasuryHandle {
     }
     pub async fn direct_address(&self, id: String) -> Result<String> {
         self.call(|reply| Command::DirectAddress(id, reply)).await
+    }
+    pub async fn native_receipt(&self, id: String) -> Result<serde_json::Value> {
+        self.call(|reply| Command::NativeReceipt(id, reply)).await
     }
     pub async fn sync(&self) -> Result<()> {
         self.call(Command::Sync).await
@@ -230,6 +234,7 @@ impl Treasury {
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::DirectAddress(id, reply) => { let _ = reply.send(self.direct_address(id).await); }
+                        Command::NativeReceipt(id, reply) => { let _ = reply.send(self.native_receipt(id).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, base, reply) => {
                             let operation = request.operation_id.clone();
@@ -298,6 +303,7 @@ impl Treasury {
 // Observe the real command boundary without substituting a fake FundingBackend.
 #[cfg(test)]
 pub(crate) enum ObservedCommand {
+    NativeReceipt(String),
     RecoverFunding(String, u32, bool),
     Prepare(PrepareRequest),
     Submit(String, bool),
@@ -310,6 +316,10 @@ impl TreasuryCommands {
     }
     pub(crate) async fn test_observe(&mut self) -> ObservedCommand {
         match self.receiver.recv().await.expect("command channel closed") {
+            Command::NativeReceipt(id, reply) => {
+                let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
+                ObservedCommand::NativeReceipt(id)
+            }
             Command::RecoverFunding(id, limit, allow_new_attempt, reply) => {
                 let _ = reply.send(Ok(super::recovery::RecoveryObservation {
                     outcome: super::recovery::RecoveryOutcome::Waiting(

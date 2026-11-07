@@ -17,8 +17,8 @@ pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod test_vfs;
 mod treasury_observation;
-pub use direct_swap::DirectOperation;
 pub(crate) use direct_swap::direct_operation_owners;
+pub use direct_swap::{DirectOperation, DirectRoute};
 mod treasury_reads;
 #[cfg(test)]
 mod worker_tests;
@@ -538,7 +538,7 @@ impl Store {
         bytes: &[u8],
         observation: Option<SyncObservation>,
         refund: Option<(&str, &str)>,
-        direct: Option<(&str, Vec<u8>)>,
+        direct: Option<(&str, Vec<u8>, bool)>,
     ) -> Result<i64> {
         ensure!(!bytes.is_empty(), "empty snapshot");
         let revision = expected
@@ -569,11 +569,11 @@ impl Store {
                 params![job, encrypted],
             )?;
         }
-        if let Some((id, payload)) = direct {
+        if let Some((id, payload, observe_receive)) = direct {
             ensure!(
                 tx.execute(
-                    "UPDATE direct_operations SET payload=?2 WHERE id=?1",
-                    params![id, payload]
+                    "UPDATE direct_operations SET payload=?2,observe_receive=?3 WHERE id=?1",
+                    params![id, payload, observe_receive]
                 )? == 1,
                 "unknown direct operation"
             );

@@ -245,8 +245,12 @@ impl ServerHandler for Server {
         if self.discover_on_demand {
             instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a limit (default 25) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
         }
-        if self.direct_swap.is_some() {
-            instructions.push_str("\n\nDirect swap tools receive payments into the configured Zcash treasury. Keep returned payment instructions and operation IDs; status reports provider progress separately from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
+        if let Some((_, config)) = &self.direct_swap {
+            if config.receive {
+                instructions.push_str("\n\nReceive native ZEC directly at a shielded Zcash address, or request a foreign asset payment converted into this treasury. Native receiving needs no swap provider. Keep payment instructions and operation IDs; status separates provider progress from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
+            } else {
+                instructions.push_str("\n\nInspect saved Zcash payment requests with swap_status. Status separates provider progress from Zcash receipt and spendability; disclosed payment routes may receive late payments.");
+            }
         }
         if self.catalog.publication_failed() {
             instructions.push_str("\n\nDeferred catalog publication has stopped. Sources listed as PENDING are unavailable until restart.");

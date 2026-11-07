@@ -6,6 +6,7 @@ mod direct_receive;
 mod discovery;
 mod indexer_recovery;
 mod indexer_regression;
+mod native_receive;
 mod refund_addresses;
 mod sapling;
 mod scan_bounds;

@@ -324,10 +324,7 @@ impl MetaConfig {
                     self.treasury.is_some(),
                     "server {name}: swap_control requires [treasury]"
                 );
-                ensure!(
-                    !control.enabled() || self.funding.is_some(),
-                    "server {name}: enabled swap_control requires [funding]"
-                );
+                control.validate()?;
                 ensure!(
                     !control.send,
                     "server {name}: direct sending is not available yet"
@@ -351,12 +348,11 @@ impl MetaConfig {
             } else {
                 treasury.validate()?;
             }
-            let funding = self
-                .funding
-                .as_ref()
-                .context("managed profiles require [funding]")?;
             if !shared_only {
-                funding.validate()?;
+                self.funding
+                    .as_ref()
+                    .context("managed profiles require [funding]")?
+                    .validate()?;
             }
         } else {
             if let Some(t) = &self.treasury {
@@ -368,12 +364,9 @@ impl MetaConfig {
             }
             if let Some(f) = &self.funding
                 && !shared_only
+                && !self.servers.values().any(|s| s.swap_control.is_some())
             {
-                if self.servers.values().any(|s| s.swap_control.is_some()) {
-                    f.validate_swap()?;
-                } else {
-                    f.validate()?;
-                }
+                f.validate()?;
             }
         }
         Ok(())
@@ -967,17 +960,39 @@ impl Deployment {
         &self,
         env: &BTreeMap<String, String>,
     ) -> Result<FundingConnections> {
-        use crate::rotation::base::secure_endpoint;
+        Ok(FundingConnections {
+            treasury: self.treasury_connection_preflight(env)?,
+            near: self.near_connection_preflight(env)?,
+        })
+    }
+    fn treasury_connection_preflight(
+        &self,
+        env: &BTreeMap<String, String>,
+    ) -> Result<TreasuryConnections> {
         let t = self.config.treasury.as_ref().unwrap();
-        let f = self.config.funding.as_ref().unwrap();
         t.validate()?;
-        f.validate_swap()?;
-        // Resolve source dependencies before any funding worker starts.
         let sync_settings = crate::treasury::SyncSettings::new(
             t.indexer_endpoint(|name| env.get(name).cloned())?,
             t.confirmations,
         )?;
-        secure_endpoint(&t.submission_endpoint(|name| env.get(name).cloned())?)?;
+        let sender = crate::treasury::submission::GrpcSubmission::new(
+            t.submission_endpoint(|name| env.get(name).cloned())?,
+            t.indexer_endpoint(|name| env.get(name).cloned())?,
+        )?;
+        Ok(TreasuryConnections {
+            max_network_fee: crate::rotation::config::zatoshis(&t.max_funding_transaction_fee_zec)?
+                as u64,
+            sync_settings,
+            sender,
+        })
+    }
+    fn near_connection_preflight(&self, env: &BTreeMap<String, String>) -> Result<NearSource> {
+        let f = self
+            .config
+            .funding
+            .as_ref()
+            .context("NEAR swap configuration unavailable")?;
+        f.validate_swap()?;
         let key = f
             .near_api_key_env
             .as_deref()
@@ -988,27 +1003,36 @@ impl Deployment {
             .as_deref()
             .map(|name| required_secret(env, name))
             .transpose()?;
-        // Presence and header syntax are source-capability prerequisites.
-        let near =
+        let client =
             crate::rotation::near::NearClient::with_session(key.as_deref(), session.as_deref())?;
-        let sender = crate::treasury::submission::GrpcSubmission::new(
-            t.submission_endpoint(|name| env.get(name).cloned())?,
-            t.indexer_endpoint(|name| env.get(name).cloned())?,
-        )?;
-        Ok(FundingConnections {
-            max_network_fee: crate::rotation::config::zatoshis(&t.max_funding_transaction_fee_zec)?
-                as u64,
-            sync_settings,
-            near,
-            sender,
+        Ok(NearSource {
+            client,
+            funding: f.clone(),
         })
+    }
+    fn optional_near_source(&self, env: &BTreeMap<String, String>) -> Option<NearSource> {
+        self.config.funding.as_ref()?;
+        match self.near_connection_preflight(env) {
+            Ok(source) => Some(source),
+            Err(error) => {
+                tracing::warn!(
+                    category = "funding_configuration_unavailable", reason = %error,
+                    "NEAR swap configuration unavailable; foreign asset swaps and managed funding are unavailable; native Zcash tools do not require NEAR; correct NEAR configuration and restart"
+                );
+                None
+            }
+        }
     }
     fn base_connection_preflight(
         &self,
         env: &BTreeMap<String, String>,
     ) -> Result<crate::rotation::base::BaseRpc> {
         use crate::rotation::base::BaseRpc;
-        let f = self.config.funding.as_ref().unwrap();
+        let f = self
+            .config
+            .funding
+            .as_ref()
+            .context("Base configuration unavailable")?;
         f.validate_base()?;
         let urls = f.base_rpc_urls(|name| env.get(name).cloned())?;
         if self.config.network.mode == crate::network::Mode::Direct {
@@ -1055,19 +1079,19 @@ impl Deployment {
         }) {
             use crate::rotation::manager::ManagedPool;
             let t = self.config.treasury.as_ref().unwrap();
-            let f = self.config.funding.as_ref().unwrap();
             let mut capabilities = self.wallet_setup(env, true, allow_store_only).await?;
             let store = capabilities.store();
             let setup: Result<()> = async {
+            let auto_fund = self.config.funding.as_ref().is_some_and(|f| f.auto_fund) && capabilities.funding_available();
             if let ManagedSetup::Treasury(treasury) = &mut capabilities {
                 treasury.owner.configure_sync(treasury.source.sync_settings.clone());
-                if f.auto_fund {
+                if auto_fund {
                     treasury.owner.configure_automatic_shielding(crate::rotation::config::zatoshis(
                         &t.max_refund_shielding_fee_zec,
                     )? as u64);
                 }
             }
-            install_funding_restrictions(&store, restriction, f.auto_fund && capabilities.funding_available())
+            install_funding_restrictions(&store, restriction, auto_fund)
                 .await?;
             let managed = self
                 .wallet_resolution
@@ -1136,16 +1160,19 @@ impl Deployment {
                         mut owner,
                         base,
                         source,
+                        near,
                     } = *treasury;
                     let (handle, commands) = crate::treasury::actor::channel();
-                    let direct = self.direct_service(store.clone(), handle.clone(), &source);
-                    let Some(base) = base else {
+                    let direct =
+                        self.direct_service(store.clone(), handle.clone(), &source, near.as_ref());
+                    let (Some(base), Some(near)) = (base, near) else {
                         runtime = ManagedRuntime::Direct(Box::new(DirectRuntime {
                             owner,
                             commands,
                             sender: source.sender,
-                            service: direct
-                                .expect("SDK opened without Base only for direct swap work"),
+                            service: direct.expect(
+                                "SDK opened without managed funding only for direct Zcash work",
+                            ),
                         }));
                         return Ok(InitializedWallets {
                             wallets,
@@ -1153,12 +1180,16 @@ impl Deployment {
                             managed_pools,
                         });
                     };
+                    let NearSource {
+                        client: near,
+                        funding: f,
+                    } = near;
                     tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
                         "{}", if f.auto_fund { "Automatic wallet funding enabled; new transfers use spendable treasury funds" } else { "Automatic wallet funding disabled; new funding transfers are paused" });
                     let backend = crate::rotation::funding::Backend {
                         treasury: handle,
                         store: store.clone(),
-                        near: source.near,
+                        near,
                         base,
                         wallets: self.wallet_resolution.wallets.clone(),
                         funding: f.clone(),
@@ -1188,12 +1219,15 @@ impl Deployment {
                 ManagedSetup::StoreOnly { owner, .. } => ManagedRuntime::StoreOnly(owner),
                 ManagedSetup::Treasury(treasury) => {
                     let TreasurySetup {
-                        mut owner, source, ..
+                        mut owner,
+                        source,
+                        near,
+                        ..
                     } = *treasury;
                     owner.configure_sync(source.sync_settings.clone());
                     let (handle, commands) = crate::treasury::actor::channel();
                     let service = self
-                        .direct_service(owner.store_handle(), handle, &source)
+                        .direct_service(owner.store_handle(), handle, &source, near.as_ref())
                         .unwrap();
                     ManagedRuntime::Direct(Box::new(DirectRuntime {
                         owner,
@@ -1224,11 +1258,15 @@ impl Deployment {
             .values()
             .any(|s| s.swap_control.as_ref().is_some_and(|c| c.enabled()));
         if !best_effort && (with_base || direct_admission) {
-            let (source, base) = if with_base {
+            let (source, near, base) = if with_base {
                 let (source, base) = self.managed_connection_preflight(env)?;
-                (source, Some(base))
+                (source.treasury, Some(source.near), Some(base))
             } else {
-                (self.funding_connection_preflight(env)?, None)
+                (
+                    self.treasury_connection_preflight(env)?,
+                    self.optional_near_source(env),
+                    None,
+                )
             };
             let owner = crate::treasury::Treasury::open(
                 t.state_dir.clone(),
@@ -1240,6 +1278,7 @@ impl Deployment {
                 owner,
                 base,
                 source,
+                near,
             })));
         }
         let shared = crate::treasury::Treasury::open_shared_state(
@@ -1263,15 +1302,19 @@ impl Deployment {
         } else {
             None
         };
-        if (base.is_none() && !self.direct_required()) || self.config.funding.is_none() {
+        if base.is_none() && !self.direct_required() {
             return Ok(self.store_only_setup(shared, base));
         }
-        let source = match self.funding_connection_preflight(env) {
+        let near = self.optional_near_source(env);
+        if near.is_none() && !self.direct_required() {
+            return Ok(self.store_only_setup(shared, base));
+        }
+        let source = match self.treasury_connection_preflight(env) {
             Ok(source) => source,
-            Err(_) => {
+            Err(error) => {
                 tracing::warn!(
-                    category = "funding_configuration_unavailable",
-                    "Treasury source configuration unavailable; new funding and direct swaps are unavailable; existing Base payments and saved status remain available; correct source configuration and restart"
+                    category = "funding_configuration_unavailable", reason = %error,
+                    "Treasury connection configuration unavailable; new funding and Zcash operations are unavailable; independent Base payments and saved status remain available; correct treasury connections and restart"
                 );
                 return Ok(self.store_only_setup(shared, base));
             }
@@ -1282,6 +1325,7 @@ impl Deployment {
                     owner: *owner,
                     base,
                     source,
+                    near,
                 })))
             }
             crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
@@ -1315,16 +1359,28 @@ impl Deployment {
         &self,
         store: crate::rotation::store::StoreHandle,
         treasury: crate::treasury::actor::TreasuryHandle,
-        source: &FundingConnections,
+        source: &TreasuryConnections,
+        near: Option<&NearSource>,
     ) -> Option<crate::direct_swap::Service> {
-        self.direct_required().then(|| {
-            crate::direct_swap::Service::new(
+        self.direct_required().then(|| match near {
+            Some(near) => crate::direct_swap::Service::new(
                 store,
                 treasury,
-                source.near.clone(),
-                self.config.funding.as_ref().unwrap().clone(),
+                near.client.clone(),
+                near.funding.clone(),
                 source.max_network_fee,
-            )
+            ),
+            None => crate::direct_swap::Service::native(
+                store,
+                treasury,
+                source.max_network_fee,
+                self.config
+                    .funding
+                    .as_ref()
+                    .map(|f| f.poll_seconds)
+                    .filter(|seconds| *seconds > 0)
+                    .unwrap_or_else(crate::rotation::config::poll),
+            ),
         })
     }
 
@@ -1973,10 +2029,17 @@ struct BoundListeners {
 }
 
 struct FundingConnections {
+    treasury: TreasuryConnections,
+    near: NearSource,
+}
+struct TreasuryConnections {
     max_network_fee: u64,
     sync_settings: crate::treasury::SyncSettings,
-    near: crate::rotation::near::NearClient,
     sender: crate::treasury::submission::GrpcSubmission,
+}
+struct NearSource {
+    client: crate::rotation::near::NearClient,
+    funding: FundingConfig,
 }
 
 struct StoreOnlyOwner {
@@ -2012,7 +2075,8 @@ enum ManagedSetup {
 struct TreasurySetup {
     owner: crate::treasury::Treasury,
     base: Option<crate::rotation::base::BaseRpc>,
-    source: FundingConnections,
+    source: TreasuryConnections,
+    near: Option<NearSource>,
 }
 impl ManagedSetup {
     fn store(&self) -> crate::rotation::store::StoreHandle {
@@ -2028,7 +2092,7 @@ impl ManagedSetup {
         }
     }
     fn funding_available(&self) -> bool {
-        matches!(self, Self::Treasury(t) if t.base.is_some())
+        matches!(self, Self::Treasury(t) if t.base.is_some() && t.near.is_some())
     }
     async fn close(self) -> Result<()> {
         match self {

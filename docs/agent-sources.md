@@ -425,6 +425,9 @@ not removed by API filters.
 Direct financial control has separate listener capabilities under
 [`swap_control`](configuration.md#direct-swap-control). Its first-party asset,
 payment-request and status tools share advertising, search and dispatch policy.
+Native ZEC requests use fresh shielded receivers without NEAR; foreign routes use
+the host's optional NEAR capability. Status can recover an operation by original
+kind/request ID after a lost response.
 They require no provider registration and cannot select another listener owner or
 treasury. Disabling admission retains owned status; API filters do not confer
 financial authority.

@@ -81,6 +81,82 @@ pub(crate) fn inspect_notes(
     Ok(result)
 }
 
+#[derive(Serialize)]
+pub(crate) struct NativeReceipt {
+    received_zatoshis: u64,
+    confirmed_zatoshis: u64,
+    spendable_zatoshis: Option<u64>,
+    snapshot_revision: i64,
+    sdk_scanned_height: Option<u32>,
+    sdk_min_confirmations: u32,
+    spendability_limitations: [&'static str; 2],
+    spendability_unavailable_reason: Option<&'static str>,
+    notes: Vec<NoteEvidence>,
+}
+
+/// Match the actual SDK note receiver, independently of sender memo metadata.
+pub(crate) fn native_receipt(
+    wallet: &LightWallet,
+    address: &str,
+    revision: i64,
+) -> Result<NativeReceipt> {
+    use zcash_keys::address::Address;
+    let chain = wallet.chain_type();
+    let bound = Address::decode(&chain, address).context("invalid native receiver")?;
+    ensure!(
+        match &bound {
+            Address::Sapling(_) => true,
+            Address::Unified(ua) =>
+                ua.transparent().is_none() && (ua.sapling().is_some() || ua.orchard().is_some()),
+            _ => false,
+        },
+        "native receiver must be shielded"
+    );
+    let inspection = evidence_for_receiver(wallet, None, Some(&bound))?;
+    let mut received = 0u64;
+    let mut confirmed = 0u64;
+    let mut spendable = inspection
+        .spendability_unavailable_reason
+        .is_none()
+        .then_some(0u64);
+    for note in &inspection.notes {
+        if note.transaction.status != "failed" {
+            received = received
+                .checked_add(note.value_zatoshis)
+                .context("native receipt amount overflow")?;
+        }
+        if note.transaction.status == "confirmed"
+            && note
+                .transaction
+                .saved_confirmations
+                .is_some_and(|count| count >= inspection.sdk_min_confirmations)
+        {
+            confirmed = confirmed
+                .checked_add(note.value_zatoshis)
+                .context("native receipt amount overflow")?;
+        }
+        if note.sdk_spendable_at_snapshot == Some(true) {
+            spendable = spendable
+                .map(|sum| {
+                    sum.checked_add(note.value_zatoshis)
+                        .context("native spendable amount overflow")
+                })
+                .transpose()?;
+        }
+    }
+    Ok(NativeReceipt {
+        received_zatoshis: received,
+        confirmed_zatoshis: confirmed,
+        spendable_zatoshis: spendable,
+        snapshot_revision: revision,
+        sdk_scanned_height: inspection.sdk_scanned_height,
+        sdk_min_confirmations: inspection.sdk_min_confirmations,
+        spendability_limitations: inspection.spendability_limitations,
+        spendability_unavailable_reason: inspection.spendability_unavailable_reason,
+        notes: inspection.notes,
+    })
+}
+
 struct Selection {
     notes: Option<BTreeSet<OutputRef>>,
     target_height: Option<u32>,
@@ -155,6 +231,14 @@ fn selection(wallet: &LightWallet) -> Selection {
 }
 
 fn evidence(wallet: &LightWallet, filter: Option<&str>) -> Result<NotesInspection> {
+    evidence_for_receiver(wallet, filter, None)
+}
+fn evidence_for_receiver(
+    wallet: &LightWallet,
+    filter: Option<&str>,
+    receiver: Option<&zcash_keys::address::Address>,
+) -> Result<NotesInspection> {
+    use zcash_keys::address::Address;
     ensure!(
         wallet
             .unified_key_store
@@ -166,7 +250,12 @@ fn evidence(wallet: &LightWallet, filter: Option<&str>) -> Result<NotesInspectio
     let mut notes = Vec::new();
     for transaction in wallet.wallet_transactions.values() {
         for note in transaction.sapling_notes() {
-            if included(note, filter) {
+            let matches = receiver.is_none_or(|address| match address {
+                Address::Sapling(expected) => expected.as_ref() == &note.note().recipient(),
+                Address::Unified(expected) => expected.sapling() == Some(&note.note().recipient()),
+                _ => false,
+            });
+            if matches && included(note, filter) {
                 let receiver =
                     zcash_keys::address::Address::from(note.note().recipient()).encode(&chain);
                 notes.push(note_evidence(
@@ -180,7 +269,11 @@ fn evidence(wallet: &LightWallet, filter: Option<&str>) -> Result<NotesInspectio
             }
         }
         for note in transaction.orchard_notes() {
-            if included(note, filter) {
+            let matches = receiver.is_none_or(|address| match address {
+                Address::Unified(expected) => expected.orchard() == Some(&note.note().recipient()),
+                _ => false,
+            });
+            if matches && included(note, filter) {
                 let receiver = zcash_keys::address::UnifiedAddress::from_receivers(
                     Some(note.note().recipient()),
                     None,
@@ -201,7 +294,11 @@ fn evidence(wallet: &LightWallet, filter: Option<&str>) -> Result<NotesInspectio
             }
         }
         for note in transaction.ironwood_notes() {
-            if included(note, filter) {
+            let matches = receiver.is_none_or(|address| match address {
+                Address::Unified(expected) => expected.orchard() == Some(&note.note().recipient()),
+                _ => false,
+            });
+            if matches && included(note, filter) {
                 // Ironwood shares the Orchard address receiver, not its pool identity.
                 let receiver = zcash_keys::address::UnifiedAddress::from_receivers(
                     Some(note.note().recipient()),
@@ -608,6 +705,72 @@ mod tests {
                 zcash_keys::address::Address::from(received.note().recipient())
                     .encode(&wallet.chain_type())
             );
+        }
+
+        #[test]
+        fn native_receipts_use_actual_receivers_and_retain_historical_spent_notes() {
+            let mut wallet = funded();
+            let sapling = wallet
+                .wallet_transactions
+                .values()
+                .flat_map(|tx| tx.sapling_notes())
+                .next()
+                .unwrap()
+                .note()
+                .recipient();
+            let orchard = wallet
+                .wallet_transactions
+                .values()
+                .flat_map(|tx| tx.orchard_notes())
+                .next()
+                .unwrap()
+                .note()
+                .recipient();
+            let address = zcash_keys::address::UnifiedAddress::from_receivers(
+                Some(orchard),
+                Some(sapling),
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .encode(&wallet.chain_type());
+            let before = native_receipt(&wallet, &address, 4).unwrap();
+            assert_eq!(before.received_zatoshis, 225_000);
+            assert_eq!(before.confirmed_zatoshis, 225_000);
+            assert_eq!(before.spendable_zatoshis, Some(220_000));
+            assert_eq!(before.notes.len(), 4);
+            let spent = TxId::from_bytes([91; 32]);
+            for transaction in wallet.wallet_transactions.values_mut() {
+                for note in transaction.sapling_notes_mut() {
+                    note.set_spending_transaction(Some(spent));
+                }
+                for note in transaction.orchard_notes_mut() {
+                    note.set_spending_transaction(Some(spent));
+                }
+                for note in transaction.ironwood_notes_mut() {
+                    note.set_spending_transaction(Some(spent));
+                }
+            }
+            wallet.wallet_transactions.insert(
+                spent,
+                WalletTransaction::new_for_test(spent, ConfirmationStatus::Confirmed(25.into())),
+            );
+            let historical = native_receipt(&wallet, &address, 5).unwrap();
+            assert_eq!(historical.received_zatoshis, 225_000);
+            assert_eq!(historical.confirmed_zatoshis, 225_000);
+            assert_eq!(historical.spendable_zatoshis, Some(0));
+            assert!(
+                historical
+                    .notes
+                    .iter()
+                    .all(|note| note.spend_status == "spent")
+            );
+            let sapling_only =
+                zcash_keys::address::Address::from(sapling).encode(&wallet.chain_type());
+            let sapling_receipt = native_receipt(&wallet, &sapling_only, 5).unwrap();
+            assert_eq!(sapling_receipt.confirmed_zatoshis, 50_000);
+            assert_eq!(sapling_receipt.notes.len(), 1);
         }
 
         #[test]
