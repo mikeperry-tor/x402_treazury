@@ -292,6 +292,7 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
         tor::confinement::profile(
             task.policy
                 .socks_endpoint
+                .as_ref()
                 .context("SOCKS endpoint missing")?
                 .port(),
             &[],

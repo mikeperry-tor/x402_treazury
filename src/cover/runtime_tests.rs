@@ -114,7 +114,7 @@ async fn paid_fixture() {
     .await;
     let context = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap()

@@ -206,7 +206,9 @@ as your web browsing traffic.
 
 For a dedicated daemon, use a listener such as `SocksPort 127.0.0.1:9050
 IsolateSOCKSAuth` and change `network.socks_endpoint` in your local deployment
-file. That same file controls initialization, synchronization and serving.
+file. The endpoint accepts any IP literal or network name, so a Docker service
+such as `tor:9050` works. That same file controls initialization, synchronization
+and serving.
 Keep Tor running throughout.
 
 ### 2. Create the treasury

@@ -1321,7 +1321,7 @@ async fn tor_unsigned_retry_child() {
     .await;
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         connect_timeout_seconds: Some(1),
         ..Default::default()
     })
@@ -2248,7 +2248,7 @@ async fn prior_wallet_liability_relay_child() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             cover_traffic_enabled: Some(false),
             ..Default::default()
         })

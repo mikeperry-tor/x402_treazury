@@ -539,7 +539,7 @@ async fn public_transport_child() {
     .await;
     let context = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         connect_timeout_seconds: Some(1),
         ..Default::default()
     })
@@ -1603,7 +1603,7 @@ async fn directory_payment_fixture() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             cover_traffic_enabled: Some(false),
             ..Default::default()
         })

@@ -144,7 +144,17 @@ async fn supervise(state: &Path, m: &Manifest, allow: bool, prepare_only: bool) 
     };
     let config: MetaConfig = toml::from_str(std::str::from_utf8(&files::read(&m.deployment)?)?)?;
     let policy: NetworkPolicy = config.network;
-    let socks = policy.socks_endpoint.context("SOCKS endpoint missing")?;
+    let socks: std::net::SocketAddr = policy
+        .socks_endpoint
+        .as_ref()
+        .context("SOCKS endpoint missing")?
+        .to_string()
+        .parse()
+        .context("owned Tor qualification requires a literal SOCKS endpoint")?;
+    ensure!(
+        socks.ip().is_loopback(),
+        "owned Tor qualification requires a loopback SOCKS endpoint"
+    );
     let ports: Vec<_> = config.servers.values().map(|s| s.listen.port()).collect();
     let profile_text = confinement::profile(socks.port(), &ports)?;
     files::directory(&m.evidence_dir)

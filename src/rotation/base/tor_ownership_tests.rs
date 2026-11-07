@@ -239,7 +239,7 @@ async fn tor_base_ownership_child() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(_proxy.address),
+            socks_endpoint: Some(_proxy.address.into()),
             ..Default::default()
         })
         .unwrap()

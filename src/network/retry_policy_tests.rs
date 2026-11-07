@@ -171,7 +171,7 @@ impl Running {
         )
         .await;
         let mut policy = tor_policy(retries);
-        policy.socks_endpoint = Some(socks.address);
+        policy.socks_endpoint = Some(socks.address.into());
         let network = NetworkContext::new(policy)
             .unwrap()
             .with_test_root(crate::test_tls::CA);

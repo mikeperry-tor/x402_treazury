@@ -104,7 +104,7 @@ async fn run() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             cover_traffic_enabled: Some(true),
             cover_limits: Limits {
                 max_requests_per_window: 4096,

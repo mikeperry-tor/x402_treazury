@@ -6,7 +6,7 @@ use x402_treazury::network::{IsolationId, Mode, NetworkContext, NetworkPolicy, S
 fn policy(proxy: &Socks) -> NetworkPolicy {
     NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         connect_timeout_seconds: Some(1),
         ..Default::default()
     }
@@ -70,10 +70,37 @@ fn deterministic_tokens_and_strict_policy() {
         .validate()
         .is_err()
     );
+    for endpoint in [
+        "1.1.1.1:9150",
+        "[2001:db8::1]:9150",
+        "tor:9150",
+        "tor.local:9050",
+    ] {
+        let policy = NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(endpoint.parse().unwrap()),
+            ..Default::default()
+        };
+        policy.validate().unwrap();
+        assert_eq!(policy.inspection()["socks_endpoint"], endpoint);
+    }
+    for endpoint in ["127.0.0.1:0", "tor", "tor:", "", "tor:70000", "a/b:9150"] {
+        assert!(
+            endpoint
+                .parse::<x402_treazury::network::SocksEndpoint>()
+                .is_err(),
+            "{endpoint}"
+        );
+    }
     assert!(
         NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some("1.1.1.1:9150".parse().unwrap()),
+            socks_endpoint: Some(
+                "127.0.0.1:0"
+                    .parse::<std::net::SocketAddr>()
+                    .unwrap()
+                    .into()
+            ),
             ..Default::default()
         }
         .validate()
@@ -118,6 +145,42 @@ async fn http_remote_dns_credentials_reuse_and_separation() {
         );
     }
     assert_ne!(records[0].password, records[1].password);
+    server.abort();
+}
+#[tokio::test]
+async fn network_name_socks_endpoint_resolves_and_connects() {
+    let (address, server) = origin().await;
+    let proxy = Socks::start(
+        BTreeMap::from([("service.invalid".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let context = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(
+            format!("localhost:{}", proxy.address.port())
+                .parse()
+                .unwrap(),
+        ),
+        connect_timeout_seconds: Some(2),
+        ..Default::default()
+    })
+    .unwrap();
+    let id = IsolationId::evm("0x0000000000000000000000000000000000000003").unwrap();
+    let url = "http://service.invalid/";
+    assert_eq!(
+        context
+            .http(&id, url, Duration::from_secs(2))
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "ok"
+    );
     server.abort();
 }
 #[tokio::test]
@@ -777,7 +840,7 @@ async fn grpc_reconnect_uses_connection_budget_before_response_inactivity() {
     });
     let context = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy_address),
+        socks_endpoint: Some(proxy_address.into()),
         connect_timeout_seconds: Some(5),
         read_timeout_seconds: Some(1),
         ..Default::default()
@@ -846,7 +909,7 @@ async fn grpc_stream_capacity_stall_is_bounded_before_dispatch() {
         .await;
         let context = NetworkContext::new(NetworkPolicy {
             mode: if tor { Mode::Tor } else { Mode::Direct },
-            socks_endpoint: tor.then_some(socks.address),
+            socks_endpoint: tor.then_some(socks.address.into()),
             connect_timeout_seconds: Some(1),
             read_timeout_seconds: Some(1),
             ..Default::default()

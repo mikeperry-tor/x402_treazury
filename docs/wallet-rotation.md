@@ -1147,7 +1147,7 @@ rechecks all bound pools together after each wake. It adds no observation or
 financial authority and stops after its single announcement or serving shutdown.
 
 In Tor mode, finite serving startup discovery retains its captured work while the
-configured local SOCKS port is unreachable. A shared TCP-only check reports the
+configured SOCKS endpoint is unreachable. A shared TCP-only check reports the
 endpoint and retries every five seconds until reachable; it then ends and the
 normal finite passes proceed. This does not verify Tor bootstrap, add recurring
 idle discovery or reset an existing wallet/treasury observation cooldown.

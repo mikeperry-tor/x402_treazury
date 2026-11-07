@@ -4,7 +4,7 @@ use tokio::net::TcpListener;
 fn tor_context(endpoint: std::net::SocketAddr) -> NetworkContext {
     NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(endpoint),
+        socks_endpoint: Some(endpoint.into()),
         ..Default::default()
     })
     .unwrap()

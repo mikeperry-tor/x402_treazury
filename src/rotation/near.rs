@@ -1103,7 +1103,7 @@ mod tests {
         .await;
         crate::network::install(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             ..Default::default()
         })
         .unwrap();

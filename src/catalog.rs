@@ -119,7 +119,7 @@ pub struct Config {
     pub cache_revision: Option<String>,
     #[serde(skip)]
     pub relay_fallback: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
-    /// Only deferred serving discovery waits for its local SOCKS prerequisite.
+    /// Only deferred serving discovery waits for its SOCKS prerequisite.
     #[serde(skip)]
     #[doc(hidden)]
     pub wait_for_startup_socks: bool,

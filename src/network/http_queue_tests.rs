@@ -58,7 +58,7 @@ async fn queued_timeout_and_cancellation_never_transmit_headers_or_body() {
         .await;
         let context = NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             cover_traffic_enabled: Some(false),
             ..Default::default()
         })
@@ -150,7 +150,7 @@ async fn empty_http2_data_frames_do_not_renew_response_inactivity() {
     .await;
     let context = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         cover_traffic_enabled: Some(false),
         ..Default::default()
     })

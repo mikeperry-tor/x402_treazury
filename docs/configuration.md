@@ -1536,11 +1536,12 @@ cannot choose transport.
 `config show` reports effective settings without reading keys or contacting Tor.
 Offline wallet inspection, backup and explicit-birthday init remain offline.
 
-The SOCKS endpoint must be a literal loopback IP and nonzero port. Run Tor Browser
-or a Tor daemon on that endpoint; 9150 is an example, not an auto-discovered port.
+The SOCKS endpoint is a nonzero `host:port` where the host may be any IP literal
+or network name, including a Docker service name. Run Tor Browser or a Tor daemon
+on that endpoint; 9150 is an example, not an auto-discovered port.
 If that port is unreachable during ordinary serving startup, an ERROR names the
 configured SOCKS endpoint, with a reminder on the next failed probe after each
-minute while startup discovery is waiting. Finite startup discovery retries the local
+minute while startup discovery is waiting. Finite startup discovery retries the
 TCP connection every five seconds, then resumes automatically without a restart.
 Ready listeners, fresh cached catalogs and independent financial work remain
 available. This checks TCP reachability only, not Tor bootstrap or destination

@@ -634,7 +634,7 @@ spec="nonexistent.json"
     let context =
         x402_treazury::network::NetworkContext::new(x402_treazury::network::NetworkPolicy {
             mode: x402_treazury::network::Mode::Tor,
-            socks_endpoint: Some(proxy_address),
+            socks_endpoint: Some(proxy_address.into()),
             ..Default::default()
         })
         .unwrap();

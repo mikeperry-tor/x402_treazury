@@ -128,7 +128,7 @@ async fn tor_base_inactivity_child() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             read_timeout_seconds: Some(1),
             ..Default::default()
         })

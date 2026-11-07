@@ -1855,7 +1855,7 @@ async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_e
     }
     std::fs::write(
         dir.path().join("invalid.toml"),
-        "[network]\nmode='tor'\nsocks_endpoint='1.1.1.1:9150'\n",
+        "[network]\nmode='tor'\nsocks_endpoint='tor:0'\n",
     )
     .unwrap();
     for command in [
@@ -1877,7 +1877,7 @@ async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_e
         ]);
         assert!(
             bad(run(dir.path(), &args, &[]).await)
-                .contains("SOCKS endpoint must be a literal loopback")
+                .contains("SOCKS endpoint must be an IP literal or network name")
         );
     }
     for mut args in [

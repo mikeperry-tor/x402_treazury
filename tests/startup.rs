@@ -343,7 +343,7 @@ async fn tor_catalog_child() {
     .await;
     let policy = NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     };
     network::install_context(

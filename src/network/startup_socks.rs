@@ -1,11 +1,11 @@
-//! Startup-only local connectivity discovery, independent of financial authority.
+//! Startup-only connectivity discovery, independent of financial authority.
 use super::*;
 
 const RETRY: Duration = Duration::from_secs(5);
 const ERROR_REPEAT: Duration = Duration::from_secs(60);
 
 impl NetworkContext {
-    /// Keep finite serving discovery pending until its local Tor prerequisite exists.
+    /// Keep finite serving discovery pending until its Tor prerequisite exists.
     /// This is one TCP observation, not a Tor bootstrap check or a permanent monitor.
     /// Drop the future with its startup owner; no detached task or HTTP replay exists.
     pub(crate) async fn wait_for_startup_socks(&self) {
@@ -14,7 +14,11 @@ impl NetworkContext {
         }
         self.startup_socks
             .get_or_init(|| async {
-                let endpoint = self.policy.socks_endpoint.expect("validated Tor policy");
+                let endpoint = self
+                    .policy
+                    .socks_endpoint
+                    .as_ref()
+                    .expect("validated Tor policy");
                 let mut last_error = None::<tokio::time::Instant>;
                 loop {
                     let reason = match self.connect_startup_socks(endpoint).await {

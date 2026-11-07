@@ -401,7 +401,7 @@ mod tests {
         drop(reserved);
         crate::network::install(crate::network::NetworkPolicy {
             mode: crate::network::Mode::Tor,
-            socks_endpoint: Some(endpoint),
+            socks_endpoint: Some(endpoint.into()),
             connect_timeout_seconds: Some(1),
             cover_traffic_enabled: Some(false),
             ..Default::default()

@@ -233,7 +233,7 @@ async fn fallback_diagnostics_fixture() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             tor_isolation_retries: Some(0),
             cover_traffic_enabled: Some(false),
             ..Default::default()

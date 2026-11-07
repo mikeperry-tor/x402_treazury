@@ -47,7 +47,7 @@ fn only_proven_local_refusal_is_permanent() {
 fn context(address: SocketAddr) -> NetworkContext {
     NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(address),
+        socks_endpoint: Some(address.into()),
         connect_timeout_seconds: Some(1),
         cover_traffic_enabled: Some(false),
         ..Default::default()

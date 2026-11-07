@@ -87,7 +87,17 @@ impl Tor {
             !port.try_exists()? && !cookie.try_exists()?,
             "Tor control artifacts already exist; refusing stale ownership"
         );
-        let socks = policy.socks_endpoint.context("SOCKS endpoint missing")?;
+        let socks: std::net::SocketAddr = policy
+            .socks_endpoint
+            .as_ref()
+            .context("SOCKS endpoint missing")?
+            .to_string()
+            .parse()
+            .context("owned Tor requires a literal SOCKS endpoint")?;
+        ensure!(
+            socks.ip().is_loopback(),
+            "owned Tor requires a loopback SOCKS endpoint"
+        );
         let args = [
             "-f".into(),
             config.to_string_lossy().into_owned(),
@@ -383,7 +393,7 @@ exec {} --exact tor::owned::tests::fake_tor --ignored --nocapture
         drop(listener);
         let policy = NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks),
+            socks_endpoint: Some(socks.into()),
             ..Default::default()
         };
         let data = root.join("persistent");

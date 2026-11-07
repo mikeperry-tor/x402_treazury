@@ -645,11 +645,14 @@ async fn fixture(mode: &str) {
     let attempts = if tor { retries.unwrap_or(2) + 1 } else { 1 };
     let mut network = NetworkContext::new(NetworkPolicy {
         mode: if tor { Mode::Tor } else { Mode::Direct },
-        socks_endpoint: tor.then_some(if mode == "tor-local-refused" {
-            refused_address
-        } else {
-            proxy.address
-        }),
+        socks_endpoint: tor.then_some(
+            if mode == "tor-local-refused" {
+                refused_address
+            } else {
+                proxy.address
+            }
+            .into(),
+        ),
         tor_isolation_retries: retries,
         cover_traffic_enabled: Some(false),
         ..Default::default()

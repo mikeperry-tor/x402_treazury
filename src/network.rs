@@ -51,6 +51,100 @@ pub enum SocksAuth {
     TorExtended,
     Legacy,
 }
+/// A SOCKS proxy endpoint: any IP literal or network name with a nonzero port.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct SocksEndpoint {
+    host: String,
+    port: u16,
+}
+impl SocksEndpoint {
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+impl std::fmt::Display for SocksEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.host.contains(':') {
+            write!(f, "[{}]:{}", self.host, self.port)
+        } else {
+            write!(f, "{}:{}", self.host, self.port)
+        }
+    }
+}
+impl std::str::FromStr for SocksEndpoint {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        let value = value.trim();
+        let invalid = || {
+            anyhow::anyhow!(
+                "SOCKS endpoint must be an IP literal or network name with a nonzero port"
+            )
+        };
+        ensure!(
+            !value.is_empty()
+                && !value.bytes().any(|byte| {
+                    byte.is_ascii_whitespace() || matches!(byte, b'/' | b'?' | b'#' | b'@' | b'\\')
+                }),
+            invalid()
+        );
+        let (host, port) = if let Ok(address) = value.parse::<SocketAddr>() {
+            (address.ip().to_string(), address.port())
+        } else if let Some((host, port)) = value
+            .strip_prefix('[')
+            .and_then(|value| value.split_once("]:"))
+        {
+            ensure!(host.parse::<std::net::Ipv6Addr>().is_ok(), invalid());
+            (
+                host.to_string(),
+                port.parse::<u16>().map_err(|_| invalid())?,
+            )
+        } else {
+            let (host, port) = value.rsplit_once(':').ok_or_else(invalid)?;
+            ensure!(!host.contains(':'), invalid());
+            (
+                host.to_string(),
+                port.parse::<u16>().map_err(|_| invalid())?,
+            )
+        };
+        ensure!(
+            !host.is_empty()
+                && host.len() <= 253
+                && (host.parse::<std::net::IpAddr>().is_ok()
+                    || host.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_')
+                    })),
+            invalid()
+        );
+        ensure!(port != 0, invalid());
+        Ok(Self { host, port })
+    }
+}
+impl TryFrom<String> for SocksEndpoint {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self> {
+        value.parse()
+    }
+}
+impl From<SocksEndpoint> for String {
+    fn from(value: SocksEndpoint) -> Self {
+        value.to_string()
+    }
+}
+impl From<SocketAddr> for SocksEndpoint {
+    fn from(value: SocketAddr) -> Self {
+        Self {
+            host: value.ip().to_string(),
+            port: value.port(),
+        }
+    }
+}
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkPolicy {
@@ -60,7 +154,7 @@ pub struct NetworkPolicy {
     pub cover_limits: crate::cover::Limits,
     #[serde(default)]
     pub mode: Mode,
-    pub socks_endpoint: Option<SocketAddr>,
+    pub socks_endpoint: Option<SocksEndpoint>,
     pub isolation_namespace: Option<String>,
     pub socks_auth: Option<SocksAuth>,
     pub connect_timeout_seconds: Option<u64>,
@@ -94,10 +188,11 @@ impl NetworkPolicy {
         } else {
             let endpoint = self
                 .socks_endpoint
+                .as_ref()
                 .context("network.socks_endpoint is required in Tor mode")?;
             ensure!(
-                endpoint.ip().is_loopback() && endpoint.port() != 0,
-                "SOCKS endpoint must be a literal loopback address and nonzero port"
+                endpoint.port() != 0,
+                "SOCKS endpoint must be an IP literal or network name with a nonzero port"
             );
             let namespace = self.namespace();
             ensure!(
@@ -357,10 +452,10 @@ pub struct NetworkContext {
 }
 impl NetworkContext {
     /// Local startup prerequisite only; no destination or SOCKS credentials cross it.
-    async fn connect_startup_socks(&self, endpoint: SocketAddr) -> std::io::Result<()> {
+    async fn connect_startup_socks(&self, endpoint: &SocksEndpoint) -> std::io::Result<()> {
         tokio::time::timeout(
             self.policy.connect_timeout(),
-            tokio::net::TcpStream::connect(endpoint),
+            tokio::net::TcpStream::connect((endpoint.host(), endpoint.port())),
         )
         .await
         .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?
@@ -654,9 +749,13 @@ impl NetworkContext {
         }
         if self.policy.mode == Mode::Tor {
             let (user, pass) = self.credentials(&scope);
+            let endpoint = self
+                .policy
+                .socks_endpoint
+                .as_ref()
+                .context("SOCKS endpoint missing")?;
             let proxy =
-                reqwest::Proxy::all(format!("socks5h://{}", self.policy.socks_endpoint.unwrap()))?
-                    .basic_auth(&user, &pass);
+                reqwest::Proxy::all(format!("socks5h://{endpoint}"))?.basic_auth(&user, &pass);
             builder = builder.proxy(proxy);
         }
         let client = builder
@@ -938,13 +1037,14 @@ impl NetworkContext {
             let proxy = self
                 .policy
                 .socks_endpoint
+                .as_ref()
                 .context("SOCKS endpoint missing")?;
             let (user, pass) = self.credentials(id);
             let mut tcp = hyper_util::client::legacy::connect::HttpConnector::new();
             tcp.enforce_http(false);
             let proxy_uri = format!("http://{proxy}")
                 .parse()
-                .expect("literal SOCKS endpoint");
+                .context("invalid SOCKS endpoint")?;
             let connector =
                 hyper_util::client::legacy::connect::proxy::SocksV5::new(proxy_uri, tcp)
                     .with_auth(user, pass)

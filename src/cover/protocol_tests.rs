@@ -93,7 +93,7 @@ async fn run() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             cover_traffic_enabled: Some(true),
             ..Default::default()
         })
@@ -262,7 +262,7 @@ async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
     .await;
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         cover_traffic_enabled: Some(true),
         ..Default::default()
     })

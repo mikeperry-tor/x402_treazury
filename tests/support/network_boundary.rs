@@ -117,7 +117,7 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
     .await;
     let policy = NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         connect_timeout_seconds: Some(1),
         ..Default::default()
     };
@@ -233,7 +233,7 @@ async fn socks_failures_never_reach_a_direct_http_or_grpc_target() {
         let proxy = Socks::start(BTreeMap::new(), fault).await;
         let ctx = NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             connect_timeout_seconds: Some(1),
             ..Default::default()
         })
@@ -299,7 +299,7 @@ async fn interrupted_http_body_is_not_retried() {
     .await;
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     })
     .unwrap();
@@ -366,7 +366,7 @@ async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable(
     let ctx = Arc::new(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             ..Default::default()
         })
         .unwrap(),

@@ -129,7 +129,7 @@ async fn directory_relay_fixture() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             cover_traffic_enabled: Some(false),
             ..Default::default()
         })

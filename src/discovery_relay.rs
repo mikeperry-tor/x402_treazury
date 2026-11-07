@@ -1360,7 +1360,7 @@ pub(crate) mod tests {
             .await;
             let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
                 mode: crate::network::Mode::Tor,
-                socks_endpoint: Some(_socks.address),
+                socks_endpoint: Some(_socks.address.into()),
                 ..Default::default()
             })
             .unwrap()

@@ -19,7 +19,7 @@ async fn fallback_retains_payer_credentials_remote_dns_and_no_direct_egress() {
     .await;
     network::install(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     })
     .unwrap();

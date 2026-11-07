@@ -93,7 +93,7 @@ async fn unrepresentable_retry_after_blocks_origin_and_relay_without_blocking_ot
     let context = Arc::new(
         network::NetworkContext::new(network::NetworkPolicy {
             mode: network::Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             ..Default::default()
         })
         .unwrap()

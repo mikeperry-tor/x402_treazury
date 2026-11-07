@@ -2036,7 +2036,7 @@ async fn promotion_identity_child() {
     .await;
     install_network(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     });
     for method in ["GET", "POST"] {

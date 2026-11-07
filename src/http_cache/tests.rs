@@ -1239,7 +1239,7 @@ async fn unfollowed_catalog_redirects_consume_complete_json_without_retries_or_d
                     .await;
                     let network = NetworkContext::new(NetworkPolicy {
                         mode: mode.clone(),
-                        socks_endpoint: (mode == Mode::Tor).then_some(socks.address),
+                        socks_endpoint: (mode == Mode::Tor).then_some(socks.address.into()),
                         ..Default::default()
                     })
                     .unwrap()
@@ -1357,7 +1357,7 @@ async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or
     .await;
     let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap()
@@ -1497,7 +1497,7 @@ async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or
     // Untrusted TLS remains rejected on all three fresh-scope attempts.
     let untrusted_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap();
@@ -1550,7 +1550,7 @@ async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or
     .await;
     let bad_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
-        socks_endpoint: Some(bad_socks.address),
+        socks_endpoint: Some(bad_socks.address.into()),
         ..Default::default()
     })
     .unwrap()
@@ -1569,7 +1569,7 @@ async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or
     tokio::task::yield_now().await;
     let closed_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
-        socks_endpoint: Some(closed_addr),
+        socks_endpoint: Some(closed_addr.into()),
         ..Default::default()
     })
     .unwrap()
@@ -1656,7 +1656,7 @@ async fn static_catalog_proven_local_proxy_refusal_never_schedules_paid_fallback
     drop(socket);
     let network = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
-        socks_endpoint: Some(endpoint),
+        socks_endpoint: Some(endpoint.into()),
         ..Default::default()
     })
     .unwrap();

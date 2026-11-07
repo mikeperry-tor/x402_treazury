@@ -42,7 +42,7 @@ async fn dns_socks_and_tls_do_not_consume_header_inactivity() {
             .await;
             let mut context = NetworkContext::new(NetworkPolicy {
                 mode: mode.clone(),
-                socks_endpoint: (mode == Mode::Tor).then_some(socks.address),
+                socks_endpoint: (mode == Mode::Tor).then_some(socks.address.into()),
                 connect_timeout_seconds: Some(2),
                 cover_traffic_enabled: Some(false),
                 ..Default::default()
@@ -88,7 +88,7 @@ async fn stalled_socks_uses_connect_limit_not_read_limit() {
     let socks = Socks::start(BTreeMap::new(), Fault::Stall).await;
     let context = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         connect_timeout_seconds: Some(1),
         cover_traffic_enabled: Some(false),
         ..Default::default()
@@ -150,7 +150,7 @@ async fn multiplexed_response_progress_cannot_renew_sibling_headers_or_body() {
     .await;
     let context = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         cover_traffic_enabled: Some(false),
         ..Default::default()
     })

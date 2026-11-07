@@ -7,7 +7,7 @@ use tokio::sync::{Semaphore, mpsc};
 fn context(socks: &Socks) -> NetworkContext {
     NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         connect_timeout_seconds: Some(2),
         ..Default::default()
     })

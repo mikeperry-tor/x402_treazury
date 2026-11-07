@@ -134,7 +134,7 @@ async fn ordinary_eviction_forgets_negative_capability_without_resetting_process
     .await;
     let http = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap()
@@ -272,7 +272,7 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
         .await;
         let http = NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             ..Default::default()
         })
         .unwrap()
@@ -432,7 +432,7 @@ async fn distinct_effective_scopes_isolate_sessions_and_drain_after_replacement(
     .await;
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap()
@@ -651,7 +651,7 @@ async fn completed_old_tail_timeout_allows_live_episode_to_schedule_again() {
     .await;
     let http = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap()

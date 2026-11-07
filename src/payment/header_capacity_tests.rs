@@ -164,7 +164,7 @@ async fn wire_fixture() {
     crate::network::install_test_context(
         crate::network::NetworkContext::new(crate::network::NetworkPolicy {
             mode: crate::network::Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             tor_isolation_retries: Some(0),
             ..Default::default()
         })

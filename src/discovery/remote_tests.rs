@@ -306,7 +306,7 @@ async fn fixture() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             tor_isolation_retries: Some(0),
             read_timeout_seconds: Some(1),
             cover_traffic_enabled: Some(false),

@@ -1039,7 +1039,7 @@ async fn tor_consensus_lifecycle() -> Result<()> {
     .await;
     crate::network::install(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     })?;
     run().await?;

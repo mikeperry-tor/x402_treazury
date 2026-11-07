@@ -222,7 +222,7 @@ async fn metadata_fixture(mode: &str) {
     .await;
     let network = NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         tor_isolation_retries: Some(0),
         cover_traffic_enabled: Some(false),
         ..Default::default()

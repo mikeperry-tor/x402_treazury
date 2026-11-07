@@ -414,7 +414,7 @@ async fn fixture() {
     .await;
     let mut context = NetworkContext::new(NetworkPolicy {
         mode: if tor { Mode::Tor } else { Mode::Direct },
-        socks_endpoint: tor.then_some(socks.address),
+        socks_endpoint: tor.then_some(socks.address.into()),
         read_timeout_seconds: Some(2),
         tor_isolation_retries: retries,
         ..Default::default()

@@ -94,7 +94,7 @@ mod tests {
         .await;
         let network = NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(socks.address),
+            socks_endpoint: Some(socks.address.into()),
             ..Default::default()
         })
         .unwrap()

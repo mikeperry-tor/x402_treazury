@@ -94,7 +94,7 @@ async fn unsigned_ranges_validate_every_response_and_never_follow_or_pay() {
     .await;
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(socks.address),
+        socks_endpoint: Some(socks.address.into()),
         ..Default::default()
     })
     .unwrap()

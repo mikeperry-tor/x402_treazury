@@ -113,7 +113,7 @@ async fn scope_child() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             ..Default::default()
         })
         .unwrap()

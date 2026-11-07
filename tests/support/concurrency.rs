@@ -341,7 +341,7 @@ async fn tor_burst_child() {
     .await;
     install_network(NetworkPolicy {
         mode: Mode::Tor,
-        socks_endpoint: Some(proxy.address),
+        socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     });
     let traces = rotation_burst().await;

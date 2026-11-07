@@ -149,7 +149,7 @@ async fn paid_operation_urls() {
     crate::network::install_test_context(
         NetworkContext::new(NetworkPolicy {
             mode: Mode::Tor,
-            socks_endpoint: Some(proxy.address),
+            socks_endpoint: Some(proxy.address.into()),
             cover_traffic_enabled: Some(false),
             ..Default::default()
         })

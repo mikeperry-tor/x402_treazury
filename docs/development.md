@@ -578,8 +578,8 @@ WARN whose message states the endpoint name and current tool count and suggests
 advertised inventory, not model context; each listing may repeat it. It does not
 reject work, change mode or perform network/wallet work.
 
-An unreachable configured local Tor SOCKS endpoint during serving startup emits
-a shared startup-wait diagnostic with the local address, safe I/O kind, retry
+An unreachable configured Tor SOCKS endpoint during serving startup emits
+a shared startup-wait diagnostic with the configured endpoint, safe I/O kind, retry
 cadence and reminder interval. While startup recovery remains pending, the
 condition is INFO; repetitive probe details belong at DEBUG. The existing probe
 schedule and reminder interval do not grant terminal failure severity. Recovery

@@ -171,7 +171,7 @@ identity from current pool roles.
 Participating unsigned transport recovery classifies concrete causes. A transient
 SOCKS target failure, remote-resolution failure, reset, TLS failure or timeout can
 use the remaining configured attempts; certificate and hostname verification stay
-enabled. A timeout connecting to the configured local SOCKS listener also uses
+enabled. A timeout connecting to the configured SOCKS endpoint also uses
 that count, with no extra loop or direct escape. A proven refusal at that local
 connection stage, SOCKS authentication rejection, protocol parsing/serialization
 failure or invalid local configuration is terminal. An unlocated refusal or the
@@ -184,7 +184,7 @@ The common classifier applies to catalog, Coinbase, document reads,
 relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
 Other API methods recover only from TLS connection-establishment failures;
 post-dispatch TLS failures grant no replay, including failures before response
-headers arrive. Startup's local SOCKS
+headers arrive. Startup's SOCKS
 reachability prerequisite remains separate from per-operation attempts.
 
 Remote provider search uses `discovery/remote.rs` to retain one encompassing work
@@ -807,9 +807,10 @@ No production trust changes, real Tor, live provider calls or payments are invol
 ## Serving startup SOCKS prerequisite
 
 Ordinary serving startup can also make a TCP-only connection to its configured
-literal loopback SOCKS endpoint. This shared, cancellation-owned prerequisite
-check carries no credentials or destination and performs no SOCKS handshake.
-An unreachable endpoint emits an immediate ERROR naming the local address and
+SOCKS endpoint, resolving an IP literal or network name through the system
+resolver. This shared, cancellation-owned prerequisite check carries no
+credentials or destination and performs no SOCKS handshake.
+An unreachable endpoint emits an immediate ERROR naming the endpoint and
 safe I/O kind, then repeats it on the next failed probe at least 60 seconds after
 the preceding ERROR while the shared startup wait remains pending. No separate
 logging timer or probe is created. Retry cadence is five seconds after a failed connection attempt, using the
@@ -880,7 +881,7 @@ financial or qualification authority.
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Normal expiry is ordinary freshness policy. HTTP disk cache limits are 128 MiB / 4,096 entries / 16 KiB metadata / 144 MiB database; pressure eviction logs DEBUG, while persistence/read failures WARN. Store Busy/Locked failures WARN before command reply; this grants no mutation retry. Cache persistence failure does not invalidate a complete response. |
 | Optional cover episode bounds | Bound optional unsigned work; cannot cut off the real paid call. Actual process-budget refusals WARN; owner-cache pressure eviction logs DEBUG; ordinary completed episode budgets/deadlines and cached refusals use DEBUG; fresh retained resource refusals and optional task/sampling failures use INFO. Local deadlines/preemption preserve successful qualification and return interrupted checks to unknown after cleanup, without renewing episode/process budgets. The three-second cleanup wait in `wait_experiment_idle` is a test-only fixture bound; production cleanup has no such cutoff. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. Actual deadline expiry WARNs with a safe stage and numeric allowance. |
-| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed local TCP connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
+| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed TCP connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
 | Sync mempool drain window | Bounds initial mempool-stream settling before requesting its shutdown. Received work drains and workers join before sync returns; it is not a whole-sync deadline. |
 
