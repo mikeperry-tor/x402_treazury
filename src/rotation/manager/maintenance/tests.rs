@@ -115,7 +115,7 @@ impl Fixture {
             ManagedPool::new(
                 store.clone(),
                 group.clone(),
-                BaseRpc::new(&format!("{endpoint}/rpc"), 12).unwrap(),
+                BaseRpc::new(&format!("{endpoint}/rpc")).unwrap(),
                 crate::payment::SpendPolicy {
                     max_atomic: Some(U256::from(100)),
                 },
@@ -217,7 +217,7 @@ async fn fixture_with_credit(blocked: bool, fail: bool, credited: bool) -> Fixtu
         ManagedPool::new(
             store.clone(),
             group.clone(),
-            BaseRpc::new(&format!("{endpoint}/rpc"), 12).unwrap(),
+            BaseRpc::new(&format!("{endpoint}/rpc")).unwrap(),
             crate::payment::SpendPolicy {
                 max_atomic: Some(U256::from(100)),
             },

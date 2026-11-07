@@ -138,7 +138,7 @@ async fn fixture() -> Fixture {
     let manager = ManagedPool::new(
         store.clone(),
         group,
-        BaseRpc::new(&format!("{base}/rpc"), 12).unwrap(),
+        BaseRpc::new(&format!("{base}/rpc")).unwrap(),
         SpendPolicy::dollars("0.01").unwrap(),
     )
     .unwrap();

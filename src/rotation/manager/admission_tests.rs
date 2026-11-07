@@ -231,7 +231,7 @@ async fn fixture_with_held_response(hold: bool) -> Fixture {
     let pool = ManagedPool::new(
         store,
         pool,
-        BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        BaseRpc::new("http://127.0.0.1:1").unwrap(),
         SpendPolicy {
             max_atomic: Some(U256::from(100)),
         },
@@ -255,7 +255,7 @@ async fn fixture_with_held_response(hold: bool) -> Fixture {
 #[tokio::test]
 async fn qualification_canonical_loop_ignores_bad_historical_readiness_and_resolves_later_wallet() {
     let mut f = fixture().await;
-    f.pool.base = BaseRpc::new(&f.url.replace("/pay", "/rpc"), 12).unwrap();
+    f.pool.base = BaseRpc::new(&f.url.replace("/pay", "/rpc")).unwrap();
     f.pay().await.unwrap().0.text().await.unwrap();
     let other: PaymentCandidateHandle = f
         .db()
@@ -540,7 +540,7 @@ async fn new_advisory_authorization_can_resolve_and_unknown_estimate_refreshes_t
         .unwrap();
     assert!(f.pay().await.unwrap().0.status().is_success());
     let endpoint = f.url.replace("/pay", "/rpc");
-    f.pool.base = BaseRpc::new(&endpoint, 12).unwrap();
+    f.pool.base = BaseRpc::new(&endpoint).unwrap();
     let pool = f.pool.pool.clone();
     let query = f
         .pool

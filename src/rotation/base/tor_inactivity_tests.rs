@@ -75,7 +75,7 @@ async fn endpoint(
     Json(result()).into_response()
 }
 fn rpc(path: &str) -> BaseRpc {
-    BaseRpc::new(&format!("https://api.example.com{path}"), 12).unwrap()
+    BaseRpc::new(&format!("https://api.example.com{path}")).unwrap()
 }
 fn selected(payer: &str) -> Arc<crate::network::HttpTransport> {
     crate::network::global()

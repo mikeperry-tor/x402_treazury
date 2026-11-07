@@ -385,7 +385,7 @@ async fn rpc_fixture() -> (Arc<Rpc>, BaseRpc, tokio::task::JoinHandle<()>) {
         .route("/", post(handle))
         .with_state(rpc.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     (rpc, base, server)
 }

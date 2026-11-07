@@ -61,7 +61,7 @@ async fn sync_cli_explains_pending_retirement_and_preserves_failed_wallet_result
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}/", listener.local_addr().unwrap());
-        let base = BaseRpc::new(&endpoint, 12).unwrap();
+        let base = BaseRpc::new(&endpoint).unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let reserves = super::capacity_fixture::two_reserves("2");
         let pool = store

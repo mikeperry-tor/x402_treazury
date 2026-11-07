@@ -71,7 +71,7 @@ impl FundingObservations for Funding {
     async fn credit(&self, job: FundingJob) -> Result<()> {
         let pool = job.pool_id.clone();
         let query = self.store.call(move |s| s.chain_query(&pool)).await?;
-        let view = BaseRpc::new(&format!("{}/rpc", self.base), 12)?
+        let view = BaseRpc::new(&format!("{}/rpc", self.base))?
             .view(query)
             .await?;
         let wallet = job.wallet_id.clone();

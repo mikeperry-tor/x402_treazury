@@ -163,7 +163,7 @@ mod tests {
                     ManagedPool::new(
                         store.clone(),
                         id,
-                        crate::rotation::base::BaseRpc::new("https://rpc.example", 3).unwrap(),
+                        crate::rotation::base::BaseRpc::new("https://rpc.example").unwrap(),
                         SpendPolicy::dollars("1").unwrap(),
                     )
                     .unwrap(),
@@ -260,7 +260,7 @@ sources=["local"]
             ManagedPool::new(
                 store.clone(),
                 pools[0].group_name().to_owned(),
-                crate::rotation::base::BaseRpc::new("https://rpc.example", 3).unwrap(),
+                crate::rotation::base::BaseRpc::new("https://rpc.example").unwrap(),
                 SpendPolicy { max_atomic: None },
             )
             .unwrap(),

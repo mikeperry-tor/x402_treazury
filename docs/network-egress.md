@@ -372,20 +372,20 @@ collection; retry delays release that capacity for unrelated reads. Neither mode
 results or oversized responses on that endpoint. Conditional promotion follows
 each method's observation boundary. Chain, block and contract reads validate
 their results. A null receipt remains pending and may promote connectivity. A
-nonnull unconfirmed receipt needs only a parseable block height and matching
-requested transaction hash to promote; a missing or mismatched hash still returns
-pending but cannot promote. Remaining receipt fields, including transfer and
-authorization events, are checked when evaluating a confirmed receipt. Pending
-observations trigger no additional proof reads and establish no transfer proof.
+receipt claiming a height beyond the observed tip needs only a parseable block
+height and matching requested transaction hash to promote; a missing or mismatched
+hash still returns pending but cannot promote. Null and future-height receipts
+trigger no additional proof reads. Receipts within the observed chain have their
+transfer and authorization fields validated, then require finalized canonical
+evidence before establishing a transfer proof.
 Canonical proof and configured whole-view fallback remain independent. Canonical
-Base proofs use the lower of the finalized height and latest height minus the
-configured confirmation depth. Block-hash-pinned contract reads and canonical
+Base proofs use the provider's finalized anchor without an additional local
+confirmation-depth requirement. Block-hash-pinned contract reads and canonical
 rechecks bind balances/nonces to that view; receipt inclusion obeys the same bound.
 Unsupported, missing or incoherent finalized evidence remains pending or uses a
 configured fresh-view fallback, never a depth-only downgrade. Scalar advisory
-latest reads retain their existing contract. Finality, confirmations
-and canonical block rechecks determine whether evidence is usable. Base RPC response collection
-has a fixed 16 MiB byte bound to protect memory before JSON decoding, including
+latest reads retain their existing contract. Finality and canonical block rechecks
+determine whether evidence is usable. Base RPC response collection has a fixed 16 MiB byte bound to protect memory before JSON decoding, including
 chunked and lengthless bodies. Oversized responses produce a redacted typed failure
 without retrying that endpoint. Configured fallback discards the partial view and
 reacquires all evidence; it cannot reuse a balance from the rejected response.

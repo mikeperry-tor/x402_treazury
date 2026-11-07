@@ -69,7 +69,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         ManagedPool::new(
             store.clone(),
             pool.clone(),
-            BaseRpc::new(&base, 12).unwrap(),
+            BaseRpc::new(&base).unwrap(),
             crate::payment::SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),
@@ -468,7 +468,7 @@ async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
         ManagedPool::new(
             store.clone(),
             pool,
-            BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+            BaseRpc::new("http://127.0.0.1:1").unwrap(),
             crate::payment::SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),

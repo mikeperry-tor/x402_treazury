@@ -139,11 +139,7 @@ async fn late_socks_child() {
         ManagedPool::new(
             store.clone(),
             group.clone(),
-            BaseRpc::new(
-                &format!("https://127.0.0.1:{}/rpc", origin_address.port()),
-                12,
-            )
-            .unwrap(),
+            BaseRpc::new(&format!("https://127.0.0.1:{}/rpc", origin_address.port())).unwrap(),
             crate::payment::SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),

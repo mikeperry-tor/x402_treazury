@@ -30,7 +30,7 @@ async fn payment_crash_child() {
     let mut manager = ManagedPool::new(
         store,
         pool,
-        BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        BaseRpc::new("http://127.0.0.1:1").unwrap(),
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
@@ -170,7 +170,7 @@ async fn process_loss_preserves_authorizations_without_replay_and_peer_can_pay()
                 ManagedPool::new(
                     store.clone(),
                     pool,
-                    BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+                    BaseRpc::new("http://127.0.0.1:1").unwrap(),
                     SpendPolicy::dollars("5").unwrap(),
                 )
                 .unwrap(),

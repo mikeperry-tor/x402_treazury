@@ -76,7 +76,7 @@ async fn saturation_child() {
     let listener = crate::test_tls::listener().await;
     let origin = format!("https://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let rpc = BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap();
+    let rpc = BaseRpc::new(&format!("{origin}/rpc")).unwrap();
     let mut state = Store::create(
         &dir.path().join("state"),
         &dir.path().join("key"),

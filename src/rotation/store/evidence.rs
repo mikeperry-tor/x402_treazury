@@ -114,7 +114,7 @@ mod tests {
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = request["params"][0].as_str().unwrap();
-                        let height = if matches!(tag, "latest" | "finalized") {head} else {u64::from_str_radix(&tag[2..],16).unwrap()};
+                        let height = if tag == "latest" {head} else if tag == "finalized" {head - 12} else {u64::from_str_radix(&tag[2..],16).unwrap()};
                         json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     }
                     "eth_call" => { assert_eq!(request["params"][1]["requireCanonical"],true);
@@ -126,7 +126,7 @@ mod tests {
             }
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+        let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });

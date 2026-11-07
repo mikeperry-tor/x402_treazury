@@ -25,7 +25,6 @@ confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 # Reviewed Tor test endpoint: export BASE_RPC_URL=https://base-rpc.publicnode.com
 # Verification remains required; omitted fallback settings retain dRPC/Base failover.
-base_confirmations = 12
 [wallets.coverage_a]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets

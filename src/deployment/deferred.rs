@@ -1182,7 +1182,7 @@ wait_for_catalogs=false
                 ManagedPool::new(
                     store.clone(),
                     pool.clone(),
-                    BaseRpc::new(&base, 12).unwrap(),
+                    BaseRpc::new(&base).unwrap(),
                     crate::payment::SpendPolicy::dollars("1").unwrap(),
                 )
                 .unwrap(),

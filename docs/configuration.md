@@ -566,14 +566,15 @@ funds and keys at their address, stops routine polling/selection, transfers noth
 and never releases financial obligations. Positive tolerance trades purchasing
 power for less observation work; it does not bound cumulative stranded capital.
 
-`funding.base_confirmations` defaults to 12 and sets a minimum depth for Base
-financial evidence. Canonical balances, authorization resolution and payment
-receipts also require the RPC's `finalized` chain: the selected height is the lower
-of `latest - base_confirmations` and the finalized height. A lagging finalized
+Canonical Base balances, authorization resolution and payment receipts require
+the RPC's `finalized` chain. Financial observations use the finalized anchor;
+there is no additional application confirmation-depth setting. A lagging finalized
 chain delays evidence; unsupported or unavailable finality retains pending work
 and may use a configured RPC fallback, without substituting depth-only evidence.
-Ordinary scalar balance estimates still read `latest`. Persisted support may
-therefore span more than the minimum depth. Current database schema 23 is required
+Ordinary scalar balance estimates still read `latest`. New confirmation-depth
+metadata describes the observed gap between those anchors rather than a local
+policy. Historical records retain their original minimum-depth metadata.
+Current database schema 23 is required
 for owner opens and read-only inspection; older and future versions fail without
 source-state mutation. Retained histories protect original financial ownership; see
 the [database rollback boundary](wallet-cli.md#treasury-and-managed-pools).

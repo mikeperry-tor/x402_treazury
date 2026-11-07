@@ -599,7 +599,16 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
     assert_eq!(wallet["max_attempts"], 3);
     assert_eq!(wallet["max_retirement_remainder_usdc"], "0.001");
     let treasury = roundtrip::<TreasuryConfig>("state_dir='state'");
-    assert_eq!(treasury["confirmations"], 3);
+    assert_eq!(
+        treasury["confirmations"],
+        u64::from(
+            zcash_client_backend::data_api::wallet::ConfirmationsPolicy::default()
+                .trusted()
+                .get()
+        )
+    );
+    let overridden = roundtrip::<TreasuryConfig>("state_dir='state'\nconfirmations=7");
+    assert_eq!(overridden["confirmations"], 7);
     assert!(treasury.get("max_funding_transaction_fee_zec").is_none());
     let removed = "state_dir='state'\nmax_funding_transaction_fee_zec='0.0003'";
     assert!(toml::from_str::<TreasuryConfig>(removed).is_err());
@@ -620,7 +629,8 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
     }
     let funding = roundtrip::<FundingConfig>("");
     assert_eq!(funding["auto_fund"], true);
-    assert_eq!(funding["base_confirmations"], 12);
+    assert!(funding.get("base_confirmations").is_none());
+    assert!(toml::from_str::<FundingConfig>("base_confirmations=12").is_err());
     assert_eq!(funding["quote_deadline_seconds"], 1800);
     let overridden = roundtrip::<FundingConfig>("quote_deadline_seconds=7200");
     assert_eq!(overridden["quote_deadline_seconds"], 7200);

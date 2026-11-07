@@ -228,7 +228,7 @@ async fn paid_fixture() {
         crate::rotation::manager::ManagedPool::new(
             store.clone(),
             pool,
-            crate::rotation::base::BaseRpc::new("https://api.example.com/rpc", 12).unwrap(),
+            crate::rotation::base::BaseRpc::new("https://api.example.com/rpc").unwrap(),
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),

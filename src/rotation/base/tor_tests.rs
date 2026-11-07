@@ -93,8 +93,10 @@ async fn handler(
     let result = || match method {
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
-            let height = if matches!(payload["params"][0].as_str(), Some("latest" | "finalized")) {
+            let height = if payload["params"][0] == "latest" {
                 100
+            } else if payload["params"][0] == "finalized" {
+                88
             } else {
                 u64::from_str_radix(
                     payload["params"][0]
@@ -250,7 +252,7 @@ async fn fixture() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let rpc = BaseRpc::new(&url("/matrix"), 12).unwrap();
+    let rpc = BaseRpc::new(&url("/matrix")).unwrap();
     let mut wallet = 1000;
     // Every eligible status, success at all three positions and finite exhaustion
     // through the real advisory balance consumer; all payload bytes stay equal.
@@ -342,7 +344,7 @@ async fn fixture() {
         captured
             .wallets
             .push((format!("wallet-{ordinal}"), payer.clone()));
-        BaseRpc::new(&url("/owned-view"), 12)
+        BaseRpc::new(&url("/owned-view"))
             .unwrap()
             .view(captured)
             .await
@@ -371,7 +373,7 @@ async fn fixture() {
         ("multi-a".into(), address(8003)),
         ("multi-b".into(), address(8004)),
     ];
-    BaseRpc::new(&url("/multi-view"), 12)
+    BaseRpc::new(&url("/multi-view"))
         .unwrap()
         .view(captured)
         .await
@@ -401,7 +403,7 @@ async fn fixture() {
 async fn interrupted_read(f: &Fixture) {
     f.reset();
     let endpoint = url("/interrupted");
-    let rpc = BaseRpc::new(&endpoint, 12).unwrap();
+    let rpc = BaseRpc::new(&endpoint).unwrap();
     let payer = address(1800);
     let owner = IsolationId::evm(&payer).unwrap();
     let before = selected(&owner, &endpoint);
@@ -441,7 +443,7 @@ async fn method_consumers(f: &Fixture) {
             f.reset();
             let endpoint = url("/methods");
             f.plan("/methods", method, [Step::Status(status)]);
-            let rpc = BaseRpc::new(&endpoint, 12).unwrap();
+            let rpc = BaseRpc::new(&endpoint).unwrap();
             match method {
                 "eth_chainId" => {
                     rpc.view(query()).await.unwrap();
@@ -475,7 +477,7 @@ async fn method_consumers(f: &Fixture) {
         }
     }
     f.reset();
-    let rpc = BaseRpc::new(&url("/forbidden"), 12).unwrap();
+    let rpc = BaseRpc::new(&url("/forbidden")).unwrap();
     let result: Result<Value> = rpc
         .rpc("eth_sendRawTransaction", json!(["0x00"]), |value| {
             Ok((value, true))
@@ -497,7 +499,7 @@ async fn fallback_and_validation(f: &Fixture) {
             "eth_call",
             std::iter::repeat_n(Step::Status(status), 3),
         );
-        let rpc = BaseRpc::with_fallbacks(&[url("/a"), format!("{OTHER}/b")], 12).unwrap();
+        let rpc = BaseRpc::with_fallbacks(&[url("/a"), format!("{OTHER}/b")]).unwrap();
         assert_eq!(
             rpc.current_balance(&address(2000 + status as usize))
                 .await
@@ -520,8 +522,7 @@ async fn fallback_and_validation(f: &Fixture) {
         "eth_chainId",
         std::iter::repeat_n(Step::Status(400), 3),
     );
-    let strict =
-        BaseRpc::with_fallbacks(&[url("/strict-a"), format!("{OTHER}/strict-b")], 12).unwrap();
+    let strict = BaseRpc::with_fallbacks(&[url("/strict-a"), format!("{OTHER}/strict-b")]).unwrap();
     assert!(strict.view(query()).await.is_err());
     assert_eq!(
         f.requests()
@@ -539,8 +540,8 @@ async fn fallback_and_validation(f: &Fixture) {
         "eth_call",
         std::iter::repeat_n(Step::Status(503), 3),
     );
-    let view_b = BaseRpc::new(&url("/view-b"), 12).unwrap();
-    let view_rpc = BaseRpc::with_fallbacks(&[url("/view-a"), url("/view-b")], 12).unwrap();
+    let view_b = BaseRpc::new(&url("/view-b")).unwrap();
+    let view_rpc = BaseRpc::with_fallbacks(&[url("/view-a"), url("/view-b")]).unwrap();
     let mut chain_query = query();
     chain_query.wallets.push(("wallet".into(), address(2500)));
     let view = view_rpc.view(chain_query).await.unwrap();
@@ -609,7 +610,7 @@ async fn fallback_and_validation(f: &Fixture) {
             Step::Result(json!({"number":"0x59","timestamp":"0x1","hash":format!("0x{:064x}",89)})),
         ],
     );
-    let error = BaseRpc::with_fallbacks(&[endpoint.clone(), url("/forbidden-height-fallback")], 12)
+    let error = BaseRpc::with_fallbacks(&[endpoint.clone(), url("/forbidden-height-fallback")])
         .unwrap()
         .view(query())
         .await
@@ -641,7 +642,7 @@ async fn fallback_and_validation(f: &Fixture) {
         valid_before: u64::MAX,
     });
     assert!(
-        BaseRpc::new(&endpoint, 12)
+        BaseRpc::new(&endpoint)
             .unwrap()
             .view(nonce_query)
             .await
@@ -672,7 +673,7 @@ async fn fallback_and_validation(f: &Fixture) {
         let before = selected(&owner, &endpoint);
         f.plan("/wrong-chain", "eth_chainId", [Step::Status(403), step]);
         assert!(
-            BaseRpc::new(&endpoint, 12)
+            BaseRpc::new(&endpoint)
                 .unwrap()
                 .view(query())
                 .await
@@ -694,7 +695,7 @@ async fn fallback_and_validation(f: &Fixture) {
     ] {
         f.reset();
         let endpoint = url("/invalid-result");
-        let rpc = BaseRpc::new(&endpoint, 12).unwrap();
+        let rpc = BaseRpc::new(&endpoint).unwrap();
         let owner = if method == "eth_getBlockByNumber" {
             IsolationId::discovery(&endpoint).unwrap()
         } else {
@@ -731,8 +732,8 @@ async fn races_and_eviction(f: &Fixture, socks: &crate::test_socks::Socks) {
     f.reset();
     let payer = address(4000);
     let owner = IsolationId::evm(&payer).unwrap();
-    let primary = BaseRpc::new(&url("/held"), 12).unwrap();
-    let recover = BaseRpc::new(&url("/recover"), 12).unwrap();
+    let primary = BaseRpc::new(&url("/held")).unwrap();
+    let recover = BaseRpc::new(&url("/recover")).unwrap();
     assert_ne!(
         primary.endpoint_id(),
         recover.endpoint_id(),
@@ -741,7 +742,7 @@ async fn races_and_eviction(f: &Fixture, socks: &crate::test_socks::Socks) {
     let original = selected(&owner, &url("/held"));
     let discovery_owner = IsolationId::discovery(&url("/held")).unwrap();
     let discovery_before = selected(&discovery_owner, &url("/held"));
-    let independent = BaseRpc::new(&format!("{OTHER}/independent"), 12).unwrap();
+    let independent = BaseRpc::new(&format!("{OTHER}/independent")).unwrap();
     assert_eq!(
         independent.current_balance(&payer).await.unwrap(),
         U256::from(7)
@@ -815,7 +816,7 @@ async fn races_and_eviction(f: &Fixture, socks: &crate::test_socks::Socks) {
             Step::Held(json!(format!("0x{:064x}", 6)), gate.clone()),
         ],
     );
-    let late = BaseRpc::new(&url("/late"), 12).unwrap();
+    let late = BaseRpc::new(&url("/late")).unwrap();
     let task = {
         let payer = payer.clone();
         tokio::spawn(async move { late.current_balance(&payer).await })
@@ -845,7 +846,7 @@ async fn races_and_eviction(f: &Fixture, socks: &crate::test_socks::Socks) {
             Step::Held(json!(format!("0x{:064x}", 8)), gate.clone()),
         ],
     );
-    let evicted = BaseRpc::new(&url("/evicted"), 12).unwrap();
+    let evicted = BaseRpc::new(&url("/evicted")).unwrap();
     let task = {
         let payer = payer.clone();
         tokio::spawn(async move { evicted.current_balance(&payer).await })

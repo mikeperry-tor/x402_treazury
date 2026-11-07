@@ -347,7 +347,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         .route("/pay", get(seller))
         .with_state(f.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let base = BaseRpc::new(&format!("{origin}/base"), 2).unwrap();
+    let base = BaseRpc::new(&format!("{origin}/base")).unwrap();
     let (handle, commands) = actor::channel();
     let backend = Backend { treasury: handle.clone(), store: store.clone(), near: NearClient::synthetic_at(&origin).unwrap(), base: base.clone(),
         wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())).collect(),
@@ -586,7 +586,7 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
     // Actual preparation owns SDK synchronization. Queue it before the actor's
     // maintenance tick so an incidental background scan cannot satisfy the test.
     let prepare_handle = handle.clone();
-    let base = BaseRpc::new("http://127.0.0.1:1", 2).unwrap();
+    let base = BaseRpc::new("http://127.0.0.1:1").unwrap();
     // An unavailable advisory destination endpoint cannot prohibit a valid
     // SDK-funded preparation. Actual Store publication failures are different.
     let prepare = tokio::spawn(async move {
@@ -687,7 +687,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
     let backend = Backend {
         treasury: handle.clone(), store: store.clone(),
         near: NearClient::synthetic_at(&origin).unwrap(),
-        base: BaseRpc::new(&format!("{origin}/base"), 2).unwrap(),
+        base: BaseRpc::new(&format!("{origin}/base")).unwrap(),
         wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_attempts":1})).unwrap())]),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
     };

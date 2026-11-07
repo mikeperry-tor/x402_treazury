@@ -324,10 +324,7 @@ async fn observe_usdc(
         .as_ref()
         .context("missing Base settings")
         .and_then(|funding| {
-            BaseRpc::with_fallbacks(
-                &funding.base_rpc_urls(|name| std::env::var(name).ok())?,
-                funding.base_confirmations,
-            )
+            BaseRpc::with_fallbacks(&funding.base_rpc_urls(|name| std::env::var(name).ok())?)
         });
     let base = match base {
         Ok(base) => base,

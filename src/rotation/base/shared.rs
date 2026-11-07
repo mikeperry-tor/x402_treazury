@@ -10,7 +10,6 @@ type SharedResult = Arc<Result<ChainView, Arc<anyhow::Error>>>;
 struct Key {
     query: ChainQuery,
     endpoints: Vec<String>,
-    confirmations: u64,
 }
 struct Active {
     key: Key,
@@ -96,7 +95,6 @@ impl BaseRpc {
                 .chain(&self.fallbacks)
                 .map(Self::endpoint_id)
                 .collect(),
-            confirmations: self.confirmations,
         };
         let mut receiver = {
             let mut active = ACTIVE.lock().expect("Base acquisition owners");
@@ -173,7 +171,7 @@ mod tests {
                         },
                         "eth_getBlockByNumber" => {
                             let tag = value["params"][0].as_str().unwrap();
-                            let height = if matches!(tag, "latest" | "finalized") {100} else {u64::from_str_radix(&tag[2..],16).unwrap()};
+                            let height = if tag == "latest" {100} else if tag == "finalized" {88} else {u64::from_str_radix(&tag[2..],16).unwrap()};
                             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                         },
                         "eth_call" => json!(format!("0x{:064x}", 5_000_000)),
@@ -216,7 +214,7 @@ mod tests {
                     invalid.captures.get_mut(&job.wallet_id).unwrap().namespace = uuid::Uuid::nil()
                 }
             }
-            let error = BaseRpc::new(&url, 12)
+            let error = BaseRpc::new(&url)
                 .unwrap()
                 .shared_balance_view(invalid, store.clone())
                 .await
@@ -230,7 +228,7 @@ mod tests {
         assert_eq!(chains.load(Ordering::SeqCst), 0);
         let launch = |query: ChainQuery| {
             let store = store.clone();
-            let rpc = BaseRpc::new(&url, 12).unwrap();
+            let rpc = BaseRpc::new(&url).unwrap();
             tokio::spawn(async move { rpc.shared_balance_view(query, store).await })
         };
         let first = launch(query.clone());
@@ -285,7 +283,6 @@ mod tests {
                         captures: Default::default(),
                     },
                     endpoints: vec![],
-                    confirmations: 1,
                 },
                 result: channel.clone(),
             });

@@ -16,13 +16,10 @@ async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_
         "conflict", // One hash at distinct heights is a malformed provider tuple.
     ] {
         logs.lock().unwrap().clear();
-        let rpc = BaseRpc::with_fallbacks(
-            &[
-                format!("http://{address}/{mode}"),
-                format!("http://{address}/ok"),
-            ],
-            12,
-        )
+        let rpc = BaseRpc::with_fallbacks(&[
+            format!("http://{address}/{mode}"),
+            format!("http://{address}/ok"),
+        ])
         .unwrap();
         let view = rpc.view(fixture::query()).await.unwrap();
         assert!(
@@ -54,25 +51,19 @@ async fn identity_and_authorization_failures_do_not_use_a_fallback() {
     let (address, logs, server) = fixture::fixture().await;
     for mode in ["wrong-chain", "401"] {
         logs.lock().unwrap().clear();
-        let rpc = BaseRpc::with_fallbacks(
-            &[
-                format!("http://{address}/{mode}"),
-                format!("http://{address}/ok"),
-            ],
-            12,
-        )
+        let rpc = BaseRpc::with_fallbacks(&[
+            format!("http://{address}/{mode}"),
+            format!("http://{address}/ok"),
+        ])
         .unwrap();
         assert!(rpc.view(fixture::query()).await.is_err());
         assert!(logs.lock().unwrap().iter().all(|(seen, _)| seen == mode));
     }
     // A configured fallback must supply its own internally coherent headers.
-    let rpc = BaseRpc::with_fallbacks(
-        &[
-            format!("http://{address}/403"),
-            format!("http://{address}/conflict"),
-        ],
-        12,
-    )
+    let rpc = BaseRpc::with_fallbacks(&[
+        format!("http://{address}/403"),
+        format!("http://{address}/conflict"),
+    ])
     .unwrap();
     assert!(rpc.view(fixture::query()).await.is_err());
     server.abort();
@@ -87,7 +78,7 @@ fn endpoint_lists_are_validated_without_silent_limits() {
         vec!["https://one.invalid", "https://one.invalid/"],
     ] {
         assert!(
-            BaseRpc::with_fallbacks(&urls.into_iter().map(String::from).collect::<Vec<_>>(), 12)
+            BaseRpc::with_fallbacks(&urls.into_iter().map(String::from).collect::<Vec<_>>())
                 .is_err()
         );
     }
@@ -97,7 +88,7 @@ fn endpoint_lists_are_validated_without_silent_limits() {
 async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
     let (address, logs, server) = fixture::fixture().await;
     let urls = ["403", "429", "503"].map(|mode| format!("http://{address}/{mode}"));
-    let error = BaseRpc::with_fallbacks(&urls, 12)
+    let error = BaseRpc::with_fallbacks(&urls)
         .unwrap()
         .view(fixture::query())
         .await
@@ -118,13 +109,10 @@ async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
     // reaching the old fixture. Give cancellation its own origin and capture.
     server.abort();
     let (address, logs, server) = fixture::fixture().await;
-    let rpc = BaseRpc::with_fallbacks(
-        &[
-            format!("http://{address}/stall"),
-            format!("http://{address}/ok"),
-        ],
-        12,
-    )
+    let rpc = BaseRpc::with_fallbacks(&[
+        format!("http://{address}/stall"),
+        format!("http://{address}/ok"),
+    ])
     .unwrap();
     assert!(
         tokio::time::timeout(
@@ -141,13 +129,10 @@ async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
 #[tokio::test]
 async fn progressing_complete_view_survives_former_deadline_without_fallback() {
     let (address, logs, server) = fixture::fixture().await;
-    let rpc = BaseRpc::with_fallbacks(
-        &[
-            format!("http://{address}/slow"),
-            format!("http://{address}/ok"),
-        ],
-        12,
-    )
+    let rpc = BaseRpc::with_fallbacks(&[
+        format!("http://{address}/slow"),
+        format!("http://{address}/ok"),
+    ])
     .unwrap();
     let started = std::time::Instant::now();
     let view = tokio::time::timeout(
@@ -171,7 +156,7 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
 async fn exact_balance_evidence_preserves_both_anchors_amounts_and_original_lifetime() {
     use alloy_primitives::U256;
     let (address, _, server) = fixture::fixture().await;
-    let view = BaseRpc::new(&format!("http://{address}/exact"), 12)
+    let view = BaseRpc::new(&format!("http://{address}/exact"))
         .unwrap()
         .view(fixture::query())
         .await
@@ -207,7 +192,7 @@ async fn history_uses_its_original_proof_without_requiring_a_fresh_balance_tip()
         nonce: format!("0x{:064x}", 1),
         valid_before: now().unwrap() - 2000,
     });
-    let view = BaseRpc::new(&format!("http://{address}/history-stale"), 12)
+    let view = BaseRpc::new(&format!("http://{address}/history-stale"))
         .unwrap()
         .view(query.clone())
         .await
@@ -224,13 +209,10 @@ async fn history_uses_its_original_proof_without_requiring_a_fresh_balance_tip()
         1
     );
     logs.lock().unwrap().clear();
-    let rpc = BaseRpc::with_fallbacks(
-        &[
-            format!("http://{address}/malformed-nonce"),
-            format!("http://{address}/ok"),
-        ],
-        12,
-    )
+    let rpc = BaseRpc::with_fallbacks(&[
+        format!("http://{address}/malformed-nonce"),
+        format!("http://{address}/ok"),
+    ])
     .unwrap();
     assert_eq!(rpc.view(query).await.unwrap().released, vec!["history"]);
     assert!(logs.lock().unwrap().iter().any(|(mode, _)| mode == "ok"));

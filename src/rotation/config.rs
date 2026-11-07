@@ -27,10 +27,11 @@ fn attempts() -> u32 {
     3
 }
 fn confirmations() -> u64 {
-    3
-}
-fn base_confirmations() -> u64 {
-    12
+    u64::from(
+        zcash_client_backend::data_api::wallet::ConfirmationsPolicy::default()
+            .trusted()
+            .get(),
+    )
 }
 fn confidentiality() -> String {
     "basic".into()
@@ -546,8 +547,6 @@ pub struct FundingConfig {
     pub base_rpc_url_env: String,
     #[serde(default)]
     pub base_rpc_fallback_url_envs: Option<Vec<String>>,
-    #[serde(default = "base_confirmations")]
-    pub base_confirmations: u64,
     #[serde(default = "confidentiality")]
     pub confidentiality: String,
     pub near_api_key_env: Option<String>,
@@ -624,7 +623,6 @@ impl FundingConfig {
             env_name(name)?;
             ensure!(names.insert(name), "duplicate Base RPC environment name");
         }
-        ensure!(self.base_confirmations > 0, "invalid funding limits");
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {

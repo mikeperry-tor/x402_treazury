@@ -20,7 +20,7 @@ pub struct TransferProof {
     pub nonce: String,
 }
 impl BaseRpc {
-    /// Read-only, payer-isolated verification. Missing/unconfirmed receipts remain
+    /// Read-only, payer-isolated verification. Missing/unfinalized receipts remain
     /// pending. Provider failures may use only the configured RPC fallbacks.
     pub async fn verify_transfer(
         &self,
@@ -68,11 +68,7 @@ impl BaseRpc {
                         return Ok((None, true));
                     }
                     let height = quantity(&receipt["blockNumber"])?;
-                    if latest
-                        .height
-                        .checked_sub(self.confirmations)
-                        .is_none_or(|confirmed_height| height > confirmed_height)
-                    {
+                    if height > latest.height {
                         // Pending observations retain their existing result even
                         // when the transaction hash cannot qualify connectivity.
                         let matches_request = hash(&receipt["transactionHash"])
@@ -91,8 +87,8 @@ impl BaseRpc {
         let Some((claimed, proof)) = confirmed else {
             return Ok(None);
         };
-        // A missing or shallow receipt is pending without financial-header work.
-        // A qualified receipt still needs the complete finalized/depth bound.
+        // A missing or future receipt is pending without financial-header work.
+        // An included receipt still needs the complete finalized-chain proof.
         let headers = self
             .finalized_headers(latest, timestamp, &ViewProgress::new())
             .await?;
@@ -302,15 +298,18 @@ mod tests {
         validate_receipt(&many, &e, &b).unwrap();
     }
     #[tokio::test]
-    async fn receipt_verification_waits_for_confirmations_and_rechecks_canonical_blocks() {
+    async fn receipt_verification_waits_for_finality_and_rechecks_canonical_blocks() {
         use axum::{Json, Router, routing::post};
         for mode in [
             "valid",
             "old",
             "host_future",
             "fallback",
+            "near_tip",
+            "at_tip",
+            "near_tip_pending",
             "pending",
-            "unconfirmed",
+            "future",
             "reorg",
             "wrong_chain",
             "wrong_receipt",
@@ -318,11 +317,21 @@ mod tests {
             "finality_unavailable",
             "finality_reorg",
             "pending_without_finality",
-            "unconfirmed_without_finality",
+            "future_without_finality",
         ] {
-            let (e, b, mut receipt) = fixture();
-            if matches!(mode, "unconfirmed" | "unconfirmed_without_finality") {
-                receipt["blockNumber"] = json!("0x63");
+            let (e, mut b, mut receipt) = fixture();
+            if matches!(mode, "future" | "future_without_finality") {
+                receipt["blockNumber"] = json!("0x65");
+            }
+            if matches!(mode, "near_tip" | "near_tip_pending" | "at_tip") {
+                b.height = if mode == "at_tip" { 100 } else { 99 };
+                b.hash = format!("0x{:064x}", b.height);
+                receipt["blockNumber"] = json!(format!("0x{:x}", b.height));
+                receipt["blockHash"] = json!(b.hash);
+                for log in receipt["logs"].as_array_mut().unwrap() {
+                    log["blockNumber"] = json!(format!("0x{:x}", b.height));
+                    log["blockHash"] = json!(b.hash);
+                }
             }
             if mode == "wrong_receipt" {
                 receipt["transactionHash"] = json!(B256::ZERO);
@@ -348,19 +357,20 @@ mod tests {
                             "eth_getTransactionReceipt" => if matches!(mode, "pending" | "pending_without_finality") { Value::Null } else { receipt },
                             "eth_getBlockByNumber" => {
                                 let tag = q["params"][0].as_str().unwrap();
-                                if tag == "finalized" && matches!(mode, "finality_unavailable" | "pending_without_finality" | "unconfirmed_without_finality") {
+                                if tag == "finalized" && matches!(mode, "finality_unavailable" | "pending_without_finality" | "future_without_finality") {
                                     return Json(json!({"jsonrpc":"2.0","id":1,"result":null}));
                                 }
                                 let height = match tag {
                                     "latest" => 100,
                                     "finalized" if mode == "not_finalized" => 70,
                                     "finalized" if mode == "finality_reorg" => 90,
+                                    "finalized" if mode == "near_tip_pending" => 98,
                                     "finalized" => 100,
                                     _ => u64::from_str_radix(&tag[2..],16).unwrap(),
                                 };
                                 let changed = height == 80 && seen.fetch_add(1,std::sync::atomic::Ordering::SeqCst)>0 && mode == "reorg";
                                 json!({"number":format!("0x{height:x}"),
-                                    "hash":if height == 80 {if changed {B256::ZERO.to_string()} else {b.hash}} else if tag == "0x5a" && mode == "finality_reorg" {B256::ZERO.to_string()} else {format!("0x{height:064x}")},
+                                    "hash":if height == b.height {if changed {B256::ZERO.to_string()} else {b.hash}} else if tag == "0x5a" && mode == "finality_reorg" {B256::ZERO.to_string()} else {format!("0x{height:064x}")},
                                     "timestamp":format!("0x{stamp:x}")})
                             },
                             method => panic!("unexpected RPC {method}"),
@@ -373,26 +383,24 @@ mod tests {
                 let refused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 let refused_url = format!("http://{}", refused.local_addr().unwrap());
                 drop(refused);
-                BaseRpc::with_fallbacks(&[refused_url, url], 12).unwrap()
+                BaseRpc::with_fallbacks(&[refused_url, url]).unwrap()
             } else {
-                BaseRpc::new(&url, 12).unwrap()
+                BaseRpc::new(&url).unwrap()
             };
             let result = rpc.verify_transfer(&e).await;
             match mode {
-                "valid" | "old" | "host_future" | "fallback" => {
+                "valid" | "old" | "host_future" | "fallback" | "near_tip" | "at_tip" => {
                     assert_eq!(result.unwrap().unwrap().amount_atomic, "7000")
                 }
                 "pending"
-                | "unconfirmed"
+                | "future"
                 | "not_finalized"
+                | "near_tip_pending"
                 | "pending_without_finality"
-                | "unconfirmed_without_finality" => assert!(result.unwrap().is_none()),
+                | "future_without_finality" => assert!(result.unwrap().is_none()),
                 _ => assert!(result.is_err(), "{mode}"),
             }
-            if matches!(
-                mode,
-                "pending_without_finality" | "unconfirmed_without_finality"
-            ) {
+            if matches!(mode, "pending_without_finality" | "future_without_finality") {
                 let requests = requests.lock().unwrap();
                 assert_eq!(
                     requests.len(),
@@ -438,13 +446,10 @@ mod tests {
             }));
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
-            let rpc = BaseRpc::with_fallbacks(
-                &[
-                    format!("http://{address}/primary"),
-                    format!("http://{address}/fallback"),
-                ],
-                12,
-            )
+            let rpc = BaseRpc::with_fallbacks(&[
+                format!("http://{address}/primary"),
+                format!("http://{address}/fallback"),
+            ])
             .unwrap();
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let result = rpc.verify_transfer(&expected).await;

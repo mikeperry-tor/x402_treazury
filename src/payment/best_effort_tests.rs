@@ -432,7 +432,7 @@ async fn run_private(
         ManagedPool::new(
             store.clone(),
             pool.clone(),
-            BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap(),
+            BaseRpc::new(&format!("{origin}/rpc")).unwrap(),
             SpendPolicy {
                 max_atomic: Some(U256::from(1_000_000)),
             },
@@ -695,7 +695,7 @@ async fn qualification_budget_refusal_rolls_back_admission_before_signed_dispatc
         ManagedPool::new(
             store.clone(),
             pool,
-            BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap(),
+            BaseRpc::new(&format!("{origin}/rpc")).unwrap(),
             SpendPolicy::dollars("0.02").unwrap(),
         )
         .unwrap(),
@@ -2038,7 +2038,7 @@ async fn tor_unsigned_retry_child() {
         ManagedPool::new(
             handle.clone(),
             pool.clone(),
-            BaseRpc::new(&format!("https://{addr_b}/rpc"), 12).unwrap(),
+            BaseRpc::new(&format!("https://{addr_b}/rpc")).unwrap(),
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),
@@ -2326,7 +2326,7 @@ async fn prior_wallet_liability_relay_child() {
         ManagedPool::new(
             handle.clone(),
             pool,
-            BaseRpc::new("https://api.example.com/rpc", 12).unwrap(),
+            BaseRpc::new("https://api.example.com/rpc").unwrap(),
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap(),

@@ -1036,7 +1036,7 @@ impl Deployment {
                 "Direct Base RPC verification exposes your client IP address and queried wallet addresses to each contacted RPC provider, including fallbacks; see config show base_rpc_policy"
             );
         }
-        let base = BaseRpc::with_fallbacks(&urls, f.base_confirmations)?;
+        let base = BaseRpc::with_fallbacks(&urls)?;
         Ok(base)
     }
 
@@ -2600,7 +2600,7 @@ bearer_token_env="TOKEN"
             crate::rotation::manager::ManagedPool::new(
                 store.clone(),
                 pool,
-                crate::rotation::base::BaseRpc::new(&rpc_url, 12).unwrap(),
+                crate::rotation::base::BaseRpc::new(&rpc_url).unwrap(),
                 crate::payment::SpendPolicy::dollars("5").unwrap(),
             )
             .unwrap(),

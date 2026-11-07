@@ -506,7 +506,7 @@ async fn publish_initial_credit(store: &StoreHandle, pool: &str, base: &str) {
     for wallet in wallets {
         let pool = pool.to_owned();
         let query = store.call(move |s| s.chain_query(&pool)).await.unwrap();
-        let view = BaseRpc::new(&format!("{base}/rpc"), 12)
+        let view = BaseRpc::new(&format!("{base}/rpc"))
             .unwrap()
             .view(query)
             .await
@@ -591,7 +591,7 @@ fn assert_balance_observation_outcome(result: anyhow::Result<()>) {
 async fn reconcile_complete_history(h: &Harness) {
     let pool = h.pool.clone();
     let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
-    let view = BaseRpc::new(&format!("{}/rpc", h.base), 12)
+    let view = BaseRpc::new(&format!("{}/rpc", h.base))
         .unwrap()
         .view(query)
         .await
@@ -618,7 +618,7 @@ fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {
     let manager = ManagedPool::new(
         store,
         pool,
-        BaseRpc::new(&format!("{base}/rpc"), 12).unwrap(),
+        BaseRpc::new(&format!("{base}/rpc")).unwrap(),
         SpendPolicy::dollars("none").unwrap(),
     )
     .unwrap();
@@ -1194,7 +1194,7 @@ async fn direct_managed_calls_bound_body_challenges_and_drop_unused_header_bodie
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
+        BaseRpc::new(&format!("{}/rpc", h.base)).unwrap(),
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
@@ -1861,7 +1861,7 @@ async fn configured_payment_cap_allows_attempts_above_estimated_funded_capacity(
         ManagedPool::new(
             h.store.clone(),
             h.pool.clone(),
-            BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
+            BaseRpc::new(&format!("{}/rpc", h.base)).unwrap(),
             SpendPolicy::dollars("none").unwrap(),
         )
         .unwrap(),
@@ -2148,7 +2148,7 @@ async fn malformed_base_evidence_never_applies_a_partial_view() {
         let pool = h.pool.clone();
         let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
         assert!(
-            BaseRpc::new(&format!("{}/rpc", h.base), 12)
+            BaseRpc::new(&format!("{}/rpc", h.base))
                 .unwrap()
                 .view(query)
                 .await
@@ -2476,7 +2476,7 @@ async fn explicit_api_cap_independent_of_funding_target_uses_confirmed_capacity(
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
+        BaseRpc::new(&format!("{}/rpc", h.base)).unwrap(),
         SpendPolicy::dollars("6").unwrap(),
     )
     .unwrap();
@@ -2501,7 +2501,7 @@ async fn foreground_admission_does_not_start_historical_authorization_sweep() {
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
+        BaseRpc::new(&format!("{}/rpc", h.base)).unwrap(),
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
@@ -2531,7 +2531,7 @@ async fn nonce_outages_retain_journals_without_vetoing_signing_across_restart() 
     let pool = h.pool.clone();
     let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
     assert!(
-        BaseRpc::new(&format!("{}/rpc", h.base), 12)
+        BaseRpc::new(&format!("{}/rpc", h.base))
             .unwrap()
             .view(query)
             .await

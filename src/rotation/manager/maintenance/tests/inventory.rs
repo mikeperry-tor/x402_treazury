@@ -102,7 +102,7 @@ impl Inventory {
             ManagedPool::new(
                 fixture.store.clone(),
                 fixture.group.clone(),
-                BaseRpc::new(&endpoint, 12).unwrap(),
+                BaseRpc::new(&endpoint).unwrap(),
                 crate::payment::SpendPolicy {
                     max_atomic: Some(U256::from(100)),
                 },

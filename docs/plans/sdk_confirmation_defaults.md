@@ -38,6 +38,8 @@ and tests/COMPLEXITY.md. AGENTS.md independent review and planning workflow appl
 ## Review and validation evidence
 
 - Independent reviewer `asset_search_review` accepted the Zcash public SDK accessor
-  design at the baseline. Base design review is in progress. It identified that
-  observation depth equality must stop acting as scope when recording actual gaps;
-  zero finalized/latest gap must also remain valid. No implementation yet.
+  design at the baseline and accepted the complete Base design at `5816de41`.
+  Its material observation-depth finding is incorporated: depth equality must stop
+  acting as scope when recording actual gaps; zero finalized/latest gap is valid.
+  Historical serialized depth remains readable without rewriting evidence.
+- C1 implementation is in progress; validation and exact review remain pending.

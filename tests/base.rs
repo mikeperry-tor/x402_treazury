@@ -26,7 +26,7 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
                         let result=match v["method"].as_str().unwrap() {
                             "eth_chainId"=>json!("0x2105"),
                             "eth_getBlockByNumber"=>{
-                                let height=if matches!(v["params"][0].as_str(),Some("latest"|"finalized")) {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
+                                let height=if v["params"][0] == "latest" {100} else if v["params"][0] == "finalized" {88} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
                                 json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{stamp:x}")})
                             }
                             "eth_call"=>{
@@ -42,7 +42,7 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
                     }
                 }))).await.unwrap();
             });
-            let rpc = BaseRpc::new(&url, 12).unwrap();
+            let rpc = BaseRpc::new(&url).unwrap();
             let query = |anchor| ChainQuery {
                 captures: Default::default(),
                 wallets: vec![("wallet".into(), format!("0x{:040x}", 1))],

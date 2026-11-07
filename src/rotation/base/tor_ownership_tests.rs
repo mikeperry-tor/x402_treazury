@@ -139,8 +139,10 @@ async fn endpoint(
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
             let tag = q["params"][0].as_str().unwrap();
-            let height = if matches!(tag, "latest" | "finalized") {
+            let height = if tag == "latest" {
                 100
+            } else if tag == "finalized" {
+                88
             } else {
                 u64::from_str_radix(&tag[2..], 16).unwrap()
             };
@@ -162,14 +164,14 @@ async fn endpoint(
             let mut receipt = receipt();
             match path {
                 "/receipt-null" => Value::Null,
-                // Preserve existing pending semantics: no receipt proof is required yet.
-                "/receipt-unconfirmed" => {
-                    json!({"blockNumber":"0x63", "transactionHash":expected().transaction})
+                // A receipt beyond latest is pending without a canonical receipt proof.
+                "/receipt-future" => {
+                    json!({"blockNumber":"0x65", "transactionHash":expected().transaction})
                 }
-                "/receipt-unconfirmed-wrong" => {
-                    json!({"blockNumber":"0x63", "transactionHash":B256::ZERO})
+                "/receipt-future-wrong" => {
+                    json!({"blockNumber":"0x65", "transactionHash":B256::ZERO})
                 }
-                "/receipt-unconfirmed-missing" => json!({"blockNumber":"0x63"}),
+                "/receipt-future-missing" => json!({"blockNumber":"0x65"}),
                 "/receipt-tx" => {
                     receipt["transactionHash"] = json!(B256::ZERO);
                     receipt
@@ -186,7 +188,7 @@ async fn endpoint(
     Json(json!({"jsonrpc":"2.0","id":q["id"],"result":result})).into_response()
 }
 fn rpc(path: &str) -> BaseRpc {
-    BaseRpc::new(&format!("https://api.example.com{path}"), 12).unwrap()
+    BaseRpc::new(&format!("https://api.example.com{path}")).unwrap()
 }
 fn selected(address: &str) -> Arc<crate::network::HttpTransport> {
     crate::network::global()
@@ -260,7 +262,7 @@ async fn tor_base_ownership_child() {
     for n in 0..32 {
         f.seen(&format!("/saturated/{n}"), "eth_call").await;
     }
-    let healthy = BaseRpc::new("https://spec.example.com/healthy", 12).unwrap();
+    let healthy = BaseRpc::new("https://spec.example.com/healthy").unwrap();
     tokio::time::timeout(Duration::from_millis(500), async {
         assert_eq!(
             healthy
@@ -298,9 +300,9 @@ async fn tor_base_ownership_child() {
         "/receipt-tx",
         "/receipt-nonce",
         "/receipt-null",
-        "/receipt-unconfirmed",
-        "/receipt-unconfirmed-wrong",
-        "/receipt-unconfirmed-missing",
+        "/receipt-future",
+        "/receipt-future-wrong",
+        "/receipt-future-missing",
         "/receipt-valid",
     ] {
         let before = selected(&e.payer.to_string());
@@ -321,7 +323,7 @@ async fn tor_base_ownership_child() {
                     "invalid receipt requires no canonical proof RPC"
                 );
             }
-            "/receipt-unconfirmed-wrong" | "/receipt-unconfirmed-missing" => {
+            "/receipt-future-wrong" | "/receipt-future-missing" => {
                 assert!(result.unwrap().is_none(), "pending semantics unchanged");
                 assert!(
                     Arc::ptr_eq(&before, &after),
@@ -329,7 +331,7 @@ async fn tor_base_ownership_child() {
                 );
                 assert_eq!(f.count(path, "eth_getBlockByNumber"), 1);
             }
-            "/receipt-null" | "/receipt-unconfirmed" => {
+            "/receipt-null" | "/receipt-future" => {
                 assert!(result.unwrap().is_none());
                 assert!(
                     !Arc::ptr_eq(&before, &after),
@@ -377,13 +379,10 @@ async fn tor_base_ownership_child() {
 
     // Endpoint A obtains headers, then exhausts one read's three scopes. B must
     // reacquire its whole view; evidence must contain only B's URL and anchors.
-    let fallback = BaseRpc::with_fallbacks(
-        &[
-            "https://api.example.com/view-a".into(),
-            "https://api.example.com/view-b".into(),
-        ],
-        12,
-    )
+    let fallback = BaseRpc::with_fallbacks(&[
+        "https://api.example.com/view-a".into(),
+        "https://api.example.com/view-b".into(),
+    ])
     .unwrap();
     let endpoint_b = rpc("/view-b").endpoint_id();
     let view = fallback.view(query.clone()).await.unwrap();

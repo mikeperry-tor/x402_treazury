@@ -1494,10 +1494,10 @@ async fn disabled_quote_closes_after_explicit_discovery_without_polling_or_new_s
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = x402_treazury::rotation::base::BaseRpc::new(
-        &format!("http://{}/", listener.local_addr().unwrap()),
-        12,
-    )
+    let base = x402_treazury::rotation::base::BaseRpc::new(&format!(
+        "http://{}/",
+        listener.local_addr().unwrap()
+    ))
     .unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let manager = x402_treazury::rotation::manager::ManagedPool::new(

@@ -43,7 +43,7 @@ async fn balance_fallback_is_quiet_at_info_and_has_safe_provider_context_at_debu
     }
     let (primary, rejected, first) = endpoint(StatusCode::FORBIDDEN).await;
     let (secondary, accepted, second) = endpoint(StatusCode::OK).await;
-    let rpc = BaseRpc::with_fallbacks(&[primary, secondary], 12).unwrap();
+    let rpc = BaseRpc::with_fallbacks(&[primary, secondary]).unwrap();
     let logs = crate::rotation::base::tests::Logs::default();
     let writer = logs.clone();
     let subscriber = tracing_subscriber::fmt()
@@ -102,7 +102,7 @@ async fn view_failure_stays_at_debug_for_the_requesting_workflow() {
         } else {
             endpoint(StatusCode::FORBIDDEN).await
         };
-        let rpc = BaseRpc::with_fallbacks(&[primary, secondary], 12).unwrap();
+        let rpc = BaseRpc::with_fallbacks(&[primary, secondary]).unwrap();
         let logs = crate::rotation::base::tests::Logs::default();
         let writer = logs.clone();
         let subscriber = tracing_subscriber::fmt()

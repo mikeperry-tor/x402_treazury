@@ -186,7 +186,7 @@ async fn paid_operation_urls() {
         store.clone(),
         group,
         // Any accidental balance read fails: the fixture serves purchase only.
-        BaseRpc::new("https://api.example.com/rpc", 12).unwrap(),
+        BaseRpc::new("https://api.example.com/rpc").unwrap(),
         SpendPolicy::dollars("0.01").unwrap(),
     )
     .unwrap();

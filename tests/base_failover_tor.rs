@@ -23,13 +23,10 @@ async fn fallback_retains_payer_credentials_remote_dns_and_no_direct_egress() {
         ..Default::default()
     })
     .unwrap();
-    let rpc = BaseRpc::with_fallbacks(
-        &[
-            "http://localhost:1/403".into(),
-            "http://localhost:2/ok".into(),
-        ],
-        12,
-    )
+    let rpc = BaseRpc::with_fallbacks(&[
+        "http://localhost:1/403".into(),
+        "http://localhost:2/ok".into(),
+    ])
     .unwrap();
     // Neither origin port exists: success proves requests traversed the SOCKS fixture.
     rpc.view(fixture::query()).await.unwrap();
@@ -104,13 +101,10 @@ async fn fallback_retains_payer_credentials_remote_dns_and_no_direct_egress() {
         assert!(exhausted, "one wallet must exhaust its endpoint budget");
         assert_eq!(accounted, rejected.len());
     }
-    let rpc = BaseRpc::with_fallbacks(
-        &[
-            "http://localhost:3/limited".into(),
-            "http://localhost:4/ok".into(),
-        ],
-        12,
-    )
+    let rpc = BaseRpc::with_fallbacks(&[
+        "http://localhost:3/limited".into(),
+        "http://localhost:4/ok".into(),
+    ])
     .unwrap();
     rpc.view(fixture::query()).await.unwrap();
     let records = proxy.records.lock().unwrap();

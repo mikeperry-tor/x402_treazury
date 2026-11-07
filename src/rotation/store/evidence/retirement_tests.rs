@@ -46,7 +46,7 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
                 "eth_chainId" => json!(if wrong_chain { "0x1" } else { "0x2105" }),
                 "eth_getBlockByNumber" => {
                     let tag = v["params"][0].as_str().unwrap();
-                    let height = if matches!(tag, "latest" | "finalized") { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
+                    let height = if tag == "latest" { head } else if tag == "finalized" { head - 12 } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
                     let hash = if hash_conflict && height == 188 { 999 } else { height };
                     json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{timestamp:x}")})
                 },
@@ -63,7 +63,7 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(

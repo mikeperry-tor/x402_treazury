@@ -1226,7 +1226,7 @@ mod ownership_tests {
             ManagedPool::new(
                 store.clone(),
                 pool.clone(),
-                BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+                BaseRpc::new("http://127.0.0.1:1").unwrap(),
                 SpendPolicy::dollars("5").unwrap(),
             )
             .unwrap()

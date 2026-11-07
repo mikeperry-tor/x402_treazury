@@ -157,7 +157,7 @@ async fn one_pass_refreshes_independent_wallets_without_near_credentials_or_sour
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     // Resolve configured Base settings through the production API without
     // touching process-global environment in parallel tests.
-    let base = BaseRpc::new(&endpoint, 12).unwrap();
+    let base = BaseRpc::new(&endpoint).unwrap();
     let (store, worker) = StoreHandle::spawn(state);
     let (wallets, malformed) = scope(&config(), &store).await.unwrap();
     assert_eq!(malformed, 0);
@@ -271,8 +271,7 @@ async fn finite_sync_applies_group_tolerance_and_retires_without_a_funding_owner
             }
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base =
-            BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+        let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let query = state
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
@@ -381,7 +380,7 @@ async fn invalid_existing_retirement_policy_keeps_scalar_sync_and_saved_authorit
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let report = refresh_usdc(
         store.clone(),

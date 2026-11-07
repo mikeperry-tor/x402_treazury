@@ -51,7 +51,7 @@ async fn base_fixture(balance: u64) -> (BaseRpc, Arc<AtomicUsize>, tokio::task::
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 2).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, calls, server)
 }
@@ -303,7 +303,7 @@ async fn optional_destination_failure_logs_debug_and_prepares_once() {
     let deadline = now().unwrap() + 7200;
     save_quotes(&owner.store, vec![job.clone()], deadline).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 2).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let app = Router::new().fallback(|| async {
         (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,

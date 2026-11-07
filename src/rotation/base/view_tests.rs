@@ -36,8 +36,10 @@ async fn fixture_timestamp(
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = v["params"][0].as_str().unwrap();
-                        let height = if matches!(tag, "latest" | "finalized") {
+                        let height = if tag == "latest" {
                             head.load(std::sync::atomic::Ordering::SeqCst)
+                        } else if tag == "finalized" {
+                            head.load(std::sync::atomic::Ordering::SeqCst) - 12
                         } else {
                             u64::from_str_radix(&tag[2..], 16).unwrap()
                         };
@@ -64,7 +66,7 @@ async fn fixture_timestamp(
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (rpc, requests, server, stamp)
 }
@@ -207,15 +209,14 @@ async fn historical_resolution_and_compatibility_share_identical_anchors() {
                 "eth_getBlockByNumber",
                 "eth_getBlockByNumber",
                 "eth_call",
-                "eth_getBlockByNumber",
                 "eth_getBlockByNumber"
             ]
         );
         assert_eq!(requests[1]["params"][0], "latest");
         assert_eq!(requests[2]["params"][0], "finalized");
         assert_eq!(requests[3]["params"][0], "0x58");
-        assert_eq!(requests[5]["params"][0], "0x64");
-        assert_eq!(requests[6]["params"][0], "0x58");
+        // Resolution, finalized and captured anchors coincide and share one recheck.
+        assert_eq!(requests[5]["params"][0], "0x58");
     }
     server.abort();
 }
@@ -281,8 +282,7 @@ async fn combined_history_acquires_new_admission_headers_without_relabeling_reso
             "0xbc",
             "0x58",
             "0xbc",
-            "0xc8",
-            "0x64"
+            "0xc8"
         ]
     );
     let balances: Vec<_> = requests
@@ -356,12 +356,11 @@ async fn unused_authorization_requires_strictly_later_confirmed_time_for_release
         let reads = requests.lock().unwrap();
         assert_eq!(
             reads.len(),
-            7,
-            "historical proof rechecks its resolution and finalized anchors without balances"
+            6,
+            "historical proof shares one resolution/finalized recheck without balances"
         );
         assert_eq!(reads[4]["params"][1]["blockHash"], anchor(88).hash);
-        assert_eq!(reads[5]["params"][0], "0x64");
-        assert_eq!(reads[6]["params"][0], "0x58");
+        assert_eq!(reads[5]["params"][0], "0x58");
         drop(reads);
         server.abort();
     }

@@ -423,7 +423,7 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
         ("[funding]", "poll_seconds=0", true),
         ("[funding]", "swap_timeout_seconds=0", true),
         ("[funding]", "quote_deadline_seconds=1", true),
-        ("[funding]", "base_confirmations=0", false),
+        ("[funding]", "base_rpc_url_env='invalid-name'", false),
     ];
     for (section, declaration, scoped) in cases {
         let dir = tempfile::tempdir().unwrap();
@@ -434,7 +434,11 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
         drop(store);
         write_spec(dir.path());
         let path = dir.path().join("deployment.toml");
-        let config = managed_config().replace(section, &format!("{section}\n{declaration}"));
+        let config = if scoped {
+            managed_config().replace(section, &format!("{section}\n{declaration}"))
+        } else {
+            managed_config().replace("base_rpc_url_env='BASE'", declaration)
+        };
         std::fs::write(&path, config).unwrap();
         let loaded =
             Deployment::load_for_serving_with_relay(&path, &env(), Default::default()).await;
@@ -499,7 +503,7 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         write_spec(dir.path());
         let mut config = managed_config().replace("https://127.0.0.1:1", &origin);
         if fault == "declaration" {
-            config = config.replace("[funding]", "[funding]\nbase_confirmations=0");
+            config = config.replace("base_rpc_url_env='BASE'", "base_rpc_url_env='invalid-name'");
         }
         if relay_enabled {
             let provider =

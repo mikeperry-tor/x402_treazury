@@ -58,6 +58,8 @@ pub struct BalanceObservation {
     pub asset: String,
     /// SHA-256 identity of the configured endpoint; contains no URL or credential.
     pub endpoint: String,
+    /// Observed latest/finalized gap; historical records may retain a smaller
+    /// requested minimum depth. This metadata does not select evidence scope.
     pub confirmations: u64,
     pub confirmed: BalancePoint,
     pub latest: BalancePoint,
@@ -87,13 +89,17 @@ impl BalanceObservation {
         {
             return Err(EvidenceFailure::InvalidTuple);
         }
-        if self.confirmations == 0
-            || self
-                .latest
-                .anchor
-                .height
-                .checked_sub(self.confirmations)
-                .is_none_or(|height| self.confirmed.anchor.height > height)
+        if self.confirmed.anchor.hash == self.latest.anchor.hash
+            && self.confirmed.amount != self.latest.amount
+        {
+            return Err(EvidenceFailure::AmountContradiction);
+        }
+        if self
+            .latest
+            .anchor
+            .height
+            .checked_sub(self.confirmations)
+            .is_none_or(|height| self.confirmed.anchor.height > height)
         {
             return Err(EvidenceFailure::InvalidTuple);
         }
@@ -108,7 +114,6 @@ impl BalanceObservation {
             || self.address != previous.address
             || self.network != previous.network
             || self.asset != previous.asset
-            || self.confirmations != previous.confirmations
         {
             return Err(EvidenceFailure::ScopeMismatch);
         }
@@ -204,14 +209,14 @@ mod tests {
             changed.compare(&original),
             Err(EvidenceFailure::ConfirmedReplacement)
         );
-        changed.confirmations = 1;
+        changed.wallet = "other".into();
         assert_eq!(
             changed.compare(&original),
             Err(EvidenceFailure::ScopeMismatch)
         );
     }
     #[test]
-    fn minimum_depth_allows_finality_lag_but_rejects_shallow_evidence() {
+    fn historical_depth_metadata_cannot_exceed_the_observed_anchor_gap() {
         let mut value = observation(20, 8, 3);
         value.confirmed.anchor = Anchor {
             height: 19,
@@ -223,6 +228,37 @@ mod tests {
             hash: format!("0x{:064x}", 21),
         };
         assert_eq!(value.validate(), Err(EvidenceFailure::InvalidTuple));
+    }
+    #[test]
+    fn zero_gap_and_changing_gap_metadata_preserve_historical_comparison() {
+        let historical = observation(20, 8, 3);
+        let historical: BalanceObservation =
+            serde_json::from_slice(&serde_json::to_vec(&historical).unwrap()).unwrap();
+        assert_eq!(historical.confirmations, 12);
+        let mut same = historical.clone();
+        same.confirmations = 0;
+        assert_eq!(same.compare(&historical), Ok(std::cmp::Ordering::Equal));
+
+        let mut newer = historical.clone();
+        newer.latest.anchor.height = 33;
+        newer.latest.anchor.hash = format!("0x{:064x}", 33);
+        newer.confirmations = 13;
+        assert_eq!(newer.compare(&historical), Ok(std::cmp::Ordering::Greater));
+        assert_eq!(historical.compare(&newer), Ok(std::cmp::Ordering::Less));
+
+        let mut zero_gap = newer;
+        zero_gap.confirmed = zero_gap.latest.clone();
+        zero_gap.confirmations = 0;
+        zero_gap.validate().unwrap();
+        assert_eq!(
+            zero_gap.compare(&historical),
+            Ok(std::cmp::Ordering::Greater)
+        );
+        zero_gap.latest.amount += U256::from(1);
+        assert_eq!(
+            zero_gap.validate(),
+            Err(EvidenceFailure::AmountContradiction)
+        );
     }
     #[test]
     fn latest_progress_orders_balances_while_finalized_head_is_unchanged() {

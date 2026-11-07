@@ -163,7 +163,7 @@ USD conversion-overhead ceiling:
 | `funding.slippage_bps` | Relative quote execution tolerance; default 500 (5%). The current application permits 0-1000 (0-10%); the 10% ceiling is an application choice, not an established NEAR requirement. |
 | Quote/refund and signed transaction expiry | External financial authority windows. Managed/send requests default to 1800 seconds; foreign receives request refund handling after 7200 by default. Neither is a completion deadline or replay permission. |
 | x402 signing authority | Newly signed API payment authority lasts at most the lesser of the seller timeout and 300 seconds (`payment/lifetime.rs`); this does not impose an HTTP work deadline. |
-| Confirmations and witnesses | Default Zcash confirmations: 3; Base confirmations: 12 plus finalized evidence. SDK witnesses and consensus state govern spendability. |
+| Confirmations and witnesses | Zcash uses the pinned SDK's trusted default (currently 3), with an explicit uniform-threshold override. Base requires finalized evidence without an additional depth setting. SDK witnesses and consensus state govern spendability. |
 | Monetary representations and exact transaction shape | ZEC uses eight decimals and the SDK 21-million-ZEC domain; nominal USDC reserve/retirement accounting uses signed 64-bit micro-USDC. Exact single-step proposals, recipients, fees, change and Ironwood-only input/output policy remain validated. |
 | [Qualification-only API budgets/job counts](../tests/live/INTEGRATION_REFERENCE.md#registry-authorization-and-preparation) | Separately authorized test restrictions, with test-only concurrency and execution-window bounds; no ordinary funding ZEC budget. |
 
@@ -591,14 +591,15 @@ unverified until the chain checks succeed.
 
 `rotation/base.rs` verifies Base chain identity, finalized anchors,
 block-pinned USDC balances and EIP-3009 authorization use. Its confirmed anchor
-is the lower of the provider's finalized height and the latest height minus
-`funding.base_confirmations` (default 12). Both finality and configured depth must
-hold; depth alone does not establish finality. Missing or inconsistent finalized
-evidence retains the existing observation retry and configured fallback behavior.
+is the provider's finalized anchor, without an additional application depth
+requirement. New observation depths describe the actual latest/finalized gap and
+may be zero; they do not select a confirmation policy. Historical records retain
+their original minimum-depth metadata. Missing or inconsistent finalized evidence
+retains the existing observation retry and configured fallback behavior.
 A used authorization
 or an expired authorization proven unused can release its reservation through the
 store's canonical reconciliation transaction. An unused but still-valid signature
-remains a liability. Receipt inclusion must satisfy the same finalized/depth bound.
+remains a liability. Receipt inclusion must be within the same finalized chain.
 
 Changed canonical history invalidates affected derived evidence. In one Store
 transaction, reconciliation archives the current authorization resolutions,

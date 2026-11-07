@@ -56,7 +56,7 @@ async fn startup_and_funding_share_credit_after_cancellation_without_losing_new_
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (store, owner) = StoreHandle::spawn(state);
     let pool = super::super::manager::ManagedPool::new(
@@ -187,7 +187,7 @@ async fn partial_credit_consumes_initial_claim_and_late_reads_never_reopen_it() 
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (store, owner) = StoreHandle::spawn(state);
     let observer = Observations {
@@ -411,7 +411,7 @@ async fn production_credit_uses_shared_failure_schedule_without_recounting_cache
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (store, owner) = StoreHandle::spawn(state);
     let reads = Observations {

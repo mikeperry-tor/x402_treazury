@@ -45,7 +45,7 @@ async fn fixture(mode: &'static str) -> (BaseRpc, Arc<Mutex<Chain>>, tokio::task
         Json(json!({"jsonrpc":"2.0","id":1,"result":result}))
     })).with_state(chain.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (rpc, chain, server)
 }
@@ -80,11 +80,12 @@ fn query() -> ChainQuery {
 }
 
 #[tokio::test]
-async fn finalized_progress_and_minimum_depth_both_bound_authorization_expiry() {
+async fn finalized_progress_alone_bounds_authorization_expiry() {
     let (rpc, chain, server) = fixture("valid").await;
     let first = rpc.view(query()).await.unwrap();
     assert_eq!(first.observations["wallet"].confirmed.anchor.height, 80);
     assert_eq!(first.observations["wallet"].latest.anchor.height, 100);
+    assert_eq!(first.observations["wallet"].confirmations, 20);
     assert!(
         first.released.is_empty(),
         "latest time cannot expire an authorization before finalized time"
@@ -92,13 +93,21 @@ async fn finalized_progress_and_minimum_depth_both_bound_authorization_expiry() 
     first.observations["wallet"].validate().unwrap();
     chain.lock().unwrap().finalized = 95;
     let next = rpc.view(query()).await.unwrap();
-    assert_eq!(next.observations["wallet"].confirmed.anchor.height, 88);
+    assert_eq!(next.observations["wallet"].confirmed.anchor.height, 95);
+    assert_eq!(next.observations["wallet"].confirmations, 5);
     assert_eq!(
         next.resolutions["attempt"].outcome,
         AuthorizationOutcome::ExpiredUnused
     );
-    assert_eq!(next.resolutions["attempt"].block_time, 88);
-    assert_eq!(next.resolution_certificates["attempt"].anchor().height, 88);
+    assert_eq!(next.resolutions["attempt"].block_time, 95);
+    assert_eq!(next.resolution_certificates["attempt"].anchor().height, 95);
+    chain.lock().unwrap().finalized = 100;
+    let at_tip = rpc.view(query()).await.unwrap();
+    let observation = &at_tip.observations["wallet"];
+    assert_eq!(observation.confirmed.anchor.height, 100);
+    assert_eq!(observation.latest.anchor, observation.confirmed.anchor);
+    assert_eq!(observation.confirmations, 0);
+    observation.validate().unwrap();
     server.abort();
 }
 
@@ -116,8 +125,8 @@ async fn unavailable_finality_uses_only_configured_complete_evidence_and_never_d
             .any(|r| r["method"] == "eth_call")
     );
     let (healthy, _, second) = fixture("valid").await;
-    let rpc = BaseRpc::with_fallbacks(&[unsupported.url.to_string(), healthy.url.to_string()], 12)
-        .unwrap();
+    let rpc =
+        BaseRpc::with_fallbacks(&[unsupported.url.to_string(), healthy.url.to_string()]).unwrap();
     assert_eq!(
         rpc.view(query()).await.unwrap().observations["wallet"]
             .confirmed
@@ -174,7 +183,7 @@ async fn captured_chain_conflict_does_not_shop_for_another_provider() {
     let (primary, _, first) = fixture("valid").await;
     let (fallback, untouched, second) = fixture("valid").await;
     let rpc =
-        BaseRpc::with_fallbacks(&[primary.url.to_string(), fallback.url.to_string()], 12).unwrap();
+        BaseRpc::with_fallbacks(&[primary.url.to_string(), fallback.url.to_string()]).unwrap();
     let mut query = query();
     query.captures.get_mut("wallet").unwrap().checkpoint = Some(Anchor {
         height: 99,

@@ -397,8 +397,10 @@ This command reads `[treasury]`, resolves state/key paths relative to the TOML,
 and requires exclusive ownership: stop the managed server first. It does not load
 API specs, require NEAR/submission credentials, or load `.env` automatically.
 The indexer must serve mainnet over TLS; HTTP is permitted only on loopback for
-local testing. Account 0's shielded funds are used, with `confirmations` (default
-3) applied to zingolib's spendability calculation. Unconfirmed change is excluded.
+local testing. Account 0's shielded funds are used, with `confirmations` applied to zingolib's spendability calculation. Its default
+comes from the pinned Zcash SDK's trusted confirmation policy (currently 3).
+An explicit override replaces this default; the same threshold applies to all
+supported funds. Unconfirmed change is excluded.
 
 Available treasury serving requests one background ZEC scan after listeners bind.
 Further scans need enabled unfilled funding claims or validated pending source or
@@ -882,8 +884,7 @@ base_rpc_fallback_url_envs = ["BASE_RPC_SECONDARY", "BASE_RPC_TERTIARY"]
 Failover restarts the **entire read-only chain view** on one endpoint, including
 chain ID, persisted anchor, confirmed/latest balances, authorization nonces and
 final canonical-block checks. Canonical balances, nonces and receipt proofs require
-both the provider's finalized chain and `funding.base_confirmations`; scalar
-latest-balance observations remain advisory. Unsupported or unavailable finalized
+the provider's finalized chain; scalar latest-balance observations remain advisory. Unsupported or unavailable finalized
 evidence cannot fall back to a depth-only proof. Partial evidence is discarded. HTTP 403/408/429,
 500/502/503/504, availability transport failures and RPC -32005/-32016/-32601
 permit fallback. Malformed JSON/envelopes/results, oversized responses and TLS

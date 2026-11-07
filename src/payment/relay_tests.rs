@@ -447,7 +447,7 @@ async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
     let manager = ManagedPool::new(
         store.clone(),
         pool.clone(),
-        BaseRpc::new("https://api.example.com/rpc", 12).unwrap(),
+        BaseRpc::new("https://api.example.com/rpc").unwrap(),
         SpendPolicy::dollars("0.01").unwrap(),
     )
     .unwrap();

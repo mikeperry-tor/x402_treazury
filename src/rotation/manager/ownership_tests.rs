@@ -40,7 +40,7 @@ async fn unsigned_candidate_neither_publishes_roles_nor_waits_for_the_payment_ga
     let manager = ManagedPool::new(
         store.clone(),
         pool,
-        BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        BaseRpc::new("http://127.0.0.1:1").unwrap(),
         SpendPolicy::dollars("1").unwrap(),
     )
     .unwrap();

@@ -16,7 +16,6 @@ confirmations = 3
 auto_fund = false # Change only after explicitly approving the funded test.
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
-base_confirmations = 12
 slippage_bps = 100
 poll_seconds = 5 # Local scheduling/jitter; recurring network observations retain a 60-second floor.
 swap_timeout_seconds = 1800

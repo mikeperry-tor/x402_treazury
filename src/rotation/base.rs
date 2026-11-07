@@ -80,7 +80,6 @@ fn safe_reason(error: &anyhow::Error) -> String {
                 | "missing Base RPC result"
                 | "invalid block hash"
                 | "invalid RPC quantity"
-                | "insufficient Base confirmations"
                 | "Base block is in the future"
                 | "receipt block height mismatch"
                 | "receipt transaction reverted"
@@ -176,7 +175,6 @@ pub struct ChainView {
 pub struct BaseRpc {
     identity: crate::network::IsolationId,
     url: reqwest::Url,
-    confirmations: u64,
     fallbacks: Vec<BaseRpc>,
 }
 pub fn now() -> Result<u64> {
@@ -208,17 +206,15 @@ struct ResolvedHistory {
 }
 
 impl BaseRpc {
-    pub fn new(url: &str, confirmations: u64) -> Result<Self> {
-        ensure!(confirmations > 0, "invalid Base RPC limits");
+    pub fn new(url: &str) -> Result<Self> {
         Ok(Self {
             identity: crate::network::IsolationId::discovery(url)?,
             url: secure_endpoint(url)?,
-            confirmations,
             fallbacks: vec![],
         })
     }
     /// Only operator-selected endpoints; every attempt constructs a whole chain view.
-    pub fn with_fallbacks(urls: &[String], confirmations: u64) -> Result<Self> {
+    pub fn with_fallbacks(urls: &[String]) -> Result<Self> {
         ensure!(
             !urls.is_empty() && urls.len() <= 3,
             "configure one to three Base RPC endpoints; list is never truncated"
@@ -232,7 +228,7 @@ impl BaseRpc {
         }
         let mut endpoints = urls
             .iter()
-            .map(|url| Self::new(url, confirmations))
+            .map(|url| Self::new(url))
             .collect::<Result<Vec<_>>>()?;
         let mut primary = endpoints.remove(0);
         primary.fallbacks = endpoints;
@@ -242,7 +238,6 @@ impl BaseRpc {
         Ok(Self {
             identity: crate::network::IsolationId::evm(address)?,
             url: self.url.clone(),
-            confirmations: self.confirmations,
             fallbacks: vec![],
         })
     }
@@ -650,8 +645,8 @@ impl BaseRpc {
         // canonicality check and can be reconciled after a chain replacement.
         self.canonical_headers(progress).await
     }
-    /// Financial facts require both the configured depth and chain finality.
-    /// Finality is never inferred from elapsed local time or a depth-only read.
+    /// Financial facts require chain finality, never elapsed local time or a
+    /// locally chosen block depth.
     async fn canonical_headers(&self, progress: &ViewProgress) -> Result<ViewHeaders> {
         let (latest, timestamp) = progress
             .step("latest_block", self.block("latest"))
@@ -665,10 +660,6 @@ impl BaseRpc {
         timestamp: u64,
         progress: &ViewProgress,
     ) -> Result<ViewHeaders> {
-        let depth_height = latest
-            .height
-            .checked_sub(self.confirmations)
-            .context("insufficient Base confirmations")?;
         let (finalized, finalized_time) = progress
             .step("finalized_block", self.block("finalized"))
             .await
@@ -677,7 +668,7 @@ impl BaseRpc {
             finalized.height <= latest.height && finalized_time <= timestamp,
             RpcFailure::malformed("eth_getBlockByNumber")
         );
-        let height = depth_height.min(finalized.height);
+        let height = finalized.height;
         let (confirmed, confirmed_time) = progress
             .step("confirmed_block", self.block(&format!("0x{height:x}")))
             .await
@@ -855,7 +846,7 @@ impl BaseRpc {
                         network: "eip155:8453".into(),
                         asset: USDC.into(),
                         endpoint,
-                        confirmations: rpc.confirmations,
+                        confirmations: latest.height - confirmed.height,
                         confirmed: evidence::BalancePoint {
                             anchor: confirmed,
                             amount: stable,
@@ -986,7 +977,7 @@ mod tests {
             let logs = Logs::default();
             let writer = logs.clone();
             let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false).with_env_filter("warn,x402_treazury::rotation::base=debug").with_writer(move ||writer.clone()).finish();
-            let rpc = BaseRpc::new(&url, 12).unwrap();
+            let rpc = BaseRpc::new(&url).unwrap();
             let error = rpc.view(ChainQuery{wallets:vec![],pending:vec![],anchor:None,captures:Default::default()}).with_subscriber(subscriber).await.err().unwrap();
             let public = safe_diagnostic(&error);
             let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();

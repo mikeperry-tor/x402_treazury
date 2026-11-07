@@ -518,7 +518,7 @@ async fn fixture() {
                         })
                         .await
                         .is_ok(),
-                    _ => crate::rotation::base::BaseRpc::new(&endpoint, 12)
+                    _ => crate::rotation::base::BaseRpc::new(&endpoint)
                         .unwrap()
                         .current_balance("0x0000000000000000000000000000000000000042")
                         .await
@@ -801,7 +801,7 @@ async fn body_cases(
             })
             .await
             .is_ok(),
-            "base" => crate::rotation::base::BaseRpc::new(&endpoint, 12)
+            "base" => crate::rotation::base::BaseRpc::new(&endpoint)
                 .unwrap()
                 .current_balance("0x0000000000000000000000000000000000000043")
                 .await

@@ -206,7 +206,7 @@ async fn rotation_burst() -> Vec<(String, std::net::SocketAddr, String, String)>
         h.f.balances.lock().unwrap().insert(active, 0);
         let pool = h.pool.clone();
         let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
-        let view = BaseRpc::new(&format!("{}/rpc", h.base), 12)
+        let view = BaseRpc::new(&format!("{}/rpc", h.base))
             .unwrap()
             .view(query)
             .await

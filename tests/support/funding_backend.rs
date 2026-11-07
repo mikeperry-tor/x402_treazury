@@ -35,7 +35,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         treasury,
         store: store.clone(),
         near: super::super::near::NearClient::new(None).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
         wallets: std::collections::BTreeMap::from([("pool".into(), policy())]),
         funding: serde_json::from_value(
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
@@ -442,7 +442,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     for (path, code) in [("forbidden", "403"), ("limited", "429")] {
         let due = store.balance_due(&job.wallet_id).await;
         tokio::time::advance(due.saturating_duration_since(tokio::time::Instant::now())).await;
-        backend.base = super::super::base::BaseRpc::new(&format!("{url}/{path}"), 12).unwrap();
+        backend.base = super::super::base::BaseRpc::new(&format!("{url}/{path}")).unwrap();
         let error = backend
             .credit(&job)
             .await
@@ -469,7 +469,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             "only the explicit advisory failure field may change"
         );
     }
-    backend.base = super::super::base::BaseRpc::new(&url, 12).unwrap();
+    backend.base = super::super::base::BaseRpc::new(&url).unwrap();
     let due = store.balance_due(&job.wallet_id).await;
     tokio::time::advance(due.saturating_duration_since(tokio::time::Instant::now())).await;
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
@@ -715,7 +715,7 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     let (treasury, commands) = actor::channel();
     let backend = Backend {
         treasury, store: store.clone(), near: super::super::near::NearClient::test_at(&origin).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
         wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())].into(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
         };
@@ -947,7 +947,7 @@ async fn sizing_policy_resolves_the_job_slot_range() {
         treasury,
         store,
         near: super::super::near::NearClient::new(None).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
         wallets: [(
             "pool".into(),
             serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"},"large":{"min_funding_amount_usdc":"10","max_funding_amount_usdc":"25"}},"max_api_payment_usdc":"1"})).unwrap(),
@@ -1023,7 +1023,7 @@ async fn quote_prerequisite_draws_and_persists_within_the_configured_slot_range(
         treasury,
         store: store.clone(),
         near: super::super::near::NearClient::new(None).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
         wallets: [(
             "pool".into(),
             serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap(),
@@ -1115,7 +1115,7 @@ async fn sizing_policy_uses_the_default_small_range_when_reserves_are_omitted() 
         treasury,
         store,
         near: super::super::near::NearClient::new(None).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
         wallets: [(
             "pool".into(),
             serde_json::from_value(json!({"mode":"zcash_rotation","max_api_payment_usdc":"1"}))
@@ -1171,7 +1171,7 @@ async fn sizing_policy_uses_the_default_large_range_for_an_empty_slot() {
         treasury,
         store,
         near: super::super::near::NearClient::new(None).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
         wallets: [("pool".into(), config)].into(),
         funding: serde_json::from_value(
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),

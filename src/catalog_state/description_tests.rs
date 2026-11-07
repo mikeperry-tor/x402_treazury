@@ -39,7 +39,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             ManagedPool::new(
                 store.clone(),
                 group,
-                BaseRpc::new("https://rpc.example.com", 12).unwrap(),
+                BaseRpc::new("https://rpc.example.com").unwrap(),
                 SpendPolicy::dollars("0.01").unwrap(),
             )
             .unwrap(),

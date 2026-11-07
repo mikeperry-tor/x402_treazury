@@ -22,7 +22,6 @@ confirmations = 3
 # --allow-funding and positive registry limits. Zero-funding runs enforce denial.
 auto_fund = false
 confidentiality = "public"
-base_confirmations = 12
 [wallets.test_pool]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets

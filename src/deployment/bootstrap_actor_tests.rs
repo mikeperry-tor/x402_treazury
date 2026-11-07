@@ -103,7 +103,7 @@ fn funding_backend(
     origin: &str,
 ) -> Backend {
     Backend {
-        treasury:handle,store,near:NearClient::test_at(origin).unwrap(),base:BaseRpc::new(&format!("{origin}/base"), 12).unwrap(),
+        treasury:handle,store,near:NearClient::test_at(origin).unwrap(),base:BaseRpc::new(&format!("{origin}/base")).unwrap(),
         wallets:BTreeMap::from([("research".into(),serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())]),
         funding:serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),}
 }

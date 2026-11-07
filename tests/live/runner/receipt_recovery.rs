@@ -20,7 +20,29 @@ use x402_treazury::{
 #[derive(Deserialize)]
 struct ObservationConfig {
     network: NetworkPolicy,
-    funding: FundingConfig,
+    funding: ArchivedBaseSettings,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ArchivedBaseSettings {
+    #[serde(
+        default,
+        deserialize_with = "present_rpc_env",
+        skip_serializing_if = "Option::is_none"
+    )]
+    base_rpc_url_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_rpc_fallback_url_envs: Option<Vec<String>>,
+}
+fn present_rpc_env<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+impl ArchivedBaseSettings {
+    fn config(self) -> Result<FundingConfig> {
+        Ok(serde_json::from_value(serde_json::to_value(self)?)?)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -29,7 +51,6 @@ struct Task {
     version: u32,
     policy: NetworkPolicy,
     urls: Vec<String>,
-    confirmations: u64,
 
     snapshot: Value,
     candidates: Vec<Candidate>,
@@ -141,7 +162,7 @@ pub async fn observe(path: &Path, digest: &str) -> Result<u8> {
         Ok(())
     })?;
     network::install(task.policy)?;
-    let rpc = BaseRpc::with_fallbacks(&task.urls, task.confirmations)?;
+    let rpc = BaseRpc::with_fallbacks(&task.urls)?;
     let mut results = Vec::new();
     for (index, expected) in expected.iter().enumerate() {
         eprintln!(
@@ -249,7 +270,7 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
         "receipt recovery treasury mismatch"
     );
     let config: ObservationConfig = serde_json::from_value(archive["deployment"].clone())?;
-    let funding = config.funding;
+    let funding = config.funding.config()?;
     let candidates = select(&registry.report(Some(run), now()?)?, &snapshot)?;
     if candidates.is_empty() {
         println!("No unverified successful seller receipts to observe; no requests sent");
@@ -259,7 +280,6 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
         version: 1,
         policy: config.network,
         urls: funding.base_rpc_urls(|name| std::env::var(name).ok())?,
-        confirmations: funding.base_confirmations,
 
         snapshot,
         candidates,
@@ -404,17 +424,15 @@ mod tests {
             "mode":"tor", "socks_endpoint":"127.0.0.1:19050"
         }))
         .unwrap();
-        let funding: FundingConfig = serde_json::from_value(json!({
-            "base_rpc_url_env":"RECOVERY_RPC", "base_rpc_fallback_url_envs":[],
-            "base_confirmations":19
-        }))
-        .unwrap();
         let mut deployment = json!({"version":1,"servers":{},
-            "network":network,"funding":funding});
+            "network":network,"funding":{
+                "base_rpc_url_env":"RECOVERY_RPC", "base_rpc_fallback_url_envs":[]
+            }});
         assert!(
             serde_json::from_value::<x402_treazury::deployment::MetaConfig>(deployment.clone())
                 .is_ok()
         );
+        deployment["funding"]["base_confirmations"] = json!(19);
         for retired in [
             json!({"provider":"missing-provider.toml","serve":true}),
             json!({"fallbacks":{"GET":["missing-provider.toml"]},"api_requests":true}),
@@ -427,17 +445,45 @@ mod tests {
             );
             let observed: ObservationConfig = serde_json::from_value(deployment.clone()).unwrap();
             assert_eq!(serde_json::to_value(observed.network).unwrap(), deployment["network"]);
-            assert_eq!(serde_json::to_value(observed.funding).unwrap(), deployment["funding"]);
+            let funding = observed.funding.config().unwrap();
+            assert_eq!(funding.base_rpc_url_env, "RECOVERY_RPC");
+            assert_eq!(funding.base_rpc_fallback_url_envs, Some(vec![]));
+            assert_eq!(
+                funding.base_rpc_urls(|_| Some("https://rpc.example.com".into())).unwrap(),
+                ["https://rpc.example.com"]
+            );
             assert_eq!(deployment, original);
         }
         for field in ["network", "funding"] {
             let mut invalid = deployment.clone();
-            invalid[field] = json!({"unknown_observation_policy":true});
+            invalid[field] = json!(false);
             assert!(serde_json::from_value::<ObservationConfig>(invalid).is_err());
             let mut missing = deployment.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<ObservationConfig>(missing).is_err());
         }
+        for settings in [
+            json!({"base_rpc_url_env":null}),
+            json!({"base_rpc_url_env":true}),
+            json!({"base_rpc_fallback_url_envs":"invalid"}),
+        ] {
+            let mut invalid = deployment.clone();
+            invalid["funding"] = settings;
+            assert!(serde_json::from_value::<ObservationConfig>(invalid).is_err());
+        }
+        let invalid: ArchivedBaseSettings = serde_json::from_value(json!({
+            "base_rpc_url_env":"invalid environment name"
+        })).unwrap();
+        let mut lookups = 0;
+        assert!(invalid.config().unwrap().base_rpc_urls(|_| {
+            lookups += 1;
+            None
+        }).is_err());
+        assert_eq!(lookups, 0, "invalid settings fail before environment lookup");
+        let defaults: ArchivedBaseSettings = serde_json::from_value(json!({})).unwrap();
+        let defaults = defaults.config().unwrap();
+        assert_eq!(defaults.base_rpc_url_env, "BASE_RPC_URL");
+        assert_eq!(defaults.base_rpc_fallback_url_envs, None);
     }
 
     fn fixture() -> (Value, Value) {
@@ -477,7 +523,6 @@ mod tests {
             version: 1,
             policy: NetworkPolicy::default(),
             urls: vec![],
-            confirmations: 12,
 
             candidates: select(&report, &snapshot).unwrap(),
             snapshot,

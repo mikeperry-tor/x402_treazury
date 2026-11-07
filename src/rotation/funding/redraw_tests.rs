@@ -69,7 +69,7 @@ async fn start(min: &str, max: &str, app: axum::Router) -> Fixture {
     let observations = Observations {
         store: store.clone(),
         near: crate::rotation::near::NearClient::test_at(&origin).unwrap(),
-        base: crate::rotation::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
+        base: crate::rotation::base::BaseRpc::new("http://127.0.0.1:1").unwrap(),
     };
     Fixture {
         _dir: dir,

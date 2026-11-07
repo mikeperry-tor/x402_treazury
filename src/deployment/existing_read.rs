@@ -59,10 +59,7 @@ impl ExistingRead {
                     .context("Base configuration unavailable")?;
                 funding.validate_base()?;
                 let urls = funding.base_rpc_urls(env)?;
-                let base = crate::rotation::base::BaseRpc::with_fallbacks(
-                    &urls,
-                    funding.base_confirmations,
-                )?;
+                let base = crate::rotation::base::BaseRpc::with_fallbacks(&urls)?;
                 let store = crate::treasury::Treasury::open_shared_state(
                     treasury.state_dir.clone(),
                     treasury.key_file.clone(),
