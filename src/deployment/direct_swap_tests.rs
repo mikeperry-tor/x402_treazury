@@ -446,7 +446,7 @@ async fn native_sdk_remains_available_without_usable_near_configuration() {
         None,
         Some("near_api_key_env='MISSING'"),
         Some("near_api_key_env='BAD'"),
-        Some("slippage_bps=1001"),
+        Some("slippage_bps=10001"),
         Some("poll_seconds=99"),
         Some("poll_seconds=0"),
     ] {

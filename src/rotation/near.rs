@@ -599,7 +599,7 @@ fn request_on(
     ensure!(
         atomic(amount)? > 0
             && matches!(confidentiality, "public" | "basic" | "advanced")
-            && slippage <= 1000,
+            && slippage <= 10000,
         "invalid quote policy"
     );
     let deadline = chrono::DateTime::from_timestamp(i64::try_from(deadline)?, 0)
@@ -1203,6 +1203,54 @@ mod tests {
         assert!(
             client
                 .validate_saved_quote(&missing, &limits, 2_000_000_000)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn full_percentage_slippage_preserves_quote_and_saved_floor_bindings() {
+        let client = NearClient::new(None).unwrap();
+        for (slippage, minimum) in [
+            (0, 5_000_000u64),
+            (1001, 4_499_500),
+            (2500, 3_750_000),
+            (10000, 1),
+        ] {
+            let (mut request, mut response, limits) = fixture(false);
+            request["slippageTolerance"] = json!(slippage);
+            response["quoteRequest"] = request.clone();
+            let output = validate_quote(request, response, &limits, 2_000_000_000).unwrap();
+            client
+                .validate_saved_quote(&output, &limits, 2_000_000_000)
+                .unwrap();
+
+            let (mut input, limits) = input_fixture();
+            input.request["slippageTolerance"] = json!(slippage);
+            input.response["quoteRequest"] = input.request.clone();
+            input.response["quote"]["minAmountOut"] = json!(minimum.to_string());
+            client
+                .validate_saved_quote(&input, &limits, 2_000_000_000)
+                .unwrap();
+            input.response["quote"]["minAmountOut"] = json!((minimum - 1).to_string());
+            assert!(
+                client
+                    .validate_saved_quote(&input, &limits, 2_000_000_000)
+                    .is_err()
+            );
+            input.response["quote"]["minAmountOut"] = json!(minimum.to_string());
+            input.response["quoteRequest"]["slippageTolerance"] = json!(slippage + 1);
+            assert!(
+                client
+                    .validate_saved_quote(&input, &limits, 2_000_000_000)
+                    .is_err()
+            );
+        }
+        let (mut input, limits) = input_fixture();
+        input.request["slippageTolerance"] = json!(10001);
+        input.response["quoteRequest"] = input.request.clone();
+        assert!(
+            client
+                .validate_saved_quote(&input, &limits, 2_000_000_000)
                 .is_err()
         );
     }

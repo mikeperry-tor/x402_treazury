@@ -540,7 +540,7 @@ saved draw is retried with normal backoff until configuration or external
 conditions change. This is not an empty treasury. The ceiling
 does not reject beneficial extra execution output. The executable `EXACT_INPUT`
 quote fixes the preview's NEAR-priced ZEC principal and applies
-`funding.slippage_bps` (default 500 basis points, range 0–1000) once to its
+`funding.slippage_bps` (default 500 basis points; range 0–10000, or 0–100%) once to its
 expected output. Its `minAmountOut` is the execution floor, not the route's
 minimum supported size. USD valuations and commission metadata are advisory. No external exchange-rate oracle
 or mutable balance tracking is introduced. Accepted older `EXACT_OUTPUT` work

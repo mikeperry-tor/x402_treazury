@@ -645,7 +645,7 @@ impl FundingConfig {
             "confidentiality must be public, basic or advanced"
         );
         ensure!(
-            self.slippage_bps <= 1000
+            self.slippage_bps <= 10000
                 && self.poll_seconds > 0
                 && self.poll_seconds <= 60
                 && self.swap_timeout_seconds > 0

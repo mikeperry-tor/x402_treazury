@@ -123,6 +123,23 @@ fn rpc_fallback_configuration_is_explicit_bounded_and_unique() {
 }
 
 #[test]
+fn slippage_configuration_accepts_the_full_percentage_domain() {
+    use x402_treazury::rotation::config::FundingConfig;
+    let default: FundingConfig = toml::from_str("").unwrap();
+    assert_eq!(default.slippage_bps, 500);
+    for (slippage, valid) in [
+        (0, true),
+        (1001, true),
+        (2500, true),
+        (10000, true),
+        (10001, false),
+    ] {
+        let funding: FundingConfig = toml::from_str(&format!("slippage_bps={slippage}")).unwrap();
+        assert_eq!(funding.validate().is_ok(), valid, "{slippage}");
+    }
+}
+
+#[test]
 fn default_rpc_resolution_and_explicit_overrides_are_unambiguous() {
     use x402_treazury::rotation::config::{DEFAULT_BASE_RPC_URLS, FundingConfig};
     let parse = |text: &str| toml::from_str::<FundingConfig>(text).unwrap();

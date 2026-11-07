@@ -419,7 +419,7 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
         ("[funding]", "near_api_key_env='invalid-name'", true),
         ("[funding]", "near_user_session_env='MISSING'", true),
         ("[funding]", "confidentiality='unknown'", true),
-        ("[funding]", "slippage_bps=1001", true),
+        ("[funding]", "slippage_bps=10001", true),
         ("[funding]", "poll_seconds=0", true),
         ("[funding]", "swap_timeout_seconds=0", true),
         ("[funding]", "quote_deadline_seconds=1", true),

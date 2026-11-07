@@ -160,7 +160,7 @@ USD conversion-overhead ceiling:
 | `max_api_payment_usdc` | Per-x402-payment USDC authority, independent of ZEC funding. Managed profiles require an explicit setting; static default is $1. `none`/`off` means unlimited. |
 | `max_retirement_remainder_usdc` | Automatic retirement threshold, default $0.001; no transfer or replacement authority. |
 | `max_attempts` | Managed-funding transaction recovery-attempt bound, default three; unsigned outages/quote refreshes do not consume it. Direct sends do not gain replacement-payment authority. |
-| `funding.slippage_bps` | Relative quote execution tolerance; default 500 (5%). The current application permits 0-1000 (0-10%); the 10% ceiling is an application choice, not an established NEAR requirement. |
+| `funding.slippage_bps` | Relative quote execution tolerance; default 500 (5%). The full percentage domain 0-10000 basis points (0-100%) is supported; provider quote acceptance remains external. |
 | Quote/refund and signed transaction expiry | External financial authority windows. Managed/send requests default to 1800 seconds; foreign receives request refund handling after 7200 by default. Neither is a completion deadline or replay permission. |
 | x402 signing authority | Newly signed API payment authority lasts at most the lesser of the seller timeout and 300 seconds (`payment/lifetime.rs`); this does not impose an HTTP work deadline. |
 | Confirmations and witnesses | Zcash uses the pinned SDK's trusted default (currently 3), with an explicit uniform-threshold override. Base requires finalized evidence without an additional depth setting. SDK witnesses and consensus state govern spendability. |
@@ -436,7 +436,7 @@ The preview's NEAR-priced ZEC principal becomes the fixed input of the executabl
 quote that no longer satisfies current claim policy is refreshed
 before preparation, and prepared work retains its fixed payment amount and exact
 transaction ownership. Configured slippage
-(`funding.slippage_bps`, default 500 basis points, range 0–1000) applies once to
+(`funding.slippage_bps`, default 500 basis points; range 0–10000, or 0–100%) applies once to
 that live quote's expected output.
 Slippage bounds the executable minimum relative to the quoted output; it does not
 certify the quote's initial exchange rate or promise the allocation target as a

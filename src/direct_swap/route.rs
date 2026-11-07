@@ -600,6 +600,21 @@ mod tests {
         assert!(validate_quote(request.clone(), response(&request), 1000).is_ok());
     }
     #[test]
+    fn full_percentage_slippage_preserves_direct_receive_floor() {
+        for (slippage, minimum) in [(0, 100000u64), (1001, 89990), (2500, 75000), (10000, 1)] {
+            let mut request = receive(true);
+            request["slippageTolerance"] = json!(slippage);
+            let mut response = response(&request);
+            response["quote"]["minAmountOut"] = json!(minimum.to_string());
+            assert!(validate_quote(request.clone(), response.clone(), 1000).is_ok());
+            response["quote"]["minAmountOut"] = json!((minimum - 1).to_string());
+            assert!(validate_quote(request.clone(), response, 1000).is_err());
+            request["slippageTolerance"] = json!(10001);
+            assert!(validate_request(&zingolib::config::ChainType::Mainnet, &request).is_err());
+        }
+    }
+
+    #[test]
     fn catalog_retains_chain_decimals_and_rejects_ambiguity() {
         let value = json!([
             {"assetId":"asset:a","blockchain":"a","decimals":18,"symbol":"USDC","price":1},
