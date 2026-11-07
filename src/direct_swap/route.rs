@@ -19,6 +19,24 @@ pub(crate) struct Asset {
     pub metadata: serde_json::Map<String, Value>,
 }
 
+pub(crate) fn rank_assets(assets: Vec<Asset>, query: &str) -> Vec<Asset> {
+    crate::relevance::rank(
+        assets,
+        query,
+        |asset| {
+            let mut text = format!("{} {} {}", asset.asset_id, asset.blockchain, asset.symbol);
+            for field in ["coingeckoId", "contractAddress", "name", "description"] {
+                if let Some(value) = asset.metadata.get(field).and_then(Value::as_str) {
+                    text.push(' ');
+                    text.push_str(value);
+                }
+            }
+            (text, String::new())
+        },
+        |asset| &asset.asset_id,
+    )
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum SwapType {
     #[serde(rename = "EXACT_INPUT")]
@@ -587,6 +605,59 @@ mod tests {
         assert_eq!(assets[0].metadata["price"], 1);
         assert!(select_asset(&assets, "asset:a", "b").is_err());
         assert!(validate_assets(json!([value[0], value[0]])).is_err());
+    }
+
+    #[test]
+    fn asset_keywords_rank_across_identity_fields_and_keep_literal_priority() {
+        let assets = validate_assets(json!([
+            {"assetId":"token:eth-usdc","blockchain":"eth","symbol":"USDC","decimals":6,"coingeckoId":"usd-coin"},
+            {"assetId":"token:base-usdc","blockchain":"base","symbol":"USDC","decimals":6,"coingeckoId":"usd-coin","contractAddress":"0xABCDEF"},
+            {"assetId":"token:btc","blockchain":"btc","symbol":"BTC","decimals":8,"coingeckoId":"bitcoin"}
+        ])).unwrap();
+        for query in ["usdc BASE", "BASE usdc"] {
+            let ranked = rank_assets(assets.clone(), query);
+            assert_eq!(ranked[0].asset_id, "token:base-usdc");
+            assert_eq!(ranked.len(), 2, "OR-term search still returns other USDC");
+        }
+        assert_eq!(rank_assets(assets.clone(), "BITCOIN")[0].symbol, "BTC");
+        assert_eq!(rank_assets(assets.clone(), "abcdef")[0].blockchain, "base");
+        assert_eq!(rank_assets(assets, "token:ETH-usdc")[0].blockchain, "eth");
+
+        let assets = validate_assets(json!([
+            {"assetId":"token:a","blockchain":"test","symbol":"TOKEN","decimals":6,"description":"usd alpha coin usd alpha coin"},
+            {"assetId":"token:z","blockchain":"test","symbol":"TOKEN","decimals":6,"name":"USD Coin"}
+        ])).unwrap();
+        assert_eq!(rank_assets(assets, "usd coin")[0].asset_id, "token:z");
+    }
+
+    #[test]
+    fn asset_search_excludes_volatile_metadata_and_preserves_blank_order() {
+        let assets = validate_assets(json!([
+            {"assetId":"token:b","blockchain":"test","symbol":"TOKEN","decimals":6,"price":"volatileprice","priceUpdatedAt":"clocksecret","description":["nottext"]},
+            {"assetId":"token:a","blockchain":"test","symbol":"TOKEN","decimals":6}
+        ])).unwrap();
+        for query in [
+            "volatileprice",
+            "clocksecret",
+            "priceUpdatedAt",
+            "decimals",
+            "nottext",
+        ] {
+            assert!(rank_assets(assets.clone(), query).is_empty(), "{query}");
+        }
+        let original = rank_assets(assets.clone(), " \t ");
+        assert_eq!(
+            original
+                .iter()
+                .map(|a| a.asset_id.as_str())
+                .collect::<Vec<_>>(),
+            ["token:b", "token:a"]
+        );
+        let tied = rank_assets(assets, "TOKEN");
+        assert_eq!(
+            tied.iter().map(|a| a.asset_id.as_str()).collect::<Vec<_>>(),
+            ["token:a", "token:b"]
+        );
     }
     #[test]
     fn receive_memo_and_fee_metadata_are_preserved_and_status_bound() {

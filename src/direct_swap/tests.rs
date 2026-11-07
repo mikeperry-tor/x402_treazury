@@ -2,6 +2,91 @@ use super::*;
 use futures_util::FutureExt;
 
 #[tokio::test]
+async fn asset_search_ranks_before_paging_and_exposes_native_currency_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = crate::rotation::store::Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"wallet",
+    )
+    .unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let app = axum::Router::new().route("/v0/tokens", axum::routing::get(|| async {
+        axum::Json(json!([
+            {"assetId":"token:eth-usdc","blockchain":"eth","symbol":"USDC","decimals":6},
+            {"assetId":"token:base-usdc","blockchain":"base","symbol":"USDC","decimals":6},
+            {"assetId":"token:btc","blockchain":"btc","symbol":"BTC","decimals":8,"coingeckoId":"bitcoin"}
+        ]))
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let near = NearClient::test_at(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    let http = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (treasury, commands) = crate::treasury::actor::channel();
+    let service = Service::new(
+        store.clone(),
+        treasury,
+        near,
+        serde_json::from_value(json!({})).unwrap(),
+        0,
+    );
+    let config = Config {
+        receive: true,
+        ..Default::default()
+    };
+    let mut pages = Vec::new();
+    for offset in [0, 1] {
+        let page = service
+            .invoke(
+                "owner",
+                &config,
+                "x402_treazury_swap_assets",
+                json!({"query":"USDC base","offset":offset,"limit":1}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(page["total"], 2);
+        assert_eq!(page["complete"], true);
+        assert_eq!(page["foreign_assets_available"], true);
+        assert_eq!(
+            page["next_offset"],
+            if offset == 0 { json!(1) } else { Value::Null }
+        );
+        pages.push(page["assets"][0]["assetId"].clone());
+    }
+    assert_eq!(pages, [json!("token:base-usdc"), json!("token:eth-usdc")]);
+    let page = service
+        .invoke(
+            "owner",
+            &config,
+            "x402_treazury_swap_assets",
+            json!({"query":"Zcash"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["assets"][0]["assetId"], route::ZEC);
+    let blank = service
+        .invoke(
+            "owner",
+            &config,
+            "x402_treazury_swap_assets",
+            json!({"query":"  "}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(blank["assets"][0]["native"], true);
+    assert_eq!(blank["assets"][1]["assetId"], "token:eth-usdc");
+    assert!(
+        commands.test_is_empty(),
+        "search cannot occupy the SDK owner"
+    );
+    http.abort();
+    drop((service, store, commands));
+    worker.await.unwrap();
+}
+
+#[tokio::test]
 async fn request_id_recovers_owned_status_without_admission_or_backend() {
     let dir = tempfile::tempdir().unwrap();
     let state = crate::rotation::store::Store::create(

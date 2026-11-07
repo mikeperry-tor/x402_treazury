@@ -935,7 +935,14 @@ conflicting terms fail. An uncertain quote-creation response is retained without
 automatically creating another payment request. A fresh ID is a separate request.
 
 `swap_assets` always includes native ZEC locally; foreign metadata reports its
-availability/completeness explicitly, without promising route liquidity. Missing
+availability/completeness explicitly, without promising route liquidity. Native
+ZEC includes the name `Zcash`. Nonblank queries use the shared case-insensitive
+literal-priority/BM25 search across asset ID, chain, symbol and available string
+CoinGecko ID, contract address, name and description. Prices, timestamps and JSON
+field names are excluded. Terms use OR matching; literal query substrings rank
+first, then BM25 relevance, with asset-ID ties. Use spaced queries such as
+`base USDC`; chain aliases and concatenated words are not inferred. Results are
+ranked before pagination. Blank queries retain native-first provider order. Missing
 or invalid NEAR configuration affects foreign work while native work remains
 available. Optional native polling uses the positive configured funding cadence
 or the existing default when absent; it grants no automatic managed funding or

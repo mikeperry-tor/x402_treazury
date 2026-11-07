@@ -448,7 +448,7 @@ financial authority.
 | `x402_treazury_raw_call` | Raw URL permission: required `method`, public HTTPS `url`; optional `query`, `headers` and JSON `body`. |
 | `x402_treazury_tools_search` | Either management capability or on-demand discovery: optional `query`, `source_name`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Same exposure as tool search: required readable `tool_id` and `arguments`. |
-| `x402_treazury_swap_assets` | Either direct capability: optional `query`, `offset`, `limit`; native ZEC is local, with explicit foreign-list availability. |
+| `x402_treazury_swap_assets` | Either direct capability: identity/name keyword `query`, `offset`, `limit`; [literal-priority/BM25 asset search](configuration.md#direct-swap-control), local native ZEC and explicit foreign-list availability. |
 | `x402_treazury_payment_request_create` | Receive capability: `asset_id`, `chain`, atomic `amount`, `request_id`; foreign assets additionally require payer-owned `refund_address`. |
 | `x402_treazury_swap_preview` | Send capability: destination `asset_id`, `chain`, atomic `amount`, `recipient`; dry result grants no execution authority. |
 | `x402_treazury_swap_send` | Send capability: destination terms and `request_id`; foreign sends require `max_source_zatoshis`, optional for native ZEC. |

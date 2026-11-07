@@ -82,6 +82,23 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
     )
     .unwrap();
     assert_ne!(search["items"][0]["tool_id"], next["items"][0]["tool_id"]);
+    let zec: Value = serde_json::from_str(
+        &server
+            .invoke(
+                "x402_treazury_tools_search",
+                json!({"query":"ZEC"}).as_object().unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        zec["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["tool_id"] == "x402_treazury_swap_assets")
+    );
     let native: Value = serde_json::from_str(
         &server
             .invoke(

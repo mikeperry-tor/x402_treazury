@@ -96,7 +96,7 @@ pub fn definitions(config: &Config) -> Vec<rmcp::model::Tool> {
         vec![],
     )];
     if config.enabled() {
-        specs.push(("x402_treazury_swap_assets", "Find native Ironwood Zcash (ZEC) and supported foreign assets by full asset ID and chain. Foreign listing availability and completeness are explicit; token support does not guarantee liquidity.", json!({"query":text("Asset ID, chain or symbol to match."),"offset":{"type":"integer","minimum":0,"description":"Result offset; keep the same query."},"limit":{"type":"integer","minimum":1,"default":25,"description":"Number of assets to return."}}), vec![]));
+        specs.push(("x402_treazury_swap_assets", "Search native Ironwood Zcash (ZEC) and supported foreign assets by symbol, chain, asset ID or available names. Case-insensitive literal matches rank before BM25 keyword matches; token support does not guarantee liquidity.", json!({"query":text("Symbol, chain, asset ID or available name keywords; separate words with spaces."),"offset":{"type":"integer","minimum":0,"description":"Result offset; keep the same query."},"limit":{"type":"integer","minimum":1,"default":25,"description":"Number of assets to return."}}), vec![]));
     }
     if config.receive {
         specs.push(("x402_treazury_payment_request_create", "Receive native Ironwood Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh Ironwood address per new request_id with no NEAR call. Foreign assets use one exact-input swap; ZEC value is estimated until settlement. Identical retries return the original request.", json!({"asset_id":text("Full source assetId from swap_assets."),"chain":text("Exact source blockchain from swap_assets."),"amount":text("Positive atomic amount as decimal digits; native ZEC uses zatoshis."),"refund_address":text("Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported."),"request_id":text("Unique caller request ID for these exact terms.")}), vec!["asset_id","chain","amount","request_id"]));
@@ -197,14 +197,7 @@ impl Service {
                         foreign_available = true;
                     }
                 }
-                let query = args.query.unwrap_or_default().to_lowercase();
-                let assets: Vec<_> = assets
-                    .into_iter()
-                    .filter(|asset| {
-                        serde_json::to_string(asset)
-                            .is_ok_and(|text| text.to_lowercase().contains(&query))
-                    })
-                    .collect();
+                let assets = route::rank_assets(assets, args.query.as_deref().unwrap_or_default());
                 let offset = args.offset.unwrap_or(0);
                 let limit = args.limit.unwrap_or(25);
                 ensure!(limit > 0 && offset <= assets.len(), "invalid asset page");
@@ -511,7 +504,10 @@ fn native_asset() -> route::Asset {
         blockchain: "zec".into(),
         decimals: 8,
         symbol: "ZEC".into(),
-        metadata: serde_json::Map::from_iter([("native".into(), json!(true))]),
+        metadata: serde_json::Map::from_iter([
+            ("native".into(), json!(true)),
+            ("name".into(), json!("Zcash")),
+        ]),
     }
 }
 fn native_amount(amount: &str) -> Result<u64> {
