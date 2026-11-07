@@ -23,9 +23,6 @@ fn cap() -> String {
 fn retirement_tolerance() -> String {
     "0.001".into()
 }
-fn network_fee_limit() -> String {
-    "0.0003".into()
-}
 fn attempts() -> u32 {
     3
 }
@@ -314,7 +311,6 @@ pub enum WalletConfig {
         max_api_payment_usdc: String,
         #[serde(default = "retirement_tolerance")]
         max_retirement_remainder_usdc: String,
-        max_conversion_overhead_percent: u32,
         #[serde(default = "attempts")]
         max_attempts: u32,
     },
@@ -338,7 +334,6 @@ impl WalletConfig {
                 reserves,
                 max_retirement_remainder_usdc,
                 max_api_payment_usdc,
-                max_conversion_overhead_percent,
                 max_attempts,
             } => {
                 reserves.validate()?;
@@ -346,10 +341,6 @@ impl WalletConfig {
                     .context("invalid max_retirement_remainder_usdc")?;
                 SpendPolicy::dollars(max_api_payment_usdc)
                     .context("invalid max_api_payment_usdc")?;
-                ensure!(
-                    *max_conversion_overhead_percent <= 100,
-                    "max_conversion_overhead_percent must be an integer from 0 to 100"
-                );
                 ensure!(*max_attempts > 0, "invalid managed wallet limits");
             }
         }
@@ -382,7 +373,7 @@ pub fn zatoshis(s: &str) -> Result<i64> {
     ensure!(amount > 0, "ZEC limit out of range");
     Ok(amount)
 }
-/// Amount ceilings may be zero; existing fee and reserve settings remain positive.
+/// Direct debit preferences may be zero; values use exact eight-decimal ZEC encoding.
 pub(crate) fn zatoshis_allow_zero(s: &str) -> Result<i64> {
     let (whole, fraction) = s.split_once('.').unwrap_or((s, ""));
     ensure!(
@@ -451,8 +442,6 @@ pub struct TreasuryConfig {
     pub submission_url_env: String,
     pub indexer_url: Option<String>,
     pub submission_url: Option<String>,
-    #[serde(default = "network_fee_limit")]
-    pub max_funding_transaction_fee_zec: String,
     #[serde(default = "confirmations")]
     pub confirmations: u64,
 }
@@ -528,8 +517,6 @@ impl TreasuryConfig {
                 super::base::secure_endpoint(url)?;
             }
         }
-        zatoshis(&self.max_funding_transaction_fee_zec)
-            .context("invalid max_funding_transaction_fee_zec")?;
         ensure!(
             self.confirmations > 0 && self.confirmations <= u32::MAX as u64,
             "invalid treasury limits"
@@ -721,10 +708,8 @@ mod tests {
             large.large.as_ref().unwrap().maximum_atomic().unwrap(),
             25_000_000
         );
-        let wallet: WalletConfig = toml::from_str(
-            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5",
-        )
-        .unwrap();
+        let wallet: WalletConfig =
+            toml::from_str("mode='zcash_rotation'\nmax_api_payment_usdc='1'\n").unwrap();
         let WalletConfig::ZcashRotation { reserves, .. } = wallet else {
             unreachable!()
         };

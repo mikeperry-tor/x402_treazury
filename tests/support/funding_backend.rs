@@ -29,7 +29,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     let (store, worker) = StoreHandle::spawn(store);
     let (treasury, mut commands) = actor::channel();
     let policy = || {
-        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap()
+        serde_json::from_value::<WalletConfig>(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap()
     };
     let mut backend = Backend {
         treasury,
@@ -41,7 +41,6 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
         )
         .unwrap(),
-        max_network_fee: 30_000,
     };
     let request = super::super::near::request(
         &super::super::near::Assets {
@@ -130,17 +129,6 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         );
         assert!(commands.test_is_empty(), "{field} dispatched a command");
     }
-    if let WalletConfig::ZcashRotation {
-        max_conversion_overhead_percent,
-        ..
-    } = backend.wallets.get_mut("pool").unwrap()
-    {
-        *max_conversion_overhead_percent = 3;
-    }
-    let error = backend.prepare(&job, &quote).await.unwrap_err();
-    assert!(error.is::<crate::rotation::error::QuotePolicyMismatch>());
-    assert!(commands.test_is_empty());
-    backend.wallets.insert("pool".into(), policy());
     let (result, observed) = tokio::join!(backend.prepare(&job, &quote), commands.test_observe());
     assert!(
         result
@@ -155,8 +143,6 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert_eq!(prepared.pool_id, Some(job.pool_id.clone()));
     assert_eq!(prepared.recipient, quote.deposit.clone().unwrap());
     assert_eq!(prepared.amount_zatoshis, 100000);
-    assert_eq!(prepared.max_fee_zatoshis, 30000);
-    assert_eq!(prepared.max_input_zatoshis, 130000);
     assert_eq!(
         before,
         serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
@@ -587,7 +573,6 @@ fn near_diagnostics_preserve_stage_and_safe_categories_only() {
             "near_bridge_minimum_atomic:400000",
             "bridge minimum below offer",
         ),
-        ("quote overhead limit", "fee/overhead cap exceeded"),
         ("quote output mismatch", "output target mismatch"),
         (
             "quote binding mismatch: secret-recipient",
@@ -608,14 +593,6 @@ fn near_diagnostics_preserve_stage_and_safe_categories_only() {
         safe_error(&error, &FundingPhase::Allocated)
             .contains("NEAR asset catalog: invalid asset catalog")
     );
-}
-
-#[test]
-fn overhead_policy_detection_requires_the_typed_error() {
-    let typed = anyhow::Error::new(crate::rotation::near::OverheadLimit("quote overhead limit"));
-    assert!(typed.is::<crate::rotation::near::OverheadLimit>());
-    let prose = anyhow::anyhow!("quote overhead limit");
-    assert!(!prose.is::<crate::rotation::near::OverheadLimit>());
 }
 
 #[test]
@@ -739,10 +716,9 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     let backend = Backend {
         treasury, store: store.clone(), near: super::super::near::NearClient::test_at(&origin).unwrap(),
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
-        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())].into(),
+        wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())].into(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
-        max_network_fee: 10000,
-    };
+        };
     let expected = job.clone();
     let prerequisite = tokio::spawn(async move {
         let mut backend = backend;
@@ -974,12 +950,11 @@ async fn sizing_policy_resolves_the_job_slot_range() {
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
         wallets: [(
             "pool".into(),
-            serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"},"large":{"min_funding_amount_usdc":"10","max_funding_amount_usdc":"25"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap(),
+            serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"},"large":{"min_funding_amount_usdc":"10","max_funding_amount_usdc":"25"}},"max_api_payment_usdc":"1"})).unwrap(),
         )]
         .into(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
-        max_network_fee: 10000,
-    };
+        };
     assert_eq!(
         backend.sizing_policy(&small).await.unwrap(),
         crate::rotation::config::SizingPolicy::Range {
@@ -1051,15 +1026,14 @@ async fn quote_prerequisite_draws_and_persists_within_the_configured_slot_range(
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
         wallets: [(
             "pool".into(),
-            serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap(),
+            serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"min_funding_amount_usdc":"2","max_funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap(),
         )]
         .into(),
         funding: serde_json::from_value(
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
         )
         .unwrap(),
-        max_network_fee: 10_000,
-    };
+        };
     let stop = CancellationToken::new();
     let actor = tokio::spawn(
         owner.run_commands(
@@ -1144,14 +1118,14 @@ async fn sizing_policy_uses_the_default_small_range_when_reserves_are_omitted() 
         base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
         wallets: [(
             "pool".into(),
-            serde_json::from_value(json!({"mode":"zcash_rotation","max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap(),
+            serde_json::from_value(json!({"mode":"zcash_rotation","max_api_payment_usdc":"1"}))
+                .unwrap(),
         )]
         .into(),
         funding: serde_json::from_value(
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
         )
         .unwrap(),
-        max_network_fee: 10_000,
     };
     assert_eq!(
         backend.sizing_policy(&job).await.unwrap(),
@@ -1164,7 +1138,10 @@ async fn sizing_policy_uses_the_default_small_range_when_reserves_are_omitted() 
 
 #[tokio::test]
 async fn sizing_policy_uses_the_default_large_range_for_an_empty_slot() {
-    let config: WalletConfig = serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"large":{}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap();
+    let config: WalletConfig = serde_json::from_value(
+        json!({"mode":"zcash_rotation","reserves":{"large":{}},"max_api_payment_usdc":"1"}),
+    )
+    .unwrap();
     let WalletConfig::ZcashRotation { reserves, .. } = config.clone() else {
         panic!("managed config")
     };
@@ -1200,7 +1177,6 @@ async fn sizing_policy_uses_the_default_large_range_for_an_empty_slot() {
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
         )
         .unwrap(),
-        max_network_fee: 10_000,
     };
     assert_eq!(
         backend.sizing_policy(&job).await.unwrap(),

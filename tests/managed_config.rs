@@ -15,7 +15,6 @@ submission_url_env = "SUBMISSION"
 base_rpc_url_env = "BASE_RPC"
 [wallets.research]
 mode = "zcash_rotation"
-max_conversion_overhead_percent = 5
 max_api_payment_usdc = "1.00"
 [wallets.research.reserves.small]
 funding_amount_usdc = "2.00"
@@ -61,12 +60,8 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
     assert!(!dir.path().join("state").exists());
     for (from, to) in [
         (
-            "max_conversion_overhead_percent = 5",
-            "max_conversion_overhead_percent = 101",
-        ),
-        (
-            "max_conversion_overhead_percent = 5",
-            "max_conversion_overhead_percent = 5\nmax_funding_spend_zec = \"0.02\"",
+            "mode = \"zcash_rotation\"",
+            "mode = \"zcash_rotation\"\nmax_funding_spend_zec = \"0.02\"",
         ),
         (
             "mode = \"zcash_rotation\"",
@@ -102,7 +97,7 @@ fn money_is_exact_and_tagged_profiles_reject_cross_mode_fields() {
         )
         .is_err()
     );
-    toml::from_str::<WalletConfig>("mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='2'")
+    toml::from_str::<WalletConfig>("mode='zcash_rotation'\nmax_api_payment_usdc='1'\n[reserves.small]\nfunding_amount_usdc='2'")
         .unwrap()
         .validate()
         .unwrap();
@@ -268,14 +263,14 @@ fn reserve_funding_limits_are_exact() {
         ("2", "NaN", false),
     ] {
         let config: WalletConfig = toml::from_str(&format!(
-            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='{target}'\nmax_funding_amount_usdc='{max}'"
+            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\n[reserves.small]\nfunding_amount_usdc='{target}'\nmax_funding_amount_usdc='{max}'"
         )).unwrap();
         assert_eq!(config.validate().is_ok(), valid);
     }
 }
 
 #[tokio::test]
-async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_offline() {
+async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences_offline() {
     let shown = Deployment::show_config(std::path::Path::new(
         "examples/deployments/comprehensive.toml",
     ))
@@ -306,9 +301,15 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
             "0.001"
         );
     }
-    assert_eq!(
-        shown["treasury"]["max_funding_transaction_fee_zec"],
-        "0.0003"
+    assert!(
+        shown["treasury"]
+            .get("max_funding_transaction_fee_zec")
+            .is_none()
+    );
+    assert!(
+        shown["wallets"]["web"]
+            .get("max_conversion_overhead_percent")
+            .is_none()
     );
     assert!(
         shown["treasury"]
@@ -437,8 +438,7 @@ fn retirement_tolerance_is_exact_finite_nonnegative_and_bounded() {
 async fn retirement_defaults_and_overrides_resolve_independently_for_groups_and_templates() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let managed =
-        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n";
+    let managed = "mode='zcash_rotation'\nmax_api_payment_usdc='1'\n";
     let text = format!(
         "{}\n[wallets.exact]\n{managed}max_retirement_remainder_usdc='0'\n[wallets.exact.reserves.small]\nfunding_amount_usdc='2'\n[wallets.custom]\n{managed}max_retirement_remainder_usdc='0.002'\n[wallets.custom.reserves.small]\nfunding_amount_usdc='2'\n[wallet_templates.generated]\n{managed}[wallet_templates.generated.reserves.small]\nfunding_amount_usdc='2'\n[wallet_assignment]\nscope='server'\ntemplate='generated'\n[servers.generated]\nlisten='127.0.0.1:0'\nbearer_token_env='GENERATED_TOKEN'\nsources=['api']\n",
         config()
@@ -469,7 +469,7 @@ fn retirement_configuration_reopen_preserves_values_until_selected_groups_are_ap
     let id = store.id().to_owned();
     let profile = |setting: &str| -> WalletConfig {
         toml::from_str(&format!(
-            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n{setting}\n[reserves.small]\nfunding_amount_usdc='2'"
+            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\n{setting}\n[reserves.small]\nfunding_amount_usdc='2'"
         )).unwrap()
     };
     let apply = |store: &mut Store, name: &str, wallet: WalletConfig| {
@@ -543,7 +543,7 @@ fn retirement_configuration_reopen_preserves_values_until_selected_groups_are_ap
 
 #[test]
 fn managed_cap_is_explicit_and_independent_of_reserve_targets() {
-    let base = "mode='zcash_rotation'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='2'";
+    let base = "mode='zcash_rotation'\n[reserves.small]\nfunding_amount_usdc='2'";
     assert!(toml::from_str::<WalletConfig>(base).is_err());
     for cap in ["0", "0.01", "10", "none", "off"] {
         let config: WalletConfig =
@@ -594,13 +594,21 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
     let wallet = roundtrip::<WalletConfig>("mode='static'\nprivate_key_env='KEY'");
     assert_eq!(wallet["max_api_payment_usdc"], "1.00");
     let wallet = roundtrip::<WalletConfig>(
-        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='2'",
+        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\n[reserves.small]\nfunding_amount_usdc='2'",
     );
     assert_eq!(wallet["max_attempts"], 3);
     assert_eq!(wallet["max_retirement_remainder_usdc"], "0.001");
     let treasury = roundtrip::<TreasuryConfig>("state_dir='state'");
     assert_eq!(treasury["confirmations"], 3);
-    assert_eq!(treasury["max_funding_transaction_fee_zec"], "0.0003");
+    assert!(treasury.get("max_funding_transaction_fee_zec").is_none());
+    let removed = "state_dir='state'\nmax_funding_transaction_fee_zec='0.0003'";
+    assert!(toml::from_str::<TreasuryConfig>(removed).is_err());
+    assert!(
+        toml::from_str::<WalletConfig>(
+            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5"
+        )
+        .is_err()
+    );
     assert!(treasury.get("id").is_none());
     assert!(treasury.get("key_file").is_none());
     // Explicit optional values must not become empty identity/path references.

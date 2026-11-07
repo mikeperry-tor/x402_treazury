@@ -449,7 +449,6 @@ other listener settings. This substitutes automatic pools for the explicit pool:
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
 max_retirement_remainder_usdc = "0.001" # Default per group; explicit "0" requires exact zero.
-max_conversion_overhead_percent = 5
 
 [wallet_templates.small.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -464,8 +463,7 @@ template = "small"
 
 Sources and servers can then omit `wallet`; `[wallets]` may also be omitted.
 See [funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for
-actual spendable treasury capacity, conversion-overhead limits and accepted-operation
-fee caps.
+actual spendable treasury capacity, SDK-calculated fees and nominal reserve sizing.
 The singleton `[treasury]` and `[funding]` settings are still required when the
 resolved deployment has managed pools. Explicit source/server wallet references
 continue to take priority and must refer to entries in `[wallets]`, not templates.
@@ -544,8 +542,7 @@ does not reject beneficial extra execution output. The executable `EXACT_INPUT`
 quote fixes the preview's NEAR-priced ZEC principal and applies
 `funding.slippage_bps` (default 500 basis points, range 0–1000) once to its
 expected output. Its `minAmountOut` is the execution floor, not the route's
-minimum supported size. Existing transaction-fee and conversion-overhead
-safeguards still apply. No external exchange-rate oracle
+minimum supported size. USD valuations and commission metadata are advisory. No external exchange-rate oracle
 or mutable balance tracking is introduced. Accepted older `EXACT_OUTPUT` work
 retains its original terms; configuration changes govern new quotes.
 
@@ -592,7 +589,7 @@ setting. `auto_fund=false` pauses new funding. Enabled unfilled reserve claims
 keep discovering later ZEC deposits and confirmations through the shared treasury
 owner; fully funded idle serving does not watch for incoming funds. Retirement
 continues only while its own unresolved candidate work remains. Keep group
-payment caps, output/conversion-overhead and accepted-operation fee safeguards,
+payment caps, nominal output bounds and SDK transaction checks,
 explicit funding controls and separately authorized qualification allocation counts.
 Qualification has no separate ZEC spending budget. Its `total_test_budget_usdc`
 limits API authorizations using a running durable total, independently of funding.
@@ -710,8 +707,8 @@ not automatically abandoned or replaced.
 Reopen applies changed caps, reserve bounds and slot enablement. Existing accepted
 terms, job identities and original allocation floors remain immutable; current
 policy is rechecked before new quote acceptance. An unprepared quote that no longer
-satisfies current overhead or claim policy is refreshed, while prepared work keeps
-its fixed transaction fee/input caps. Configuration edits do not convert state.
+satisfies current claim policy is refreshed, while prepared work keeps
+its fixed payment amount, input ownership and exact signed bytes. Configuration edits do not convert state.
 Ordinary startup rejects unsupported legacy schemas without mutation. Configuration
 edits and `wallet recover` cannot supply missing immutable destination-readiness
 evidence or convert unsupported state. Preserve complete backups and all accepted
@@ -979,11 +976,14 @@ expiry. Disabled admissions and process restart preserve these bindings.
 `swap_preview` accepts a destination `asset_id`, `chain`, positive atomic
 `amount` and `recipient`. It returns `executable = false` and creates no payment
 authority or input reservation. Both routes report principal, the operator's
-optional total-debit preference and the existing treasury network-fee ceiling.
-`fee_estimate` reports an advisory SDK ZIP317 network fee, principal-plus-fee total
-and whether that estimate fits those limits. Missing spendable inputs or scan data
-leave the estimate null with an `unavailable_reason`; limit inspection remains
-available. This query waits behind accepted SDK work, creates no proof and reserves
+optional total-debit preference. `fee_estimate` reports the advisory SDK spendable
+Ironwood balance, ZIP317 network fee, principal-plus-fee total and `fits`. The
+`available_debit_zatoshis` is the smaller of the spendable balance and optional
+operator limit; without that limit it is the spendable balance. A successful
+proposal with a known total within that available debit reports `fits=true`.
+Insufficient proposal funds report false even when the advisory balance appears
+sufficient. Unknown balance/fee data report null unless an exceeded known limit
+already proves the payment cannot fit. Unknown observations are never zero balances. This query waits behind accepted SDK work, creates no proof and reserves
 no inputs. The actual fee and accepted authority are checked during preparation.
 Native estimates use the validated Ironwood recipient. Foreign preview obtains a
 dry exact-output quote using an existing shielded refund receiver, without deriving
@@ -994,9 +994,8 @@ to pay that assumed output.
 
 `swap_send` accepts the same destination terms and a caller `request_id`. Native
 ZEC uses the exact principal and a shielded-only recipient, with no NEAR request
-or provider deadline. Optional `max_source_zatoshis` must cover that principal if
-supplied. Foreign sends require `max_source_zatoshis`, a positive decimal string
-limiting the executable quote's ZEC principal. The provider fixes the requested
+or provider deadline. Foreign sends obtain their executable quote internally;
+the agent supplies no ZEC source ceiling or exchange-rate calculation. The provider fixes the requested
 foreign output amount; its exact input, deposit address/memo, refund receiver and
 deadline are saved before source preparation. Destination memos/tags are
 unsupported. A source deposit does not establish destination delivery: status
@@ -1010,8 +1009,9 @@ transaction's real total debit, rather than principal plus a maximum fee estimat
 The accepted operation persistently retains its original authority; later
 configuration changes do not cancel it or grant replacement payment authority.
 This preference applies only to this toolset's outgoing payments, without changing
-managed funding, shielding or other SDK sends. The existing treasury network-fee
-safeguard still applies; there is no new fee preference.
+managed funding or other SDK sends. SDK fees have no separate application ceiling.
+There is no caller-supplied source cap, conversion-overhead rejection or commission
+metadata gate. USD values and provider fee metadata are reported as advisory data.
 
 Identical send retries return the original operation; conflicting request-ID reuse
 fails. Accepted work survives disconnection, listener removal, disabled admissions

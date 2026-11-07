@@ -49,8 +49,7 @@ HEAD = ["../../providers/agproxy.toml"]
 # Treasury commands use this same state directory and its default wallet.key.
 [treasury]
 state_dir = "../../state/privacy"
-# Standard network fees are calculated by the wallet; these reject high-fee proposals.
-# max_funding_transaction_fee_zec = "0.0003" # default per funding transaction
+# Standard network fees are calculated by the wallet.
 
 [funding]
 # Managed serving funds bootstrap and refills by default. Set auto_fund=false to pause new funding.
@@ -68,7 +67,6 @@ base_rpc_url_env = "BASE_RPC_URL"
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.10"
-max_conversion_overhead_percent = 5
 
 [wallets.web.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -80,7 +78,6 @@ max_conversion_overhead_percent = 5
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.50"
-max_conversion_overhead_percent = 5
 
 [wallets.company.reserves.small]
 # Default randomized nominal funding: $2-5.

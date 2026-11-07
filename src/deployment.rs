@@ -976,8 +976,6 @@ impl Deployment {
             t.indexer_endpoint(|name| env.get(name).cloned())?,
         )?;
         Ok(TreasuryConnections {
-            max_network_fee: crate::rotation::config::zatoshis(&t.max_funding_transaction_fee_zec)?
-                as u64,
             sync_settings,
             sender,
         })
@@ -1153,8 +1151,7 @@ impl Deployment {
                         near,
                     } = *treasury;
                     let (handle, commands) = crate::treasury::actor::channel();
-                    let direct =
-                        self.direct_service(store.clone(), handle.clone(), &source, near.as_ref());
+                    let direct = self.direct_service(store.clone(), handle.clone(), near.as_ref());
                     let (Some(base), Some(near)) = (base, near) else {
                         runtime = ManagedRuntime::Direct(Box::new(DirectRuntime {
                             owner,
@@ -1183,7 +1180,6 @@ impl Deployment {
                         base,
                         wallets: self.wallet_resolution.wallets.clone(),
                         funding: f.clone(),
-                        max_network_fee: source.max_network_fee,
                     };
                     owner.configure_funding_discovery(
                         crate::rotation::funding::FundingBackend::allocation_groups(&backend),
@@ -1217,7 +1213,7 @@ impl Deployment {
                     owner.configure_sync(source.sync_settings.clone());
                     let (handle, commands) = crate::treasury::actor::channel();
                     let service = self
-                        .direct_service(owner.store_handle(), handle, &source, near.as_ref())
+                        .direct_service(owner.store_handle(), handle, near.as_ref())
                         .unwrap();
                     ManagedRuntime::Direct(Box::new(DirectRuntime {
                         owner,
@@ -1349,7 +1345,6 @@ impl Deployment {
         &self,
         store: crate::rotation::store::StoreHandle,
         treasury: crate::treasury::actor::TreasuryHandle,
-        source: &TreasuryConnections,
         near: Option<&NearSource>,
     ) -> Option<crate::direct_swap::Service> {
         self.direct_required().then(|| match near {
@@ -1358,12 +1353,10 @@ impl Deployment {
                 treasury,
                 near.client.clone(),
                 near.funding.clone(),
-                source.max_network_fee,
             ),
             None => crate::direct_swap::Service::native(
                 store,
                 treasury,
-                source.max_network_fee,
                 self.config
                     .funding
                     .as_ref()
@@ -2023,7 +2016,6 @@ struct FundingConnections {
     near: NearSource,
 }
 struct TreasuryConnections {
-    max_network_fee: u64,
     sync_settings: crate::treasury::SyncSettings,
     sender: crate::treasury::submission::GrpcSubmission,
 }
@@ -2455,7 +2447,6 @@ near_user_session_env="SESSION"
 [wallets.shared]
 mode="zcash_rotation"
 max_api_payment_usdc="1"
-max_conversion_overhead_percent=5
 [wallets.shared.reserves.small]
 funding_amount_usdc="5"
 [sources.test]

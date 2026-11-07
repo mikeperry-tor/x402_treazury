@@ -198,7 +198,7 @@ mod tests {
         assert!(store.funding_jobs().unwrap().is_empty());
         drop(store);
         let mut cfg = config();
-        cfg.wallets.insert("selected".into(), serde_json::from_value(json!({"mode":"zcash_rotation","max_api_payment_usdc":"5","max_conversion_overhead_percent":5,"reserves":{"small":{"funding_amount_usdc":"5"}}})).unwrap());
+        cfg.wallets.insert("selected".into(), serde_json::from_value(json!({"mode":"zcash_rotation","max_api_payment_usdc":"5","reserves":{"small":{"funding_amount_usdc":"5"}}})).unwrap());
         cfg.treasury = Some(serde_json::from_value(json!({"state_dir":state,"key_file":key,"id":id,"indexer_url_env":"ABSENT_INDEXER","submission_url_env":"ABSENT_SUBMIT"})).unwrap());
         cfg.funding = Some(
             serde_json::from_value(

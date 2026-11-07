@@ -78,13 +78,13 @@ async fn authenticated_sdk_failure_preserves_base_payments_liabilities_and_shutd
 }
 #[tokio::test]
 async fn funding_only_failures_preserve_base_payments_and_static_service() {
-    for fault in ["credential", "quote", "fee"] {
+    for fault in ["credential", "quote", "confirmations"] {
         base_service(fault, false).await;
     }
 }
 #[tokio::test]
 async fn enabled_relay_preserves_base_and_static_service_when_source_funding_is_unavailable() {
-    for fault in ["sdk", "credential", "quote", "fee"] {
+    for fault in ["sdk", "credential", "quote", "confirmations"] {
         base_service(fault, true).await;
     }
 }
@@ -154,10 +154,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     config = match fault {
         "credential" => config.replace("[funding]", "[funding]\nnear_api_key_env='NEAR'"),
         "quote" => config.replace("[funding]", "[funding]\nquote_deadline_seconds=0"),
-        "fee" => config.replace(
-            "[treasury]",
-            "[treasury]\nmax_funding_transaction_fee_zec='invalid'",
-        ),
+        "confirmations" => config.replace("[treasury]", "[treasury]\nconfirmations=0"),
         _ => config,
     };
     if relay_enabled {
@@ -418,11 +415,6 @@ async fn store_only_binding_rollback_and_cancelled_serving_release_owner() {
 async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_fatal() {
     let cases = [
         ("[treasury]", "confirmations=0", true),
-        (
-            "[treasury]",
-            "max_funding_transaction_fee_zec='invalid'",
-            true,
-        ),
         ("[treasury]", "indexer_url='http://untrusted.example'", true),
         ("[funding]", "near_api_key_env='invalid-name'", true),
         ("[funding]", "near_user_session_env='MISSING'", true),

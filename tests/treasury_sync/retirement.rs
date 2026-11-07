@@ -112,7 +112,7 @@ async fn sync_cli_explains_pending_retirement_and_preserves_failed_wallet_result
         } else {
             ""
         };
-        std::fs::write(&config, format!("version=1\nservers={{}}\n[treasury]\nid='{id}'\nstate_dir='state'\nkey_file='key'\n[funding]\nbase_rpc_url_env='SYNC_BASE_RPC'\nbase_rpc_fallback_url_envs=[]\n[wallets.configured]\nmode='zcash_rotation'\nmax_api_payment_usdc='1'\n{retirement_setting}max_conversion_overhead_percent=5\n[wallets.configured.reserves.small]\nfunding_amount_usdc='2'\n")).unwrap();
+        std::fs::write(&config, format!("version=1\nservers={{}}\n[treasury]\nid='{id}'\nstate_dir='state'\nkey_file='key'\n[funding]\nbase_rpc_url_env='SYNC_BASE_RPC'\nbase_rpc_fallback_url_envs=[]\n[wallets.configured]\nmode='zcash_rotation'\nmax_api_payment_usdc='1'\n{retirement_setting}[wallets.configured.reserves.small]\nfunding_amount_usdc='2'\n")).unwrap();
         let expected = match failure {
             "canonical" => "usdc_retirement_unavailable",
             "scalar" => "usdc_balance_unavailable",

@@ -450,14 +450,20 @@ that change, including same-receiver self-payment change. Incoming note ownershi
 does not authorize extra outgoing payments. The direct
 operation's optional total-debit authority checks principal plus the SDK's actual
 network fee at proposal and calculated-byte publication; it does not estimate the
-fee by subtracting the requested amount from an advisory balance. Existing
-treasury network-fee safeguards apply independently. Direct previews reuse the
+fee by subtracting the requested amount from an advisory balance. There is no
+application network-fee ceiling or derived input cap. Direct previews reuse the
 application's Ironwood-only `source_proposal` and SDK `total_fee` through the
-serialized actor; the SDK's unrestricted preview wrapper is unsuitable. The
+serialized actor; the SDK's unrestricted preview wrapper is unsuitable. The same
+wallet guard reads the SDK Ironwood spendable balance. This observation and the
+proposal are advisory; no separate reservation subtraction or balance ledger is added. The
 unsigned proposal is discarded, never stored or calculated. Passing `lock_inputs =
 None` avoids SDK input locks; no snapshot, address derivation or cached-proposal
 replacement occurs. The SDK's note selector ignores its generic lock filter, so
 this is advisory and actual preparation still checks accepted-input ownership.
+The pinned balance API can return zero when scan/anchor data is missing. When the
+proposal reports `ScanRequired`, preview exposes unknown spendability rather than
+that fallback zero. A scanned empty wallet still reports known zero; unrelated
+fee failures do not erase a known balance.
 Native estimates use the validated receiver. Foreign dry quotes lack a deposit
 address, so a private standard transparent-output shape estimates the fee; neither
 that placeholder nor proposal may escape into accepted terms or signing. Foreign

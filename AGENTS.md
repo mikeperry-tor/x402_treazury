@@ -85,7 +85,7 @@ quirks, workarounds, and compatibility exemptions are documented in
   auto-funding, and the ZEC wallet balance the operator funds is the ZEC capital
   limit. Do not reintroduce daily/cumulative allocation, per-transfer ZEC spending
   budgets, or mirror a USDC reserve target into a ZEC cap. Reserve ranges authorize
-  nominal USDC sizing only. Per-payment authority, actual network-fee caps,
+  nominal USDC sizing only. Per-payment authority, SDK transaction validity,
   accepted-work ownership and separately authorized qualification API budgets
   protect distinct things. Qualification funding has no separate ZEC spending budget;
   reviewed job counts, reserve sizing and actual supported treasury funds govern new allocations.

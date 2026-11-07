@@ -276,7 +276,8 @@ fn check_echo(request: &Value, echo: &Value, accepting_quote: bool) -> Result<()
         if request.get(key).is_some() {
             continue;
         }
-        if !accepting_quote && matches!(key.as_str(), "appFees" | "insured" | "quoteWaitingTimeMs")
+        if matches!(key.as_str(), "appFees" | "rebates")
+            || (!accepting_quote && matches!(key.as_str(), "insured" | "quoteWaitingTimeMs"))
         {
             continue;
         }
@@ -286,20 +287,6 @@ fn check_echo(request: &Value, echo: &Value, accepting_quote: bool) -> Result<()
                 "invalid quote waiting metadata"
             ),
             "insured" => ensure!(value.is_boolean(), "invalid quote insurance metadata"),
-            "appFees" => {
-                let fees = value.as_array().context("invalid direct quote fees")?;
-                for fee in fees {
-                    ensure!(
-                        fee["recipient"]
-                            .as_str()
-                            .is_some_and(|recipient| !recipient.is_empty())
-                            && fee["fee"]
-                                .as_f64()
-                                .is_some_and(|n| n.is_finite() && n >= 0.0),
-                        "invalid direct quote fee metadata"
-                    );
-                }
-            }
             _ => ensure!(value.is_null(), "unsupported direct quote routing metadata"),
         }
     }
@@ -567,8 +554,25 @@ mod tests {
         response["quote"]["depositMemo"] = Value::Null;
         assert!(validate_quote(request.clone(), response.clone(), 1000).is_err());
         response["quote"]["depositMemo"] = json!("memo");
-        response["quoteRequest"]["appFees"][0]["fee"] = json!("wrong-type");
-        assert!(validate_quote(request, response, 1000).is_err());
+        response["quoteRequest"]["appFees"] = json!("unavailable commission report");
+        response["quoteRequest"]["rebates"] = json!({"new-provider-format":true});
+        let quote = validate_quote(request.clone(), response.clone(), 1000).unwrap();
+        assert_eq!(quote.response, response);
+        assert!(
+            validate_status(
+                &quote,
+                &json!({"status":"SUCCESS","quoteResponse":response})
+            )
+            .is_ok()
+        );
+        for field in ["recipient", "refundTo", "amount", "slippageTolerance"] {
+            let mut changed = quote.response.clone();
+            changed["quoteRequest"][field] = Value::Null;
+            assert!(
+                validate_quote(request.clone(), changed, 1000).is_err(),
+                "{field}"
+            );
+        }
         let request = super::request(
             &asset("foreign:stellar", "stellar", 7),
             &asset(ZEC, "zec", 8),

@@ -49,7 +49,8 @@ make run CARGO_ARGS='--offline --example quote_near'
 Cargo's `--offline` only disables dependency fetching. This example makes a real
 **dry** NEAR quote request using public test addresses; it does not allocate a
 deposit or send funds. No application commission is configured. NEAR platform and
-route fees are subject to the validated quote limits.
+route fees are reported as provider metadata; no local USD-overhead or commission
+metadata gate is applied.
 
 **Stop here until the operator supplies funds and approves live execution.**
 No funded mainnet swap or paid seller call is covered by the offline qualification.
@@ -106,9 +107,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    ZEC amount using a fresh quote for one $2-$5 nominal USDC deposit, including
    source fees and any later replacement permitted by the run authority.
    There is no separate per-transfer ZEC spending budget. Actual spendable treasury
-   funds, the **5% quoted conversion overhead** limit, and the **0.0003 ZEC per
-   shielding fee** cap govern the transfer. These are safeguards, not a price
-   estimate or a promise that a route fits. The separate reviewed qualification
+   funds and the SDK-calculated transaction fee govern the transfer. No shielding,
+   application fee ceiling or USD conversion-overhead gate is used. A preview is
+   advisory and does not promise that a route will remain available. The separate reviewed qualification
    manifest/registry limits new funding jobs and API payment authorizations, not
    ZEC spending. `total_test_budget_usdc` counts API authorizations only; retain
    `auto_fund=false` unless the explicit run authorization permits funding.

@@ -16,7 +16,6 @@ template="small"
 [wallet_templates.small]
 mode="zcash_rotation"
 max_api_payment_usdc="1.00"
-max_conversion_overhead_percent=5
 [wallet_templates.small.reserves.small]
 funding_amount_usdc="5.000001"
 [treasury]
@@ -145,13 +144,11 @@ private_key_env='SERVER_KEY'
 [wallets.unused_managed]
 mode='zcash_rotation'
 max_api_payment_usdc='1'
-max_conversion_overhead_percent=1
 [wallets.unused_managed.reserves.small]
 funding_amount_usdc='3'
 [wallet_templates.unused]
 mode='zcash_rotation'
 max_api_payment_usdc='1'
-max_conversion_overhead_percent=1
 [wallet_templates.unused.reserves.small]
 funding_amount_usdc='100'
 "#;

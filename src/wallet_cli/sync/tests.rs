@@ -12,7 +12,7 @@ use std::{
 
 fn config() -> MetaConfig {
     serde_json::from_value(json!({"version":1,"servers":{},"sources":{"unused":{"spec":"/missing/provider.toml","api_key_env":"UNRELATED_MISSING_KEY"}},
-        "wallets":{"configured":{"mode":"zcash_rotation","max_api_payment_usdc":"1","max_conversion_overhead_percent":5,"reserves":{"small":{"funding_amount_usdc":"2"}}},
+        "wallets":{"configured":{"mode":"zcash_rotation","max_api_payment_usdc":"1","reserves":{"small":{"funding_amount_usdc":"2"}}},
             "static":{"mode":"static","private_key_env":"MISSING_STATIC_KEY"}},
         "funding":{"near_api_key_env":"MISSING_NEAR_KEY","near_user_session_env":"MISSING_NEAR_SESSION","base_rpc_fallback_url_envs":[]}
     })).unwrap()

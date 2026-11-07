@@ -438,7 +438,7 @@ mod tests {
                     "indexer_url_env":"INDEXER","submission_url_env":"SUBMIT"},
                 "funding":{"base_rpc_url_env":"BASE","base_rpc_fallback_url_envs":[]},
                 "wallets":{"pool":{"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"2"}},
-                    "max_api_payment_usdc":"0.02","max_conversion_overhead_percent":5}},
+                    "max_api_payment_usdc":"0.02"}},
                 "sources":{"api":{"spec":"https://catalog.invalid/spec"},"other":{"spec":"local.json"}},
                 "servers":{"main":{"listen":"127.0.0.1:0","bearer_token_env":"TOKEN","wallet":"pool","sources":["api","other"]}}
             })).unwrap();

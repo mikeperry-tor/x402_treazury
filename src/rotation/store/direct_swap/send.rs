@@ -4,7 +4,6 @@ use crate::rotation::transaction::PrepareRequest;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DirectSendAuthority {
-    pub max_fee_zatoshis: u64,
     pub max_debit_zatoshis: Option<u64>,
 }
 #[derive(Clone)]
@@ -23,7 +22,7 @@ impl DirectSourceCondition {
     fn message(self) -> &'static str {
         match self {
             Self::CostLimit => {
-                "Transaction cost exceeds accepted total debit or existing network fee limit"
+                "Transaction cost exceeds the accepted direct-send total-debit limit"
             }
             Self::InsufficientFunds => "Waiting for spendable treasury funds",
             Self::Unavailable => {
@@ -157,26 +156,6 @@ impl Store {
                 (deposit, principal, Some(quote.deadline))
             }
         };
-        if let Some(maximum) = record
-            .terms
-            .get("max_source_zatoshis")
-            .filter(|value| !value.is_null())
-        {
-            let maximum: u64 = maximum
-                .as_str()
-                .context("invalid caller source authority")?
-                .parse()
-                .context("invalid caller source authority")?;
-            ensure!(
-                principal <= maximum,
-                "direct source principal exceeds caller authority"
-            );
-        } else {
-            ensure!(
-                record.route == DirectRoute::Native,
-                "foreign sends require explicit caller source authority"
-            );
-        }
         Ok(DirectSendBinding {
             recipient,
             principal,
@@ -241,10 +220,6 @@ impl Store {
             principal == binding.principal,
             "direct source principal binding mismatch"
         );
-        ensure!(
-            fee <= binding.authority.max_fee_zatoshis,
-            "direct source fee exceeds accepted authority"
-        );
         let cost = principal
             .checked_add(fee)
             .context("direct source cost overflow")?;
@@ -253,7 +228,7 @@ impl Store {
                 .authority
                 .max_debit_zatoshis
                 .is_none_or(|maximum| cost <= maximum),
-            "direct source cost exceeds accepted debit authority"
+            crate::rotation::error::FundingCondition::CostLimit
         );
         Ok(())
     }
@@ -300,12 +275,7 @@ impl Store {
         }
         Ok(())
     }
-    pub fn direct_send_action(
-        &self,
-        id: &str,
-        current_max_fee: u64,
-        now: Option<u64>,
-    ) -> Result<DirectSendAction> {
+    pub fn direct_send_action(&self, id: &str, now: Option<u64>) -> Result<DirectSendAction> {
         let record = self.direct_by_id(id)?;
         if record.kind != "send"
             || record.authority.is_none()
@@ -343,15 +313,6 @@ impl Store {
             return Ok(DirectSendAction::NoAutomaticAction);
         }
         self.require_operation_source_policy(id, "direct_source_preparation")?;
-        let fee = current_max_fee.min(binding.authority.max_fee_zatoshis);
-        let cost = binding
-            .principal
-            .checked_add(fee)
-            .context("direct source cost overflow")?;
-        let max_input = binding
-            .authority
-            .max_debit_zatoshis
-            .map_or(cost, |cap| cost.min(cap));
         Ok(DirectSendAction::Prepare(PrepareRequest {
             managed_funding: None,
             operation_id: id.into(),
@@ -359,8 +320,6 @@ impl Store {
             recipient: binding.recipient,
             amount_zatoshis: binding.principal,
             deadline: binding.deadline,
-            max_fee_zatoshis: fee,
-            max_input_zatoshis: max_input,
         }))
     }
     /// A fixed derived diagnostic cannot change accepted authority or work ownership.
@@ -468,7 +427,6 @@ mod tests {
                 &operation.id,
                 None,
                 DirectSendAuthority {
-                    max_fee_zatoshis: 50,
                     max_debit_zatoshis: cap,
                 },
             )
@@ -493,6 +451,74 @@ mod tests {
             deadline,
         }
     }
+    #[test]
+    fn old_fee_fields_do_not_limit_source_and_changed_retry_shape_fails_without_replacement() {
+        let (_dir, mut store) = fixture();
+        let operation = native(&mut store, "old-fields", Some(60));
+        let mut old = serde_json::to_value(&operation).unwrap();
+        old["authority"]["max_fee_zatoshis"] = json!(1);
+        old["terms"]["max_source_zatoshis"] = json!("1");
+        let payload = seal(
+            &store.key,
+            &store.direct_aad(&operation.id),
+            &serde_json::to_vec(&old).unwrap(),
+        )
+        .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE direct_operations SET payload=?2 WHERE id=?1",
+                params![operation.id, payload],
+            )
+            .unwrap();
+        let saved = store.direct_request("owner", "send", "old-fields").unwrap();
+        assert_eq!(saved.terms, old["terms"]);
+        assert_eq!(
+            saved.authority.as_ref().unwrap().max_debit_zatoshis,
+            Some(60)
+        );
+        store
+            .require_direct_source_cost(&operation.id, 50, 10)
+            .unwrap();
+        assert!(
+            store
+                .require_direct_source_cost(&operation.id, 50, 11)
+                .is_err()
+        );
+        assert!(matches!(
+            store.direct_send_action(&operation.id, None).unwrap(),
+            DirectSendAction::Prepare(_)
+        ));
+        assert!(
+            store
+                .reserve_native("owner", "send", "old-fields", operation.terms.clone())
+                .is_err()
+        );
+        assert_eq!(
+            store
+                .direct_request("owner", "send", "old-fields")
+                .unwrap()
+                .id,
+            operation.id
+        );
+        let after: Vec<u8> = store
+            .db
+            .query_row(
+                "SELECT payload FROM direct_operations WHERE id=?1",
+                [&operation.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            unseal(&store.key, &store.direct_aad(&operation.id), &after)
+                .unwrap()
+                .as_slice(),
+            serde_json::to_vec(&old).unwrap().as_slice()
+        );
+        assert_eq!(store.direct_pending().unwrap().len(), 1);
+        assert!(!store.status().unwrap().outgoing_pending);
+    }
+
     #[test]
     fn native_authority_binds_actual_cost_and_survives_pause_and_config_changes() {
         let (_dir, mut store) = fixture();
@@ -539,19 +565,16 @@ mod tests {
                 &operation.id,
                 None,
                 DirectSendAuthority {
-                    max_fee_zatoshis: 1,
                     max_debit_zatoshis: Some(1),
                 },
             )
             .unwrap();
         assert_eq!(retried.authority, operation.authority);
         let DirectSendAction::Prepare(request) =
-            store.direct_send_action(&operation.id, 10, None).unwrap()
+            store.direct_send_action(&operation.id, None).unwrap()
         else {
             panic!("native send must be preparable without UTC");
         };
-        assert_eq!(request.max_input_zatoshis, 55);
-        assert_eq!(request.max_fee_zatoshis, 10);
         assert!(request.deadline.is_none());
         store.deny_new_funding();
         assert!(
@@ -591,7 +614,7 @@ mod tests {
         assert!(store.direct_pending().unwrap().is_empty());
         assert!(!store.direct_source_needed().unwrap());
         assert!(matches!(
-            store.direct_send_action(&operation.id, 50, None).unwrap(),
+            store.direct_send_action(&operation.id, None).unwrap(),
             DirectSendAction::NoAutomaticAction
         ));
         drop(store);
@@ -602,7 +625,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            store.direct_send_action(&operation.id, 50, None).unwrap(),
+            store.direct_send_action(&operation.id, None).unwrap(),
             DirectSendAction::NoAutomaticAction
         ));
         let revision = store.snapshot().unwrap().0;
@@ -631,7 +654,7 @@ mod tests {
         assert!(store.direct_changes.notified().now_or_never().is_some());
         assert_eq!(store.direct_pending().unwrap().len(), 1);
         assert!(matches!(
-            store.direct_send_action(&operation.id, 1, None).unwrap(),
+            store.direct_send_action(&operation.id, None).unwrap(),
             DirectSendAction::Submit
         ));
         let loaded = PreparedTransaction::load(&store, &operation.id).unwrap();
@@ -660,7 +683,7 @@ mod tests {
         use crate::direct_swap::route::{Asset, SwapType, ZEC, request_on, validate_quote_on};
         let now = crate::rotation::base::now().unwrap();
         let refund = crate::rotation::near::test_shielded_refund(&store.network.chain());
-        let (operation,_)=store.reserve_direct("owner","send",request_id,json!({"asset_id":"foreign:usd","chain":"foreign","amount":"1000","recipient":"destination","max_source_zatoshis":"60"})).unwrap();
+        let (operation,_)=store.reserve_direct("owner","send",request_id,json!({"asset_id":"foreign:usd","chain":"foreign","amount":"1000","recipient":"destination"})).unwrap();
         store
             .save_direct_address(
                 &operation.id,
@@ -704,7 +727,6 @@ mod tests {
                 &operation.id,
                 Some(serde_json::to_value(quote).unwrap()),
                 DirectSendAuthority {
-                    max_fee_zatoshis: 50,
                     max_debit_zatoshis: Some(60),
                 },
             )
@@ -717,7 +739,7 @@ mod tests {
         let binding = store.direct_send_binding(&operation.id).unwrap().unwrap();
         assert_eq!(binding.principal, 50);
         assert!(matches!(
-            store.direct_send_action(&operation.id, 50, None).unwrap(),
+            store.direct_send_action(&operation.id, None).unwrap(),
             DirectSendAction::NoAutomaticAction
         ));
         store

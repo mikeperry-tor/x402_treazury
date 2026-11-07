@@ -44,8 +44,6 @@ fn request(job: &FundingJob, deadline: u64) -> PrepareRequest {
         deadline: Some(deadline),
         recipient: DEPOSIT.into(),
         amount_zatoshis: 50_000,
-        max_fee_zatoshis: 50_000,
-        max_input_zatoshis: 100_000,
     }
 }
 

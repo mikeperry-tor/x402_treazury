@@ -27,7 +27,6 @@ base_confirmations = 12
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
-max_conversion_overhead_percent = 5
 
 [wallets.test_pool.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -36,7 +35,6 @@ max_conversion_overhead_percent = 5
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
-max_conversion_overhead_percent = 5
 
 [wallets.independent_pool.reserves.small]
 # Default randomized nominal funding: $2-5.

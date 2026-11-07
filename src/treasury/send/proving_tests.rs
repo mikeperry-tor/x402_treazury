@@ -245,8 +245,6 @@ async fn qualify_preparation(case: PreparationCase) {
         deadline: Some(deadline),
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,
-        max_fee_zatoshis: 120_000,
-        max_input_zatoshis: 180_000,
     };
     if !funded {
         let error = treasury.prepare(request()).await.err().unwrap();

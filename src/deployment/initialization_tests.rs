@@ -19,12 +19,10 @@ base_rpc_fallback_url_envs=[]
 mode='zcash_rotation'
 max_api_payment_usdc='5'
 reserves={small={funding_amount_usdc='5'}}
-max_conversion_overhead_percent=5
 [wallets.unselected]
 mode='zcash_rotation'
 max_api_payment_usdc='5'
 reserves={small={funding_amount_usdc='5'}}
-max_conversion_overhead_percent=5
 [sources.api]
 spec='spec.json'
 base_url='https://127.0.0.1:1'

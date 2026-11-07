@@ -15,8 +15,6 @@ fn native_request(id: String, recipient: String, amount: u64) -> PrepareRequest 
         deadline: None,
         recipient,
         amount_zatoshis: amount,
-        max_fee_zatoshis: 100_000,
-        max_input_zatoshis: u64::MAX,
     }
 }
 async fn accept(
@@ -34,14 +32,13 @@ async fn accept(
                     "send",
                     request_id,
                     json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec",
-                "amount":"50000","recipient":recipient,"max_source_zatoshis":null}),
+                "amount":"50000","recipient":recipient}),
                 )?
                 .0;
             let operation = s.accept_direct_send(
                 &operation.id,
                 None,
                 DirectSendAuthority {
-                    max_fee_zatoshis: 100_000,
                     max_debit_zatoshis: cap,
                 },
             )?;
@@ -91,10 +88,6 @@ async fn native_self_payment_uses_actual_total_cap_and_retains_bytes_after_cance
         .to_owned();
     let actual_fee = fee(&owner, &recipient).await;
     let total = 50_000 + actual_fee;
-    assert!(
-        actual_fee < 100_000,
-        "fixture must distinguish actual fee from configured maximum"
-    );
     let rejected = accept(&owner, recipient.clone(), "below-actual", Some(total - 1)).await;
     let error = owner
         .prepare(native_request(rejected.clone(), recipient.clone(), 50_000))

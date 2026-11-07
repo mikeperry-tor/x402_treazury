@@ -22,7 +22,11 @@ enum Command {
     Refund(String, oneshot::Sender<Result<String>>),
     DirectAddress(String, oneshot::Sender<Result<String>>),
     PreviewAddress(oneshot::Sender<Result<String>>),
-    PreviewFee(super::FeeTarget, u64, oneshot::Sender<Result<u64>>),
+    PreviewFee(
+        super::FeeTarget,
+        u64,
+        oneshot::Sender<Result<super::FeePreview>>,
+    ),
     NativeReceipt(String, oneshot::Sender<Result<serde_json::Value>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(
@@ -72,7 +76,11 @@ impl TreasuryHandle {
     pub async fn preview_address(&self) -> Result<String> {
         self.call(Command::PreviewAddress).await
     }
-    pub(crate) async fn preview_fee(&self, target: super::FeeTarget, amount: u64) -> Result<u64> {
+    pub(crate) async fn preview_fee(
+        &self,
+        target: super::FeeTarget,
+        amount: u64,
+    ) -> Result<super::FeePreview> {
         self.call(|reply| Command::PreviewFee(target, amount, reply))
             .await
     }
@@ -1032,8 +1040,6 @@ mod tests {
             deadline: Some(u64::MAX),
             recipient: "not-used-before-sync".into(),
             amount_zatoshis: 1,
-            max_fee_zatoshis: 10000,
-            max_input_zatoshis: 20000,
         };
         let (send, reply) = oneshot::channel();
         handle
@@ -1120,8 +1126,6 @@ mod tests {
                     deadline: Some(u64::MAX),
                     recipient: recipient.into(),
                     amount_zatoshis: 1,
-                    max_fee_zatoshis: 10000,
-                    max_input_zatoshis: 20000,
                 })
                 .await
                 .err()

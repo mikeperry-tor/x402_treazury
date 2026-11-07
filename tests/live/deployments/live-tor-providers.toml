@@ -32,7 +32,6 @@ max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible 
 # Review the current bridge minimum before authorizing new funding.
 # It is not a universal or permanent route minimum.
 max_api_payment_usdc = "0.20"
-max_conversion_overhead_percent = 5
 
 [wallets.coverage_a.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -41,7 +40,6 @@ max_conversion_overhead_percent = 5
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
-max_conversion_overhead_percent = 5
 
 [wallets.coverage_b.reserves.small]
 # Default randomized nominal funding: $2-5.

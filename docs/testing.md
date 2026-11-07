@@ -90,8 +90,8 @@ clear test error. A PaidClient regression covers run and registry budget refusal
 before signed dispatch: payment journals and admission evidence remain absent,
 balance estimates and reserve ownership remain unchanged, and sufficient authority
 allows the same case to proceed. Funding has no ZEC spending budget; reviewed
-allocation counts, reserve sizes, actual treasury spendability and fee/overhead
-safeguards apply.
+allocation counts, reserve sizes, actual treasury spendability and SDK transaction
+validity apply.
 
 Catalog media regressions preserve precedence, parameter case and first-duplicate
 lookup semantics, plus usable wildcard fallback and exact selected Content-Type.

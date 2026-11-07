@@ -26,7 +26,6 @@ quote_deadline_seconds = 1800
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.05"
-max_conversion_overhead_percent = 5
 max_attempts = 3
 
 [wallets.demo.reserves.small]

@@ -72,10 +72,6 @@ async fn native_service_submits_once_despite_diagnostic_failure_and_preserves_ac
         .unwrap()
         .into_u64();
     let total = principal.checked_add(actual_fee).unwrap();
-    assert!(
-        actual_fee < 100_000,
-        "fixture must distinguish actual fee from the maximum"
-    );
     let config = Config {
         receive: false,
         send: true,
@@ -90,7 +86,7 @@ async fn native_service_submits_once_despite_diagnostic_failure_and_preserves_ac
     let store = owner.store.clone();
     let (treasury, commands) = super::super::actor::channel();
     // There is deliberately no NEAR client, funding configuration or Base RPC.
-    let service = Service::native(store.clone(), treasury.clone(), 100_000, 5);
+    let service = Service::native(store.clone(), treasury.clone(), 5);
     let accepted = service
         .invoke(
             "owner",

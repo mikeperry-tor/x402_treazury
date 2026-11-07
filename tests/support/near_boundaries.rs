@@ -2,7 +2,7 @@ use std::time::Duration;
 use super::*;
 
 #[test]
-fn asset_and_quote_boundaries_fail_closed() {
+fn asset_and_transfer_boundaries_fail_closed_while_cost_metadata_is_advisory() {
     let tokens: Value = serde_json::from_str(include_str!("../fixtures/near/tokens.json")).unwrap();
     for index in 0..2 {
         let mut missing = tokens.clone();
@@ -32,17 +32,14 @@ fn asset_and_quote_boundaries_fail_closed() {
         let mut bad = response.clone();
         bad["quote"]["amountInUsd"] = json!(text);
         assert!(
-            validate_quote(request.clone(), bad, &limits, 2_000_000_000).is_err(),
+            validate_quote(request.clone(), bad, &limits, 2_000_000_000).is_ok(),
             "{text}"
         );
     }
-    for (fee, pass) in [(500u64, true), (501, false), (u64::MAX, false)] {
+    for fee in [500u64, 501, u64::MAX] {
         let mut changed = response.clone();
         changed["quoteRequest"]["appFees"] = json!([{"recipient":"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd","fee":fee}]);
-        assert_eq!(
-            validate_quote(request.clone(), changed, &limits, 2_000_000_000).is_ok(),
-            pass
-        );
+        assert!(validate_quote(request.clone(), changed, &limits, 2_000_000_000).is_ok());
     }
 }
 

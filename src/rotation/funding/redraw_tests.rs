@@ -100,10 +100,7 @@ fn request(job: &FundingJob, target: u64, max_output: u64, sizing: SizingPolicy)
         job: job.clone(),
         refund: crate::rotation::near::PUBLIC_REFUND_UA.into(),
         target: target.to_string(),
-        limits: crate::rotation::near::Limits {
-            max_output,
-            max_fee_bps: 10_000,
-        },
+        limits: crate::rotation::near::Limits { max_output },
         sizing,
         max_attempts: 3,
         confidentiality: "public".into(),

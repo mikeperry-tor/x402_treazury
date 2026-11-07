@@ -21,7 +21,7 @@ authorizations, not a fee forecast or a sum that must be allocated before execut
 Each paid case retains its explicit per-case reservation. Every authorization
 consumes the test budget even when its result is missing or another wallet is tried.
 New funding has no monetary qualification budget: reviewed job counts and reserve
-sizes, current SDK-spendable ZEC, conversion overhead and actual network-fee caps
+sizes, current SDK-spendable ZEC and SDK-calculated transaction fees
 supply its boundaries. A funded wallet's API payments are charged only when authorized.
 
 ## Wallet and listener scope

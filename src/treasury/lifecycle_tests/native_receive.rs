@@ -215,7 +215,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         handle.clone(),
         crate::rotation::near::NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
         serde_json::from_value(json!({})).unwrap(),
-        30000,
     );
     let config = crate::direct_swap::Config {
         receive: true,
@@ -341,7 +340,6 @@ async fn native_receive_resumes_reservation_and_tracks_partial_excess_receipts_a
         handle.clone(),
         crate::rotation::near::NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
         serde_json::from_value(json!({})).unwrap(),
-        30000,
     );
     let reorg = service
         .invoke(

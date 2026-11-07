@@ -212,7 +212,6 @@ async fn invalid_windows_fail_before_reservation_or_sdk_provider_effects() {
         treasury,
         NearClient::test_at("http://127.0.0.1:1").unwrap(),
         serde_json::from_value(json!({})).unwrap(),
-        30_000,
     );
     let config = Config {
         receive: true,
@@ -292,7 +291,6 @@ async fn identical_create_retry_returns_original_without_renewal_or_sdk_provider
             treasury,
             NearClient::test_at("http://127.0.0.1:1").unwrap(),
             serde_json::from_value(json!({"quote_deadline_seconds":1})).unwrap(),
-            30_000,
         );
         let config = Config {
             receive: true,

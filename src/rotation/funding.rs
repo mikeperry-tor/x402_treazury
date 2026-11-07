@@ -464,21 +464,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             if error.is::<super::transaction::PreparationAlreadyFulfilled>() {
                 return Ok(Observation::None);
             }
-            if !error.is::<super::error::QuotePolicyMismatch>() {
-                return Err(error);
-            }
-            let id = job.id.clone();
-            let operation = job.operation_id.clone();
-            tracing::debug!(
-                wallet=%job.pool_name,
-                operation=%job.operation_id,
-                "The unprepared quote no longer satisfies current overhead policy; refreshing it under current policy"
-            );
-            return self
-                .store
-                .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
-                .await
-                .map(|()| Observation::None);
+            return Err(error);
         }
         Ok(Observation::Prepared)
     }
@@ -513,7 +499,6 @@ pub struct Backend {
     pub base: super::base::BaseRpc,
     pub wallets: std::collections::BTreeMap<String, super::config::WalletConfig>,
     pub funding: super::config::FundingConfig,
-    pub max_network_fee: u64,
 }
 impl Backend {
     fn require_auto_funding(&self) -> Result<()> {
@@ -544,27 +529,19 @@ impl Backend {
         config.policy()
     }
     fn policy(&self, job: &FundingJob) -> Result<(super::near::Limits, u32)> {
-        let super::config::WalletConfig::ZcashRotation {
-            max_conversion_overhead_percent,
-            max_attempts,
-            ..
-        } = self
+        let super::config::WalletConfig::ZcashRotation { max_attempts, .. } = self
             .wallets
             .get(&job.pool_name)
             .context("funding pool disabled")?
         else {
             anyhow::bail!("funding pool disabled")
         };
-        // Actual spendable treasury funds and the accepted operation's fee cap
-        // bound a swap. There is no separate per-quote ZEC spending budget.
+        // SDK spendability governs source funds; the configured reserve bounds nominal output sizing.
         Ok((
             super::near::Limits {
                 // Only quote/preparation use this field; they supply the exact
                 // current claim's output ceiling before validating any quote.
                 max_output: u64::MAX,
-                max_fee_bps: max_conversion_overhead_percent
-                    .checked_mul(100)
-                    .context("invalid conversion overhead percent")?,
             },
             *max_attempts,
         ))
@@ -665,8 +642,7 @@ impl FundingBackend for Backend {
             .await?;
         limits.max_output = u64::try_from(claim.maximum_output)
             .context("funding output exceeds route amount range")?;
-        // Accepted work carries the quote's fixed principal and the configured
-        // fee ceiling below, so a later configuration edit cannot re-veto it.
+        // Revalidate actual quote bindings; informational pricing and commissions grant no authority.
         let checked = self
             .near
             .validate_saved_quote(quote, &limits, now()?)
@@ -674,8 +650,6 @@ impl FundingBackend for Backend {
                 // Quote expiry here precedes the treasury command and input acceptance.
                 if error.is::<super::near::QuoteWindowExpired>() {
                     error.context(super::transaction::PreparationDeferred)
-                } else if error.is::<super::near::OverheadLimit>() {
-                    error.context(super::error::QuotePolicyMismatch)
                 } else {
                     error
                 }
@@ -702,11 +676,6 @@ impl FundingBackend for Backend {
                     deadline: Some(checked.deadline),
                     recipient: checked.deposit.context("missing deposit")?,
                     amount_zatoshis: checked.input,
-                    max_fee_zatoshis: self.max_network_fee,
-                    max_input_zatoshis: checked
-                        .input
-                        .checked_add(self.max_network_fee)
-                        .context("funding cost overflow")?,
                 },
                 self.base.clone(),
             )
@@ -953,9 +922,6 @@ fn near_diagnostic(error: &anyhow::Error) -> String {
             "near_response_failed: timeout" => "response body timeout",
             "near_response_failed: body transport" => "response body transport failure",
             "invalid NEAR JSON" => "invalid JSON response",
-            "quote overhead limit" | "platform fee exceeds overhead cap" => {
-                "fee/overhead cap exceeded"
-            }
             "near_bridge_minimum_not_increasing" => "invalid bridge minimum",
             _ if text.starts_with("near_bridge_minimum_atomic:") => "bridge minimum below offer",
             "required asset missing or ambiguous" => "required asset missing or ambiguous",
@@ -1094,9 +1060,6 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
     }
     for cause in error.chain() {
         match cause.to_string().as_str() {
-            "funding_cost_limit_exceeded" => {
-                return "funding_cost_limit_exceeded; review max_funding_transaction_fee_zec; standard network fee was not overridden; inspect unprepared recovery before trying again";
-            }
             "funding_amount_limit_exceeded" => {
                 return "funding_amount_limit_exceeded; bridge minimum exceeds the configured maximum funding amount; raise max_funding_amount_usdc or change the configured range; no funds submitted; the saved draw is retried with backoff until configuration or external conditions change";
             }

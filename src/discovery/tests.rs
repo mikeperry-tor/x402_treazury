@@ -1287,7 +1287,7 @@ async fn boolean_config_and_shared_wallet_bindings_are_strict_and_offline() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("deployment.toml");
         let wallet = if managed {
-            "mode='zcash_rotation'\nmax_api_payment_usdc='0.05'\nmax_conversion_overhead_percent=5\n[wallets.agent_shared.reserves.small]\nfunding_amount_usdc='2.00'"
+            "mode='zcash_rotation'\nmax_api_payment_usdc='0.05'\n[wallets.agent_shared.reserves.small]\nfunding_amount_usdc='2.00'"
         } else {
             "mode='static'\nprivate_key_env='UNSET_TEST_KEY'"
         };

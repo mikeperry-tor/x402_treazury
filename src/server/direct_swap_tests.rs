@@ -30,7 +30,6 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
         treasury,
         crate::rotation::near::NearClient::with_session(None, None).unwrap(),
         serde_json::from_value(json!({})).unwrap(),
-        0,
     );
     let mut server = Server::from_bindings(vec![], None);
     server.catalog_server = "alice".into();
@@ -213,7 +212,7 @@ async fn send_only_discovery_native_preview_and_disabled_status_preserve_authori
         .await
         .unwrap();
     let (treasury, mut commands) = crate::treasury::actor::channel();
-    let service = crate::direct_swap::Service::native(store.clone(), treasury, 15_000, 5);
+    let service = crate::direct_swap::Service::native(store.clone(), treasury, 5);
     let mut server = Server::from_bindings(vec![], None);
     server.catalog_server = "alice".into();
     server.direct_swap = Some((
@@ -296,7 +295,8 @@ async fn send_only_discovery_native_preview_and_disabled_status_preserve_authori
     let preview: Value = serde_json::from_str(&preview.unwrap()).unwrap();
     assert_eq!(preview["executable"], false);
     assert_eq!(preview["fee_estimate"]["unavailable_reason"], "unavailable");
-    assert_eq!(preview["max_network_fee_zatoshis"], "15000");
+    assert!(preview["fee_estimate"]["fits"].is_null());
+    assert!(preview["fee_estimate"]["spendable_zatoshis"].is_null());
     let wrapped = json!({"tool_id":"x402_treazury_swap_preview","arguments":preview_args});
     let (same, observed) = tokio::join!(
         server.invoke("x402_treazury_tool_call", wrapped.as_object().unwrap()),

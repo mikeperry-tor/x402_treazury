@@ -28,7 +28,6 @@ async fn asset_search_ranks_before_paging_and_exposes_native_currency_name() {
         treasury,
         near,
         serde_json::from_value(json!({})).unwrap(),
-        0,
     );
     let config = Config {
         receive: true,
@@ -224,7 +223,7 @@ async fn native_receipt_reuses_snapshot_evidence_without_occupying_sdk_owner() {
         .await
         .unwrap();
     let (treasury, mut commands) = crate::treasury::actor::channel();
-    let service = Service::native(store.clone(), treasury, 0, crate::rotation::config::poll());
+    let service = Service::native(store.clone(), treasury, crate::rotation::config::poll());
     assert!(!service.observe_once(&operation).await.unwrap());
     let reference = json!({"operation_id":operation.id});
     let current = service
@@ -344,7 +343,6 @@ async fn committed_quote_is_observed_without_foreground_acknowledgment() {
         treasury,
         near,
         serde_json::from_value(json!({})).unwrap(),
-        0,
     );
     let stop = CancellationToken::new();
     let task = tokio::spawn({

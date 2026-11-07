@@ -135,7 +135,6 @@ confidentiality='public'
 mode='zcash_rotation'
 max_api_payment_usdc='1'
 reserves={small={funding_amount_usdc='2'}}
-max_conversion_overhead_percent=5
 [sources.api]
 spec='spec.json'
 prefix='api'

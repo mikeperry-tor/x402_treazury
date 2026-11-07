@@ -32,13 +32,42 @@ impl std::fmt::Display for FeePreviewUnavailable {
 }
 impl std::error::Error for FeePreviewUnavailable {}
 
+#[derive(Debug)]
+pub(crate) struct FeePreview {
+    pub spendable_zatoshis: Option<u64>,
+    pub fee: std::result::Result<u64, FeePreviewUnavailable>,
+}
+
 impl Treasury {
-    pub(super) async fn preview_fee(&self, target: FeeTarget, amount: u64) -> Result<u64> {
+    pub(super) async fn preview_fee(&self, target: FeeTarget, amount: u64) -> Result<FeePreview> {
         let client = self
             .client
             .as_ref()
             .ok_or(FeePreviewUnavailable::Unavailable)?;
-        wallet_fee(&mut *client.wallet().write().await, target, amount)
+        Ok(wallet_preview(
+            &mut *client.wallet().write().await,
+            target,
+            amount,
+        ))
+    }
+}
+
+fn wallet_preview(wallet: &mut LightWallet, target: FeeTarget, amount: u64) -> FeePreview {
+    let mut spendable_zatoshis = super::SnapshotBalances::read(wallet).spendable_shielded;
+    let fee = wallet_fee(wallet, target, amount).map_err(|error| {
+        error
+            .downcast_ref::<FeePreviewUnavailable>()
+            .copied()
+            .unwrap_or(FeePreviewUnavailable::Unavailable)
+    });
+    // The pinned SDK balance API falls back to zero when scan/anchor data is
+    // absent. The proposal's typed result distinguishes that from a scanned zero.
+    if fee == Err(FeePreviewUnavailable::ScanRequired) {
+        spendable_zatoshis = None;
+    }
+    FeePreview {
+        spendable_zatoshis,
+        fee,
     }
 }
 
@@ -167,11 +196,12 @@ mod tests {
         // Debug also covers unsaved proposal and advisory-lock state. Never print this
         // representation; all wallet keys here are the public deterministic test seed.
         let before_ephemeral = format!("{wallet:?}");
-        assert_eq!(
-            wallet_fee(&mut wallet, FeeTarget::Native(recipient), 50_000).unwrap(),
-            expected_native_fee
-        );
-        assert!(wallet_fee(&mut wallet, FeeTarget::NearDeposit, 50_000).unwrap() > 0);
+        let observation = wallet_preview(&mut wallet, FeeTarget::Native(recipient.clone()), 50_000);
+        assert_eq!(observation.spendable_zatoshis, Some(500_000));
+        assert_eq!(observation.fee, Ok(expected_native_fee));
+        let foreign = wallet_preview(&mut wallet, FeeTarget::NearDeposit, 50_000);
+        assert_eq!(foreign.spendable_zatoshis, observation.spendable_zatoshis);
+        assert!(foreign.fee.unwrap() > 0);
         assert!(
             before_ephemeral == format!("{wallet:?}"),
             "fee preview changed wallet or cached proposal state"
@@ -186,12 +216,18 @@ mod tests {
     fn unavailable_fees_are_typed_and_do_not_fall_back_to_legacy_funds() {
         let mut wallet = SyntheticWalletBuilder::new(SEED).build();
         let recipient = native_address(&wallet);
+        let observed = wallet_preview(&mut wallet, FeeTarget::Native(recipient.clone()), 50_000);
+        assert_eq!(observed.spendable_zatoshis, Some(0));
+        assert_eq!(observed.fee, Err(FeePreviewUnavailable::InsufficientFunds));
         let error = wallet_fee(&mut wallet, FeeTarget::Native(recipient), 50_000).unwrap_err();
         assert_eq!(
             error.downcast_ref::<FeePreviewUnavailable>(),
             Some(&FeePreviewUnavailable::InsufficientFunds)
         );
         wallet.sync_state = pepper_sync::wallet::SyncState::new();
+        let observed = wallet_preview(&mut wallet, FeeTarget::NearDeposit, 50_000);
+        assert_eq!(observed.spendable_zatoshis, None);
+        assert_eq!(observed.fee, Err(FeePreviewUnavailable::ScanRequired));
         let error = wallet_fee(&mut wallet, FeeTarget::NearDeposit, 50_000).unwrap_err();
         assert_eq!(
             error.downcast_ref::<FeePreviewUnavailable>(),
@@ -202,6 +238,38 @@ mod tests {
             .orchard_note(500_000)
             .build();
         assert!(wallet_fee(&mut legacy, FeeTarget::NearDeposit, 50_000).is_err());
+    }
+
+    #[test]
+    fn missing_scan_data_reports_unknown_funded_balance_and_restoration_recovers_it() {
+        let mut wallet = SyntheticWalletBuilder::new(SEED)
+            .ironwood_note(500_000)
+            .build();
+        let before = wallet_preview(&mut wallet, FeeTarget::NearDeposit, 50_000);
+        assert_eq!(before.spendable_zatoshis, Some(500_000));
+        assert!(before.fee.is_ok());
+        let saved = std::mem::replace(
+            &mut wallet.sync_state,
+            pepper_sync::wallet::SyncState::new(),
+        );
+        let missing = wallet_preview(&mut wallet, FeeTarget::NearDeposit, 50_000);
+        assert_eq!(missing.spendable_zatoshis, None);
+        assert_eq!(missing.fee, Err(FeePreviewUnavailable::ScanRequired));
+        wallet.sync_state = saved;
+        let restored = wallet_preview(&mut wallet, FeeTarget::NearDeposit, 50_000);
+        assert_eq!(restored.spendable_zatoshis, before.spendable_zatoshis);
+        assert_eq!(restored.fee, before.fee);
+    }
+
+    #[test]
+    fn balance_survives_unavailable_fee_with_a_static_safe_reason() {
+        let mut wallet = SyntheticWalletBuilder::new(SEED)
+            .ironwood_note(500_000)
+            .build();
+        let observation = wallet_preview(&mut wallet, FeeTarget::NearDeposit, u64::MAX);
+        assert_eq!(observation.spendable_zatoshis, Some(500_000));
+        assert_eq!(observation.fee, Err(FeePreviewUnavailable::Unavailable));
+        assert_eq!(observation.fee.unwrap_err().to_string(), "unavailable");
     }
 
     #[test]

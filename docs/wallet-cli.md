@@ -130,9 +130,8 @@ credited low-balance wallets are never topped up.
 
 Only `treasury.state_dir` is required in the treasury table.
 Actual spendable funds after reservations, confirmations and fees govern enabled funding;
-`max_funding_transaction_fee_zec` defaults to `"0.0003"` and rejects proposals
-above that fee. There is no transparent-shielding fee setting because that
-operation is unsupported. See
+the SDK calculates standard transaction fees without a separate application fee
+ceiling. Transparent-input shielding is unsupported. See
 [funding limits](wallet-rotation.md#funding-limits-and-fees).
 The default key is `wallet.key` inside the wallet directory;
 set `key_file` for separate storage. Possession of the complete default directory
@@ -235,7 +234,7 @@ x402_treazury wallet bootstrap --config examples/deployments/managed.local.toml
 This declares configured groups, runs the production treasury/funding workers,
 and waits for the first positive credit on its captured enabled
 reserve generations. It closes treasury ownership before exiting, requires
-`funding.auto_fund=true`, and respects actual source spendability, fee caps, recovery attempts and qualification allocation counts. Static wallets are
+`funding.auto_fund=true`, and respects actual source spendability, recovery attempts and qualification allocation counts. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
 signing keys or MCP listeners are needed. Network traffic follows the deployment
 policy, including Tor.
@@ -525,10 +524,9 @@ these include untouched quote refreshes and unpublished calculations closed afte
 exclusive offline SDK reconstruction. Unclassified historical records still count.
 Reaching that bound requires
 operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
-source capacity, output/conversion-overhead limits and the accepted operation fee
-cap apply to every new preparation. Qualification runs enforce reviewed funding-job
+source capacity and nominal output bounds apply to every new preparation. Qualification runs enforce reviewed funding-job
 counts and reserve sizing, with actual treasury spendability and operation-specific
-fee/input safeguards governing funding. Recovery still requires its separate
+SDK transaction validity governing funding. Recovery still requires its separate
 qualification authority. Unpublished work
 can use a fresh operation only after successful offline reconstruction establishes
 that neither outgoing bytes nor factual transaction metadata was committed. A
@@ -555,7 +553,7 @@ immutable operation IDs, encrypted quotes, guarded phases and persistent fair
 scheduling; status includes funding progress. Preparing a journaled funding job
 commits its PREPARED phase together with the wallet snapshot and signed bytes.
 Managed serving defaults to `[funding].auto_fund = true`: it funds the configured
-reserves under actual spendable funds and operation fee caps. Set it false
+reserves under actual spendable funds and SDK-calculated fees. Set it false
 to pause automatic funding; reconciliation and treasury sync remain available.
 This default applies only to configured managed serving, not wallet commands or
 static wallets. Bounded qualification examples explicitly opt out. `near_api_key_env` names the partner credential;
@@ -635,10 +633,11 @@ Missing or conflicting evidence keeps the original ownership.
 `treasury/send.rs` retains the public Zingolib proposal through accepted-input
 journaling, then uses the backend's calculate-only API with explicit ordinary
 NU7-aware expiry. Public proposal cleanup runs after releasing the wallet guard.
-It accepts one mainnet transparent recipient, uses account 0's
-shielded inputs, rejects multi-step transactions, and verifies the resulting
-recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
-operation UUID, source/fee safeguards and quote deadline.
+It accepts one exact recipient (native Ironwood or a bound NEAR deposit), uses
+account 0's Ironwood inputs, rejects multi-step transactions, and verifies the
+resulting recipient, amount, actual fee and consensus expiry. Preparation binds
+the operation UUID, payment amount and any provider deadline; managed funding also
+binds its pool/job authority. No caller fee ceiling or derived input cap is used.
 `funding.quote_deadline_seconds` requests a 1,800-second window by default;
 the returned quote can differ and remains authoritative. Preparation and the
 first submission require an unexpired returned deadline, without an extra local
@@ -691,15 +690,15 @@ execution requires an initialized treasury, chain endpoint settings and delibera
 authenticated confidential execution remains unqualified.
 
 Quote validation checks assets, request bindings, mainnet transparent deposits,
-fixed input, output floor and integer cost caps. The sizing preview can be retained
+fixed input and output floor. The sizing preview can be retained
 immutably within the encrypted quote; it adds no database fields or balance
 tracking. Preview expiry does not invalidate an accepted executable quote. Old
 accepted `EXACT_OUTPUT` operations keep their original request, response, slippage
 and bytes across restart. Timestamp normalization is accepted only for
 the same instant. An extended provider deposit deadline never extends the local
-send deadline. The echoed platform fee is allowed only for the captured 1Click
-collector, with its rate and USD overhead bounded by `max_conversion_overhead_percent`; requests never
-add application fees. Unknown collectors are rejected. Public quote fixtures and
+send deadline. Provider USD valuations, platform fees and rebates are advisory
+metadata, retained without collector/rate/shape restrictions; requests do not add
+application fees. Exact transfer and actual alternate-recipient bindings remain enforced. Public quote fixtures and
 confidential-auth rejection fixtures live in `tests/fixtures/near/`. Redirects are
 disabled; optional credentials remain confined to the NEAR client.
 
@@ -972,16 +971,14 @@ if any view fails. Use the same trusted
 RPC policy as the deployment; choosing another provider discloses those addresses
 to that provider.
 
-Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc` and
-`max_conversion_overhead_percent` (integer 0–100). `reserves.small` defaults to a
+Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc`. `reserves.small` defaults to a
 randomized $2-5 nominal range; an absent `reserves.large` stays disabled, while an
 explicit empty `[reserves.large]` opts into $10-25. A slot may instead set
 `funding_amount_usdc` for a fixed target (optionally with
 `max_funding_amount_usdc` headroom), or both `min_funding_amount_usdc` and
 `max_funding_amount_usdc` for an inclusive randomized range. Amounts are positive
 exact micro-USDC decimals, and a maximum must be at least its minimum/target.
-Actual spendable treasury funds and the accepted operation's configured
-network-fee cap bound each transfer; there is no separate per-operation ZEC
+Actual spendable treasury funds and SDK-calculated transaction fees govern each transfer; there is no separate per-operation ZEC
 spending budget. The group payment cap is independent of reserve size; a price
 above a nominal funding floor can be attempted by an eligible wallet under that
 payment cap.

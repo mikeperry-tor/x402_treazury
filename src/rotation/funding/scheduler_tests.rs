@@ -92,33 +92,6 @@ impl FundingBackend for Source {
         Ok(false)
     }
 }
-struct MismatchSource {
-    inner: Source,
-    prepared: Arc<std::sync::atomic::AtomicBool>,
-}
-impl FundingBackend for MismatchSource {
-    type Observations = Reads;
-    fn observations(&self) -> Reads {
-        self.inner.observations()
-    }
-    fn max_attempts(&self, job: &FundingJob) -> u32 {
-        self.inner.max_attempts(job)
-    }
-    async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
-        self.inner.quote_prerequisite(job).await
-    }
-    async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
-        self.prepared.store(true, Ordering::SeqCst);
-        anyhow::bail!(crate::rotation::error::QuotePolicyMismatch)
-    }
-    async fn submit(&mut self, job: &FundingJob) -> Result<()> {
-        self.inner.submit(job).await
-    }
-    async fn reconcile(&mut self, job: &FundingJob) -> Result<bool> {
-        self.inner.reconcile(job).await
-    }
-}
-
 fn quote(job: &FundingJob) -> Quote {
     Quote {
         sizing_preview: None,
@@ -870,90 +843,6 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
             assert_eq!(reopened.status().unwrap().treasury_operations.len(), 1);
         }
     }
-}
-#[tokio::test]
-async fn overhead_policy_mismatch_refreshes_the_unprepared_quote() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut state = Store::create(
-        &dir.path().join("state"),
-        &dir.path().join("key"),
-        1,
-        b"fixture",
-    )
-    .unwrap();
-    crate::rotation::store::test_support::declare_two_reserves(
-        &mut state,
-        "pool",
-        "5",
-        Some(alloy_primitives::U256::from(1_000_000)),
-        0,
-    )
-    .unwrap();
-    let job = state.funding_jobs().unwrap().remove(0);
-    state
-        .save_funding_quote(&job.id, &serde_json::to_vec(&quote(&job)).unwrap())
-        .unwrap();
-    let (store, actor) = StoreHandle::spawn(state);
-    let (statuses, _status_events) = mpsc::unbounded_channel();
-    let (started, _source_events) = mpsc::unbounded_channel();
-    let reads = Reads {
-        credits: Arc::new(Semaphore::new(64)),
-        credit_calls: Arc::new(AtomicUsize::new(0)),
-        statuses,
-        status_gates: Default::default(),
-        failed_job: Default::default(),
-        processing: false,
-        quotes: None,
-    };
-    let prepared = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let worker = FundingWorker::new(
-        store.clone(),
-        MismatchSource {
-            inner: Source {
-                store: store.clone(),
-                reads,
-                gate: Arc::new(Semaphore::new(64)),
-                started,
-            },
-            prepared: prepared.clone(),
-        },
-        60,
-    );
-    worker.tick(1000).await.unwrap();
-    assert!(prepared.load(Ordering::SeqCst));
-    let id = job.id.clone();
-    let current = store
-        .call(move |s| Ok(s.funding_job(&id)?.unwrap()))
-        .await
-        .unwrap();
-    assert_ne!(current.operation_id, job.operation_id);
-    assert_eq!(current.phase, FundingPhase::Allocated);
-    let id = job.id.clone();
-    assert_eq!(
-        store
-            .call(move |s| s.funding_recovery_count(&id))
-            .await
-            .unwrap(),
-        0
-    );
-    let id = job.id.clone();
-    let operation = current.operation_id.clone();
-    assert_eq!(
-        store
-            .call(move |s| Ok(s.funding_facts(&id, &operation)?.source_attempts))
-            .await
-            .unwrap(),
-        0
-    );
-    assert!(
-        store
-            .call(|s| Ok(s.status()?.treasury_operations.is_empty()))
-            .await
-            .unwrap()
-    );
-    drop(worker);
-    drop(store);
-    actor.await.unwrap();
 }
 
 fn submitted(store: &mut Store, job: &FundingJob) {

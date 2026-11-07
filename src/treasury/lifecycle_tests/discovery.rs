@@ -497,7 +497,6 @@ async fn credit_reuses_destination_observation_without_restoring_a_journal_debit
         base,
         wallets: BTreeMap::new(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE"})).unwrap(),
-        max_network_fee: 30_000,
     };
     backend.credit(&job).await.unwrap();
     assert_eq!(

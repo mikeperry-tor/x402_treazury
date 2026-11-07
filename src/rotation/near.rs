@@ -14,16 +14,6 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub const ORIGIN: &str = "https://1click.chaindefuser.com";
-/// A quote's USD overhead or platform fee exceeds the configured cap.
-#[derive(Debug)]
-pub(crate) struct OverheadLimit(pub(crate) &'static str);
-impl std::fmt::Display for OverheadLimit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
-impl std::error::Error for OverheadLimit {}
-
 #[derive(Debug)]
 pub(crate) struct QuoteWindowExpired;
 impl std::fmt::Display for QuoteWindowExpired {
@@ -82,7 +72,6 @@ impl Quote {
 #[derive(Clone)]
 pub struct Limits {
     pub max_output: u64,
-    pub max_fee_bps: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwapStatus {
@@ -642,7 +631,6 @@ fn check_echo(request: &Value, echo: &Value) -> Result<()> {
         ensure!(matches, "quote binding mismatch: {key}");
     }
     for key in [
-        "rebates",
         "virtualChainRecipient",
         "virtualChainRefundRecipient",
         "customRecipientMsg",
@@ -650,24 +638,11 @@ fn check_echo(request: &Value, echo: &Value) -> Result<()> {
         ensure!(
             echo.get(key)
                 .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty)),
-            "unsupported quote routing or fees"
+            "unsupported quote routing"
         );
     }
-    // 1Click injects its own platform fee even when we request no app fees.
-    // Accept only the observed platform collector, not arbitrary commissions.
-    if let Some(fees) = echo.get("appFees").filter(|v| !v.is_null()) {
-        let fees = fees.as_array().context("invalid platform fees")?;
-        ensure!(fees.len() <= 1, "unsupported fee recipients");
-        for fee in fees {
-            ensure!(
-                fee["recipient"]
-                    == "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"
-                    && fee["fee"].as_u64().is_some_and(|n| n <= 10000)
-                    && fee.get("limitOrderId").is_none_or(Value::is_null),
-                "unsupported platform fee"
-            );
-        }
-    }
+    // Provider-added commission metadata is retained in the raw response. It
+    // cannot change the requested transfer bindings or veto later status reads.
     Ok(())
 }
 pub fn validate_quote(request: Value, response: Value, limits: &Limits, now: u64) -> Result<Quote> {
@@ -681,7 +656,7 @@ fn validate_quote_on(
     now: u64,
 ) -> Result<Quote> {
     let quote = validate_quote_structure(network, request, response, now)?;
-    validate_quote_costs(&quote, limits)?;
+    validate_output_limit(&quote, limits)?;
     Ok(quote)
 }
 fn validate_quote_structure(
@@ -774,55 +749,13 @@ fn validate_quote_structure(
     })
 }
 
-/// Current spending policy belongs to the executable quote. Historical sizing
-/// previews retain their bindings and nominal amount, not a second price gate.
-fn validate_quote_costs(quote: &Quote, limits: &Limits) -> Result<()> {
-    let request = &quote.request;
-    let response = &quote.response;
-    let q = &response["quote"];
-    let target = quote.output_atomic()?;
-    if request["swapType"] == "EXACT_OUTPUT" {
+/// Reserve bounds authorize nominal output sizing, not exchange pricing or a
+/// maximum credit when a fixed-input executable quote improves on its preview.
+fn validate_output_limit(quote: &Quote, limits: &Limits) -> Result<()> {
+    if quote.request["swapType"] == "EXACT_OUTPUT" {
         ensure!(
-            target <= limits.max_output,
+            quote.output_atomic()? <= limits.max_output,
             super::error::FundingCondition::AmountLimit
-        );
-    }
-    // USD uses exact rational arithmetic (up to 18 fractional digits), never f64.
-    let usd = q["amountInUsd"].as_str().context("missing USD input")?;
-    let (whole, fraction) = usd.split_once('.').unwrap_or((usd, ""));
-    ensure!(
-        fraction.len() <= 18 && fraction.bytes().all(|b| b.is_ascii_digit()),
-        "invalid USD amount"
-    );
-    let scale = 10u128.pow(fraction.len() as u32);
-    let value = u128::from(atomic(whole)?)
-        .checked_mul(scale)
-        .and_then(|n| {
-            n.checked_add(if fraction.is_empty() {
-                0
-            } else {
-                fraction.parse().unwrap_or(u128::MAX)
-            })
-        })
-        .context("USD overflow")?;
-    let left = value
-        .checked_mul(1_000_000)
-        .and_then(|n| n.checked_mul(10000))
-        .context("USD overflow")?;
-    let right = u128::from(target)
-        .checked_mul(scale)
-        .and_then(|n| n.checked_mul(10000 + u128::from(limits.max_fee_bps)))
-        .context("USD overflow")?;
-    ensure!(limits.max_fee_bps <= 10000, "invalid overhead cap");
-    ensure!(left <= right, OverheadLimit("quote overhead limit"));
-    if let Some(fees) = response["quoteRequest"]["appFees"].as_array() {
-        let total: u64 = fees
-            .iter()
-            .map(|fee| fee["fee"].as_u64().unwrap_or(u64::MAX))
-            .sum();
-        ensure!(
-            total <= u64::from(limits.max_fee_bps),
-            OverheadLimit("platform fee exceeds overhead cap")
         );
     }
     Ok(())
@@ -1028,7 +961,6 @@ mod tests {
         let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":"5000000","amountInUsd":"5","depositAddress":"t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8","deadline":request["deadline"]}});
         let limits = Limits {
             max_output: 5_000_000,
-            max_fee_bps: 500,
         };
         synthetic
             .validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000)
@@ -1093,9 +1025,16 @@ mod tests {
     #[ignore = "isolated process network policy; exercised by parent test"]
     async fn proxied_near_child() {
         use crate::network::{IsolationId, Mode, NetworkPolicy};
-        let (request, response, limits) = fixture(false);
+        let (request, mut response, limits) = fixture(false);
+        response["quoteRequest"]["appFees"] = json!([
+            {"recipient":"changed-collector", "fee":0.5, "limitOrderId":"provider-order"},
+            {"recipient":"another-collector", "fee":1000000}
+        ]);
+        response["quoteRequest"]["rebates"] = json!({"provider":"metadata"});
         let quote_response = response.clone();
-        let status_response = json!({"status":"SUCCESS", "quoteResponse":response});
+        let mut status_response = json!({"status":"SUCCESS", "quoteResponse":response});
+        status_response["quoteResponse"]["quoteRequest"]["appFees"] = json!("unavailable report");
+        status_response["quoteResponse"]["quoteRequest"]["rebates"] = Value::Null;
         let app = axum::Router::new()
             .route(
                 "/v0/tokens",
@@ -1196,7 +1135,6 @@ mod tests {
             response,
             Limits {
                 max_output: u64::MAX,
-                max_fee_bps: 500,
             },
         )
     }
@@ -1324,40 +1262,113 @@ mod tests {
     }
 
     #[test]
-    fn historical_sizing_cost_does_not_override_current_executable_policy() {
-        let (mut quote, mut limits) = input_fixture();
-        quote.sizing_preview.as_mut().unwrap().response["quoteRequest"]["appFees"] = json!([{
-            "recipient":"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
-            "fee":500
-        }]);
-        // The preview cost 5.25 USD for 5 USDC under the former 5% policy.
-        // The same fixed ZEC now returns 6 USDC and meets the current 3% policy.
-        quote.response["quote"]["amountOut"] = json!("6000000");
-        quote.response["quote"]["minAmountOut"] = json!("5850000");
-        limits.max_fee_bps = 300;
+    fn provider_usd_metadata_does_not_gate_quotes_or_saved_work() {
         let client = NearClient::new(None).unwrap();
-        assert!(
-            client
-                .validate_saved_quote(&quote, &limits, 2_000_000_000)
-                .is_ok()
-        );
-        let mut bad = quote.clone();
-        bad.response["quote"]["amountInUsd"] = json!("6.1800001");
-        assert!(
-            client
-                .validate_saved_quote(&bad, &limits, 2_000_000_000)
-                .is_err()
-        );
-        let mut bad = quote;
-        bad.response["quoteRequest"]["appFees"] = json!([{
-            "recipient":"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
-            "fee":301
-        }]);
-        assert!(
-            client
-                .validate_saved_quote(&bad, &limits, 2_000_000_000)
-                .is_err()
-        );
+        for metadata in [
+            Some(json!(
+                "100000000000000000000000000000000000000000.1234567890123456789"
+            )),
+            Some(json!("unavailable report")),
+            Some(json!({"unknown":"valuation representation"})),
+            Some(Value::Null),
+            None,
+        ] {
+            for dry in [true, false] {
+                let (request, mut response, limits) = fixture(dry);
+                let output = response["quote"].as_object_mut().unwrap();
+                output.remove("amountInUsd");
+                if let Some(value) = &metadata {
+                    output.insert("amountInUsd".into(), value.clone());
+                }
+                let quote =
+                    validate_quote(request, response.clone(), &limits, 2_000_000_000).unwrap();
+                assert_eq!(quote.response, response);
+            }
+            let (mut quote, limits) = input_fixture();
+            for response in [
+                &mut quote.response,
+                &mut quote.sizing_preview.as_mut().unwrap().response,
+            ] {
+                let output = response["quote"].as_object_mut().unwrap();
+                output.remove("amountInUsd");
+                if let Some(value) = &metadata {
+                    output.insert("amountInUsd".into(), value.clone());
+                }
+            }
+            let saved: Quote =
+                serde_json::from_slice(&serde_json::to_vec(&quote).unwrap()).unwrap();
+            let checked = client
+                .validate_saved_quote(&saved, &limits, 2_000_000_000)
+                .unwrap();
+            assert_eq!(checked.response, quote.response);
+            assert_eq!(
+                checked.sizing_preview.unwrap().response,
+                quote.sizing_preview.unwrap().response
+            );
+        }
+    }
+
+    #[test]
+    fn commission_metadata_is_advisory_across_quote_persistence() {
+        let client = NearClient::new(None).unwrap();
+        for metadata in [
+            json!([
+                {"recipient":"changed-collector", "fee":0.5, "limitOrderId":"provider-order"},
+                {"recipient":"another-collector", "fee":1000000}
+            ]),
+            json!({"unknown":"fee representation"}),
+            json!("unavailable report"),
+            Value::Null,
+        ] {
+            let (mut quote, limits) = input_fixture();
+            quote.response["quoteRequest"]["appFees"] = metadata.clone();
+            quote.response["quoteRequest"]["rebates"] = metadata.clone();
+            quote.response["quoteRequest"]["futureFeeMetadata"] = metadata.clone();
+            quote.sizing_preview.as_mut().unwrap().response["quoteRequest"]["appFees"] =
+                metadata.clone();
+            quote.sizing_preview.as_mut().unwrap().response["quoteRequest"]["rebates"] = metadata;
+            validate_quote(
+                quote.request.clone(),
+                quote.response.clone(),
+                &limits,
+                2_000_000_000,
+            )
+            .unwrap();
+            let saved: Quote =
+                serde_json::from_slice(&serde_json::to_vec(&quote).unwrap()).unwrap();
+            let checked = client
+                .validate_saved_quote(&saved, &limits, 2_000_000_000)
+                .unwrap();
+            assert_eq!(checked.response, quote.response);
+            for (pointer, value) in [
+                ("/quoteRequest/recipient", json!("changed-recipient")),
+                ("/quoteRequest/refundTo", json!("changed-refund")),
+                ("/quoteRequest/slippageTolerance", json!(1000)),
+                ("/quote/amountIn", json!("100001")),
+                (
+                    "/quoteRequest/virtualChainRecipient",
+                    json!("alternate-recipient"),
+                ),
+                (
+                    "/quoteRequest/virtualChainRefundRecipient",
+                    json!("alternate-refund"),
+                ),
+                (
+                    "/quoteRequest/customRecipientMsg",
+                    json!("alternate-message"),
+                ),
+            ] {
+                let mut changed = saved.clone();
+                let (parent, key) = pointer.rsplit_once('/').unwrap();
+                changed.response.pointer_mut(parent).unwrap()[key] = value;
+                assert!(
+                    client
+                        .validate_saved_quote(&changed, &limits, 2_000_000_000)
+                        .is_err(),
+                    "{pointer}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1643,7 +1654,7 @@ mod tests {
     }
 
     #[test]
-    fn quotes_fail_closed_on_cost_route_and_binding_changes() {
+    fn quotes_fail_closed_on_route_and_binding_changes() {
         for dry in [true, false] {
             let (request, response, limits) = fixture(dry);
             let quote =
@@ -1656,7 +1667,6 @@ mod tests {
                     json!("0x0000000000000000000000000000000000000002"),
                 ),
                 ("/quoteRequest/refundTo", json!("other")),
-                ("/quote/amountInUsd", json!("5.250000000000000001")),
                 ("/quote/amountOut", json!("4999999")),
             ] {
                 let mut bad = response.clone();
@@ -1697,7 +1707,6 @@ mod tests {
         assert!(req.get("appFees").is_none());
         let limits = Limits {
             max_output: u64::MAX,
-            max_fee_bps: 500,
         };
         let quote =
             validate_quote(req.clone(), response.clone(), &limits, deadline - 1800).unwrap();
@@ -1709,11 +1718,6 @@ mod tests {
         assert_eq!(quote.input, 369795);
         for (pointer, value) in [
             ("/quoteRequest/confidentiality", json!("basic")),
-            (
-                "/quoteRequest/appFees/0/recipient",
-                json!("arbitrary-commission.near"),
-            ),
-            ("/quoteRequest/appFees/0/fee", json!(501)),
             ("/quoteRequest/deadline", json!("2099-01-01T00:00:00Z")),
         ] {
             let mut bad = response.clone();

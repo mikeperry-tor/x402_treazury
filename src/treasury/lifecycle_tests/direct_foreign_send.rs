@@ -88,7 +88,6 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
         treasury.clone(),
         crate::rotation::near::NearClient::synthetic_at(&origin).unwrap(),
         serde_json::from_value(json!({"auto_fund":false,"poll_seconds":1})).unwrap(),
-        30_000,
     );
     let config = Config {
         send: true,
@@ -123,7 +122,6 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
         .unwrap();
     let mut request = destination.clone();
     request["request_id"] = json!("accepted");
-    request["max_source_zatoshis"] = json!("50000");
     let accepted = service
         .invoke("owner", &config, "x402_treazury_swap_send", request.clone())
         .await
@@ -152,10 +150,14 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
     );
     let mut denied = request;
     denied["request_id"] = json!("too-small");
-    denied["max_source_zatoshis"] = json!("49999");
+    let denied_config = Config {
+        send: true,
+        max_send_zec: Some("0.00049999".into()),
+        ..Default::default()
+    };
     assert!(
         service
-            .invoke("owner", &config, "x402_treazury_swap_send", denied)
+            .invoke("owner", &denied_config, "x402_treazury_swap_send", denied)
             .await
             .is_err()
     );
@@ -202,7 +204,7 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
     };
     let actor_stop = CancellationToken::new();
     let actor = tokio::spawn(owner.run_commands(commands, sender, actor_stop.clone()));
-    let source_only = Service::native(store.clone(), treasury.clone(), 30_000, 1);
+    let source_only = Service::native(store.clone(), treasury.clone(), 1);
     let service_stop = CancellationToken::new();
     let progress = tokio::spawn({
         let service = source_only.clone();

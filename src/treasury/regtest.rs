@@ -48,8 +48,8 @@ async fn native_payment(
     let request_id = uuid::Uuid::new_v4().to_string();
     let id = treasury.store.call(move |s| {
         let operation = s.reserve_native("regtest", "send", &request_id,
-            json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"50000","recipient":destination,"max_source_zatoshis":null}))?.0;
-        Ok(s.accept_direct_send(&operation.id, None, crate::rotation::store::DirectSendAuthority { max_fee_zatoshis:50_000,max_debit_zatoshis:Some(100_000) })?.id)
+            json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"50000","recipient":destination}))?.0;
+        Ok(s.accept_direct_send(&operation.id, None, crate::rotation::store::DirectSendAuthority { max_debit_zatoshis:Some(100_000) })?.id)
     }).await?;
     let prepared = treasury
         .prepare(PrepareRequest {
@@ -59,8 +59,6 @@ async fn native_payment(
             deadline: None,
             recipient,
             amount_zatoshis: 50_000,
-            max_fee_zatoshis: 50_000,
-            max_input_zatoshis: 100_000,
         })
         .await?;
     let inputs = treasury.store.call(move |s| s.prepared_inputs(&id)).await?;
@@ -516,7 +514,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
     let snapshot = treasury.store.call(|s| s.snapshot()).await?;
     let stop = CancellationToken::new();
     let error = treasury
-        .shield_refund("unsupported-transparent-refund".into(), 30_000, &stop)
+        .shield_refund("unsupported-transparent-refund".into(), &stop)
         .await
         .err()
         .context("transparent shielding unexpectedly succeeded")?;

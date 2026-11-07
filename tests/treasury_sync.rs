@@ -476,7 +476,7 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
                 "send",
                 "empty-proposal",
                 serde_json::json!({"asset_id":"nep141:zec.omft.near", "chain":"zec",
-                "amount":"50000", "recipient":recipient.clone(), "max_source_zatoshis":null}),
+                "amount":"50000", "recipient":recipient.clone()}),
             )
             .unwrap()
             .0;
@@ -485,7 +485,6 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
                 &operation.id,
                 None,
                 DirectSendAuthority {
-                    max_fee_zatoshis: 20_000,
                     max_debit_zatoshis: Some(70_000),
                 },
             )
@@ -515,8 +514,6 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
                 deadline: None,
                 recipient,
                 amount_zatoshis: 50_000,
-                max_fee_zatoshis: 20_000,
-                max_input_zatoshis: 70_000,
             })
             .await
             .err()
@@ -973,7 +970,7 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     let before_rows = rows();
     for job in &jobs {
         let error = treasury
-            .shield_refund(job.id.clone(), 0, &CancellationToken::new())
+            .shield_refund(job.id.clone(), &CancellationToken::new())
             .await
             .err()
             .expect("transparent-input shielding must be unsupported");
@@ -1263,8 +1260,6 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
             deadline: Some(x402_treazury::rotation::base::now().unwrap() + 1000),
             recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
             amount_zatoshis: 50_000,
-            max_fee_zatoshis: 20_000,
-            max_input_zatoshis: 70_000,
         })
         .await
         .err()
@@ -1831,8 +1826,6 @@ async fn actor_startup_is_finite_and_source_commands_share_its_success_or_failur
                     deadline: Some(x402_treazury::rotation::base::now().unwrap() + 1000),
                     recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
                     amount_zatoshis: 50_000,
-                    max_fee_zatoshis: 20_000,
-                    max_input_zatoshis: 70_000,
                 })
                 .await
                 .err()
@@ -2053,19 +2046,19 @@ async fn sync_cli_reports_independent_assets_without_provider_or_near_credential
             "invalid" => "indexer_url='http://off-machine.invalid'".into(),
             "conflicting" => format!("indexer_url='{indexer}'\nindexer_url_env='SYNC_INDEXER'"),
             "unrelated" => format!(
-                "indexer_url='{indexer}'\nsubmission_url='http://off-machine.invalid'\nsubmission_url_env='MISSING_SUBMISSION'\nmax_funding_transaction_fee_zec='invalid'\n"
+                "indexer_url='{indexer}'\nsubmission_url='http://off-machine.invalid'\nsubmission_url_env='MISSING_SUBMISSION'\n"
             ),
             _ => format!("indexer_url='{indexer}'"),
         };
         let config = dir.path().join("sync.toml");
-        std::fs::write(&config, format!("version=1\nservers={{}}\n[treasury]\nstate_dir='state'\nkey_file='key'\n{indexer_setting}\n[funding]\nbase_rpc_url_env='SYNC_BASE_RPC'\nbase_rpc_fallback_url_envs=[]\nnear_api_key_env='MISSING_NEAR_KEY'\nnear_user_session_env='MISSING_NEAR_SESSION'\n[sources.unused]\nspec='http://127.0.0.1:1/never-fetch'\napi_key_env='MISSING_PROVIDER_KEY'\n[wallets.configured]\nmode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n[wallets.configured.reserves.small]\nfunding_amount_usdc='2'\n[wallets.configured.reserves.large]\nfunding_amount_usdc='2'\n")).unwrap();
+        std::fs::write(&config, format!("version=1\nservers={{}}\n[treasury]\nstate_dir='state'\nkey_file='key'\n{indexer_setting}\n[funding]\nbase_rpc_url_env='SYNC_BASE_RPC'\nbase_rpc_fallback_url_envs=[]\nnear_api_key_env='MISSING_NEAR_KEY'\nnear_user_session_env='MISSING_NEAR_SESSION'\n[sources.unused]\nspec='http://127.0.0.1:1/never-fetch'\napi_key_env='MISSING_PROVIDER_KEY'\n[wallets.configured]\nmode='zcash_rotation'\nmax_api_payment_usdc='1'\n[wallets.configured.reserves.small]\nfunding_amount_usdc='2'\n[wallets.configured.reserves.large]\nfunding_amount_usdc='2'\n")).unwrap();
         if indexer_mode == "unrelated" {
             let mut text =
                 std::fs::read_to_string(&config)
                     .unwrap()
                     .replacen("servers={}\n", "", 1);
             text.push_str(
-                "[wallet_templates.unused]\nmode='zcash_rotation'\nmax_api_payment_usdc='invalid'\nmax_conversion_overhead_percent=5\n[wallet_templates.unused.reserves.small]\nfunding_amount_usdc='invalid'\n[servers.unrelated]\nlisten='127.0.0.1:8080'\nsources=['unused','missing']\nwallet='missing-wallet'\n",
+                "[wallet_templates.unused]\nmode='zcash_rotation'\nmax_api_payment_usdc='invalid'\n[wallet_templates.unused.reserves.small]\nfunding_amount_usdc='invalid'\n[servers.unrelated]\nlisten='127.0.0.1:8080'\nsources=['unused','missing']\nwallet='missing-wallet'\n",
             );
             std::fs::write(&config, text).unwrap();
         }

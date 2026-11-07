@@ -112,7 +112,7 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
             "prepare must pin binaries/config/catalogs and validate selected tool schemas and arguments",
             "registry authorization and immutable treasury baseline required before execution",
             "reviewed startup inventory required; treasury-only bootstrap waits for enabled reserve claims, while every payment needs eligible single-wallet capacity after liabilities and fresh canonical evidence",
-            "the running total test budget bounds API payment authorizations; funding uses reviewed job counts and reserve sizes, current spendable ZEC and actual network-fee caps",
+            "the running total test budget bounds API payment authorizations; funding uses reviewed job counts and reserve sizes, current spendable ZEC and SDK-calculated transaction fees",
             "all declared pools must be preserved; unused pools receive no new allocation authority",
         ],
         case_bindings: bindings,

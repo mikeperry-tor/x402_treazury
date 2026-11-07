@@ -350,8 +350,8 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     let base = BaseRpc::new(&format!("{origin}/base"), 2).unwrap();
     let (handle, commands) = actor::channel();
     let backend = Backend { treasury: handle.clone(), store: store.clone(), near: NearClient::synthetic_at(&origin).unwrap(), base: base.clone(),
-        wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())).collect(),
-        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(), max_network_fee: 30_000 };
+        wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())).collect(),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(), };
     let worker = FundingWorker::new(store.clone(), backend, 1);
     let sends = Arc::new(AtomicUsize::new(0));
     let lookups = Arc::new(AtomicUsize::new(0));
@@ -688,9 +688,8 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         treasury: handle.clone(), store: store.clone(),
         near: NearClient::synthetic_at(&origin).unwrap(),
         base: BaseRpc::new(&format!("{origin}/base"), 2).unwrap(),
-        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5,"max_attempts":1})).unwrap())]),
+        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_attempts":1})).unwrap())]),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
-        max_network_fee: 30_000,
     };
     let worker = FundingWorker::new(store.clone(), backend, 1);
     let sends = Arc::new(AtomicUsize::new(0));
@@ -773,39 +772,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
     // Explicit one-pass discovery makes the new deposit available. Shared
     // automatic capital waiting is covered by the discovery lifecycle test.
     handle.sync().await.unwrap();
-    // A known fee rejection has the same unstarted semantics after new funds arrive.
-    worker.backend.lock().await.max_network_fee = 1;
-    let error = worker
-        .backend
-        .lock()
-        .await
-        .prepare(&original, &accepted_quote)
-        .await
-        .unwrap_err();
-    assert!(error.is::<PreparationDeferred>(), "{error:#}");
-    assert_eq!(
-        error.downcast_ref::<FundingCondition>(),
-        Some(&FundingCondition::CostLimit)
-    );
-    worker.tick(next_poll).await.unwrap();
-    let job = original.clone();
-    next_poll = store
-        .call(move |s| {
-            let current = s.funding_job(&job.id)?.unwrap();
-            assert_eq!(current.phase, FundingPhase::Quoted);
-            assert_eq!(current.operation_id, job.operation_id);
-            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
-            s.require_unstarted_preparation(&job.operation_id)?;
-            Ok(current.next_poll)
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        f.base_calls.load(Ordering::SeqCst),
-        0,
-        "invalid fee proposals must not probe the destination"
-    );
-    worker.backend.lock().await.max_network_fee = 30_000;
+    // Standard SDK fees are accepted once real spendable funds arrive.
     worker.tick(next_poll).await.unwrap();
     assert_eq!(f.base_calls.load(Ordering::SeqCst), 1);
     let job = original.clone();

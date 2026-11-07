@@ -110,12 +110,12 @@ treasury owner, accepted inputs, encrypted snapshots and signed-byte publication
 as managed funding. Each operation binds the authenticated listener, original
 request ID and exact destination terms. Native sends have no provider quote or
 deadline. Foreign sends retain the executable quote's exact principal, deposit
-address/memo, refund receiver and deadline before source preparation; the caller's
-`max_source_zatoshis` bounds quoted principal.
+address/memo, refund receiver and deadline before source preparation. The agent
+provides the requested destination amount; source pricing comes from the quote.
 
 The optional listener `max_send_zec` preference bounds principal plus actual
 network fee only for direct sends. Omission or `"none"` is unlimited; zero denies
-new acceptance. The original total-debit and existing treasury fee authority are
+new acceptance. The original total-debit authority is
 saved with acceptance, checked against the SDK proposal and actual calculated
 transaction, and retained through restart. Tightening configuration does not
 rewrite accepted authority. Managed funding and shielding do not inherit this
@@ -123,7 +123,11 @@ preference. SDK spendability and shared accepted-input ownership remain the
 capital and concurrency authorities; no additional reserve ledger is created.
 
 Dry previews reserve no inputs or payment authority. Both routes expose configured
-limits and request an advisory SDK ZIP317 fee through the existing treasury actor.
+limits and request an advisory SDK spendable Ironwood balance and ZIP317 fee
+through the existing treasury actor. The returned `fits` compares total debit with
+the lesser of known balance and the optional operator limit. Proposal insufficiency
+is false; missing observations otherwise remain unknown. No balance observation
+reserves funds or replaces SDK selection and accepted input ownership.
 The Ironwood-only unsigned proposal is discarded without storing a proposal,
 clearing accepted work, signing, writing a snapshot or reserving inputs. Missing
 spendable funds/scan data leave an explicit unavailable estimate while preserving
@@ -146,6 +150,29 @@ deposit. Status access remains scoped to the original authenticated listener.
 
 ## Funding limits and fees
 
+The remaining controls are distinct; none imposes a separate ZEC network-fee or
+USD conversion-overhead ceiling:
+
+| Control | Scope and purpose |
+| --- | --- |
+| `swap_control.max_send_zec` | Optional direct-tool payment plus actual fee ceiling; default unlimited. Accepted authority remains bound to that operation. |
+| Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-5 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
+| `max_api_payment_usdc` | Per-x402-payment USDC authority, independent of ZEC funding. Managed profiles require an explicit setting; static default is $1. `none`/`off` means unlimited. |
+| `max_retirement_remainder_usdc` | Automatic retirement threshold, default $0.001; no transfer or replacement authority. |
+| `max_attempts` | Managed-funding transaction recovery-attempt bound, default three; unsigned outages/quote refreshes do not consume it. Direct sends do not gain replacement-payment authority. |
+| `funding.slippage_bps` | Relative quote execution tolerance; default 500 (5%). The current application permits 0-1000 (0-10%); the 10% ceiling is an application choice, not an established NEAR requirement. |
+| Quote/refund and signed transaction expiry | External financial authority windows. Managed/send requests default to 1800 seconds; foreign receives request refund handling after 7200 by default. Neither is a completion deadline or replay permission. |
+| x402 signing authority | Newly signed API payment authority lasts at most the lesser of the seller timeout and 300 seconds (`payment/lifetime.rs`); this does not impose an HTTP work deadline. |
+| Confirmations and witnesses | Default Zcash confirmations: 3; Base confirmations: 12 plus finalized evidence. SDK witnesses and consensus state govern spendability. |
+| Monetary representations and exact transaction shape | ZEC uses eight decimals and the SDK 21-million-ZEC domain; nominal USDC reserve/retirement accounting uses signed 64-bit micro-USDC. Exact single-step proposals, recipients, fees, change and Ironwood-only input/output policy remain validated. |
+| [Qualification-only API budgets/job counts](../tests/live/INTEGRATION_REFERENCE.md#registry-authorization-and-preparation) | Separately authorized test restrictions, with test-only concurrency and execution-window bounds; no ordinary funding ZEC budget. |
+
+`auto_fund` and direct receive/send flags grant capability, not extra monetary
+budgets. `funding.poll_seconds` (default 5, range 1-60) controls observation cadence;
+`swap_timeout_seconds` (default 1800) reports degraded health without abandoning
+accepted work. The SDK determines actual spendability; balance observations and
+previews grant no reservation. Provider bridge minima remain external constraints.
+
 Reserve bounds describe nominal USDC sizing for new allocations; payment caps and
 spendable treasury capacity supply separate authority. The treasury's actual
 spendable ZEC balance is the ZEC capital limit supplied by the operator. Reserve
@@ -161,7 +188,6 @@ slippage_bps = 500
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
 max_retirement_remainder_usdc = "0.001"
-max_conversion_overhead_percent = 5
 
 [wallets.research.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -177,9 +203,6 @@ max_conversion_overhead_percent = 5
 | Slot `funding_amount_usdc` | Fixed positive nominal target; optional `max_funding_amount_usdc` adds bridge-minimum headroom. |
 | Slot `min_funding_amount_usdc` + `max_funding_amount_usdc` | Uniform randomized nominal amount within the inclusive range; equal endpoints are valid. |
 | Slot `max_funding_amount_usdc` | Nominal sizing ceiling; for a fixed target it adds bridge-minimum headroom, and in range mode it is the configured upper bound. It is never a guaranteed credited balance or received maximum. |
-| `max_api_payment_usdc` | Required explicit cap for each payment by every group wallet, independently of reserve sizes. |
-| `max_retirement_remainder_usdc` | Nonnegative automatic-retirement tolerance, default $0.001 per group; it never authorizes transfers or replacement allocation. |
-| `max_conversion_overhead_percent` | Integer percentage (0–100) by which quoted USD input valuation may exceed output; the Zcash transaction fee has its own safeguard. |
 
 Enabled automatic funding uses actual spendable treasury funds after confirmation,
 reservations, liabilities and transaction fees. Displayed total balance is not
@@ -207,19 +230,12 @@ Already accepted work retains its bytes, reservations and original identities
 across disablement. A valid successful operation may receive excess input later;
 SDK-observed returns become ordinary owned capital without reopening funding.
 
-Per-operation safeguards remain and are applied once to new work. If current
-conversion-overhead or claim policy no longer accepts an unprepared quote,
-preparation refreshes it under current policy instead of submitting stale
-authority. Once preparation begins, the operation carries its fixed principal and
-transaction fee/input caps; a lowered `max_funding_transaction_fee_zec` remains a
-genuine safeguard against the actual proposal fee.
-
-```toml
-[treasury]
-max_funding_transaction_fee_zec = "0.0003"
-
-# Within an existing managed profile:
-```
+New work uses the current claim and exact quote bindings. An unsuitable unprepared
+quote can be refreshed; accepted preparation retains its fixed payment amount,
+selected-input ownership and exact signed bytes. Network fees come from the SDK's
+standard ZIP317 proposal, with no application fee ceiling or derived input cap.
+Provider USD valuations and commission metadata remain advisory; they do not veto
+quote acceptance or reconciliation and are not an independent price oracle.
 
 Immutable transaction facts report confirmed principal and actual fees. Supported
 capital is the SDK's owned Ironwood balance, including real pending owned change
@@ -229,7 +245,7 @@ credit, historical monetary equality check or separate spending ledger is added.
 See the [Ironwood-only policy](zingo-integration.md#ironwood-only-policy).
 
 Zingolib selects inputs and calculates standard network fees. The application
-checks the actual proposal against the configured network-fee cap,
+validates the exact proposal and any explicit direct total-debit authority,
 then persists the exact input owner before calculation. Backend calculation
 borrows that same public proposal and retains ordinary consensus expiry, including
 the SDK's NU7 delta, rather than the offline high-level API's epoch-end expiry.
@@ -247,21 +263,20 @@ and publishes exact bytes through the same Store worker. Dropping a caller, the
 Treasury or its normal Tokio runtime does not discard started accepted work.
 A queued task that never starts cannot accept inputs. Deposit deadline/claim checks
 and shielding stop checks retain their existing acceptance semantics. The preparation phase commits
-with accepted input evidence; known proposal shortages and fee rejections leave the quoted operation
+with accepted input evidence; known proposal shortages leave the quoted operation
 unstarted without consuming transaction recovery attempts. The
 SDK owns current balances, confirmations, witnesses, spent outputs and chain
 corrections. No full historical source/refund traversal gates publication.
 
 The bridge's USD valuation is not an independent exchange-rate oracle. Actual
-spendable treasury funds, outstanding liabilities, the conversion-overhead limit
-and the accepted operation's network-fee cap govern a swap; there is no separate
+spendable treasury funds and outstanding liabilities govern a swap; there is no separate
 per-operation ZEC spending budget. Qualification runs limit API authorization amounts with a
 running `total_test_budget_usdc` and a cumulative registry authorization. Each
 potentially chargeable API authorization consumes that budget before disclosure,
 including retries; an unsuccessful response does not restore it. Funding transfers
 do not consume the API budget and have no separate ZEC spending limit or equal
-per-job allowance. Reviewed job counts, reserve sizes, current treasury spendability,
-conversion overhead and actual network-fee caps govern funding. Registry records
+per-job allowance. Reviewed job counts, reserve sizes, current treasury spendability
+and actual SDK transaction fees govern funding. Registry records
 retain run/job/operation ownership across interruption. Their input amount is the
 first proposal observation, which can precede a failed Store commit; it grants no
 monetary authority and cannot veto a different cost on a proven unstarted retry.
@@ -418,23 +433,20 @@ replacement draw is persisted before the next request; there is no separate
 attempt cutoff or transaction recovery charge.
 The preview's NEAR-priced ZEC principal becomes the fixed input of the executable
 `EXACT_INPUT` quote. Acceptance fixes the operation's principal; an unprepared
-quote that no longer satisfies current overhead or claim policy is refreshed
-before preparation, and prepared work retains its fixed transaction fee/input
-caps. Configured slippage
+quote that no longer satisfies current claim policy is refreshed
+before preparation, and prepared work retains its fixed payment amount and exact
+transaction ownership. Configured slippage
 (`funding.slippage_bps`, default 500 basis points, range 0–1000) applies once to
 that live quote's expected output.
-Conversion overhead compares quoted input valuation with expected output;
-slippage separately bounds the executable minimum. These bounds compound: with
-5% overhead and 5% slippage, input valuation relative to minimum output can be
-`1.05 / 0.95 - 1`, about 10.53%. They do not promise the allocation target as a
-minimum credited balance.
+Slippage bounds the executable minimum relative to the quoted output; it does not
+certify the quote's initial exchange rate or promise the allocation target as a
+minimum credited balance. Reported USD and commission fields are advisory.
 `minAmountOut` is its execution floor, not the route's minimum supported swap
 size. There is no fixed ZEC conversion or external rate oracle, and this mode
 does not promise smaller swaps, faster execution or absence of refunds. Original
 allocation floors remain immutable, accepted quote terms remain bound to their
 operation, and configuration changes govern new work. Actual spendable treasury
-funds, outstanding liabilities, the accepted operation's fee cap and explicit
-qualification permits govern funding. Reserve bounds do not cap individual API payments.
+funds, outstanding liabilities and explicit qualification permits govern funding. Reserve bounds do not cap individual API payments.
 
 Each wallet has one initial funding claim. Its first positive observed Base USDC
 balance consumes that claim, even below its nominal minimum; later zero or insufficient
@@ -819,9 +831,9 @@ detail is inferred from an unparsed response. These diagnostics add no state,
 polling or financial authority. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
 polls log at debug level, clear stale error status and use the normal polling interval.
-They do not release reservations or authorize another deposit. A proposal rejected
-by its actual fee/input cap remains unstarted and logs at DEBUG while ordinary
-funding retries remain available. Retained retryable
+They do not release reservations or authorize another deposit. A direct proposal
+exceeding the operator's accepted total-debit preference remains unstarted and
+logs at DEBUG. Retained retryable
 observation attempts (including sync, RPC and storage failures) and retained-owner
 reacquisition attempts log at DEBUG with existing retry behavior. Meaningful transitions into delayed or degraded funding
 belong at INFO; operator-required outcomes belong at WARN and explain the required

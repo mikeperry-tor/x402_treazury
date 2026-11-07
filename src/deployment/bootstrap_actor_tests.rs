@@ -104,9 +104,8 @@ fn funding_backend(
 ) -> Backend {
     Backend {
         treasury:handle,store,near:NearClient::test_at(origin).unwrap(),base:BaseRpc::new(&format!("{origin}/base"), 12).unwrap(),
-        wallets:BTreeMap::from([("research".into(),serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_conversion_overhead_percent":5})).unwrap())]),
-        funding:serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),max_network_fee:30_000,
-    }
+        wallets:BTreeMap::from([("research".into(),serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())]),
+        funding:serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),}
 }
 
 async fn prepared_bootstrap_owner() -> (

@@ -55,7 +55,6 @@ base_rpc_url_env = "BASE_RPC_URL"
 [wallets.web]
 mode = "zcash_rotation"
 max_api_payment_usdc = "0.50"
-max_conversion_overhead_percent = 5
 
 [wallets.web.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -64,7 +63,6 @@ max_conversion_overhead_percent = 5
 [wallets.social]
 mode = "zcash_rotation"
 max_api_payment_usdc = "0.50"
-max_conversion_overhead_percent = 5
 
 [wallets.social.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -74,7 +72,6 @@ max_conversion_overhead_percent = 5
 [wallets.financials]
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
-max_conversion_overhead_percent = 5
 
 [wallets.financials.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -84,7 +81,6 @@ max_conversion_overhead_percent = 5
 [wallets.global]
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
-max_conversion_overhead_percent = 5
 
 [wallets.global.reserves.small]
 # Default randomized nominal funding: $2-5.

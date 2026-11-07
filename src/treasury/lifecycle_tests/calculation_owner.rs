@@ -132,14 +132,13 @@ async fn native_request(owner: &Treasury, destination: String) -> Result<Prepare
                     &request,
                     serde_json::json!({
             "asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":"50000",
-            "recipient":destination,"max_source_zatoshis":null}),
+            "recipient":destination}),
                 )?
                 .0;
             s.accept_direct_send(
                 &operation.id,
                 None,
                 crate::rotation::store::DirectSendAuthority {
-                    max_fee_zatoshis: 50_000,
                     max_debit_zatoshis: None,
                 },
             )?;
@@ -156,8 +155,6 @@ async fn native_request(owner: &Treasury, destination: String) -> Result<Prepare
         deadline: None,
         recipient: id.1,
         amount_zatoshis: 50_000,
-        max_fee_zatoshis: 50_000,
-        max_input_zatoshis: 100_000,
     })
 }
 async fn prepare(
@@ -1146,8 +1143,6 @@ async fn accepted_managed_fixed_and_ranged_quotes_keep_original_authority_after_
         assert_eq!(job.accepted_output.as_deref(), Some(preferred));
         let original = request(&job, deadline);
         let principal = original.amount_zatoshis;
-        let fee_cap = original.max_fee_zatoshis;
-        let input_cap = original.max_input_zatoshis;
         let store = owner.store.clone();
         let (reached, mut release, calls) = hold(&mut owner, false, false, false);
         let (inputs, preparation_sha) = {
@@ -1200,8 +1195,7 @@ async fn accepted_managed_fixed_and_ranged_quotes_keep_original_authority_after_
         let facts = prepared.facts().unwrap();
         assert_eq!(facts.amount_zatoshis, principal);
         assert_eq!(facts.deadline, Some(deadline));
-        assert!(facts.fee_zatoshis > 0 && facts.fee_zatoshis <= fee_cap);
-        assert!(facts.amount_zatoshis + facts.fee_zatoshis <= input_cap);
+        assert!(facts.fee_zatoshis > 0);
         evidence(&owner, job.operation_id.clone(), inputs.clone(), &prepared).await;
         let raw = prepared.bytes().to_vec();
         let snapshot = owner

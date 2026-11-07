@@ -45,8 +45,8 @@ async fn native(
     let recipient = owner.preview_address().await.unwrap();
     let destination = recipient.clone();
     let id=owner.store.call(move |s| {
-        let operation=s.reserve_native("owner","send",request_id,json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":amount.to_string(),"recipient":destination,"max_source_zatoshis":null}))?.0;
-        Ok(s.accept_direct_send(&operation.id,None,crate::rotation::store::DirectSendAuthority{max_fee_zatoshis:100_000,max_debit_zatoshis:None})?.id)
+        let operation=s.reserve_native("owner","send",request_id,json!({"asset_id":crate::direct_swap::route::ZEC,"chain":"zec","amount":amount.to_string(),"recipient":destination}))?.0;
+        Ok(s.accept_direct_send(&operation.id,None,crate::rotation::store::DirectSendAuthority{max_debit_zatoshis:None})?.id)
     }).await.unwrap();
     owner
         .prepare(PrepareRequest {
@@ -56,8 +56,6 @@ async fn native(
             deadline: None,
             recipient,
             amount_zatoshis: amount,
-            max_fee_zatoshis: 100_000,
-            max_input_zatoshis: u64::MAX,
         })
         .await
         .unwrap()
@@ -295,7 +293,7 @@ async fn transparent_shielding_is_rejected_before_state_or_network_side_effects(
             stop.cancel();
         }
         let error = owner
-            .shield_refund("not-a-funding-job".into(), 30_000, &stop)
+            .shield_refund("not-a-funding-job".into(), &stop)
             .await
             .err()
             .expect("transparent shielding is unsupported");

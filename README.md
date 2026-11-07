@@ -315,7 +315,7 @@ adding a large reserve wallet to that wallet group.
 >
 > We provide a separate large wallet option for expensive APIs (rather than simply increasing the small wallet `funding_amount_usdc`), because this uses fewer API calls per rotation of both wallets, which reduces usage tracking and linkability.
 
-To enable a large reserve wallet for a wallet group, add an empty `[wallets.NAME.reserves.large]` stanza. It opts into the randomized $10-25 nominal default; set `min_funding_amount_usdc` and `max_funding_amount_usdc` to choose a custom range. Reserve ranges authorize nominal USDC sizing only; actual spendable treasury funds and the accepted operation's network-fee cap govern each swap.
+To enable a large reserve wallet for a wallet group, add an empty `[wallets.NAME.reserves.large]` stanza. It opts into the randomized $10-25 nominal default; set `min_funding_amount_usdc` and `max_funding_amount_usdc` to choose a custom range. Reserve ranges authorize nominal USDC sizing only; actual spendable treasury funds govern funding, and the SDK calculates transaction fees.
 
 When sizing the large wallet, aim for a **4x multiple of your largest expected API payment**. For example, a $2.50 maximum API payment suggests at least **$10**, which is the lower end of the default $10-25 large range:
 
@@ -367,7 +367,6 @@ $2.50, following the 4x large-wallet sizing guidance above:
 mode = "zcash_rotation"
 max_api_payment_usdc = "2.50"
 max_retirement_remainder_usdc = "0.001"
-max_conversion_overhead_percent = 5
 
 [wallet_templates.research.reserves.small]
 # Default randomized nominal funding: $2-5.
@@ -427,7 +426,7 @@ under `[funding]`. Start or restart `serve` to expose the enabled tools.
 | --- | --- | --- |
 | `x402_treazury_swap_assets` | Either flag | Search native ZEC and supported foreign assets by symbol, chain or keywords. |
 | `x402_treazury_payment_request_create` | `receive` | Create a fresh shielded ZEC receive address or a single-use foreign swap deposit request. |
-| `x402_treazury_swap_preview` | `send` | Preview an outgoing payment, exchange rate, estimated fees and applicable limits without sending funds. |
+| `x402_treazury_swap_preview` | `send` | Preview an outgoing payment and whether its estimated total fits the send limit and spendable ZEC balance. |
 | `x402_treazury_swap_send` | `send` | Send native ZEC or swap treasury ZEC for a specified foreign amount. |
 | `x402_treazury_swap_status` | Either flag; retained for saved requests | Check sent payments or receive requests, including current UTC time and available expiry countdowns. |
 

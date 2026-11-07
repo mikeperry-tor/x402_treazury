@@ -239,8 +239,8 @@ impl Treasury {
             address
         };
         ensure!(
-            request.amount_zatoshis > 0 && request.max_input_zatoshis >= request.amount_zatoshis,
-            "invalid deposit limits"
+            request.amount_zatoshis > 0,
+            "deposit amount must be positive"
         );
         let amount = Zatoshis::from_u64(request.amount_zatoshis)?;
         let settings = self
@@ -494,48 +494,47 @@ impl Treasury {
             }
         };
         let selected_proposal: Result<_> = async {
-        ensure!(
-            proposal.steps().len() == 1,
-            "multi-step deposits are unsupported"
-        );
-        let step = proposal.steps().first();
-        ensure!(
-            step.transparent_inputs().is_empty() && step.shielded_inputs().is_some(),
-            "deposit must use shielded inputs"
-        );
-        if request.deadline.is_none() {
-            ensure!(step.payment_pools().len() == 1
-                && step.payment_pools().get(&0) == Some(&zcash_protocol::PoolType::IRONWOOD),
-                "native Zcash delivery requires an Ironwood payment proposal");
-        }
-        ensure!(step.balance().proposed_change().iter().all(|change| change.output_pool() == zcash_protocol::PoolType::IRONWOOD),
-            "new shielded source change must use Ironwood");
-        let fee = zingolib::data::proposal::total_fee(&proposal)?.into_u64();
-        let total = request
-            .amount_zatoshis
-            .checked_add(fee)
-            .context("source cost overflow")?;
-        if fee > request.max_fee_zatoshis || total > request.max_input_zatoshis {
-            tracing::debug!(
-                fee_zatoshis = fee,
-                fee_limit_zatoshis = request.max_fee_zatoshis,
-                total_zatoshis = total,
-                transfer_limit_zatoshis = request.max_input_zatoshis,
-                "funding proposal exceeds the accepted operation's transaction fee or input cap; standard network fee was not overridden"
+            ensure!(
+                proposal.steps().len() == 1,
+                "multi-step deposits are unsupported"
             );
-            anyhow::bail!(crate::rotation::error::FundingCondition::CostLimit);
+            let step = proposal.steps().first();
+            ensure!(
+                step.transparent_inputs().is_empty() && step.shielded_inputs().is_some(),
+                "deposit must use shielded inputs"
+            );
+            if request.deadline.is_none() {
+                ensure!(
+                    step.payment_pools().len() == 1
+                        && step.payment_pools().get(&0)
+                            == Some(&zcash_protocol::PoolType::IRONWOOD),
+                    "native Zcash delivery requires an Ironwood payment proposal"
+                );
+            }
+            ensure!(
+                step.balance()
+                    .proposed_change()
+                    .iter()
+                    .all(|change| change.output_pool() == zcash_protocol::PoolType::IRONWOOD),
+                "new shielded source change must use Ironwood"
+            );
+            let fee = zingolib::data::proposal::total_fee(&proposal)?.into_u64();
+            let total = request
+                .amount_zatoshis
+                .checked_add(fee)
+                .context("source cost overflow")?;
+            ensure!(
+                zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
+                "proposal amount mismatch"
+            );
+            let selected = super::inputs::selected_inputs(&proposal)?;
+            let calculation = crate::rotation::store::preparation::CalculationInputs {
+                destination: request.recipient.clone(),
+                inputs: selected,
+            };
+            Ok((calculation, i64::try_from(total)?, fee, proposal, pause))
         }
-        ensure!(
-            zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
-            "proposal amount mismatch"
-        );
-        let selected = super::inputs::selected_inputs(&proposal)?;
-        let calculation = crate::rotation::store::preparation::CalculationInputs {
-            destination: request.recipient.clone(),
-            inputs: selected,
-        };
-        Ok((calculation, i64::try_from(total)?, fee, proposal, pause))
-        }.await;
+        .await;
         match selected_proposal {
             Ok(value) => Ok(value),
             Err(error) => {
@@ -900,8 +899,6 @@ mod tests {
                 deadline: Some(deadline),
                 recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
                 amount_zatoshis: 50_000,
-                max_fee_zatoshis: 20_000,
-                max_input_zatoshis: 70_000,
             };
             let operation = attempt.operation_id.clone();
             let error = treasury.prepare(attempt).await.err().unwrap();
@@ -956,6 +953,114 @@ mod native_output_tests {
     use zingolib::testutils::synthetic_wallet::SyntheticWalletBuilder;
 
     const SEED: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[tokio::test]
+    async fn standard_fee_above_old_ceiling_selects_and_actual_direct_total_remains_authoritative()
+    {
+        let mut builder = SyntheticWalletBuilder::new(SEED).tip(40);
+        for _ in 0..20 {
+            builder = builder.ironwood_note(30_000);
+        }
+        let wallet = builder.build();
+        let chain = wallet.chain_type();
+        let spending: zcash_keys::keys::UnifiedSpendingKey = wallet
+            .unified_key_store
+            .get(&zip32::AccountId::ZERO)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let receiver = spending
+            .to_unified_full_viewing_key()
+            .orchard()
+            .unwrap()
+            .address_at(0u32, zip32::Scope::External);
+        let recipient = zcash_keys::address::UnifiedAddress::from_receivers(
+            Some(receiver),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .encode(&chain);
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = super::super::Treasury::create_with_network(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            1,
+            Some(zeroize::Zeroizing::new(SEED.into())),
+            super::super::TreasuryNetwork::Synthetic,
+        )
+        .await
+        .unwrap();
+        owner.client = Some(zingolib::lightclient::LightClient::new_for_test(wallet).await);
+        let principal = 400_000;
+        let request = PrepareRequest {
+            managed_funding: None,
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            pool_id: None,
+            deadline: None,
+            recipient: recipient.clone(),
+            amount_zatoshis: principal,
+        };
+        let (inputs, total, fee, proposal, pause) = owner
+            .select_deposit(&request, Zatoshis::from_u64(principal).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            fee > 30_000,
+            "fixture must exceed the removed application fee ceiling"
+        );
+        assert_eq!(u64::try_from(total).unwrap(), principal + fee);
+        assert_eq!(
+            zingolib::data::proposal::total_fee(&proposal)
+                .unwrap()
+                .into_u64(),
+            fee
+        );
+        assert!(inputs.inputs.len() > 6);
+        assert!(inputs.inputs.iter().all(|input| input.pool ==
+            crate::rotation::store::preparation::InputPool::Ironwood));
+        drop((proposal, pause));
+        owner
+            .store
+            .call(move |store| {
+                for (request_id, cap, accepted) in [
+                    ("too-small", Some(principal + fee - 1), false),
+                    ("exact-total", Some(principal + fee), true),
+                    ("unlimited", None, true),
+                ] {
+                    let operation = store
+                        .reserve_native(
+                            "owner",
+                            "send",
+                            request_id,
+                            serde_json::json!({"asset_id":crate::direct_swap::route::ZEC,
+                        "chain":"zec","amount":principal.to_string(),"recipient":recipient}),
+                        )?
+                        .0;
+                    store.accept_direct_send(
+                        &operation.id,
+                        None,
+                        crate::rotation::store::DirectSendAuthority {
+                            max_debit_zatoshis: cap,
+                        },
+                    )?;
+                    assert_eq!(
+                        store
+                            .require_direct_source_cost(&operation.id, principal, fee)
+                            .is_ok(),
+                        accepted
+                    );
+                    store.require_unstarted_preparation(&operation.id)?;
+                }
+                assert!(!store.status()?.outgoing_pending);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner.close().await.unwrap();
+    }
 
     #[tokio::test]
     async fn ironwood_self_payment_accepts_same_receiver_same_value_internal_change_and_proves_actual_fee()

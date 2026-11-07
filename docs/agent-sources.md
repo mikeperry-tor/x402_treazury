@@ -450,8 +450,8 @@ financial authority.
 | `x402_treazury_tool_call` | Same exposure as tool search: required readable `tool_id` and `arguments`. |
 | `x402_treazury_swap_assets` | Either direct capability: identity/name keyword `query`, `offset`, `limit`; [literal-priority/BM25 asset search](configuration.md#direct-swap-control), local native ZEC and explicit foreign-list availability. |
 | `x402_treazury_payment_request_create` | Receive capability: `asset_id`, `chain`, atomic `amount`, `request_id`; foreign assets additionally require payer-owned `refund_address` and exact one-time counterparty payment plus network fees. Optional foreign `refund_after_seconds` defaults to two hours before requested refund handling. |
-| `x402_treazury_swap_preview` | Send capability: destination `asset_id`, `chain`, atomic `amount`, `recipient`; inspect configured limits and advisory SDK fees. Dry result grants no execution authority. |
-| `x402_treazury_swap_send` | Send capability: destination terms and `request_id`; foreign sends require `max_source_zatoshis`, optional for native ZEC. |
+| `x402_treazury_swap_preview` | Send capability: destination `asset_id`, `chain`, atomic `amount`, `recipient`; inspect the optional send limit, SDK spendable balance, estimated fees and whether the payment fits. Dry result grants no execution authority. |
+| `x402_treazury_swap_send` | Send capability: destination terms and `request_id`; obtains foreign pricing internally and respects the optional operator total-debit limit. |
 | `x402_treazury_swap_status` | Owned saved work: either `operation_id`, or `kind` plus original `request_id`; receive instructions include current UTC time and available expiry/refund-start countdowns. Remains available after admission disablement. |
 
 Only enabled tools and permitted follow-ups are advertised. Neither authored

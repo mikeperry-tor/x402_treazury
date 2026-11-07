@@ -67,17 +67,6 @@ impl std::fmt::Display for FundingCondition {
 }
 impl std::error::Error for FundingCondition {}
 
-/// An unprepared quote no longer satisfies the current conversion-overhead or
-/// claim policy. Preparation refreshes it as new work instead of wedging.
-#[derive(Debug)]
-pub(crate) struct QuotePolicyMismatch;
-impl std::fmt::Display for QuotePolicyMismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("funding_quote_policy_changed")
-    }
-}
-impl std::error::Error for QuotePolicyMismatch {}
-
 /// A replacement would exceed the durable transaction recovery allowance.
 #[derive(Debug)]
 pub(crate) struct RecoveryAttemptLimit;

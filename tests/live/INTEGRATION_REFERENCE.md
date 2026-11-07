@@ -328,8 +328,8 @@ Funding-enabled launches additionally require `auto_fund=true`. Treasury-only
 starts wait for production bootstrap before dispatch, with progress logs and the
 phase/run deadline. An adopted bootstrapped pool may have a partly spent active
 wallet; the runner does not refill it artificially. Positive funding remains
-bounded by the registry, actual spendable treasury funds and the accepted
-operation's network-fee cap on preparation. Reserve ranges are nominal; a provider
+bounded by the registry, actual spendable treasury funds and SDK transaction
+validity on preparation. Reserve ranges are nominal; a provider
 bridge minimum above the configured upper bound stops unsigned acquisition
 without a deposit. Funding is not charged to the API authorization budget. Zero job authority retains the
 deny-all restriction even when the flag is supplied. Single-rotation/refill-service and two-round lifecycle dispatch are available;
@@ -527,7 +527,7 @@ successful sync reports confirmed funds; a failed sync exits nonzero and must no
 be interpreted as a zero balance. Setup and backup grant no spending authority.
 
 Review the number of allocations and nominal reserve sizing before funding.
-Actual treasury spendability, conversion overhead and transaction-fee caps govern
+Actual treasury spendability and SDK-calculated transaction fees govern
 funding; there is no separate ZEC allocation budget or fixed ZEC estimate. During
 a treasury-only run, the existing production application synchronizes and funds
 pools under explicit authority; the runner waits for bootstrap within its original

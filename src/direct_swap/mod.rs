@@ -58,7 +58,6 @@ struct Backend {
     treasury: TreasuryHandle,
     near: Option<NearSource>,
     poll_seconds: u64,
-    max_fee: u64,
 }
 #[derive(Clone)]
 struct NearSource {
@@ -96,8 +95,8 @@ pub fn definitions(config: &Config) -> Vec<rmcp::model::Tool> {
         specs.push(("x402_treazury_payment_request_create", "Receive native Ironwood Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh shielded address per new request_id, without NEAR. Tell foreign payers to send the exact atomic amount once, paying network fees separately and including the required memo; a different amount can fail or refund. Swap receive addresses must never be reused: another payment requires a new request_id and fresh quote/address. Native ZEC addresses may be reused. Identical retries retrieve the original request only.", json!({"asset_id":text("Full source assetId from swap_assets."),"chain":text("Exact source blockchain from swap_assets."),"amount":text("Positive atomic amount as decimal digits; native ZEC uses zatoshis. Foreign payer must deliver exactly this amount, with network fees additional."),"refund_address":text("Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported."),"refund_after_seconds":{"type":"integer","minimum":1,"default":7200,"description":"Foreign only: request refund handling after this many seconds (default two hours, not a NEAR maximum or refund-completion guarantee). Status shows actual deposit-address expiry separately."},"request_id":text("Unique caller request ID for these exact terms.")}), vec!["asset_id","chain","amount","request_id"]));
     }
     if config.send {
-        specs.push(("x402_treazury_swap_preview", "Preview a native Ironwood Zcash (ZEC) payment or an exact-output foreign swap. Creates no payment authority. Inspect configured total-debit and network-fee limits, quoted principal and advisory SDK fees. Foreign fees estimate a standard NEAR deposit output; actual fees are checked during preparation.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported.")}), vec!["asset_id","chain","amount","recipient"]));
-        specs.push(("x402_treazury_swap_send", "Send native Ironwood Zcash or swap treasury ZEC for an exact foreign amount. Accepted work continues after disconnect. Identical request_id retries return the original operation; inspect swap_status for settlement.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported."),"max_source_zatoshis":text("Required for foreign swaps: maximum ZEC principal in zatoshis. Optional for native ZEC. Operator total-debit limit also includes network fee."),"request_id":text("Unique caller request ID for these exact terms; reuse only for identical retries.")}), vec!["asset_id","chain","amount","recipient","request_id"]));
+        specs.push(("x402_treazury_swap_preview", "Preview a native Ironwood Zcash (ZEC) payment or an exact-output foreign swap. Creates no payment authority. Report whether the payment fits the smaller of the optional send limit and spendable ZEC balance, including estimated network fees. Foreign fees estimate a standard NEAR deposit output; actual fees are checked during preparation.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported.")}), vec!["asset_id","chain","amount","recipient"]));
+        specs.push(("x402_treazury_swap_send", "Send native Ironwood Zcash or swap treasury ZEC for an exact foreign amount. Accepted work continues after disconnect. Identical request_id retries return the original operation; inspect swap_status for settlement.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported."),"request_id":text("Unique caller request ID for these exact terms; reuse only for identical retries.")}), vec!["asset_id","chain","amount","recipient","request_id"]));
     }
     specs.into_iter().map(|(name,description,properties,required)| rmcp::model::Tool::new(name,description,Arc::new(json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone()))).collect()
 }
@@ -108,14 +107,12 @@ impl Service {
         treasury: TreasuryHandle,
         near: NearClient,
         funding: FundingConfig,
-        max_fee: u64,
     ) -> Self {
         let wake = store.direct_changes();
         Self {
             store,
             backend: Some(Arc::new(Backend {
                 treasury,
-                max_fee,
                 poll_seconds: funding.poll_seconds,
                 near: Some(NearSource {
                     client: near,
@@ -125,18 +122,12 @@ impl Service {
             wake,
         }
     }
-    pub fn native(
-        store: StoreHandle,
-        treasury: TreasuryHandle,
-        max_fee: u64,
-        poll_seconds: u64,
-    ) -> Self {
+    pub fn native(store: StoreHandle, treasury: TreasuryHandle, poll_seconds: u64) -> Self {
         let wake = store.direct_changes();
         Self {
             store,
             backend: Some(Arc::new(Backend {
                 treasury,
-                max_fee,
                 near: None,
                 poll_seconds,
             })),

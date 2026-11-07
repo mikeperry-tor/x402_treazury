@@ -173,7 +173,6 @@ async fn receive_service_http_actor_and_store_preserve_one_invoice_across_duplic
         treasury.clone(),
         crate::rotation::near::NearClient::synthetic_at(&origin).unwrap(),
         serde_json::from_value(json!({})).unwrap(),
-        30000,
     );
     let config = Config {
         receive: true,
@@ -284,7 +283,6 @@ async fn receive_service_http_actor_and_store_preserve_one_invoice_across_duplic
         unused_handle,
         crate::rotation::near::NearClient::synthetic_at(&origin).unwrap(),
         serde_json::from_value(json!({})).unwrap(),
-        30000,
     );
     let after_restart = cached_service
         .invoke(

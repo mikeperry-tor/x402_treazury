@@ -370,7 +370,7 @@ async fn saved_mixed_refund_rejects_new_transparent_shielding_without_side_effec
         .unwrap();
     let before = owner.store.call(|s| Ok(s.snapshot()?.0)).await.unwrap();
     let error = owner
-        .shield_refund(job.id.clone(), 30_000, &CancellationToken::new())
+        .shield_refund(job.id.clone(), &CancellationToken::new())
         .await
         .err()
         .unwrap();
@@ -428,7 +428,7 @@ async fn unsupported_refund_binding_is_rejected_before_sync_or_preparation() {
         // There is deliberately no indexer configuration. Rejection must happen
         // before a sync attempt, accepted input owner or operation UUID exists.
         let error = owner
-            .shield_refund(job.id.clone(), 30_000, &CancellationToken::new())
+            .shield_refund(job.id.clone(), &CancellationToken::new())
             .await
             .err()
             .expect("unsupported refund must be rejected");

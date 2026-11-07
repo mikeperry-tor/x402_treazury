@@ -106,8 +106,6 @@ pub struct PrepareRequest {
     pub deadline: Option<u64>,
     pub recipient: String,
     pub amount_zatoshis: u64,
-    pub max_fee_zatoshis: u64,
-    pub max_input_zatoshis: u64,
 }
 
 /// Only recoverable from a committed, unresolved outgoing record. No public
