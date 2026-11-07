@@ -112,6 +112,99 @@ async fn http2_multiplexes_in_one_identity_and_separates_wallets_and_discovery()
 }
 
 #[tokio::test]
+#[cfg(unix)]
+async fn unix_socks_https_enforces_trust_h2_identity_and_no_direct_fallback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let count = requests.clone();
+    let (address, server) = crate::test_tls::serve_with(
+        axum::Router::new().fallback(move || {
+            let count = count.clone();
+            async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                "ok"
+            }
+        }),
+        &[&rustls::version::TLS13],
+        &[b"h2"],
+    )
+    .await;
+    let dir = tempfile::Builder::new()
+        .prefix("x402socks")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socks = Socks::start_unix(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        Fault::None,
+        dir.path().join("s"),
+    )
+    .await;
+    let policy = NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(SocksEndpoint::Unix(dir.path().join("s"))),
+        connect_timeout_seconds: Some(2),
+        ..Default::default()
+    };
+    let id = wallet(1);
+    let untrusted = NetworkContext::new(policy.clone()).unwrap();
+    let error = client(&untrusted, &id, HttpPolicy::default())
+        .get("https://api.example.com/")
+        .send()
+        .await
+        .unwrap_err();
+    assert!(tls_failure(&error));
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+
+    let trusted = NetworkContext::new(policy.clone())
+        .unwrap()
+        .with_test_root(crate::test_tls::CA);
+    let response = client(&trusted, &id, HttpPolicy::default())
+        .get("https://api.example.com/")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.version(), reqwest::Version::HTTP_2);
+    assert_eq!(response.text().await.unwrap(), "ok");
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    let records = socks.records.lock().unwrap().clone();
+    assert_eq!(records.len(), 2);
+    for (record, context) in records.iter().zip([&untrusted, &trusted]) {
+        assert_eq!(record.address_type, 3);
+        assert_eq!(record.host, "api.example.com");
+        assert_eq!(record.port, 443);
+        assert_eq!(
+            (record.user.clone(), record.password.clone()),
+            context.credentials(&id)
+        );
+    }
+
+    // An independently reachable destination must never replace a missing proxy.
+    let destination = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", destination.local_addr().unwrap());
+    let missing = NetworkContext::new(NetworkPolicy {
+        socks_endpoint: Some(SocksEndpoint::Unix(dir.path().join("missing"))),
+        ..policy
+    })
+    .unwrap();
+    assert!(
+        missing
+            .http(&id, &url, Duration::from_secs(2))
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        destination.into_std().unwrap().accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    server.abort();
+}
+
+#[tokio::test]
 async fn compatibility_flags_are_independent_and_cannot_reuse_permissive_connections() {
     for (versions, alpn, permissive, expected) in [
         (

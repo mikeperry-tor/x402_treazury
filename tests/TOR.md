@@ -4,6 +4,9 @@ The opt-in macOS runner qualifies real circuit assignment and per-process egress
 confinement. It passed on macOS 26.6.2 with Tor 0.4.9.13; the results and their
 boundaries are recorded in [COVERAGE.md](COVERAGE.md). Local authenticated SOCKS
 and Docker consensus tests remain separate qualifications.
+Local `network::http_tests` cover authenticated Unix-socket SOCKS with real
+Rustls HTTPS/H2, rejected trust, remote DNS and no direct connection when the
+socket is missing. These localhost fixtures do not qualify real Tor circuits.
 
 ## Scope and prerequisites
 
