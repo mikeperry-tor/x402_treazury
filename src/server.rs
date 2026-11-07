@@ -23,6 +23,7 @@ pub struct Server {
     pub work: work::Work,
     pub catalog: Arc<CatalogState>,
     pub discovery: Option<Arc<crate::discovery::Manager>>,
+    pub direct_swap: Option<(crate::direct_swap::Service, crate::direct_swap::Config)>,
     pub discover_on_demand: bool,
     pub discovery_search_tool_instructions_text: Option<String>,
     pub providers_search_remote_tool_instructions_text: Option<String>,
@@ -54,6 +55,7 @@ impl Server {
             work: Default::default(),
             host_policy: Default::default(),
             discovery: None,
+            direct_swap: None,
             discover_on_demand: false,
             discovery_search_tool_instructions_text: None,
             providers_search_remote_tool_instructions_text: None,
@@ -88,7 +90,18 @@ impl Server {
         name: &str,
         args: &Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
-        if self.discover_on_demand {
+        let firstparty = self.direct_definitions();
+        if firstparty.iter().any(|t| t.name == name) {
+            return self
+                .invoke_direct(name, serde_json::Value::Object(args.clone()))
+                .await;
+        }
+        if self.discover_on_demand
+            || self
+                .discovery
+                .as_ref()
+                .is_some_and(|m| m.policy(&self.catalog_server).management())
+        {
             match name {
                 "x402_treazury_tools_search" => {
                     let args = serde_json::Value::Object(args.clone());
@@ -97,12 +110,18 @@ impl Server {
                         .as_ref()
                         .filter(|m| m.enabled(&self.catalog_server))
                     {
-                        Some(manager) => manager.invoke(&self.catalog_server, name, args).await?,
-                        None => crate::discovery::search_catalog(
+                        Some(manager) => manager.search_tools_with_firstparty(
+                            &self.catalog_server,
+                            name,
+                            args,
+                            &firstparty,
+                        )?,
+                        None => crate::discovery::search_catalog_with_firstparty(
                             &self.catalog,
                             &self.catalog_server,
                             name,
                             args,
+                            &firstparty,
                         )?,
                     };
                     return Ok(crate::output::ToolOutput::text(serde_json::to_string(
@@ -112,6 +131,11 @@ impl Server {
                 "x402_treazury_tool_call" => {
                     let call: crate::discovery::Call =
                         serde_json::from_value(serde_json::Value::Object(args.clone()))?;
+                    if firstparty.iter().any(|t| t.name.as_ref() == call.tool_id) {
+                        return self
+                            .invoke_direct(&call.tool_id, serde_json::Value::Object(call.arguments))
+                            .await;
+                    }
                     let bound = crate::discovery::find_catalog_tool(
                         &self.catalog,
                         &self.catalog_server,
@@ -166,8 +190,34 @@ impl Server {
             .invoke_output(args)
             .await
     }
+    fn direct_definitions(&self) -> Vec<Tool> {
+        self.direct_swap
+            .as_ref()
+            .map(|(_, config)| crate::direct_swap::definitions(config))
+            .unwrap_or_default()
+    }
+    async fn invoke_direct(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<crate::output::ToolOutput> {
+        anyhow::ensure!(
+            !crate::qualification::active(),
+            "qualification forbids direct swaps"
+        );
+        let (service, config) = self
+            .direct_swap
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("unknown tool"))?;
+        let result = service
+            .invoke(&self.catalog_server, config, name, args)
+            .await?;
+        Ok(crate::output::ToolOutput::text(serde_json::to_string(
+            &result,
+        )?))
+    }
     fn management_tools(&self) -> Vec<Tool> {
-        crate::discovery::tools::listener_definitions(
+        let mut tools = crate::discovery::tools::listener_definitions(
             self.discovery
                 .as_ref()
                 .map(|m| m.policy(&self.catalog_server))
@@ -176,7 +226,11 @@ impl Server {
             self.discovery_search_tool_instructions_text.as_deref(),
             self.providers_search_remote_tool_instructions_text
                 .as_deref(),
-        )
+        );
+        if !self.discover_on_demand {
+            tools.extend(self.direct_definitions());
+        }
+        tools
     }
 }
 impl ServerHandler for Server {
@@ -191,6 +245,9 @@ impl ServerHandler for Server {
         if self.discover_on_demand {
             instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a limit (default 25) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
         }
+        if self.direct_swap.is_some() {
+            instructions.push_str("\n\nDirect swap tools receive payments into the configured Zcash treasury. Keep returned payment instructions and operation IDs; status reports provider progress separately from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
+        }
         if self.catalog.publication_failed() {
             instructions.push_str("\n\nDeferred catalog publication has stopped. Sources listed as PENDING are unavailable until restart.");
         }
@@ -201,6 +258,13 @@ impl ServerHandler for Server {
     fn get_tool(&self, name: &str) -> Option<Tool> {
         let snapshot = self.catalog.read();
         if let Some(tool) = self.management_tools().into_iter().find(|t| t.name == name) {
+            return Some(tool);
+        }
+        if let Some(tool) = self
+            .direct_definitions()
+            .into_iter()
+            .find(|t| t.name == name)
+        {
             return Some(tool);
         }
         catalog_state::find(&snapshot, &self.catalog_server, name)
@@ -549,6 +613,8 @@ pub async fn force_signal() -> std::io::Result<()> {
     crate::shutdown::ShutdownSignals::new()?.recv().await
 }
 
+#[cfg(test)]
+mod direct_swap_tests;
 #[cfg(test)]
 mod security_tests;
 

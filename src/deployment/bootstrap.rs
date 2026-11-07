@@ -92,6 +92,7 @@ pub async fn bootstrap_wallets_with_network(
     }
     crate::discovery::policy::validate_registry_path(&config, path)?;
     let deployment = Deployment {
+        direct_history: None,
         listeners: wallet_resolution.source_bindings.listeners(&config),
         search_relay: None,
         prebound: BTreeMap::new(),
@@ -208,7 +209,9 @@ async fn supervise(
     let TreasuryRuntime {
         owner,
         funding: (commands, sender, worker),
+        direct,
     } = *treasury;
+    drop(direct);
     tracing::info!(
         wallets = names.len(),
         "Explicit wallet bootstrap waiting for captured initial USDC credit"

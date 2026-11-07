@@ -86,3 +86,11 @@ CREATE INDEX IF NOT EXISTS outgoing_pending ON outgoing(id) WHERE state='PREPARE
 CREATE TABLE source_disposition_history(id TEXT NOT NULL REFERENCES outgoing(id), submission TEXT NOT NULL, height INTEGER, revision INTEGER REFERENCES snapshots(revision), PRIMARY KEY(id,submission,revision));
 CREATE TABLE payment_resolution_history(attempt_id TEXT NOT NULL REFERENCES payment_attempts(id), outcome TEXT NOT NULL,height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL,support TEXT);
 CREATE INDEX resolution_history_attempt ON payment_resolution_history(attempt_id);
+
+-- Additive schema-23 extension; older states acquire it when opened for writing.
+CREATE TABLE IF NOT EXISTS direct_operations(
+ id TEXT PRIMARY KEY, owner TEXT NOT NULL, kind TEXT NOT NULL,
+ request_id TEXT NOT NULL, payload BLOB NOT NULL,
+ observe_receive INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(owner,kind,request_id));
+CREATE INDEX IF NOT EXISTS direct_receive_demand ON direct_operations(id) WHERE observe_receive=1;

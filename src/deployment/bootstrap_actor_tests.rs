@@ -401,6 +401,7 @@ async fn pending_bootstrap_completes_captured_credit_while_source_stays_owned() 
         wallets: BTreeMap::new(),
         managed_pools: Vec::new(),
         runtime: ManagedRuntime::Treasury(Box::new(TreasuryRuntime {
+            direct: None,
             owner,
             funding: (
                 commands,

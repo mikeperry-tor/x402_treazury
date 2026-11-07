@@ -21,6 +21,9 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
+[Direct swap control](configuration.md#direct-swap-control) describes opt-in first-party
+financial tools and listener ownership.
+
 [Plans](plans/) describe unfinished work, including artifact storage,
 [stale cache expiry](plans/stale_cache_expiry.md),
 [discovery keywords and recommended tools](plans/discovery_improvements.md),

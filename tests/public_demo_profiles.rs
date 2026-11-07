@@ -6,7 +6,32 @@ use x402_treazury::deployment::Deployment;
 async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for name in ["public-swap-demo.toml", "public-payment-demo.toml"] {
-        let path = root.join("tests/live/deployments").join(name);
+        let template = root.join("tests/live/deployments").join(name);
+        let dir = tempfile::tempdir().unwrap();
+        let mut config: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&template).unwrap()).unwrap();
+        let state = dir.path().join("state");
+        if let Some(treasury) = config.get_mut("treasury") {
+            treasury["state_dir"] = toml::Value::String(state.to_str().unwrap().into());
+            std::fs::create_dir(&state).unwrap();
+            // Inspection must not open even incompatible configured state.
+            std::fs::write(state.join("state.sqlite"), b"not a SQLite wallet").unwrap();
+        }
+        for (_, source) in config["sources"].as_table_mut().unwrap().iter_mut() {
+            for field in ["extends", "spec"] {
+                if let Some(value) = source.get_mut(field) {
+                    let absolute = template
+                        .parent()
+                        .unwrap()
+                        .join(value.as_str().unwrap())
+                        .canonicalize()
+                        .unwrap();
+                    *value = toml::Value::String(absolute.to_str().unwrap().into());
+                }
+            }
+        }
+        let path = dir.path().join(name);
+        std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
         let shown = Deployment::show_config(&path).await.unwrap();
         assert_eq!(shown["wallets"]["demo"]["max_api_payment_usdc"], "0.05");
         if name == "public-swap-demo.toml" {
@@ -35,6 +60,12 @@ async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
             assert!(shown["funding"]["near_user_session_env"].is_null());
         }
         let deployment = Deployment::load(&path).await.unwrap();
+        if state.exists() {
+            assert_eq!(
+                std::fs::read(state.join("state.sqlite")).unwrap(),
+                b"not a SQLite wallet"
+            );
+        }
         let inventory = deployment.inventory();
         assert_eq!(inventory.len(), 1);
         assert_eq!(inventory[0].tools.len(), 1);

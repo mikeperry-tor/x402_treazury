@@ -915,6 +915,30 @@ impl Manager {
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
+        self.search_tools_with_firstparty(owner, name, args, &[])
+    }
+
+    pub(crate) fn search_tools_with_firstparty(
+        self: &Arc<Self>,
+        owner: &str,
+        name: &str,
+        args: Value,
+        firstparty: &[rmcp::model::Tool],
+    ) -> Result<Value> {
+        crate::limits::check(
+            serde_json::to_vec(&args)?.len(),
+            65536,
+            "management_request_too_large",
+            "hardcoded_management_request_bytes",
+        )?;
+        ensure!(
+            self.policy(owner).management()
+                || self
+                    .listeners
+                    .get(owner)
+                    .is_some_and(|l| l.discover_on_demand),
+            "tool_search_disabled"
+        );
         let query: Query = serde_json::from_value(args)?;
         let snapshot = self.catalog.read();
         if let Some(source) = &query.source_name {
@@ -928,7 +952,14 @@ impl Manager {
                 "source_name_unknown"
             );
         }
-        search_catalog_query(&snapshot, self.catalog.instance(), owner, name, query)
+        search_catalog_query(
+            &snapshot,
+            self.catalog.instance(),
+            owner,
+            name,
+            query,
+            firstparty,
+        )
     }
 
     async fn commit(
@@ -1050,11 +1081,22 @@ pub(crate) fn find_catalog_tool(
 ) -> Result<BoundTool> {
     crate::catalog_state::find(&catalog.read(), owner, tool_id).cloned()
 }
+#[cfg(test)]
 pub(crate) fn search_catalog(
     catalog: &CatalogState,
     owner: &str,
     name: &str,
     args: Value,
+) -> Result<Value> {
+    search_catalog_with_firstparty(catalog, owner, name, args, &[])
+}
+
+pub(crate) fn search_catalog_with_firstparty(
+    catalog: &CatalogState,
+    owner: &str,
+    name: &str,
+    args: Value,
+    firstparty: &[rmcp::model::Tool],
 ) -> Result<Value> {
     crate::limits::check(
         serde_json::to_vec(&args)?.len(),
@@ -1065,7 +1107,7 @@ pub(crate) fn search_catalog(
     let q: Query = serde_json::from_value(args)?;
     ensure!(q.source_name.is_none(), "source_name_unknown");
     let snapshot = catalog.read();
-    search_catalog_query(&snapshot, catalog.instance(), owner, name, q)
+    search_catalog_query(&snapshot, catalog.instance(), owner, name, q, firstparty)
 }
 
 // Resolve source names before projection without reserializing the caller's request.
@@ -1075,8 +1117,9 @@ fn search_catalog_query(
     owner: &str,
     name: &str,
     q: Query,
+    firstparty: &[rmcp::model::Tool],
 ) -> Result<Value> {
-    let candidates: Vec<_> = snapshot
+    let mut candidates: Vec<_> = snapshot
         .views
         .get(owner)
         .into_iter()
@@ -1091,9 +1134,19 @@ fn search_catalog_query(
                         .is_some_and(|(registered, _)| registered == name)
             })
         })
+        .map(relevance::SearchCandidate::Api)
         .collect();
+    let firstparty: Vec<_> = firstparty
+        .iter()
+        .filter(|_| q.source_name.is_none())
+        .collect();
+    candidates.extend(
+        firstparty
+            .iter()
+            .map(|tool| relevance::SearchCandidate::FirstParty(tool)),
+    );
     let available = candidates.len();
-    let values = relevance::rank(candidates, q.query.as_deref().unwrap_or_default());
+    let values = relevance::rank_candidates(candidates, q.query.as_deref().unwrap_or_default());
     page(
         values,
         &q,
@@ -1101,7 +1154,15 @@ fn search_catalog_query(
         available,
         &format!(
             "{}:{owner}:{name}:{:?}:{:?}",
-            instance, q.source_name, q.query
+            instance,
+            q.source_name,
+            (
+                q.query.as_ref(),
+                firstparty
+                    .iter()
+                    .map(|t| t.name.as_ref())
+                    .collect::<Vec<_>>()
+            )
         ),
     )
 }
@@ -1112,7 +1173,7 @@ fn epoch() -> u64 {
         .as_secs()
 }
 fn page(
-    values: Vec<&crate::catalog_state::BoundTool>,
+    values: Vec<relevance::SearchCandidate<'_>>,
     query: &Query,
     generation: u64,
     available: usize,
@@ -1134,9 +1195,10 @@ fn page(
     };
     ensure!(offset <= values.len(), "invalid cursor");
     let end = offset.saturating_add(limit).min(values.len());
-    let items: Vec<_> = values[offset..end].iter().map(|t| json!({
-        "tool_id":t.tool.name, "description":t.description(), "input_schema":t.tool.input_schema
-    })).collect();
+    let items: Vec<_> = values[offset..end]
+        .iter()
+        .map(relevance::SearchCandidate::render)
+        .collect();
     let mut result = json!({
         "items":items,
         "available":available,

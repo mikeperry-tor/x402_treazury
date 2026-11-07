@@ -92,6 +92,7 @@ pub struct ListenerConfig {
     #[serde(default)]
     pub bearer_token_env: String,
     pub wallet: Option<String>,
+    pub swap_control: Option<crate::direct_swap::Config>,
     #[serde(default)]
     pub provider_management_local: bool,
     #[serde(default)]
@@ -127,6 +128,23 @@ impl ListenerConfig {
     }
 }
 
+fn listener_management_tools(listener: &ListenerConfig) -> Vec<rmcp::model::Tool> {
+    let mut tools = crate::discovery::tools::listener_definitions(
+        crate::discovery::policy::EndpointPolicy::from(listener),
+        listener.discover_on_demand,
+        listener.discovery_search_tool_instructions_text.as_deref(),
+        listener
+            .providers_search_remote_tool_instructions_text
+            .as_deref(),
+    );
+    if !listener.discover_on_demand
+        && let Some(config) = &listener.swap_control
+    {
+        tools.extend(crate::direct_swap::definitions(config));
+    }
+    tools
+}
+
 #[derive(Clone)]
 struct Source {
     send_tools: Option<Vec<SendToolsRule>>,
@@ -160,6 +178,7 @@ pub struct InventoryTool {
     pub tool: ToolSpec,
 }
 pub struct Deployment {
+    direct_history: Option<bool>,
     listeners: BTreeMap<String, ListenerConfig>,
     prebound: BTreeMap<String, TcpListener>,
     search_relay: Option<std::sync::Arc<crate::discovery_relay::SearchRelay>>,
@@ -292,9 +311,28 @@ impl MetaConfig {
             ensure!(
                 !server.sources.is_empty()
                     || crate::discovery::policy::EndpointPolicy::from(server).any()
-                    || server.discover_on_demand,
+                    || server.discover_on_demand
+                    || server.swap_control.is_some(),
                 "server {name}: sources cannot be empty"
             );
+            if let Some(control) = &server.swap_control {
+                ensure!(
+                    server.auth,
+                    "server {name}: swap_control requires authentication"
+                );
+                ensure!(
+                    self.treasury.is_some(),
+                    "server {name}: swap_control requires [treasury]"
+                );
+                ensure!(
+                    !control.enabled() || self.funding.is_some(),
+                    "server {name}: enabled swap_control requires [funding]"
+                );
+                ensure!(
+                    !control.send,
+                    "server {name}: direct sending is not available yet"
+                );
+            }
             for selector in server.include_tools.iter().chain(&server.exclude_tools) {
                 pattern(selector)?;
             }
@@ -331,7 +369,11 @@ impl MetaConfig {
             if let Some(f) = &self.funding
                 && !shared_only
             {
-                f.validate()?;
+                if self.servers.values().any(|s| s.swap_control.is_some()) {
+                    f.validate_swap()?;
+                } else {
+                    f.validate()?;
+                }
             }
         }
         Ok(())
@@ -517,6 +559,49 @@ impl Deployment {
         )
         .await
     }
+    // Saved work retains observation ownership even if its listener or capability
+    // table is removed. Only an existing authenticated principal gets status tools.
+    fn recover_direct_controls(config: &mut MetaConfig) -> Result<bool> {
+        if crate::qualification::active() || catalog_evidence::collecting() {
+            return Ok(false);
+        }
+        let Some(treasury) = &config.treasury else {
+            return Ok(false);
+        };
+        let owners = crate::rotation::store::direct_operation_owners(
+            &treasury.state_dir,
+            (!treasury.id.is_empty()).then_some(treasury.id.as_str()),
+        )?;
+        for (name, listener) in &mut config.servers {
+            if listener.auth && listener.swap_control.is_none() && owners.contains(name) {
+                listener.swap_control = Some(crate::direct_swap::Config::default());
+            }
+        }
+        Ok(!owners.is_empty())
+    }
+
+    fn prepare_serving_recovery(&mut self) -> Result<()> {
+        if self.direct_history.is_some()
+            || crate::qualification::active()
+            || catalog_evidence::collecting()
+        {
+            return Ok(());
+        }
+        let history = Self::recover_direct_controls(&mut self.config)?;
+        // Recovery changes only controls; keep resolved routing and socket metadata.
+        for (name, listener) in &mut self.listeners {
+            listener.swap_control = self.config.servers[name].swap_control.clone();
+        }
+        self.refresh_selection(true)?;
+        self.direct_history = Some(history);
+        Ok(())
+    }
+
+    fn direct_required(&self) -> bool {
+        self.direct_history.unwrap_or(false)
+            || self.listeners.values().any(|s| s.swap_control.is_some())
+    }
+
     fn validate_listener_credentials(&self, env: &BTreeMap<String, String>) -> Result<()> {
         for server in self.listeners.values().filter(|s| s.auth) {
             server.token(env)?;
@@ -622,11 +707,16 @@ impl Deployment {
         let scoped_funding = relay_env.is_some()
             && !crate::qualification::active()
             && !catalog_evidence::collecting();
-        let wallet_resolution = config.validate_capabilities(scoped_funding)?;
-        crate::network::install(config.network.clone())?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
         }
+        let direct_history = if purpose == startup::CatalogPurpose::Serving && relay_env.is_some() {
+            Some(Self::recover_direct_controls(&mut config)?)
+        } else {
+            None
+        };
+        let wallet_resolution = config.validate_capabilities(scoped_funding)?;
+        crate::network::install(config.network.clone())?;
         crate::discovery::policy::validate_registry_path(&config, path)?;
         // Validate every configured method/format locally before wallet state or I/O.
         let search_relay = match config.relay_fallback.as_ref() {
@@ -637,6 +727,7 @@ impl Deployment {
             None => None,
         };
         let mut deployment = Self {
+            direct_history,
             listeners: wallet_resolution.source_bindings.listeners(&config),
             prebound: BTreeMap::new(),
             search_relay,
@@ -761,12 +852,7 @@ impl Deployment {
                 listen: s.listen,
                 default_wallet: s.wallet.clone(),
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
-                management_tools: crate::discovery::tools::listener_definitions(
-                    crate::discovery::policy::EndpointPolicy::from(s),
-                    s.discover_on_demand,
-                    s.discovery_search_tool_instructions_text.as_deref(),
-                    s.providers_search_remote_tool_instructions_text.as_deref(),
-                ),
+                management_tools: listener_management_tools(s),
                 tools: self.selected[name]
                     .iter()
                     .map(|(source, tool)| InventoryTool {
@@ -885,7 +971,7 @@ impl Deployment {
         let t = self.config.treasury.as_ref().unwrap();
         let f = self.config.funding.as_ref().unwrap();
         t.validate()?;
-        f.validate()?;
+        f.validate_swap()?;
         // Resolve source dependencies before any funding worker starts.
         let sync_settings = crate::treasury::SyncSettings::new(
             t.indexer_endpoint(|name| env.get(name).cloned())?,
@@ -955,6 +1041,11 @@ impl Deployment {
         relay_wallets: &BTreeSet<String>,
         allow_store_only: bool,
     ) -> Result<InitializedWallets> {
+        let direct = self.listeners.values().any(|s| s.swap_control.is_some());
+        ensure!(
+            !direct || !crate::qualification::active(),
+            "qualification forbids swap control"
+        );
         self.validate_static_identities(only_wallets).await?;
         let mut wallets = self.static_wallets(env, only_wallets, relay_wallets)?;
         let mut runtime = ManagedRuntime::None;
@@ -965,72 +1056,7 @@ impl Deployment {
             use crate::rotation::manager::ManagedPool;
             let t = self.config.treasury.as_ref().unwrap();
             let f = self.config.funding.as_ref().unwrap();
-            let mut capabilities = if allow_store_only {
-                let shared = crate::treasury::Treasury::open_shared_state(
-                    t.state_dir.clone(),
-                    t.key_file.clone(),
-                    t.runtime_id()?,
-                    crate::rotation::store::TreasuryNetwork::Mainnet,
-                )
-                .await?;
-                let base = self.base_connection_preflight(env);
-                match base {
-                    Err(_) => {
-                        tracing::warn!(
-                            category = "base_configuration_unavailable",
-                            "Managed Base configuration unavailable; independent static service remains available; correct Base configuration and restart"
-                        );
-                        ManagedSetup::StoreOnly {
-                            owner: StoreOnlyOwner::new(shared),
-                            base: None,
-                        }
-                    }
-                    Ok(base) => match self.funding_connection_preflight(env) {
-                        Ok(source) => match crate::treasury::Treasury::reconstruct(shared).await? {
-                            crate::treasury::OpenedTreasury::Ready(owner) => {
-                                ManagedSetup::Treasury(Box::new(TreasurySetup {
-                                    owner: *owner,
-                                    base,
-                                    source,
-                                }))
-                            }
-                            crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
-                                tracing::warn!(
-                                    category = "treasury_snapshot_unavailable",
-                                    "Treasury SDK unavailable; Base service retains shared ownership; funding unavailable"
-                                );
-                                ManagedSetup::StoreOnly {
-                                    owner: StoreOnlyOwner::new(*shared),
-                                    base: Some(Box::new(base)),
-                                }
-                            }
-                        },
-                        Err(_) => {
-                            tracing::warn!(
-                                category = "funding_configuration_unavailable",
-                                "Funding configuration unavailable; Base service retains shared ownership; correct funding configuration and restart"
-                            );
-                            ManagedSetup::StoreOnly {
-                                owner: StoreOnlyOwner::new(shared),
-                                base: Some(Box::new(base)),
-                            }
-                        }
-                    },
-                }
-            } else {
-                let (source, base) = self.managed_connection_preflight(env)?;
-                let owner = crate::treasury::Treasury::open(
-                    t.state_dir.clone(),
-                    t.key_file.clone(),
-                    t.runtime_id()?,
-                )
-                .await?;
-                ManagedSetup::Treasury(Box::new(TreasurySetup {
-                    owner,
-                    base,
-                    source,
-                }))
-            };
+            let mut capabilities = self.wallet_setup(env, true, allow_store_only).await?;
             let store = capabilities.store();
             let setup: Result<()> = async {
             if let ManagedSetup::Treasury(treasury) = &mut capabilities {
@@ -1111,9 +1137,24 @@ impl Deployment {
                         base,
                         source,
                     } = *treasury;
+                    let (handle, commands) = crate::treasury::actor::channel();
+                    let direct = self.direct_service(store.clone(), handle.clone(), &source);
+                    let Some(base) = base else {
+                        runtime = ManagedRuntime::Direct(Box::new(DirectRuntime {
+                            owner,
+                            commands,
+                            sender: source.sender,
+                            service: direct
+                                .expect("SDK opened without Base only for direct swap work"),
+                        }));
+                        return Ok(InitializedWallets {
+                            wallets,
+                            runtime,
+                            managed_pools,
+                        });
+                    };
                     tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
                         "{}", if f.auto_fund { "Automatic wallet funding enabled; new transfers use spendable treasury funds" } else { "Automatic wallet funding disabled; new funding transfers are paused" });
-                    let (handle, commands) = crate::treasury::actor::channel();
                     let backend = crate::rotation::funding::Backend {
                         treasury: handle,
                         store: store.clone(),
@@ -1127,6 +1168,7 @@ impl Deployment {
                         crate::rotation::funding::FundingBackend::allocation_groups(&backend),
                     );
                     ManagedRuntime::Treasury(Box::new(TreasuryRuntime {
+                        direct,
                         owner,
                         funding: (
                             commands,
@@ -1141,10 +1183,148 @@ impl Deployment {
                 }
             };
         }
+        if matches!(runtime, ManagedRuntime::None) && self.direct_required() {
+            runtime = match self.wallet_setup(env, false, allow_store_only).await? {
+                ManagedSetup::StoreOnly { owner, .. } => ManagedRuntime::StoreOnly(owner),
+                ManagedSetup::Treasury(treasury) => {
+                    let TreasurySetup {
+                        mut owner, source, ..
+                    } = *treasury;
+                    owner.configure_sync(source.sync_settings.clone());
+                    let (handle, commands) = crate::treasury::actor::channel();
+                    let service = self
+                        .direct_service(owner.store_handle(), handle, &source)
+                        .unwrap();
+                    ManagedRuntime::Direct(Box::new(DirectRuntime {
+                        owner,
+                        commands,
+                        sender: source.sender,
+                        service,
+                    }))
+                }
+            };
+        }
         Ok(InitializedWallets {
             wallets,
             runtime,
             managed_pools,
+        })
+    }
+
+    // Base admission, SDK ownership and direct swap admission degrade independently.
+    async fn wallet_setup(
+        &self,
+        env: &BTreeMap<String, String>,
+        with_base: bool,
+        best_effort: bool,
+    ) -> Result<ManagedSetup> {
+        let t = self.config.treasury.as_ref().unwrap();
+        let direct_admission = self
+            .listeners
+            .values()
+            .any(|s| s.swap_control.as_ref().is_some_and(|c| c.enabled()));
+        if !best_effort && (with_base || direct_admission) {
+            let (source, base) = if with_base {
+                let (source, base) = self.managed_connection_preflight(env)?;
+                (source, Some(base))
+            } else {
+                (self.funding_connection_preflight(env)?, None)
+            };
+            let owner = crate::treasury::Treasury::open(
+                t.state_dir.clone(),
+                t.key_file.clone(),
+                t.runtime_id()?,
+            )
+            .await?;
+            return Ok(ManagedSetup::Treasury(Box::new(TreasurySetup {
+                owner,
+                base,
+                source,
+            })));
+        }
+        let shared = crate::treasury::Treasury::open_shared_state(
+            t.state_dir.clone(),
+            t.key_file.clone(),
+            t.runtime_id()?,
+            crate::rotation::store::TreasuryNetwork::Mainnet,
+        )
+        .await?;
+        let base = if with_base {
+            match self.base_connection_preflight(env) {
+                Ok(base) => Some(base),
+                Err(_) => {
+                    tracing::warn!(
+                        category = "base_configuration_unavailable",
+                        "Managed Base configuration unavailable; independent tools remain available; correct Base configuration and restart"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if (base.is_none() && !self.direct_required()) || self.config.funding.is_none() {
+            return Ok(self.store_only_setup(shared, base));
+        }
+        let source = match self.funding_connection_preflight(env) {
+            Ok(source) => source,
+            Err(_) => {
+                tracing::warn!(
+                    category = "funding_configuration_unavailable",
+                    "Treasury source configuration unavailable; new funding and direct swaps are unavailable; existing Base payments and saved status remain available; correct source configuration and restart"
+                );
+                return Ok(self.store_only_setup(shared, base));
+            }
+        };
+        match crate::treasury::Treasury::reconstruct(shared).await? {
+            crate::treasury::OpenedTreasury::Ready(owner) => {
+                Ok(ManagedSetup::Treasury(Box::new(TreasurySetup {
+                    owner: *owner,
+                    base,
+                    source,
+                })))
+            }
+            crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
+                tracing::warn!(
+                    category = "treasury_snapshot_unavailable",
+                    "Treasury SDK unavailable; new funding and direct swaps are unavailable; existing Base payments and saved status retain shared ownership"
+                );
+                Ok(self.store_only_setup(*shared, base))
+            }
+        }
+    }
+
+    fn store_only_setup(
+        &self,
+        store: crate::rotation::store::Store,
+        base: Option<crate::rotation::base::BaseRpc>,
+    ) -> ManagedSetup {
+        let mut owner = StoreOnlyOwner::new(store);
+        if self.direct_required() {
+            owner.direct = Some(crate::direct_swap::Service::status_only(
+                owner.store.clone(),
+            ));
+        }
+        ManagedSetup::StoreOnly {
+            owner,
+            base: base.map(Box::new),
+        }
+    }
+
+    fn direct_service(
+        &self,
+        store: crate::rotation::store::StoreHandle,
+        treasury: crate::treasury::actor::TreasuryHandle,
+        source: &FundingConnections,
+    ) -> Option<crate::direct_swap::Service> {
+        self.direct_required().then(|| {
+            crate::direct_swap::Service::new(
+                store,
+                treasury,
+                source.near.clone(),
+                self.config.funding.as_ref().unwrap().clone(),
+                source.max_network_fee,
+            )
         })
     }
 
@@ -1177,7 +1357,9 @@ impl Deployment {
             // Reserved identities invalidate source admission, rather than the
             // endpoint's narrowing. A late invalid source must not withdraw
             // healthy tools already published on this listener.
-            if (crate::discovery::policy::enabled(&self.config) || listener.discover_on_demand)
+            if (crate::discovery::policy::enabled(&self.config)
+                || listener.discover_on_demand
+                || listener.swap_control.is_some())
                 && inventory.tools.iter().any(|(_, tool)| {
                     tool.name.starts_with("dyn_") || tool.name.starts_with("x402_treazury_")
                 })
@@ -1353,6 +1535,10 @@ impl Deployment {
 
     fn unsigned_wallets(&self) -> Result<InitializedWallets> {
         ensure!(
+            !self.listeners.values().any(|s| s.swap_control.is_some()),
+            "unsigned qualification forbids swap control"
+        );
+        ensure!(
             !crate::discovery::policy::enabled(&self.config),
             "unsigned qualification forbids provider management and raw URL calls"
         );
@@ -1439,6 +1625,7 @@ impl Deployment {
         &mut self,
         wallets: BTreeMap<String, PaidClient>,
         mut tokens: BTreeMap<String, Option<String>>,
+        direct: Option<crate::direct_swap::Service>,
     ) -> Result<BoundListeners> {
         let mut servers = self.build_servers(&wallets);
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
@@ -1491,6 +1678,7 @@ impl Deployment {
                     })?;
             }
             server.discovery = manager.clone();
+            server.direct_swap = direct.clone().zip(cfg.swap_control.clone());
             let listener = if reuse_sockets {
                 prebound.remove(name).context("prebound listener missing")?
             } else {
@@ -1519,7 +1707,13 @@ impl Deployment {
         restriction: crate::rotation::restriction::FundingRestriction,
         unsigned: bool,
     ) -> Result<RunningDeployment> {
-        let setup = self.binding_wallets(env, restriction, unsigned).await;
+        let setup = async {
+            if !unsigned {
+                self.prepare_serving_recovery()?;
+            }
+            self.binding_wallets(env, restriction, unsigned).await
+        }
+        .await;
         let (tokens, initialized) = match setup {
             Ok(setup) => setup,
             Err(error) => {
@@ -1536,7 +1730,9 @@ impl Deployment {
         let runtime = initialized.runtime;
         let managed_pools = initialized.managed_pools;
         let deferred_wallets = wallets.clone();
-        let bound = self.bind_catalog_listeners(wallets, tokens).await;
+        let bound = self
+            .bind_catalog_listeners(wallets, tokens, runtime.direct_service())
+            .await;
         let BoundListeners {
             listeners,
             accepted_work,
@@ -1725,6 +1921,7 @@ fn listener_tool_inventory(
     if tools.is_empty()
         && !crate::discovery::policy::EndpointPolicy::from(server).any()
         && !server.discover_on_demand
+        && server.swap_control.is_none()
         && !incomplete
         && conflicts.is_empty()
     {
@@ -1783,15 +1980,21 @@ struct FundingConnections {
 }
 
 struct StoreOnlyOwner {
+    direct: Option<crate::direct_swap::Service>,
     store: crate::rotation::store::StoreHandle,
     worker: tokio::task::JoinHandle<()>,
 }
 impl StoreOnlyOwner {
     fn new(store: crate::rotation::store::Store) -> Self {
         let (store, worker) = crate::rotation::store::StoreHandle::spawn(store);
-        Self { store, worker }
+        Self {
+            store,
+            worker,
+            direct: None,
+        }
     }
     async fn close(self) -> Result<()> {
+        drop(self.direct);
         drop(self.store);
         self.worker.await.context("store worker failed")
     }
@@ -1808,7 +2011,7 @@ enum ManagedSetup {
 }
 struct TreasurySetup {
     owner: crate::treasury::Treasury,
-    base: crate::rotation::base::BaseRpc,
+    base: Option<crate::rotation::base::BaseRpc>,
     source: FundingConnections,
 }
 impl ManagedSetup {
@@ -1821,11 +2024,11 @@ impl ManagedSetup {
     fn base(&self) -> Option<&crate::rotation::base::BaseRpc> {
         match self {
             Self::StoreOnly { base, .. } => base.as_deref(),
-            Self::Treasury(treasury) => Some(&treasury.base),
+            Self::Treasury(treasury) => treasury.base.as_ref(),
         }
     }
     fn funding_available(&self) -> bool {
-        matches!(self, Self::Treasury(_))
+        matches!(self, Self::Treasury(t) if t.base.is_some())
     }
     async fn close(self) -> Result<()> {
         match self {
@@ -1835,23 +2038,40 @@ impl ManagedSetup {
     }
 }
 
-// Only these three dormant states can reach binding, bootstrap or serving.
+// Dormant capabilities retain one treasury or shared Store owner through serving.
 // A treasury owner always carries its matching command/funding runtime.
 enum ManagedRuntime {
     None,
     StoreOnly(StoreOnlyOwner),
     Treasury(Box<TreasuryRuntime>),
+    Direct(Box<DirectRuntime>),
+}
+struct DirectRuntime {
+    owner: crate::treasury::Treasury,
+    commands: crate::treasury::actor::TreasuryCommands,
+    sender: crate::treasury::submission::GrpcSubmission,
+    service: crate::direct_swap::Service,
 }
 struct TreasuryRuntime {
+    direct: Option<crate::direct_swap::Service>,
     owner: crate::treasury::Treasury,
     funding: FundingRuntime,
 }
 impl ManagedRuntime {
+    fn direct_service(&self) -> Option<crate::direct_swap::Service> {
+        match self {
+            Self::Treasury(t) => t.direct.clone(),
+            Self::Direct(t) => Some(t.service.clone()),
+            Self::StoreOnly(t) => t.direct.clone(),
+            _ => None,
+        }
+    }
     fn store(&self) -> Option<crate::rotation::store::StoreHandle> {
         match self {
             Self::None => None,
             Self::StoreOnly(owner) => Some(owner.store.clone()),
             Self::Treasury(treasury) => Some(treasury.owner.store_handle()),
+            Self::Direct(direct) => Some(direct.owner.store_handle()),
         }
     }
     fn funding_available(&self) -> bool {
@@ -1860,9 +2080,24 @@ impl ManagedRuntime {
     async fn close(self) -> Result<()> {
         match self {
             Self::None => Ok(()),
+            Self::Direct(direct) => {
+                let DirectRuntime {
+                    owner,
+                    commands,
+                    sender,
+                    service,
+                } = *direct;
+                drop((commands, sender, service));
+                owner.close().await
+            }
             Self::StoreOnly(owner) => owner.close().await,
             Self::Treasury(treasury) => {
-                let TreasuryRuntime { owner, funding } = *treasury;
+                let TreasuryRuntime {
+                    owner,
+                    funding,
+                    direct,
+                } = *treasury;
+                drop(direct);
                 // Funding owns Store handles: release them before joining its owner.
                 drop(funding);
                 owner.close().await
@@ -1915,12 +2150,15 @@ impl RunningDeployment {
                 }
             });
         }
+        let direct_service = self.runtime.direct_service();
         let (treasury_task, funding_task, retained_runtime) = match self.runtime {
             ManagedRuntime::Treasury(treasury) => {
                 let TreasuryRuntime {
                     owner,
                     funding: (commands, sender, worker),
+                    direct,
                 } = *treasury;
+                drop(direct);
                 (
                     Some(tokio::spawn({
                         let stopped = stop.clone();
@@ -1939,9 +2177,37 @@ impl RunningDeployment {
                     ManagedRuntime::None,
                 )
             }
+            ManagedRuntime::Direct(direct) => {
+                let DirectRuntime {
+                    owner,
+                    commands,
+                    sender,
+                    service,
+                } = *direct;
+                drop(service);
+                (
+                    Some(tokio::spawn({
+                        let stopped = stop.clone();
+                        async move {
+                            let _stop_on_exit = stopped.clone().drop_guard();
+                            owner.run_commands(commands, sender, stopped).await
+                        }
+                    })),
+                    None,
+                    ManagedRuntime::None,
+                )
+            }
             runtime => (None, None, runtime),
         };
         let mut reconciliation = JoinSet::new();
+        if let Some(service) = direct_service {
+            let stopped = reconciliation_stop.clone();
+            reconciliation.spawn(async move {
+                if let Err(error) = service.run(stopped).await {
+                    tracing::error!(category = %crate::rotation::base::safe_diagnostic(&error), "Direct swap status observation stopped; saved payment requests remain durable; restart to resume observation");
+                }
+            });
+        }
         for pool in self.managed_pools {
             let stopped = reconciliation_stop.clone();
             reconciliation.spawn(async move {
@@ -2106,6 +2372,8 @@ impl RunningDeployment {
     }
 }
 
+#[cfg(test)]
+mod direct_swap_tests;
 #[cfg(test)]
 mod store_loss_tests;
 #[cfg(test)]

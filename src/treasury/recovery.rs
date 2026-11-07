@@ -783,6 +783,7 @@ mod tests {
                         phase: SyncPhase::Ready,
                         last_error: None,
                         snapshot_revision: revision,
+                        started_snapshot_revision: None,
                         checked_at: Some(now()?),
                         checkpoint_at: 0,
                         scanned_blocks: 1,

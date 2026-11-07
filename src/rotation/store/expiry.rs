@@ -125,6 +125,7 @@ mod tests {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: 2,
+            started_snapshot_revision: None,
             checked_at: Some(100),
             checkpoint_at: 100,
             scanned_blocks: 22,

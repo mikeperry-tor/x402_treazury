@@ -120,29 +120,51 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
                 .as_deref(),
             Some(expected)
         );
-        let search = |args| {
-            crate::discovery::search_catalog(
-                &catalog,
-                "default",
-                "x402_treazury_tools_search",
-                args,
-            )
-            .unwrap()
-        };
-        let first = search(json!({"limit":1}));
-        assert_eq!(first["items"][0]["description"], expected);
-        assert_eq!(first["catalog_generation"], 11);
-        assert_eq!(first["total"], 2);
-        assert_eq!(search(json!({"query":"observed"}))["total"], 0);
-        let cursor = first["next_cursor"].clone();
-        key.learn(U256::from(7000), received().unwrap());
-        let second = search(json!({"limit":1,"cursor":cursor}));
-        assert_eq!(second["items"][0]["tool_id"], tools[1].tool.name);
-        assert_eq!(second["catalog_generation"], 11);
-        assert_eq!(
-            search(json!({"limit":1}))["items"][0]["description"],
-            "Read alpha records. Observed cost: ~$0.007/call."
-        );
+        let mut canonical_cursor = None;
+        for firstparty in [
+            Vec::new(),
+            crate::direct_swap::definitions(&Default::default()),
+        ] {
+            key.learn(U256::from(5000), received().unwrap());
+            let search = |args| {
+                crate::discovery::search_catalog_with_firstparty(
+                    &catalog,
+                    "default",
+                    "x402_treazury_tools_search",
+                    args,
+                    &firstparty,
+                )
+                .unwrap()
+            };
+            let first = search(json!({"limit":1}));
+            assert_eq!(first["items"][0]["description"], expected);
+            assert_eq!(first["catalog_generation"], 11);
+            assert_eq!(first["total"], 2 + firstparty.len());
+            assert_eq!(search(json!({"query":"observed"}))["total"], 0);
+            let canonical = search(json!({"query":"unknown","limit":1}));
+            assert_eq!(
+                canonical["total"], 2,
+                "observed prices cannot remove canonical matches"
+            );
+            let cursor = first["next_cursor"].clone();
+            if firstparty.is_empty() {
+                canonical_cursor = Some(cursor.clone());
+            }
+            key.learn(U256::from(7000), received().unwrap());
+            let second = search(json!({"limit":1,"cursor":cursor}));
+            assert_eq!(second["items"][0]["tool_id"], tools[1].tool.name);
+            assert_eq!(second["catalog_generation"], 11);
+            let canonical_next =
+                search(json!({"query":"unknown","limit":1,"cursor":canonical["next_cursor"]}));
+            assert_eq!(canonical_next["total"], 2);
+            assert_eq!(canonical_next["items"][0]["tool_id"], tools[1].tool.name);
+            assert_eq!(search(json!({"query":"observed"}))["total"], 0);
+            assert_eq!(
+                search(json!({"limit":1}))["items"][0]["description"],
+                "Read alpha records. Observed cost: ~$0.007/call."
+            );
+        }
+        let cursor = canonical_cursor.unwrap();
         let mut refreshed = tools.clone();
         refreshed[0].tool.catalog_hints = None;
         catalog.publish(CatalogSnapshot {

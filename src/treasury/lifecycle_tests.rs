@@ -2,6 +2,7 @@
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
 mod birthday;
 mod calculation_owner;
+mod direct_receive;
 mod discovery;
 mod indexer_recovery;
 mod indexer_regression;

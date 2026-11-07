@@ -3729,6 +3729,7 @@ async fn complete_inventory_preserves_definitions_and_search_pagination() {
                     owner,
                     "x402_treazury_tools_search",
                     serde_json::from_value(json!({"limit":limit})).unwrap(),
+                    &[],
                 )
                 .unwrap();
                 assert_eq!(

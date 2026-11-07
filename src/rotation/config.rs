@@ -643,6 +643,10 @@ impl FundingConfig {
     }
     pub fn validate(&self) -> Result<()> {
         self.validate_base()?;
+        self.validate_swap()
+    }
+    /// Direct deposit-funded swaps do not use Base RPC.
+    pub(crate) fn validate_swap(&self) -> Result<()> {
         if let Some(s) = &self.near_user_session_env {
             env_name(s)?;
         }

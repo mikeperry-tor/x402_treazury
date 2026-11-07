@@ -86,6 +86,7 @@ async fn qualify_preparation(case: PreparationCase) {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: treasury.revision,
+            started_snapshot_revision: None,
             checked_at: Some(now().unwrap()),
             checkpoint_at: 0,
             scanned_blocks: 1,

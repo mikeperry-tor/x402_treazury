@@ -265,7 +265,7 @@ impl NetworkPolicy {
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        let mut value = serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"tor_isolation_retries":self.tor_isolation_retries.unwrap_or(2),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]});
+        let mut value = serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"tor_isolation_retries":self.tor_isolation_retries.unwrap_or(2),"identity_scopes":["evm_address","treasury_uuid","direct_swap_operation","discovery_origin","bootstrap_invocation"]});
         if !self.trusted_ca_files.is_empty() {
             value["trusted_ca_files"] = serde_json::json!(self.trusted_ca_files);
         }
@@ -337,6 +337,10 @@ impl IsolationId {
                 canonical.as_bytes(),
             ],
         ))
+    }
+    /// Stable identity retained for every request belonging to a direct swap.
+    pub fn direct_swap(treasury: &str, operation: &str) -> Self {
+        Self::fields("direct-swap", &[treasury.as_bytes(), operation.as_bytes()])
     }
     pub fn bootstrap() -> Self {
         Self::fields("bootstrap", &[uuid::Uuid::new_v4().as_bytes()])
@@ -1296,6 +1300,23 @@ fn validate_public_addresses(addresses: &[std::net::SocketAddr]) -> std::io::Res
 #[cfg(test)]
 mod public_destination_tests {
     use super::*;
+    #[test]
+    fn direct_swap_identity_is_stable_and_separates_operations_and_owners() {
+        let identity = IsolationId::direct_swap("treasury", "operation");
+        assert_eq!(identity, IsolationId::direct_swap("treasury", "operation"));
+        assert_ne!(identity, IsolationId::direct_swap("other", "operation"));
+        assert_ne!(identity, IsolationId::direct_swap("treasury", "other"));
+        assert_ne!(identity, IsolationId::treasury("treasury"));
+        assert_ne!(
+            IsolationId::direct_swap("ab", "c"),
+            IsolationId::direct_swap("a", "bc")
+        );
+        assert_eq!(
+            identity.token("test"),
+            IsolationId::direct_swap("treasury", "operation").token("test")
+        );
+    }
+
     #[test]
     fn provider_https_policy_preserves_private_pki_and_infrastructure() {
         assert!(provider_url("http://127.0.0.1:1/read").is_err());

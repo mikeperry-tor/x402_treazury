@@ -318,6 +318,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
                             phase: crate::rotation::store::SyncPhase::Ready,
                             last_error: None,
                             snapshot_revision: revision,
+                            started_snapshot_revision: None,
                             checked_at: Some(1),
                             checkpoint_at: 1,
                             scanned_blocks: 102,

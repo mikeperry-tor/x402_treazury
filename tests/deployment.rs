@@ -1306,20 +1306,22 @@ async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity
         dir.path(),
         &(config.clone() + &format!("id={:?}\n", uuid::Uuid::new_v4().to_string())),
     );
-    let deployment = Deployment::load(&path).await.unwrap();
-    assert!(
-        format!("{:#}", deployment.bind(&env()).await.err().unwrap())
-            .contains("state identity mismatch")
-    );
+    // Read-only direct-history discovery may reject structural mismatches while
+    // loading, before binding reaches the same identity guard.
+    let error = async { Deployment::load(&path).await?.bind(&env()).await }
+        .await
+        .err()
+        .unwrap();
+    assert!(format!("{error:#}").contains("state identity mismatch"));
     let path = write_config(dir.path(), &config);
     for version in [15, 17] {
         db.pragma_update(None, "user_version", version).unwrap();
         assert!(treasury.runtime_id().is_err());
-        let deployment = Deployment::load(&path).await.unwrap();
-        assert!(
-            format!("{:#}", deployment.bind(&env()).await.err().unwrap())
-                .contains("unsupported state schema")
-        );
+        let error = async { Deployment::load(&path).await?.bind(&env()).await }
+            .await
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains("unsupported state schema"));
         let persisted: u32 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();

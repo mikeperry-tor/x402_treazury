@@ -101,6 +101,7 @@ mod tests {
                 phase: SyncPhase::Ready,
                 last_error: None,
                 snapshot_revision: owner.revision,
+                started_snapshot_revision: None,
                 checked_at: Some(1),
                 checkpoint_at: 1,
                 scanned_blocks: 0,

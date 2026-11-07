@@ -523,7 +523,12 @@ async fn binding_restricts_reused_managed_owner_and_socket_failure_releases_it()
                 else {
                     panic!("treasury runtime required")
                 };
-                let TreasuryRuntime { owner, funding } = *treasury;
+                let TreasuryRuntime {
+                    owner,
+                    funding,
+                    direct,
+                } = *treasury;
+                drop(direct);
                 drop(funding);
                 let after = owner
                     .store_handle()
@@ -636,7 +641,12 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
                 else {
                     panic!("treasury runtime required")
                 };
-                let TreasuryRuntime { owner, funding } = *treasury;
+                let TreasuryRuntime {
+                    owner,
+                    funding,
+                    direct,
+                } = *treasury;
+                drop(direct);
                 drop(funding);
                 drop(running);
                 owner.close().await.unwrap();
@@ -737,7 +747,12 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     else {
         panic!("treasury runtime required")
     };
-    let TreasuryRuntime { owner, funding } = *treasury;
+    let TreasuryRuntime {
+        owner,
+        funding,
+        direct,
+    } = *treasury;
+    drop(direct);
     drop(funding);
     let status = owner.status().await.unwrap();
     assert!(status.funding_jobs.is_empty());

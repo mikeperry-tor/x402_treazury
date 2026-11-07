@@ -37,6 +37,7 @@ pub(super) fn synced_capacity(s: &mut Store, capacity: u64) -> Result<()> {
             phase: SyncPhase::Ready,
             last_error: None,
             snapshot_revision: revision,
+            started_snapshot_revision: None,
             checked_at: Some(instant),
             checkpoint_at: instant,
             scanned_blocks: 1,

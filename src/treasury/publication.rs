@@ -1189,6 +1189,7 @@ mod tests {
                 phase: SyncPhase::Preparing,
                 last_error: None,
                 snapshot_revision: fixture.owner.revision,
+                started_snapshot_revision: None,
                 checked_at: None,
                 checkpoint_at: 0,
                 scanned_blocks: 0,

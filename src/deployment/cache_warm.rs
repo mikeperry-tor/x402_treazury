@@ -109,6 +109,7 @@ pub async fn warm_cache_with_network(
             funding.auto_fund = false;
         }
         let deployment = Deployment {
+            direct_history: None,
             listeners: EffectiveBindings::resolve(&config)?.listeners(&config),
             search_relay: None,
             prebound: BTreeMap::new(),

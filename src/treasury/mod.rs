@@ -433,6 +433,36 @@ impl Treasury {
         self.healthy = true;
         Ok(address)
     }
+    /// Persist a shielded receive address and its direct-operation binding before a quote
+    /// can expose it. Stored bindings are preserved but transparent reuse is rejected.
+    pub async fn direct_address(&mut self, id: String) -> Result<String> {
+        self.drain_calculation().await;
+        let lookup = id.clone();
+        if let Some(address) = self.store.call(move |s| s.direct_address(&lookup)).await? {
+            crate::rotation::near::require_shielded_refund(&self.network.chain(), &address)?;
+            return Ok(address);
+        }
+        ensure!(self.healthy, "treasury requires reopen");
+        self.healthy = false;
+        let client = self
+            .client
+            .as_mut()
+            .context("treasury client unavailable")?;
+        let (_, address) = client
+            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+            .await
+            .map_err(|_| anyhow::anyhow!("direct address derivation failed"))?;
+        let address = address.encode(&self.network.chain());
+        let bytes = snapshot(client).await?;
+        let expected = self.revision;
+        let saved = address.clone();
+        self.revision = self
+            .store
+            .call(move |s| s.save_direct_address(&id, &saved, expected, &bytes))
+            .await?;
+        self.healthy = true;
+        Ok(address)
+    }
     /// Declare configured capacity without allocating wallets or funding work.
     pub async fn ensure_capacity_group(
         &self,
@@ -526,6 +556,7 @@ impl Treasury {
                 phase: SyncPhase::Syncing,
                 last_error: None,
                 snapshot_revision: self.revision,
+                started_snapshot_revision: None,
                 checked_at: None,
                 checkpoint_at: 0,
                 scanned_blocks: 0,
@@ -538,6 +569,11 @@ impl Treasury {
                 spendable_shielded_zatoshis: 0,
             });
         observation.phase = SyncPhase::Syncing;
+        observation.started_snapshot_revision = Some(
+            self.revision
+                .checked_add(1)
+                .context("snapshot revision overflow")?,
+        );
         observation.confirmations = settings.confirmations.get();
         tracing::debug!("Synchronizing Zcash treasury wallet");
         self.checkpoint(observation.clone()).await?;

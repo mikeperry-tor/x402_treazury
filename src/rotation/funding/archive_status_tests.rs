@@ -89,6 +89,7 @@ fn expire_and_rotate(store: &mut Store, original: &FundingJob, max_attempts: u32
                 phase: SyncPhase::Ready,
                 last_error: None,
                 snapshot_revision: revision,
+                started_snapshot_revision: None,
                 checked_at: Some(1),
                 checkpoint_at: 1,
                 scanned_blocks: u32::try_from(height).unwrap(),

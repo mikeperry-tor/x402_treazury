@@ -10,8 +10,8 @@ requires both directions and the final combined review.
 
 Starting branch: `main`; implementation branch: `direct_swap_control`. Starting code baseline:
 `b708a06b340dfc7ee695eab5b66a6120c152af61`. At planning, only unrelated untracked
-`.vscode/` and `TODO` were present; preserve them. Status: D0 contract/design review in progress, no implementation
-or funded validation. Implementation starts from committed plan `8b861bbc141832887ec77a34c47b86f7e1c9fa71`. This request authorizes preparation of the plan; the plan
+`.vscode/` and `TODO` were present; preserve them. Status: D0 approved; D1 implemented at `bae7aaa1`, G1 correction/validation in progress.
+No funded validation. Implementation starts from committed plan `8b861bbc141832887ec77a34c47b86f7e1c9fa71`. The implementation request authorizes local implementation and review; the plan
 itself grants no funded execution, deployment, push or merge authority.
 
 Follow [planning workflow](../planning-workflow.md),
@@ -189,7 +189,9 @@ the existing client boundary; never expose keys or sessions as agent arguments.
   qualify funded delivery. No silent transparent fallback is selected.
 - Fresh reviewer `design_review` identified the identity, jobless preparation,
   receive observation and on-demand dispatch consumers above. Resolution review
-  is pending. Baseline complexity capture is in progress before Rust changes.
+  approved the decisions without residual material design blockers. Baseline
+  complexity: `target/complexity-runs/20261107T004039Z-02626c44`, complete 471 files
+  and 10,390 callable spaces against `b708a06b`, using the pinned analyzer.
 
 ## Ordered commits and integration gates
 
@@ -236,6 +238,22 @@ memo binding, invoice address persistence, same/conflicting IDs, concurrent dupl
 creation, cross-owner denial, lost responses and restart, late/under/excess payments,
 unknown provider outcome, and independent SDK receipt/spendability. Assert no ZEC
 spend, foreign signer, Base allocation, funding-claim reopening or secret output.
+
+### Direct send limit amendment
+
+The user additionally requested an optional listener toolset limit, clarified as
+preferably total ZEC debit with no new fee preference. Implement
+`swap_control.max_send_zec`: omission or `"none"` means unlimited; a decimal ZEC
+amount caps each direct native send or swap's principal plus actual network fee.
+This is per-operation authority for this path only, never a daily/cumulative
+budget and never applied to managed funding, shielding or other ZEC use. Persist
+the admission's total-debit authority; reject a principal already above it and
+check actual SDK proposal cost before accepting inputs. Do not substitute principal
+plus the configured maximum fee for actual cost, which would reject valid work.
+The existing treasury network-fee safeguard remains, with no new fee setting.
+Native exact amount fixes its principal; foreign exchanges retain the caller's
+separate maximum quoted principal. Accepted work keeps its original authority
+through capability/configuration changes.
 
 ### G1 — Receive integration gate; continue to sending
 
@@ -339,7 +357,12 @@ a mandatory research project or a source of artificial expiry rules.
 | --- | --- |
 | Planning baseline | `main` at `b708a06b340dfc7ee695eab5b66a6120c152af61`; receive and send design assessment identified hardcoded route, amount, cost and identity assumptions. No implementation or live settlement evidence. |
 | Plan design review | Fresh read-only reviewer `direct_swap_plan_review` examined baseline consumers and initial plan snapshot SHA256 `63e0a918b41a4d281fe02209d485825e6beb863cbd39525236d1635821c231e0`. No material blocker; clarified that a dry preview grants no executable authority and disabling admissions retains owned status access. Local link targets and whitespace checked; no Rust checks apply to this plan-only change. Exact committed-state review follows. |
-| D0 / D1 / G1 | Pending. Receive gate is not completion. |
+| D0 | Fresh read-only `design_review` traced financial, network, Store, SDK and MCP consumers; material findings resolved by the decisions above. No residual design blocker. Shielded reverse format/code evidence only; no funded qualification. |
+| D1 / G1 | D1 `bae7aaa1`; fresh read-only `receive_review` examined exact D0/D1 commits and combined call chains. Two material findings: direct settings forced strict startup instead of scoped degradation; second-resolution timestamps could retire receive scan demand too early. Fixup in progress preserves Store-only status and direct-without-Base availability, and uses existing scan-start snapshot revision ordering. Production compiler stopped on newly test-only `search_catalog` dead-code warning; fix is `cfg(test)`. No runtime/Clippy pass claimed yet. |
+| G1 continued corrections | `963fc840` and `aecc4932` reviewed with no remaining issue in those fixes. `aecc4932` production compiler/all-target `zcash-regtest` Clippy passed (logs `target/direct-swap-g1-clippy-continuation.log`). Later design review identified table-removal recovery gap and Store-commit notification ownership gap; correction preserves history-driven status/background work and gives durable quote publication its own existing-style Notify. Exact fixup `943dad95` reviewed with no remaining ownership finding; production compiler/all-target Clippy and fixed compatibility stage passed (`target/direct-swap-g1-clippy-history.log`, `target/direct-swap-g1-compat.log`). Search consumer correction and focused runtime validation remain pending. |
+| Focused baseline receive run | `target/direct-swap-receive-focused.log`: 64 selected tests compiled under `zcash-testutils`; 61 passed and one child helper ignored before one startup assertion failure and one fixture teardown hang. Failure: late listener inventory completeness gate missed status-only table despite early validation allowing it. Hang: fixture waited for owner shutdown while retaining external Store handles. Both focused corrections prepared; no complete runtime pass claimed. macOS linker emitted the documented large `__eh_frame` diagnostic; unwind data/profile retained. |
+| G1 preserved search contract | Root and fresh reviewer found mixed first-party/API search ranked rendered observed-price descriptions and projected complete schemas before pagination. Correction uses borrowed candidates, canonical fallback ranking and page-only rendering; existing pricing-cache regression is extended. This is a material G1 consumer correction, not deferred. |
+| G1 complexity | `target/complexity-runs/20261107T004651Z-840b8ac0`: complete 477 current / 471 baseline files, no exclusions; reviewer verified every source hash and lockfile. New warnings: `initialize_wallets_mode` Cog 40→43 / Cyc 46→54 (reassess after startup correction); `RunningDeployment::serve` Cog 30→33 / Cyc 43→46 retains coherent independent worker/actor shutdown ownership; score-only extraction rejected. |
 | D2 / G2 | Pending. Both directions required. |
 | D3 | Pending final implementation/user review and documentation handoff. |
 

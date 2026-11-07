@@ -4,6 +4,7 @@ pub(crate) mod balances;
 mod capacity;
 #[cfg(test)]
 mod codec_compatibility_tests;
+pub mod direct_swap;
 #[cfg(test)]
 mod io_failure_tests;
 pub(crate) mod observation;
@@ -16,6 +17,8 @@ pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod test_vfs;
 mod treasury_observation;
+pub use direct_swap::DirectOperation;
+pub(crate) use direct_swap::direct_operation_owners;
 mod treasury_reads;
 #[cfg(test)]
 mod worker_tests;
@@ -78,6 +81,9 @@ pub struct SyncObservation {
     pub phase: SyncPhase,
     pub last_error: Option<String>,
     pub snapshot_revision: i64,
+    /// Initial checkpoint of this scan, retained through progress and completion.
+    #[serde(default)]
+    pub started_snapshot_revision: Option<i64>,
     pub checked_at: Option<u64>,
     pub checkpoint_at: u64,
     pub scanned_blocks: u32,
@@ -227,6 +233,7 @@ pub struct Store {
         std::collections::BTreeMap<String, (String, super::error::FundingCondition)>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
+    direct_changes: std::sync::Arc<tokio::sync::Notify>,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
     _lock: std::sync::Arc<ownership::Owner>,
@@ -421,6 +428,7 @@ impl Store {
             inventory_failure: Default::default(),
             group_gates: Default::default(),
             treasury_changes: Default::default(),
+            direct_changes: Default::default(),
             db,
             _lock: std::sync::Arc::new(owner),
             key,
@@ -483,6 +491,7 @@ impl Store {
             inventory_failure: Default::default(),
             group_gates: Default::default(),
             treasury_changes: Default::default(),
+            direct_changes: Default::default(),
             db,
             _lock: std::sync::Arc::new(owner),
             key,
@@ -493,6 +502,7 @@ impl Store {
         configure(&store.db)?;
         evidence::initialize_runtime(&store.db)?;
         source_reconciliation::initialize(&store.db)?;
+        direct_swap::initialize(&store.db)?;
         Ok(store)
     }
     pub fn id(&self) -> &str {
@@ -519,6 +529,16 @@ impl Store {
         bytes: &[u8],
         observation: Option<SyncObservation>,
         refund: Option<(&str, &str)>,
+    ) -> Result<i64> {
+        self.save_bound_snapshot(expected, bytes, observation, refund, None)
+    }
+    fn save_bound_snapshot(
+        &mut self,
+        expected: i64,
+        bytes: &[u8],
+        observation: Option<SyncObservation>,
+        refund: Option<(&str, &str)>,
+        direct: Option<(&str, Vec<u8>)>,
     ) -> Result<i64> {
         ensure!(!bytes.is_empty(), "empty snapshot");
         let revision = expected
@@ -548,6 +568,15 @@ impl Store {
                 "INSERT INTO funding_refunds VALUES (?1,?2)",
                 params![job, encrypted],
             )?;
+        }
+        if let Some((id, payload)) = direct {
+            ensure!(
+                tx.execute(
+                    "UPDATE direct_operations SET payload=?2 WHERE id=?1",
+                    params![id, payload]
+                )? == 1,
+                "unknown direct operation"
+            );
         }
         tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing UNION SELECT revision FROM expired_operations UNION SELECT revision FROM source_disposition_history WHERE revision IS NOT NULL)", [revision])?;
         if let Some(mut observation) = observation {
@@ -1147,6 +1176,7 @@ pub struct StoreHandle {
     worker_stopped: tokio::sync::watch::Receiver<bool>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
+    direct_changes: std::sync::Arc<tokio::sync::Notify>,
     balance_observers: observation::Observers,
     funding_owner: std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>>,
 }
@@ -1155,6 +1185,7 @@ impl StoreHandle {
         let lock = store._lock.clone();
         let group_gates = store.group_gates.clone();
         let treasury_changes = store.treasury_changes.clone();
+        let direct_changes = store.direct_changes.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Work>(32);
         let worker = tokio::task::spawn_blocking(move || {
             let mut store = store;
@@ -1184,6 +1215,7 @@ impl StoreHandle {
                 worker_stopped,
                 group_gates,
                 treasury_changes,
+                direct_changes,
                 balance_observers: Default::default(),
                 funding_owner: Default::default(),
             },

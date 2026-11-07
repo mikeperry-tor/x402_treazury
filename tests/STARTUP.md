@@ -5,6 +5,13 @@ worker failure, dependent calls fail and close reports failure while a separate
 Store remains usable. The shared Store supervisor reports loss even without a
 new request; it does not stop independent listeners or restart financial work.
 
+`deployment::direct_swap_tests` separates wallet-independent catalog inspection
+and unsigned startup from signed history recovery. Temporary incompatible state
+must not affect inspection; actual binding restores only authenticated owned
+status, retains removed-listener background work and preserves identity/schema
+guards. The public-demo inventory fixture rewrites authored paths into temporary
+state before loading either profile, so it never opens operator wallet state.
+
 `tests/startup.rs` checks rolling replenishment, the default two-request catalog bound,
 failure and caller cancellation closing active requests, untouched queued sources,
 serial/parallel inventory equality, compatible alias sharing (concurrent and queued),

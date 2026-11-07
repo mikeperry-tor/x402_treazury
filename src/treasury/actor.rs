@@ -20,6 +20,7 @@ enum Command {
         oneshot::Sender<Result<super::recovery::RecoveryObservation>>,
     ),
     Refund(String, oneshot::Sender<Result<String>>),
+    DirectAddress(String, oneshot::Sender<Result<String>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(
         Box<PrepareRequest>,
@@ -61,6 +62,9 @@ impl TreasuryHandle {
     }
     pub async fn refund_address(&self, job: String) -> Result<String> {
         self.call(|reply| Command::Refund(job, reply)).await
+    }
+    pub async fn direct_address(&self, id: String) -> Result<String> {
+        self.call(|reply| Command::DirectAddress(id, reply)).await
     }
     pub async fn sync(&self) -> Result<()> {
         self.call(Command::Sync).await
@@ -225,6 +229,7 @@ impl Treasury {
                         Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, submission, stop, true).await); }
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
+                        Command::DirectAddress(id, reply) => { let _ = reply.send(self.direct_address(id).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, base, reply) => {
                             let operation = request.operation_id.clone();
@@ -755,6 +760,67 @@ mod tests {
             drop(store);
             task.await.unwrap().unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn direct_receive_address_survives_dropped_reply_and_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let treasury = Treasury::create(
+            dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
+        ).await.unwrap();
+        let treasury_id = treasury.status().await.unwrap().treasury_id;
+        let operation = treasury
+            .store
+            .call(|s| {
+                Ok(s.reserve_direct(
+                    "owner",
+                    "receive",
+                    "invoice",
+                    serde_json::json!({"amount":"100"}),
+                )?
+                .0
+                .id)
+            })
+            .await
+            .unwrap();
+        let before = treasury.store.call(|s| Ok(s.snapshot()?.0)).await.unwrap();
+        let (handle, commands) = channel();
+        let (send, abandoned) = oneshot::channel();
+        handle
+            .sender
+            .send(Command::DirectAddress(operation.clone(), send))
+            .await
+            .unwrap();
+        drop(abandoned);
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(treasury.run_commands(commands, NoSubmission, stop.clone()));
+        let address = handle.direct_address(operation.clone()).await.unwrap();
+        assert_shielded_refund(&address);
+        stop.cancel();
+        task.await.unwrap().unwrap();
+        drop(handle);
+        let mut restored = Treasury::open(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            treasury_id,
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.direct_address(operation).await.unwrap(), address);
+        assert_eq!(
+            restored.store.call(|s| Ok(s.snapshot()?.0)).await.unwrap(),
+            before + 1
+        );
+        assert!(
+            restored
+                .status()
+                .await
+                .unwrap()
+                .treasury_operations
+                .is_empty()
+        );
+        assert!(restored.status().await.unwrap().funding_jobs.is_empty());
     }
 
     #[tokio::test]

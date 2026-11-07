@@ -175,6 +175,9 @@ impl AddressNetwork {
     }
 }
 impl NearClient {
+    pub(crate) fn chain(&self) -> zingolib::config::ChainType {
+        self.address_network.chain()
+    }
     #[cfg(all(test, feature = "zcash-testutils"))]
     pub(crate) fn synthetic_at(origin: &str) -> Result<Self> {
         let mut client = Self::test_at(origin)?;
@@ -307,6 +310,33 @@ impl NearClient {
             &self.origin,
             None,
         )
+    }
+    /// Direct operations retain their own durable transport identity. Route policy
+    /// and response binding belong to the direct route module.
+    pub(crate) async fn direct_request(
+        &self,
+        identity: &crate::network::IsolationId,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+        query: &[(&str, &str)],
+    ) -> Result<Value> {
+        ensure!(
+            matches!(
+                (method.as_str(), path),
+                ("GET", "/v0/tokens" | "/v0/status") | ("POST", "/v0/quote")
+            ),
+            "unsupported direct swap endpoint"
+        );
+        let mut request = crate::network::global()
+            .http(identity, &self.origin, None)?
+            .request(method, format!("{}{path}", self.origin))
+            .headers(self.headers.clone())
+            .query(query);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        self.response(request).await
     }
     async fn response(&self, request: reqwest::RequestBuilder) -> Result<Value> {
         let mut response = request.send().await.map_err(|error| {

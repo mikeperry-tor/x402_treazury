@@ -873,6 +873,61 @@ and emits ERROR; their peers and financial owners keep running. Managed profiles
 retain durable payment uncertainty through shutdown;
 automatic NEAR funding is controlled by `funding.auto_fund`.
 
+## Direct swap control
+
+A listener can opt into receiving foreign assets as shielded ZEC. This capability
+requires `auth = true`, configured `[treasury]` and `[funding]`, but no Base wallet,
+source registration or Base RPC configuration:
+
+```toml
+[servers.toolbox.swap_control]
+receive = true
+send = false
+```
+
+Omitting `swap_control` grants no new financial authority. Persisted operations
+retain status on their original authenticated listener, including after table
+removal. Keeping the table with both flags false also declares status-only access.
+Background observation retains accepted work even after its listener is removed.
+Missing funding/SDK configuration can degrade recovery to saved Store status; it
+does not disable independent static or managed capabilities. Configuration and
+catalog inspection remain independent of wallet state and list declared controls.
+Serving infers only status access from history, including when an otherwise valid
+inspected deployment is subsequently bound. A history-only endpoint without API
+sources uses the serving loader; retain a disabled `swap_control` table when an
+explicit status-only inventory is needed during strict inspection. Unsigned
+loading and binding never recover treasury history.
+The authenticated listener ID owns requests; all users of its token share that
+principal. Existing `auto_fund`, raw calls and provider-management settings do not
+grant direct swap permission. First-party tools remain discoverable on endpoints
+using `discover_on_demand`. Unavailable SDK/source configuration disables new
+direct work while saved status remains available from the Store. Base outages
+affect managed Base service independently of direct receive availability.
+
+`payment_request_create` accepts a full source asset ID, its chain, an atomic decimal
+amount, a payer-owned source refund address and a caller request ID. It fixes the
+source amount; ZEC output and fees remain estimates/minimums until settlement.
+Use the returned deposit address and mandatory memo exactly once for that request.
+Stellar sources use the service's required `MEMO` deposit mode; other supported
+source routes default to `SIMPLE`, retaining any returned mandatory memo.
+A repeated request ID with identical terms returns the same saved operation;
+conflicting terms fail. An uncertain quote-creation response is retained without
+automatically creating another payment request. A fresh ID is a separate request.
+
+`swap_assets` lists current service metadata, not guaranteed route liquidity.
+`swap_status` reports the saved exact quote, provider outcome, and separate SDK
+wallet observations; attributable receipt can remain unknown. A local deadline
+does not prove nonpayment, revoke disclosed instructions, or manufacture a provider
+expiry. Disabled admissions and process restart preserve these bindings.
+
+The host owns 1Click credentials configured through the existing `[funding]` NEAR
+credential environment names. Direct quotes retain provider-added fee metadata
+(including default `appFees`); inspect returned amounts and fees. The existing
+slippage and quote-window settings apply. These tools use origin-chain deposits
+and destination-chain delivery, without a foreign-chain signer or NEAR wallet.
+Destination tag/message contracts outside the implemented service schema are
+rejected; symbols alone never select assets.
+
 ## Download and display limits
 
 Sources and reusable provider TOML files accept these positive byte limits:

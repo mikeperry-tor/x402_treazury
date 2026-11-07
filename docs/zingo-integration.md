@@ -393,6 +393,15 @@ refund UAs on our native-ZEC/Base-USDC route. These establish format compatibili
 not funded settlement. Refund receiver validation is separate from the
 transparent-only source-deposit contract; mixed UAs may select a transparent path.
 
+Direct receive invoices use the same all-shielded derivation and encrypted snapshot
+boundary, with their own persisted operation bindings. A public unfunded reverse
+Base-USDC-to-ZEC dry quote accepted the shielded-only UA on 2026-11-07. The pinned
+native bridge's `get_orchard_raw_with_memo` implements shielded withdrawals (and
+selects Ironwood after activation), separately from shielded refunds. This supports
+the implemented address contract despite the general chain guide's transparent-only
+statement; neither code nor dry quotes qualify funded delivery. Direct receiving
+keeps transparent discovery disabled and never falls back to a transparent receiver.
+
 ## Release descriptor inputs
 
 The upstream Git build derives its embedded descriptor from checkout revision,

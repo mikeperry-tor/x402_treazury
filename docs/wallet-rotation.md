@@ -37,6 +37,34 @@ Encrypted wallet snapshots and outgoing operations commit atomically; snapshot
 revision compare-and-swap prevents stale saves. Do not use upstream plaintext
 wallet saves or SDK quick-send helpers to bypass this owner and journal path.
 
+## Direct receive ownership
+
+Opt-in [direct swap control](configuration.md#direct-swap-control) stores invoices
+independently of managed Base wallets and initial funding claims. Its encrypted
+operation binds the authenticated listener, original caller request ID and terms,
+shielded receiver, exact provider quote, deposit address/memo and deadlines. A
+serialized SDK derivation commits its snapshot and receiver binding before quoting
+or disclosing instructions. Durable quote publication wakes its background owner from the Store, even when
+the foreground acknowledgment is lost. Its notification is separate from SDK scan
+demand, so provider observation cannot steal a treasury wakeup. Removing admission
+configuration or the listener retains accepted background observation; only the
+original authenticated owner can retrieve its status.
+
+Concurrent duplicate acceptance returns one operation;
+a lost creation response grants no automatic replacement quote.
+
+Provider status owns the swap outcome. SDK scanning owns received ZEC and current
+spendability, independently of optional receipt attribution. Disclosed unsettled
+receive requests request ordinary treasury scans at the existing consensus cadence;
+a successful provider observation requests a subsequent completed scan without
+requiring numerical agreement or a particular attributed note. The initial SDK
+scan checkpoint records its existing snapshot revision; a post-success scan must
+start after the snapshot revision observed when SUCCESS was saved. Progress or
+completion of an already-running scan cannot satisfy that demand. Late delivery and
+under/excess deposits retain provider facts without creating local expiry outcomes.
+No receive operation spends ZEC, allocates a Base wallet, reopens a claim, or enables
+transparent-address discovery.
+
 ## Funding limits and fees
 
 Reserve bounds describe nominal USDC sizing for new allocations; payment caps and
@@ -1115,6 +1143,7 @@ The observation scope, cadence and completion rule belong to the work requesting
 | Eligible retained-wallet retirement | Candidate-scoped canonical authorization pages and dual balance proof under the existing per-wallet owner, 60-second completion floor and error backoff | Retired or verified latest above tolerance finishes captured demand; confirmed above tolerance with latest low, valid unused authorization or transient failure retains work. Canonical-history changes retain reconstruction work; ineligible or unrecoverably corrupt original work stops locally |
 | Validated pending source or shielding transaction | Shared ZEC scans use the next block's SDK consensus spacing after successful completion; source operation observations use configured funding polling plus existing jitter, with independent error backoff. The funding scheduler owns current operations even after job completion; treasury maintenance owns jobless and archived pending originals | Bound NEAR SUCCESS closes swap source work; otherwise canonical confirmation or signed finite-expiry recovery resolves the source obligation, including after credit, disablement, removal or restart |
 | Submitted swap awaiting provider outcome, including archived attempts | Independent exact-operation NEAR status observations; successful completion schedules the next check after `funding.poll_seconds` plus existing jitter; failures retain their independent backoff with a 60-second floor | Validated SUCCESS/FAILED/REFUNDED stops that operation's status work; SUCCESS closes its own source work and fulfills the initial claim, without creating spendable funds or releasing a different disclosed original |
+| Disclosed direct receive invoice | Shared SDK scan on the existing consensus cadence; independent provider status reads on configured funding polling plus operation jitter, with 60–300-second error backoff | Terminal provider failure/refund stops demand; success requests one subsequent completed SDK scan, without attribution or amount equality. Owned status remains available after admission disablement. |
 | Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients and one eligible-retirement attempt | Report asset results and unresolved retirement work; create no background watcher and require serving to be stopped |
 | Completed-result publication or SDK reconstruction | Existing local owner retries after 60 seconds, independently of scan scheduling | Publish the identical result or reconstruct the SDK; this work alone requests no network scan or new calculation |
 | Fully funded idle serving without requested refresh or accepted observation work | No recurring Base or ZEC balance discovery | Relevant new work requests observation again |
