@@ -53,3 +53,29 @@ and agent-source discovery policy.
 - Prior rebase was mechanically patch-equivalent; this review assesses correctness
   and simplification independently. No post-upstream compiler/runtime pass is yet
   claimed. Audit, warranted corrections, final validation and cleanup remain.
+- R0 initial assessments and full assigned call-chain/history audits found no
+  material financial or protocol defect. A preliminary native-send scheduling
+  concern was withdrawn after the existing atomic index-clear/prepared-only
+  selection and its tests were traced; no correction is warranted there.
+- Selected R1 corrections, independently designed before implementation:
+  - CLI balance guide: `ce1d4399` changed reporting to Ironwood totals including
+    dust and unknown unsupported transparent fields. Correct the stale paragraph
+    without changing code or adding a test for prose.
+  - Local configuration diagnostics: Base preflight discards its error
+    (`8dfc6197`); adjacent NEAR/treasury catches (`085a6f5c`) incorrectly pass local
+    errors through a chain-verification classifier. Log only the safe top-level
+    repository-authored preflight error, never its chain or endpoint/header values.
+    Cover meaningful causes and secret-value absence with cheap local fixtures.
+    Do not introduce a new classifier or modify capability degradation.
+  - Unix SOCKS TLS validation: no implementation defect was established, but the
+    distinct new vendor HTTPS/ALPN branch has only plaintext fixture coverage.
+    Reuse authenticated SOCKS/TLS fixtures for trusted HTTPS/H2, untrusted-root
+    rejection, remote DNS/identity and missing-socket no-direct-fallback checks.
+    This belongs to upstream `72a04ce2`, so use a standalone regression commit.
+- Initial complexity `target/complexity-runs/20261107T195410Z-bd266a58` is complete:
+  486 files, 10,738 callables, no exclusions, baseline local main. All reviewers
+  verified their affected hashes. `prepare_with_observation`, `serve`, live receipt
+  recovery and owned Tor supervision warnings retain distinct ownership/validation
+  ordering; no compelling extraction or responsibility removal was found.
+  Exact plan `6616c132` passed independent review. Post-correction exact review and
+  selected compiler/runtime validation remain.
