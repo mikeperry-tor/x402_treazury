@@ -156,7 +156,7 @@ async fn qualify_preparation(case: PreparationCase) {
         operation_id: operation.clone(),
         pool_id: None,
 
-        deadline: now().unwrap() + 600,
+        deadline: Some(now().unwrap() + 600),
         recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
         amount_zatoshis: 50_000,
         max_fee_zatoshis: 120_000,

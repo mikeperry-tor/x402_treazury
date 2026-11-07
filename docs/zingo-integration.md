@@ -393,6 +393,22 @@ refund UAs on our native-ZEC/Base-USDC route. These establish format compatibili
 not funded settlement. Refund receiver validation is separate from the
 transparent-only source-deposit contract; mixed UAs may select a transparent path.
 
+Native direct sends accept shielded-only recipients and use the existing SDK
+proposal, accepted-input ownership, calculation and publication path. The direct
+recipient proof checks exactly one positive OVK-recovered payment across Sapling,
+Orchard and Ironwood against the accepted receiver and amount. The pinned backend's
+`OvkPolicy::Sender` uses an external OVK for payments and no OVK encryption for
+implicit change in all three pools; Pepper's outgoing inventory therefore excludes
+that change, including same-receiver self-payment change. Incoming note ownership
+does not authorize extra outgoing payments. The direct
+operation's optional total-debit authority checks principal plus the SDK's actual
+network fee at proposal and calculated-byte publication; it does not estimate the
+fee by subtracting the requested amount from an advisory balance. Existing
+treasury network-fee safeguards apply independently. Native preview uses local
+receiver validation without deriving an address, reserving inputs or requesting an
+SDK fee estimate. Foreign previews use an existing shielded receiver; executable
+foreign sends persist their own shielded refund binding before source preparation.
+
 Native direct receiving uses the same persisted shielded derivation, with a fresh
 UA per new request ID and no NEAR transport. Native receipt inspection matches
 actual note receiver components before projection and reuses the SDK's saved

@@ -10,6 +10,7 @@ use crate::rotation::{
     },
 };
 use anyhow::{Context, Result, ensure};
+use pepper_sync::wallet::{OutgoingNoteInterface, WalletTransaction};
 use zcash_keys::address::Address;
 use zcash_protocol::value::Zatoshis;
 use zingo_netutils::Indexer;
@@ -18,6 +19,124 @@ type DepositProposal = zcash_client_backend::proposal::Proposal<
     zcash_primitives::transaction::fees::zip317::FeeRule,
     zingolib::wallet::output::OutputRef,
 >;
+
+/// Native transfers use only the exact shielded receivers encoded by the caller.
+pub(crate) fn native_recipient(
+    chain: &zingolib::config::ChainType,
+    encoded: &str,
+) -> Result<Address> {
+    let address = Address::decode(chain, encoded).context("invalid native Zcash recipient")?;
+    ensure!(
+        match &address {
+            Address::Sapling(_) => true,
+            Address::Unified(ua) =>
+                ua.transparent().is_none() && (ua.sapling().is_some() || ua.orchard().is_some()),
+            _ => false,
+        },
+        "native Zcash recipient must be Sapling or a shielded-only unified address"
+    );
+    Ok(address)
+}
+
+fn validate_native_outputs(
+    record: &WalletTransaction,
+    recipient: &Address,
+    amount: u64,
+) -> Result<()> {
+    let sapling = record.outgoing_sapling_notes().iter().map(|note| {
+        let matches = match recipient {
+            Address::Sapling(address) => address.as_ref() == &note.recipient(),
+            Address::Unified(ua) => ua.sapling() == Some(&note.recipient()),
+            _ => false,
+        };
+        (matches, note.value())
+    });
+    let orchard = record.outgoing_orchard_notes().iter().map(|note| {
+        (
+            matches!(recipient, Address::Unified(ua) if ua.orchard() == Some(&note.recipient())),
+            note.value(),
+        )
+    });
+    // Ironwood uses Orchard receivers with its own output namespace.
+    let ironwood = record.outgoing_ironwood_notes().iter().map(|note| {
+        (
+            matches!(recipient, Address::Unified(ua) if ua.orchard() == Some(&note.recipient())),
+            note.value(),
+        )
+    });
+    // Pinned Sender OVK policy encrypts the requested payment, while implicit
+    // change has no OVK encryption in any shielded pool. Self-payment remains
+    // one outgoing payment even when incoming payment and change are identical.
+    let mut outputs = sapling
+        .chain(orchard)
+        .chain(ironwood)
+        .filter(|(_, value)| *value > 0);
+    let (matches, value) = outputs
+        .next()
+        .context("calculated native payment missing")?;
+    ensure!(
+        matches && value == amount && outputs.next().is_none(),
+        "calculated native recipient, amount or output count mismatch"
+    );
+    Ok(())
+}
+
+fn validate_calculated_payment(
+    record: &WalletTransaction,
+    recipient: &Address,
+    amount: Zatoshis,
+    fee: u64,
+) -> Result<()> {
+    let transaction = record.transaction();
+    let transparent_principal = match recipient {
+        Address::Transparent(receiver) => {
+            let transparent = transaction
+                .transparent_bundle()
+                .context("deposit output missing")?;
+            ensure!(
+                transparent.vin.is_empty() && transparent.vout.len() == 1,
+                "unexpected transparent inputs or outputs"
+            );
+            let output = &transparent.vout[0];
+            ensure!(
+                output.value() == amount && *output.script_pubkey() == receiver.script().into(),
+                "calculated recipient or amount mismatch"
+            );
+            amount.into_u64()
+        }
+        _ => {
+            ensure!(
+                transaction
+                    .transparent_bundle()
+                    .is_none_or(|bundle| bundle.vin.is_empty() && bundle.vout.is_empty()),
+                "native send contains transparent inputs or outputs"
+            );
+            validate_native_outputs(record, recipient, amount.into_u64())?;
+            0
+        }
+    };
+    let shielded_value = [
+        transaction
+            .sapling_bundle()
+            .map(|b| i64::from(*b.value_balance())),
+        transaction
+            .orchard_bundle()
+            .map(|b| i64::from(*b.value_balance())),
+        transaction
+            .ironwood_bundle()
+            .map(|b| i64::from(*b.value_balance())),
+    ]
+    .into_iter()
+    .flatten()
+    .try_fold(0i64, |total, value| total.checked_add(value))
+    .context("transaction value overflow")?;
+    ensure!(
+        shielded_value.checked_sub(i64::try_from(transparent_principal)?)
+            == Some(i64::try_from(fee)?),
+        "calculated fee mismatch"
+    );
+    Ok(())
+}
 
 fn calculate_deposit(
     wallet: &mut zingolib::wallet::LightWallet,
@@ -80,15 +199,19 @@ impl Treasury {
             "treasury requires reopen after failed preparation"
         );
         uuid::Uuid::parse_str(&request.operation_id).context("operation ID must be a UUID")?;
-        let recipient = Address::decode(&self.network.chain(), &request.recipient)
-            .context("invalid mainnet recipient")?;
-        let Address::Transparent(receiver) = recipient else {
-            anyhow::bail!(
-                "deposit requires a transparent mainnet address; TEX/unified/shielded recipients are unsupported"
+        let recipient = if request.deadline.is_none() {
+            native_recipient(&self.network.chain(), &request.recipient)?
+        } else {
+            let address = Address::decode(&self.network.chain(), &request.recipient)
+                .context("invalid source deposit recipient")?;
+            ensure!(
+                matches!(address, Address::Transparent(_)),
+                "source deposit requires a transparent address on the configured network"
             );
+            address
         };
         ensure!(
-            request.amount_zatoshis > 0 && request.max_input_zatoshis > request.amount_zatoshis,
+            request.amount_zatoshis > 0 && request.max_input_zatoshis >= request.amount_zatoshis,
             "invalid deposit limits"
         );
         let amount = Zatoshis::from_u64(request.amount_zatoshis)?;
@@ -102,6 +225,7 @@ impl Treasury {
         let deposit = request.recipient.clone();
         let binding_pool = request.pool_id.clone();
         let deadline = request.deadline;
+        let native = deadline.is_none();
         let observe_destination = base.is_some();
         let (treasury_id, observation_scope) = self
             .store
@@ -109,6 +233,16 @@ impl Treasury {
                 // Existing accepted ownership must be recognized before any
                 // binding/authority error can claim this request is unstarted.
                 s.require_unstarted_preparation(&id)?;
+                s.require_operation_preparation_available(&id)
+                    .map_err(|error| {
+                        error.context(crate::rotation::transaction::PreparationDeferred)
+                    })?;
+                if native {
+                    ensure!(
+                        s.direct_send_binding(&id)?.is_some(),
+                        "native send requires an accepted direct operation"
+                    );
+                }
                 s.require_preparation_binding(
                     &id,
                     binding_pool.as_deref(),
@@ -184,8 +318,9 @@ impl Treasury {
                     "indexer is not on mainnet"
                 );
             }
-            let instant = now()?;
-            ensure!(request.deadline > instant, "funding_deadline_expired");
+            if let Some(deadline) = request.deadline {
+                ensure!(deadline > now()?, "funding_deadline_expired");
+            }
             Ok(())
         }
         .await;
@@ -224,8 +359,11 @@ impl Treasury {
         self.calculate_owned(
             request.operation_id.clone(),
             move |s| {
-                ensure!(now()? < deadline, "funding_deadline_expired");
+                if let Some(deadline) = deadline {
+                    ensure!(now()? < deadline, "funding_deadline_expired");
+                }
                 s.require_preparation_authority(&id, authority.as_ref())?;
+                s.require_direct_source_cost(&id, principal, fee)?;
                 s.accept_preparation(&id, pool.as_deref(), authorized_cost, Some(calculation))?;
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(())
@@ -237,44 +375,13 @@ impl Treasury {
                     .get(id)
                     .context("calculated transaction missing")?;
                 let transaction = record.transaction();
-                let transparent = transaction
-                    .transparent_bundle()
-                    .context("deposit output missing")?;
-                ensure!(
-                    transparent.vin.is_empty() && transparent.vout.len() == 1,
-                    "unexpected transparent inputs or outputs"
-                );
-                let output = &transparent.vout[0];
-                ensure!(
-                    output.value() == amount && *output.script_pubkey() == receiver.script().into(),
-                    "calculated recipient or amount mismatch"
-                );
-                let shielded_value = [
-                    transaction
-                        .sapling_bundle()
-                        .map(|b| i64::from(*b.value_balance())),
-                    transaction
-                        .orchard_bundle()
-                        .map(|b| i64::from(*b.value_balance())),
-                    transaction
-                        .ironwood_bundle()
-                        .map(|b| i64::from(*b.value_balance())),
-                ]
-                .into_iter()
-                .flatten()
-                .try_fold(0i64, |total, value| total.checked_add(value))
-                .context("transaction value overflow")?;
-                ensure!(
-                    shielded_value.checked_sub(i64::try_from(request.amount_zatoshis)?)
-                        == Some(i64::try_from(fee)?),
-                    "calculated fee mismatch"
-                );
+                validate_calculated_payment(record, &recipient, amount, fee)?;
                 let facts = TransactionFacts {
                     txid: transaction.txid().to_string(),
                     expiry_height: transaction.expiry_height().into(),
                     amount_zatoshis: request.amount_zatoshis,
                     fee_zatoshis: fee,
-                    deadline: Some(request.deadline),
+                    deadline: request.deadline,
                 };
                 Ok(facts)
             },
@@ -710,7 +817,7 @@ mod tests {
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
 
-            deadline: now().unwrap() + 600,
+            deadline: Some(now().unwrap() + 600),
             recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
             amount_zatoshis: 50_000,
             max_fee_zatoshis: 20_000,
@@ -747,5 +854,124 @@ mod tests {
             .unwrap();
         restored.close().await.unwrap();
         server.abort();
+    }
+}
+
+#[cfg(all(test, feature = "zcash-testutils"))]
+mod native_output_tests {
+    use super::*;
+    use pepper_sync::wallet::{NoteInterface, OutputInterface};
+    use zingolib::testutils::synthetic_wallet::SyntheticWalletBuilder;
+
+    const SEED: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[tokio::test]
+    async fn orchard_self_payment_accepts_same_receiver_same_value_internal_change_and_proves_actual_fee()
+     {
+        for extra_payment in [false, true] {
+            let wallet = SyntheticWalletBuilder::new(SEED)
+                .activation_heights(
+                    zingolib::testutils::mock_activation_heights_deferring_nu6_3(1000),
+                )
+                .orchard_note(if extra_payment { 210_000 } else { 110_000 })
+                .build();
+            let chain = wallet.chain_type();
+            let spending: zcash_keys::keys::UnifiedSpendingKey = wallet
+                .unified_key_store
+                .get(&zip32::AccountId::ZERO)
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let receiver = spending
+                .to_unified_full_viewing_key()
+                .orchard()
+                .unwrap()
+                .address_at(0u32, zip32::Scope::Internal);
+            let encoded = zcash_keys::address::UnifiedAddress::from_receivers(
+                Some(receiver),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .encode(&chain);
+            let recipient = native_recipient(&chain, &encoded).unwrap();
+            let amount = Zatoshis::from_u64(50_000).unwrap();
+            let payment = || {
+                zcash_client_backend::zip321::Payment::new(
+                    encoded.parse().unwrap(),
+                    Some(amount),
+                    None,
+                    None,
+                    None,
+                    vec![],
+                )
+                .unwrap()
+            };
+            let payments = if extra_payment {
+                vec![payment(), payment()]
+            } else {
+                vec![payment()]
+            };
+            let mut client = zingolib::lightclient::LightClient::new_for_test(wallet).await;
+            let proposal = client
+                .propose_send(
+                    zcash_client_backend::zip321::TransactionRequest::new(payments).unwrap(),
+                    zip32::AccountId::ZERO,
+                )
+                .await
+                .unwrap();
+            let fee = zingolib::data::proposal::total_fee(&proposal)
+                .unwrap()
+                .into_u64();
+            {
+                let mut wallet = client.wallet().write().await;
+                let ids = calculate_deposit(&mut wallet, &proposal).unwrap();
+                assert_eq!(ids.len(), 1);
+                let record = wallet.wallet_transactions.get(&ids[0]).unwrap();
+                assert!(record.transaction().orchard_bundle().is_some());
+                assert!(record.transaction().ironwood_bundle().is_none());
+                assert_eq!(
+                    record
+                        .outgoing_orchard_notes()
+                        .iter()
+                        .filter(|note| note.recipient() == receiver && note.value() == 50_000)
+                        .count(),
+                    if extra_payment { 2 } else { 1 }
+                );
+                assert_eq!(
+                    record
+                        .orchard_notes()
+                        .iter()
+                        .filter(|note| note.note().recipient() == receiver
+                            && note.value() == 50_000
+                            && note.key_id().scope == zip32::Scope::Internal)
+                        .count(),
+                    2
+                );
+                if extra_payment {
+                    // Real Sender-encrypted extra payment to an owned receiver is
+                    // still unauthorized; incoming ownership cannot turn it into change.
+                    assert!(validate_calculated_payment(record, &recipient, amount, fee).is_err());
+                } else {
+                    assert_eq!(fee, 10_000);
+                    validate_calculated_payment(record, &recipient, amount, fee).unwrap();
+                    assert!(
+                        validate_calculated_payment(record, &recipient, amount, fee + 1).is_err()
+                    );
+                    assert!(
+                        validate_calculated_payment(
+                            record,
+                            &recipient,
+                            Zatoshis::from_u64(49_999).unwrap(),
+                            fee
+                        )
+                        .is_err()
+                    );
+                }
+            }
+            client.clear_proposal().await;
+        }
     }
 }

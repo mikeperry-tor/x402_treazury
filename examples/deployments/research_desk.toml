@@ -1273,5 +1273,14 @@ provider_management_local = true
 provider_management_remote = true
 remote_provider_directories = ["coinbase", "x402-list"]
 raw_url_calls = true
-instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery."
-discovery_search_tool_instructions_text = "Search APIs registered on this endpoint. Use provider-management tools to find and add providers, or raw-call tools for documented URLs; this search covers currently loaded APIs."
+instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery. Optional first-party Zcash payment tools appear when the operator enables them: receive or send native shielded ZEC, or swap foreign assets. Search the available tools before planning a payment."
+discovery_search_tool_instructions_text = "Search APIs registered on this endpoint and any enabled first-party tools. Use provider-management tools to find and add providers, or raw-call tools for documented URLs. Optional payment keywords: Zcash, ZEC, shielded payment, receive, payment request, send, payout, swap, preview, status. Availability follows operator configuration."
+
+# Optional treasury tools: enable each direction deliberately, then restart.
+# Native ZEC needs [treasury]; foreign asset swaps additionally need [funding].
+# Provider registration and the global Base wallet do not grant payout authority.
+# [servers.toolbox.swap_control]
+# receive = false
+# send = false
+# max_send_zec = "0.05" # Optional per-send principal plus actual network fee.
+# Omit max_send_zec or use "none" for no toolset total-debit preference.

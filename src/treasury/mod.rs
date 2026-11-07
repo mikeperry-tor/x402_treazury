@@ -22,6 +22,7 @@ pub use refunds::NoShieldingRequired;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
 mod send;
+pub(crate) use send::native_recipient;
 mod server;
 mod sync_reuse;
 use crate::rotation::store::TreasuryNetwork;
@@ -462,6 +463,27 @@ impl Treasury {
             .await?;
         self.healthy = true;
         Ok(address)
+    }
+    /// Existing receiver only: dry previews never derive addresses or save state.
+    pub async fn preview_address(&self) -> Result<String> {
+        ensure!(self.healthy, "treasury requires reopen");
+        let client = self.client.as_ref().context("treasury unavailable")?;
+        let addresses: serde_json::Value =
+            serde_json::from_str(&client.unified_addresses_json().await.to_string())?;
+        for entry in addresses
+            .as_array()
+            .context("invalid treasury address list")?
+        {
+            if let Some(address) = entry
+                .get("encoded_address")
+                .and_then(serde_json::Value::as_str)
+                && crate::rotation::near::require_shielded_refund(&self.network.chain(), address)
+                    .is_ok()
+            {
+                return Ok(address.to_owned());
+            }
+        }
+        anyhow::bail!("treasury has no existing shielded preview receiver")
     }
     pub async fn native_receipt(&mut self, id: String) -> Result<serde_json::Value> {
         self.drain_calculation().await;

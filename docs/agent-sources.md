@@ -424,10 +424,14 @@ not removed by API filters.
 
 Direct financial control has separate listener capabilities under
 [`swap_control`](configuration.md#direct-swap-control). Its first-party asset,
-payment-request and status tools share advertising, search and dispatch policy.
-Native ZEC requests use fresh shielded receivers without NEAR; foreign routes use
-the host's optional NEAR capability. Status can recover an operation by original
-kind/request ID after a lost response.
+payment-request, preview, send and status tools share advertising, search and
+dispatch policy. `receive` and `send` independently enable admissions; previews
+require send permission and grant no payment authority. Native shielded ZEC
+receiving and sending use no NEAR call; foreign routes use the host's optional
+NEAR capability. Send requests bind the exact destination terms and caller
+request ID. Foreign sends also require caller ZEC-principal authority; the
+operator's optional total-debit preference includes the actual network fee.
+Status can recover an operation by original kind/request ID after a lost response.
 They require no provider registration and cannot select another listener owner or
 treasury. Disabling admission retains owned status; API filters do not confer
 financial authority.
@@ -444,6 +448,11 @@ financial authority.
 | `x402_treazury_raw_call` | Raw URL permission: required `method`, public HTTPS `url`; optional `query`, `headers` and JSON `body`. |
 | `x402_treazury_tools_search` | Either management capability or on-demand discovery: optional `query`, `source_name`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Same exposure as tool search: required readable `tool_id` and `arguments`. |
+| `x402_treazury_swap_assets` | Either direct capability: optional `query`, `offset`, `limit`; native ZEC is local, with explicit foreign-list availability. |
+| `x402_treazury_payment_request_create` | Receive capability: `asset_id`, `chain`, atomic `amount`, `request_id`; foreign assets additionally require payer-owned `refund_address`. |
+| `x402_treazury_swap_preview` | Send capability: destination `asset_id`, `chain`, atomic `amount`, `recipient`; dry result grants no execution authority. |
+| `x402_treazury_swap_send` | Send capability: destination terms and `request_id`; foreign sends require `max_source_zatoshis`, optional for native ZEC. |
+| `x402_treazury_swap_status` | Owned saved work: either `operation_id`, or `kind` plus original `request_id`; remains available after admission disablement. |
 
 Only enabled tools and permitted follow-ups are advertised. Neither authored
 endpoint instruction text nor API tool filters grant management authority.

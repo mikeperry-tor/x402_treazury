@@ -18,7 +18,10 @@ pub(crate) mod test_support;
 pub(crate) mod test_vfs;
 mod treasury_observation;
 pub(crate) use direct_swap::direct_operation_owners;
-pub use direct_swap::{DirectOperation, DirectRoute};
+pub use direct_swap::{
+    DirectOperation, DirectRoute, DirectSendAction, DirectSendAuthority, DirectSendBinding,
+    DirectSourceCondition,
+};
 mod treasury_reads;
 #[cfg(test)]
 mod worker_tests;
@@ -812,6 +815,10 @@ impl Store {
         // This completes the same already accepted calculation. A later pause,
         // permit expiry or destination credit cannot discard its signed result.
         let intent = self.preparation_intent(id)?;
+        if let Some(facts) = facts.as_ref() {
+            self.require_direct_source_cost(id, facts.amount_zatoshis, facts.fee_zatoshis)?;
+        }
+        let direct_success = self.direct_source_succeeded(id)?;
         let next = expected_revision
             .checked_add(1)
             .context("snapshot revision overflow")?;
@@ -839,7 +846,7 @@ impl Store {
         tx.execute("INSERT INTO snapshots VALUES (?1,?2)", params![next, snap])?;
         // Settlement may arrive while the accepted SDK calculation is running.
         // Retain its exact result, but never disclose it after the swap succeeded.
-        let fulfilled = funding::claim_succeeded(&tx, id)?;
+        let fulfilled = funding::claim_succeeded(&tx, id)? || direct_success;
         ensure!(tx.execute(
             "INSERT INTO outgoing(id,state,raw,revision,preparation) SELECT ?1,?4,?2,?3,preparation FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL",
             params![id, encrypted, next, if fulfilled { "RESOLVED" } else { "PREPARED" }],
@@ -866,6 +873,7 @@ impl Store {
             tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
         }
         tx.commit()?;
+        self.direct_changes.notify_one();
         Ok(next)
     }
     /// Proof for the pre-preparation path only; historical effects forbid deferral.
@@ -1858,7 +1866,7 @@ impl Store {
     ) -> Result<i64> {
         ensure!(self.operation_pending(id)?, "transaction is not pending");
         ensure!(
-            !funding::provider_succeeded(&self.db, id)?,
+            !funding::provider_succeeded(&self.db, id)? && !self.direct_source_succeeded(id)?,
             "swap already succeeded; source submission is closed"
         );
         let operation = self.operation(id)?;
@@ -1882,8 +1890,8 @@ impl Store {
             "explicit_rebroadcast_required"
         );
         if operation.attempts == 0 {
-            self.funding_restriction
-                .require_new_funding("source_submission")?;
+            self.require_direct_first_submission(id)?;
+            self.require_operation_source_policy(id, "source_submission")?;
             let job: Option<String> = self
                 .db
                 .query_row(

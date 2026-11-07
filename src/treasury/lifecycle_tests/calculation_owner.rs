@@ -130,7 +130,7 @@ async fn prepare(
                     amount_zatoshis: 50_000,
                     max_fee_zatoshis: 50_000,
                     max_input_zatoshis: 100_000,
-                    deadline: now()? + 600,
+                    deadline: Some(now()? + 600),
                 })
                 .await
         }
@@ -791,7 +791,7 @@ async fn canceled_unsigned_preflight_leaves_unstarted_intent_and_next_selection_
         amount_zatoshis: 50_000,
         max_fee_zatoshis: 50_000,
         max_input_zatoshis: 100_000,
-        deadline: now().unwrap() + 600,
+        deadline: Some(now().unwrap() + 600),
     };
     let revision = owner.revision;
     net.chain.write().await.faults.inject(

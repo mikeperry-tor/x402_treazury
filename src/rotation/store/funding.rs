@@ -364,8 +364,15 @@ impl Store {
 
     /// NEAR owns settlement of this exact accepted swap, not SDK source history.
     pub(crate) fn funding_operation_fulfilled(&mut self, operation: &str) -> Result<bool> {
+        let direct_success = self.direct_source_succeeded(operation)?;
         let tx = self.db.transaction()?;
-        let fulfilled = close_fulfilled_source(&tx, operation)?;
+        if direct_success {
+            tx.execute(
+                "UPDATE outgoing SET state='RESOLVED' WHERE id=?1",
+                [operation],
+            )?;
+        }
+        let fulfilled = close_fulfilled_source(&tx, operation)? || direct_success;
         tx.commit()?;
         Ok(fulfilled)
     }
@@ -459,8 +466,9 @@ impl Store {
         pool: Option<&str>,
         recipient: &str,
         input: u64,
-        deadline: u64,
+        deadline: Option<u64>,
     ) -> Result<()> {
+        self.require_direct_preparation_binding(operation, pool, recipient, input, deadline)?;
         let binding: Option<(String,String)> = self.db.query_row(
             "SELECT j.job_id,w.pool_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id JOIN wallets w ON w.id=f.wallet_id WHERE j.operation_id=?1",
             [operation], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
@@ -474,7 +482,7 @@ impl Store {
             ensure!(
                 quote.deposit.as_deref() == Some(recipient)
                     && quote.input == input
-                    && quote.deadline == deadline,
+                    && Some(quote.deadline) == deadline,
                 "persisted funding source binding mismatch"
             );
             // This boundary follows require_unstarted_preparation: accepted work
@@ -2483,14 +2491,20 @@ mod completion_tests {
             .save_funding_quote(&job.id, &serde_json::to_vec(&quote).unwrap())
             .unwrap();
         store
-            .require_preparation_binding(&job.operation_id, Some(&job.pool_id), "deposit", 50, 1000)
+            .require_preparation_binding(
+                &job.operation_id,
+                Some(&job.pool_id),
+                "deposit",
+                50,
+                Some(1000),
+            )
             .unwrap();
         for (pool, deposit, input, deadline) in [
-            (None, "deposit", 50, 1000),
-            (Some("other-pool"), "deposit", 50, 1000),
-            (Some(job.pool_id.as_str()), "other-deposit", 50, 1000),
-            (Some(job.pool_id.as_str()), "deposit", 51, 1000),
-            (Some(job.pool_id.as_str()), "deposit", 50, 1001),
+            (None, "deposit", 50, Some(1000)),
+            (Some("other-pool"), "deposit", 50, Some(1000)),
+            (Some(job.pool_id.as_str()), "other-deposit", 50, Some(1000)),
+            (Some(job.pool_id.as_str()), "deposit", 51, Some(1000)),
+            (Some(job.pool_id.as_str()), "deposit", 50, Some(1001)),
         ] {
             assert!(
                 store
@@ -2541,7 +2555,7 @@ mod completion_tests {
                         Some(&job.pool_id),
                         "deposit",
                         50,
-                        1000
+                        Some(1000)
                     )
                     .unwrap_err()
                     .to_string()

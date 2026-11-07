@@ -367,7 +367,7 @@ async fn run() -> Result<()> {
             operation_id: op.clone(),
             pool_id: None,
 
-            deadline: now()? + 3600,
+            deadline: Some(now()? + 3600),
             recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
             amount_zatoshis: 50_000,
             max_fee_zatoshis: 50_000,
@@ -597,7 +597,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
                 operation_id: job.operation_id.clone(),
                 pool_id: Some(job.pool_id),
 
-                deadline,
+                deadline: Some(deadline),
                 recipient: addresses[n].clone(),
                 amount_zatoshis: 50_000,
                 max_fee_zatoshis: 50_000,
@@ -880,7 +880,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
             operation_id: op.clone(),
             pool_id: None,
 
-            deadline: now()? + 3600,
+            deadline: Some(now()? + 3600),
             recipient: "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8".into(),
             amount_zatoshis: 50_000,
             max_fee_zatoshis: 50_000,

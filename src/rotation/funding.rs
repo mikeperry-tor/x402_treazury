@@ -699,7 +699,7 @@ impl FundingBackend for Backend {
                     operation_id: job.operation_id.clone(),
                     pool_id: Some(job.pool_id.clone()),
 
-                    deadline: checked.deadline,
+                    deadline: Some(checked.deadline),
                     recipient: checked.deposit.context("missing deposit")?,
                     amount_zatoshis: checked.input,
                     max_fee_zatoshis: self.max_network_fee,

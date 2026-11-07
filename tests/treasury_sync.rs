@@ -479,7 +479,7 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
                 operation_id: uuid::Uuid::new_v4().to_string(),
                 pool_id: None,
 
-                deadline: x402_treazury::rotation::base::now().unwrap() + 600,
+                deadline: Some(x402_treazury::rotation::base::now().unwrap() + 600),
                 recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
                 amount_zatoshis: 50_000,
                 max_fee_zatoshis: 20_000,
@@ -1230,7 +1230,7 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
 
-            deadline: x402_treazury::rotation::base::now().unwrap() + 1000,
+            deadline: Some(x402_treazury::rotation::base::now().unwrap() + 1000),
             recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
             amount_zatoshis: 50_000,
             max_fee_zatoshis: 20_000,
@@ -1799,7 +1799,7 @@ async fn actor_startup_is_finite_and_source_commands_share_its_success_or_failur
                     managed_funding: None,
                     operation_id: uuid::Uuid::new_v4().to_string(),
                     pool_id: None,
-                    deadline: x402_treazury::rotation::base::now().unwrap() + 1000,
+                    deadline: Some(x402_treazury::rotation::base::now().unwrap() + 1000),
                     recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
                     amount_zatoshis: 50_000,
                     max_fee_zatoshis: 20_000,

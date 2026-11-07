@@ -102,7 +102,8 @@ pub struct PrepareRequest {
     pub operation_id: String,
     pub pool_id: Option<String>,
 
-    pub deadline: u64,
+    /// Provider authority window; native shielded sends have no provider deadline.
+    pub deadline: Option<u64>,
     pub recipient: String,
     pub amount_zatoshis: u64,
     pub max_fee_zatoshis: u64,
@@ -125,11 +126,14 @@ impl PreparedTransaction {
             "transaction is not pending"
         );
         let facts = store.operation_facts(operation_id)?;
-        let identity = store
-            .operation_recipient(operation_id)?
-            .as_deref()
-            .map(crate::network::IsolationId::evm)
-            .transpose()?;
+        let identity = match store.direct_operation_identity(operation_id)? {
+            Some(identity) => Some(identity),
+            None => store
+                .operation_recipient(operation_id)?
+                .as_deref()
+                .map(crate::network::IsolationId::evm)
+                .transpose()?,
+        };
         let identity = match identity {
             Some(identity) => Some(identity),
             None => store.shielding_identity(operation_id, facts.as_ref())?,

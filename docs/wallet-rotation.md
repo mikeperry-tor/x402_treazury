@@ -87,6 +87,40 @@ existing scope. Direct lookup of an unreadable operation still fails explicitly.
 No receive operation spends ZEC, allocates a Base wallet, reopens a claim, or enables
 transparent-address discovery.
 
+### Direct send ownership
+
+Native shielded sends and foreign exact-output swaps use the same serialized
+treasury owner, accepted inputs, encrypted snapshots and signed-byte publication
+as managed funding. Each operation binds the authenticated listener, original
+request ID and exact destination terms. Native sends have no provider quote or
+deadline. Foreign sends retain the executable quote's exact principal, deposit
+address/memo, refund receiver and deadline before source preparation; the caller's
+`max_source_zatoshis` bounds quoted principal.
+
+The optional listener `max_send_zec` preference bounds principal plus actual
+network fee only for direct sends. Omission or `"none"` is unlimited; zero denies
+new acceptance. The original total-debit and existing treasury fee authority are
+saved with acceptance, checked against the SDK proposal and actual calculated
+transaction, and retained through restart. Tightening configuration does not
+rewrite accepted authority. Managed funding and shielding do not inherit this
+preference. SDK spendability and shared accepted-input ownership remain the
+capital and concurrency authorities; no additional reserve ledger is created.
+
+Dry previews reserve no inputs or payment authority. Native preview validates
+amount and receiver locally without an SDK proposal or fee-estimation command;
+actual fee is known during preparation. Foreign preview uses a dry quote and
+existing shielded refund receiver. Provider waits remain outside the SDK owner.
+
+Source preparation/submission and provider observation retain independent facts
+and progress. Native completion follows the treasury transaction's blockchain
+state; depositing ZEC for a foreign swap does not prove delivery of the requested
+foreign output. Missing optional provider evidence does not invalidate a proven
+source result. Disconnection, capability or listener removal, and restart retain
+accepted work and its original transport identity. Recovery reuses the accepted
+transaction journal and original bytes under existing canonical rules; uncertain
+submission, expiry or refund never authorizes an automatic replacement swap or
+deposit. Status access remains scoped to the original authenticated listener.
+
 ## Funding limits and fees
 
 Reserve bounds describe nominal USDC sizing for new allocations; payment caps and

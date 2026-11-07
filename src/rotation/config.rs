@@ -378,6 +378,12 @@ pub fn positive_usdc(s: &str) -> Result<U256> {
     Ok(n.unwrap())
 }
 pub fn zatoshis(s: &str) -> Result<i64> {
+    let amount = zatoshis_allow_zero(s)?;
+    ensure!(amount > 0, "ZEC limit out of range");
+    Ok(amount)
+}
+/// Amount ceilings may be zero; existing fee and reserve settings remain positive.
+pub(crate) fn zatoshis_allow_zero(s: &str) -> Result<i64> {
     let (whole, fraction) = s.split_once('.').unwrap_or((s, ""));
     ensure!(
         !whole.is_empty()
@@ -387,10 +393,7 @@ pub fn zatoshis(s: &str) -> Result<i64> {
         "invalid ZEC decimal"
     );
     let n: i64 = format!("{whole}{fraction:0<8}").parse()?;
-    ensure!(
-        n > 0 && n <= 2_100_000_000_000_000,
-        "ZEC limit out of range"
-    );
+    ensure!(n <= 2_100_000_000_000_000, "ZEC limit out of range");
     Ok(n)
 }
 fn env_name(s: &str) -> Result<()> {

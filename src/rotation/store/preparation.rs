@@ -79,8 +79,26 @@ impl Store {
             !funding::claim_succeeded(&self.db, id)?,
             "swap already succeeded; new source calculation is closed"
         );
-        self.funding_restriction
-            .require_new_funding("source_preparation_start")?;
+        self.require_operation_source_policy(id, "source_preparation_start")?;
+        if let Some(binding) = self.direct_send_binding(id)? {
+            ensure!(
+                intent.pool.is_none(),
+                "direct source cannot use a managed pool"
+            );
+            let calculation = intent
+                .calculation
+                .as_ref()
+                .context("direct source input manifest is required")?;
+            ensure!(
+                calculation.destination == binding.recipient && !calculation.inputs.is_empty(),
+                "direct source input binding mismatch"
+            );
+            let fee = intent
+                .cost_zatoshis
+                .checked_sub(binding.principal)
+                .context("direct source cost below principal")?;
+            self.require_direct_source_cost(id, binding.principal, fee)?;
+        }
         let job:Option<(String,String)>=self.db.query_row("SELECT j.job_id,f.pool_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.operation_id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((job, owner_pool)) = job {
             let archived: bool = self.db.query_row(
@@ -114,10 +132,20 @@ impl Store {
             &format!("v1:{}:{}:preparation:{id}", self.id, self.network.name()),
             &serde_json::to_vec(&intent)?,
         )?;
+        let native_direct = self.direct_operation_identity(id)?.is_some()
+            && self
+                .direct_send_binding(id)?
+                .is_some_and(|binding| binding.deadline.is_none());
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO operation_network(operation_id,preparation) VALUES(?1,?2) ON CONFLICT(operation_id) DO UPDATE SET preparation=excluded.preparation",params![id,bytes])?;
+        if native_direct {
+            tx.execute(
+                "UPDATE direct_operations SET observe_receive=0 WHERE id=?1 AND kind='send'",
+                [id],
+            )?;
+        }
         tx.execute(
             "UPDATE funding_progress SET phase='\"PREPARING\"',last_error=NULL WHERE operation_id=?1",
             [id],

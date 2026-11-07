@@ -21,6 +21,7 @@ enum Command {
     ),
     Refund(String, oneshot::Sender<Result<String>>),
     DirectAddress(String, oneshot::Sender<Result<String>>),
+    PreviewAddress(oneshot::Sender<Result<String>>),
     NativeReceipt(String, oneshot::Sender<Result<serde_json::Value>>),
     Sync(oneshot::Sender<Result<()>>),
     Prepare(
@@ -66,6 +67,9 @@ impl TreasuryHandle {
     }
     pub async fn direct_address(&self, id: String) -> Result<String> {
         self.call(|reply| Command::DirectAddress(id, reply)).await
+    }
+    pub async fn preview_address(&self) -> Result<String> {
+        self.call(Command::PreviewAddress).await
     }
     pub async fn native_receipt(&self, id: String) -> Result<serde_json::Value> {
         self.call(|reply| Command::NativeReceipt(id, reply)).await
@@ -234,6 +238,7 @@ impl Treasury {
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::DirectAddress(id, reply) => { let _ = reply.send(self.direct_address(id).await); }
+                        Command::PreviewAddress(reply) => { let _ = reply.send(self.preview_address().await); }
                         Command::NativeReceipt(id, reply) => { let _ = reply.send(self.native_receipt(id).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, base, reply) => {
@@ -805,6 +810,8 @@ mod tests {
         drop(abandoned);
         let stop = CancellationToken::new();
         let task = tokio::spawn(treasury.run_commands(commands, NoSubmission, stop.clone()));
+        let preview = handle.preview_address().await.unwrap();
+        assert_shielded_refund(&preview);
         let address = handle.direct_address(operation.clone()).await.unwrap();
         assert_shielded_refund(&address);
         stop.cancel();
@@ -1011,7 +1018,7 @@ mod tests {
             operation_id: uuid::Uuid::new_v4().to_string(),
             pool_id: None,
 
-            deadline: u64::MAX,
+            deadline: Some(u64::MAX),
             recipient: "not-used-before-sync".into(),
             amount_zatoshis: 1,
             max_fee_zatoshis: 10000,
@@ -1099,7 +1106,7 @@ mod tests {
                     }),
                     operation_id: job.operation_id.clone(),
                     pool_id: Some(pool),
-                    deadline: u64::MAX,
+                    deadline: Some(u64::MAX),
                     recipient: recipient.into(),
                     amount_zatoshis: 1,
                     max_fee_zatoshis: 10000,

@@ -1,6 +1,8 @@
 //! Durable original direct-swap terms; no remote I/O or spending occurs here.
 use super::*;
 use serde_json::Value;
+mod send;
+pub use send::{DirectSendAction, DirectSendAuthority, DirectSendBinding, DirectSourceCondition};
 
 const EXTENSION: &str = "CREATE TABLE IF NOT EXISTS direct_operations(id TEXT PRIMARY KEY,owner TEXT NOT NULL,kind TEXT NOT NULL,request_id TEXT NOT NULL,payload BLOB NOT NULL,observe_receive INTEGER NOT NULL DEFAULT 0,UNIQUE(owner,kind,request_id)); CREATE INDEX IF NOT EXISTS direct_receive_demand ON direct_operations(id) WHERE observe_receive=1;";
 pub(super) fn initialize(db: &Connection) -> Result<()> {
@@ -54,6 +56,10 @@ pub struct DirectOperation {
     pub kind: String,
     pub request_id: String,
     pub terms: Value,
+    #[serde(default)]
+    pub authority: Option<DirectSendAuthority>,
+    #[serde(default)]
+    pub source_error: Option<String>,
     pub address: Option<String>,
     pub quote: Option<Value>,
     pub status: Option<Value>,
@@ -194,6 +200,8 @@ impl Store {
             kind: kind.into(),
             request_id: request_id.into(),
             terms,
+            authority: None,
+            source_error: None,
             address: None,
             quote: None,
             status: None,
@@ -219,11 +227,20 @@ impl Store {
             &serde_json::to_vec(record)?,
         )?;
         let terminal = matches!(provider_state(record), Some("FAILED" | "REFUNDED"));
-        let observe = record.kind == "receive"
-            && match record.route {
-                DirectRoute::Near => record.quote.is_some() && !terminal,
-                DirectRoute::Native => record.address.is_some() && record.state != "confirmed",
-            };
+        // Legacy column name now indexes both receive and direct source work.
+        let observe = if record.kind == "send" {
+            record.authority.is_some()
+                && !matches!(
+                    provider_state(record),
+                    Some("SUCCESS" | "FAILED" | "REFUNDED")
+                )
+        } else {
+            record.kind == "receive"
+                && match record.route {
+                    DirectRoute::Near => record.quote.is_some() && !terminal,
+                    DirectRoute::Native => record.address.is_some() && record.state != "confirmed",
+                }
+        };
         self.db.execute(
             "UPDATE direct_operations SET payload=?2,observe_receive=?3 WHERE id=?1",
             params![record.id, payload, observe],
@@ -282,7 +299,11 @@ impl Store {
                 .insert("after_snapshot_revision".into(), baseline.into());
         }
         record.status = Some(status);
-        self.save_direct(&record)
+        self.save_direct(&record)?;
+        if self.direct_source_succeeded(id)? {
+            self.funding_operation_fulfilled(id)?;
+        }
+        Ok(())
     }
     pub fn save_native_status(&mut self, id: &str, receipt: Value) -> Result<()> {
         let mut record = self.direct_by_id(id)?;
@@ -340,16 +361,22 @@ impl Store {
     pub fn direct_pending(&self) -> Result<Vec<DirectOperation>> {
         let mut statement = self
             .db
-            .prepare("SELECT id FROM direct_operations WHERE observe_receive=1 OR kind='send'")?;
+            .prepare("SELECT id FROM direct_operations WHERE observe_receive=1 UNION SELECT d.id FROM outgoing x JOIN treasury_operations t ON t.id=x.id JOIN direct_operations d ON d.id=x.id WHERE x.state='PREPARED' AND t.submission='PREPARED' AND t.attempts=0 AND d.kind='send'")?;
         let mut records = Vec::new();
         for id in statement.query_map([], |row| row.get::<_, String>(0))? {
             let Some(record) = self.direct_inventory_record(&id?)? else {
                 continue;
             };
-            if (record.route == DirectRoute::Native
-                && record.kind == "receive"
-                && record.address.is_some()
-                && record.state != "confirmed")
+            if (record.kind == "send"
+                && record.authority.is_some()
+                && !matches!(
+                    provider_state(&record),
+                    Some("SUCCESS" | "FAILED" | "REFUNDED")
+                ))
+                || (record.route == DirectRoute::Native
+                    && record.kind == "receive"
+                    && record.address.is_some()
+                    && record.state != "confirmed")
                 || (record.route == DirectRoute::Near
                     && record.quote.is_some()
                     && !matches!(
@@ -365,9 +392,9 @@ impl Store {
     pub(super) fn direct_receive_needed(&self) -> Result<bool> {
         let sync = self.treasury_sync_state()?.sync;
         let ready = sync.as_ref().filter(|sync| sync.phase == SyncPhase::Ready);
-        let mut statement = self
-            .db
-            .prepare("SELECT id FROM direct_operations WHERE observe_receive=1")?;
+        let mut statement = self.db.prepare(
+            "SELECT id FROM direct_operations WHERE observe_receive=1 AND kind='receive'",
+        )?;
         let ids = statement
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;

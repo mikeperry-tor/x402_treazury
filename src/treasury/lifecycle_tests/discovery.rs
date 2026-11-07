@@ -234,7 +234,7 @@ async fn check_preparation_probes(actor: bool, matching_chain: bool) {
                 Some(&job.pool_id),
                 DEPOSIT,
                 50_000,
-                deadline,
+                Some(deadline),
             )?;
             let facts = s.funding_facts(&job.id, &job.operation_id)?;
             assert!(!facts.preparation_accepted && !facts.source_pending);

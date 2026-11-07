@@ -883,7 +883,7 @@ Foreign routes use the optional `[funding]` NEAR settings:
 ```toml
 [servers.toolbox.swap_control]
 receive = true
-send = false
+send = true
 # max_send_zec = "0.05" # Optional per-send total debit; omit or use "none" for no limit.
 ```
 
@@ -902,8 +902,9 @@ loading and binding never recover treasury history.
 The authenticated listener ID owns requests; all users of its token share that
 principal. Existing `auto_fund`, raw calls and provider-management settings do not
 grant direct swap permission. First-party tools remain discoverable on endpoints
-using `discover_on_demand`. Unavailable SDK/source configuration disables new
-direct work while saved status remains available from the Store. Base outages
+using `discover_on_demand`. Unavailable SDK or treasury transport configuration disables new direct work
+while saved status remains available from the Store. Unavailable NEAR settings
+affect foreign routes; native Zcash work remains available. Base outages
 affect managed Base service independently of direct receive availability.
 
 `payment_request_create` accepts a full source asset ID, its chain, an atomic decimal
@@ -941,10 +942,44 @@ separate SDK wallet observations; attributable receipt can remain unknown. A loc
 does not prove nonpayment, revoke disclosed instructions, or manufacture a provider
 expiry. Disabled admissions and process restart preserve these bindings.
 
-Native request addresses and receipts are independent of NEAR configuration.
-Direct sends have a separate optional `max_send_zec` total-debit preference; it
-never changes managed funding, shielding or other ZEC usage. Quoted `"none"` and
-omission mean unlimited; TOML has no null literal. No new fee preference is added.
+`swap_preview` accepts a destination `asset_id`, `chain`, positive atomic
+`amount` and `recipient`. It returns `executable = false` and creates no payment
+authority or input reservation. Native preview validates the shielded recipient
+locally and reports principal, the operator's total-debit preference and the
+existing treasury network-fee ceiling. It does not enqueue an SDK fee estimate;
+the actual fee remains unknown until preparation. Foreign preview obtains a dry
+exact-output quote using an existing shielded refund receiver, without deriving a
+new address or creating an executable quote.
+
+`swap_send` accepts the same destination terms and a caller `request_id`. Native
+ZEC uses the exact principal and a shielded-only recipient, with no NEAR request
+or provider deadline. Optional `max_source_zatoshis` must cover that principal if
+supplied. Foreign sends require `max_source_zatoshis`, a positive decimal string
+limiting the executable quote's ZEC principal. The provider fixes the requested
+foreign output amount; its exact input, deposit address/memo, refund receiver and
+deadline are saved before source preparation. Destination memos/tags are
+unsupported. A source deposit does not establish destination delivery: status
+reports treasury transaction facts and provider progress separately.
+
+Direct sends have a separate optional `swap_control.max_send_zec` preference for
+principal plus the **actual** Zcash network fee. Omission or the quoted string
+`"none"` means unlimited; TOML has no null literal. `"0"` denies acceptance of new
+sends. A finite decimal limit is checked against the SDK proposal and calculated
+transaction's real total debit, rather than principal plus a maximum fee estimate.
+The accepted operation persistently retains its original authority; later
+configuration changes do not cancel it or grant replacement payment authority.
+This preference applies only to this toolset's outgoing payments, without changing
+managed funding, shielding or other SDK sends. The existing treasury network-fee
+safeguard still applies; there is no new fee preference.
+
+Identical send retries return the original operation; conflicting request-ID reuse
+fails. Accepted work survives disconnection, listener removal, disabled admissions
+and restart through the shared treasury owner and exact signed-byte journal.
+Capability disablement retains owned `swap_status` access. An uncertain quote
+creation or submission never authorizes another quote, replacement deposit or
+signature. A provider refund is a provider outcome, not authority to pay again.
+Native sends have no swap-provider deadline; signed transaction expiry and
+canonical recovery retain their existing blockchain meaning.
 
 The host owns 1Click credentials configured through the existing `[funding]` NEAR
 credential environment names. Direct quotes retain provider-added fee metadata

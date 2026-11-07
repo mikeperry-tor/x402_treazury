@@ -80,8 +80,47 @@ fn direct_only_inventory_and_validation_reject_unknown_authority() {
     );
     let listener = config.servers.get_mut("control").unwrap();
     listener.swap_control.as_mut().unwrap().send = true;
-    config.funding = Some(serde_json::from_value(serde_json::json!({})).unwrap());
-    assert!(format!("{:#}", config.validate().err().unwrap()).contains("sending is not available"));
+    assert!(
+        config.validate().is_ok(),
+        "sending is a separate opt-in and native sending requires no NEAR configuration"
+    );
+    config
+        .servers
+        .get_mut("control")
+        .unwrap()
+        .swap_control
+        .as_mut()
+        .unwrap()
+        .receive = false;
+    assert!(config.validate().is_ok(), "send-only listeners are valid");
+    for cap in [None, Some("none"), Some("0"), Some("0.05")] {
+        config
+            .servers
+            .get_mut("control")
+            .unwrap()
+            .swap_control
+            .as_mut()
+            .unwrap()
+            .max_send_zec = cap.map(str::to_owned);
+        assert!(
+            config.validate().is_ok(),
+            "valid optional total-debit preference: {cap:?}"
+        );
+    }
+    for cap in ["", "-1", "NaN", "0.000000001"] {
+        config
+            .servers
+            .get_mut("control")
+            .unwrap()
+            .swap_control
+            .as_mut()
+            .unwrap()
+            .max_send_zec = Some(cap.into());
+        assert!(
+            config.validate().is_err(),
+            "invalid total-debit preference: {cap}"
+        );
+    }
     assert!(
         toml::from_str::<ListenerConfig>(
             "listen='127.0.0.1:0'\n[swap_control]\nreceive=true\nowner='foreign'"
@@ -415,7 +454,7 @@ async fn native_sdk_remains_available_without_usable_near_configuration() {
         if let Some(settings) = near {
             text = text.replace("auto_fund=false", &format!("auto_fund=false\n{settings}"));
         }
-        text.push_str("\n[servers.native.swap_control]\nreceive=true\n");
+        text.push_str("\n[servers.native.swap_control]\nreceive=true\nsend=true\n");
         env.insert("BAD".into(), "malformed\nheader".into());
         std::fs::write(&path, text).unwrap();
         let deployment = Deployment::load(&path).await.unwrap();
@@ -461,7 +500,7 @@ async fn native_sdk_remains_available_without_usable_near_configuration() {
         "",
     );
     text.push_str(STATIC_LISTENER);
-    text.push_str("\n[servers.one.swap_control]\nreceive=true\n");
+    text.push_str("\n[servers.one.swap_control]\nreceive=false\nsend=true\n");
     std::fs::write(&path, text).unwrap();
     let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
         .await

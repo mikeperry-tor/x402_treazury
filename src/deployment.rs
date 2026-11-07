@@ -325,10 +325,6 @@ impl MetaConfig {
                     "server {name}: swap_control requires [treasury]"
                 );
                 control.validate()?;
-                ensure!(
-                    !control.send,
-                    "server {name}: direct sending is not available yet"
-                );
             }
             for selector in server.include_tools.iter().chain(&server.exclude_tools) {
                 pattern(selector)?;
@@ -2268,7 +2264,7 @@ impl RunningDeployment {
             let stopped = reconciliation_stop.clone();
             reconciliation.spawn(async move {
                 if let Err(error) = service.run(stopped).await {
-                    tracing::error!(category = %crate::rotation::base::safe_diagnostic(&error), "Direct swap status observation stopped; saved payment requests remain durable; restart to resume observation");
+                    tracing::error!(category = %crate::rotation::base::safe_diagnostic(&error), "Direct payment processing and observation stopped; accepted payments remain saved; restart to resume processing");
                 }
             });
         }

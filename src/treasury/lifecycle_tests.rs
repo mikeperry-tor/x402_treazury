@@ -2,11 +2,14 @@
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
 mod birthday;
 mod calculation_owner;
+mod direct_foreign_send;
 mod direct_receive;
+mod direct_send;
 mod discovery;
 mod indexer_recovery;
 mod indexer_regression;
 mod native_receive;
+mod native_send;
 mod refund_addresses;
 mod sapling;
 mod scan_bounds;
@@ -39,7 +42,7 @@ fn request(job: &FundingJob, deadline: u64) -> PrepareRequest {
         }),
         operation_id: job.operation_id.clone(),
         pool_id: Some(job.pool_id.clone()),
-        deadline,
+        deadline: Some(deadline),
         recipient: DEPOSIT.into(),
         amount_zatoshis: 50_000,
         max_fee_zatoshis: 50_000,

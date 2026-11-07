@@ -1,5 +1,6 @@
 //! First-party deposit-funded swaps. Provider settlement and SDK funds are separate facts.
 pub(crate) mod route;
+mod send;
 #[cfg(test)]
 mod tests;
 
@@ -29,9 +30,9 @@ impl Config {
     pub(crate) fn max_debit_zatoshis(&self) -> Result<Option<u64>> {
         match self.max_send_zec.as_deref() {
             None | Some("none") => Ok(None),
-            Some(value) => Ok(Some(u64::try_from(crate::rotation::config::zatoshis(
-                value,
-            )?)?)),
+            Some(value) => Ok(Some(u64::try_from(
+                crate::rotation::config::zatoshis_allow_zero(value)?,
+            )?)),
         }
     }
     pub(crate) fn validate(&self) -> Result<()> {
@@ -54,6 +55,7 @@ struct Backend {
     treasury: TreasuryHandle,
     near: Option<NearSource>,
     poll_seconds: u64,
+    max_fee: u64,
 }
 #[derive(Clone)]
 struct NearSource {
@@ -99,6 +101,10 @@ pub fn definitions(config: &Config) -> Vec<rmcp::model::Tool> {
     if config.receive {
         specs.push(("x402_treazury_payment_request_create", "Receive native shielded Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh address per new request_id with no NEAR call. Foreign assets use one exact-input swap; ZEC value is estimated until settlement. Identical retries return the original request.", json!({"asset_id":text("Full source assetId from swap_assets."),"chain":text("Exact source blockchain from swap_assets."),"amount":text("Positive atomic amount as decimal digits; native ZEC uses zatoshis."),"refund_address":text("Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported."),"request_id":text("Unique caller request ID for these exact terms.")}), vec!["asset_id","chain","amount","request_id"]));
     }
+    if config.send {
+        specs.push(("x402_treazury_swap_preview", "Preview a native shielded Zcash payment or an exact-output foreign swap. Creates no payment authority. Native preview reports principal and configured limits; actual network fee is determined during preparation.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires a shielded-only address. Memos and destination tags are unsupported.")}), vec!["asset_id","chain","amount","recipient"]));
+        specs.push(("x402_treazury_swap_send", "Send native shielded Zcash or swap treasury ZEC for an exact foreign amount. Accepted work continues after disconnect. Identical request_id retries return the original operation; inspect swap_status for settlement.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires a shielded-only address. Memos and destination tags are unsupported."),"max_source_zatoshis":text("Required for foreign swaps: maximum ZEC principal in zatoshis. Optional for native ZEC. Operator total-debit limit also includes network fee."),"request_id":text("Unique caller request ID for these exact terms; reuse only for identical retries.")}), vec!["asset_id","chain","amount","recipient","request_id"]));
+    }
     specs.into_iter().map(|(name,description,properties,required)| rmcp::model::Tool::new(name,description,Arc::new(json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone()))).collect()
 }
 
@@ -108,13 +114,14 @@ impl Service {
         treasury: TreasuryHandle,
         near: NearClient,
         funding: FundingConfig,
-        _max_fee: u64,
+        max_fee: u64,
     ) -> Self {
         let wake = store.direct_changes();
         Self {
             store,
             backend: Some(Arc::new(Backend {
                 treasury,
+                max_fee,
                 poll_seconds: funding.poll_seconds,
                 near: Some(NearSource {
                     client: near,
@@ -127,7 +134,7 @@ impl Service {
     pub fn native(
         store: StoreHandle,
         treasury: TreasuryHandle,
-        _max_fee: u64,
+        max_fee: u64,
         poll_seconds: u64,
     ) -> Self {
         let wake = store.direct_changes();
@@ -135,6 +142,7 @@ impl Service {
             store,
             backend: Some(Arc::new(Backend {
                 treasury,
+                max_fee,
                 near: None,
                 poll_seconds,
             })),
@@ -207,6 +215,14 @@ impl Service {
             }
             "x402_treazury_payment_request_create" => {
                 self.receive(owner, serde_json::from_value(args)?).await
+            }
+            "x402_treazury_swap_preview" => {
+                self.preview(owner, config, serde_json::from_value(args)?)
+                    .await
+            }
+            "x402_treazury_swap_send" => {
+                self.send(owner, config, serde_json::from_value(args)?)
+                    .await
             }
             "x402_treazury_swap_status" => {
                 let args: Status = serde_json::from_value(args)?;
@@ -352,7 +368,8 @@ impl Service {
             let receipt = if operation.route == DirectRoute::Native { operation.status.as_ref().map(|s| s["receipt"].clone()).unwrap_or(Value::Null) } else { json!({"attribution":"unknown"}) };
             let matches_snapshot = receipt["snapshot_revision"].as_i64() == Some(saved.snapshot_revision);
             let instructions = native_receive.then(|| json!({"asset_id":route::ZEC,"chain":"zec","amount_zatoshis":operation.terms["amount"],"recipient":operation.address}));
-            Ok(json!({"operation":operation,"zec_receipt":receipt,"receipt_matches_saved_snapshot":native_receive.then_some(matches_snapshot),"receipt_refresh_unavailable":native_receive.then_some(refresh_unavailable && !matches_snapshot),"payment_instructions":instructions,"treasury_observation":saved.sync}))
+            let source = if operation.kind == "send" { s.direct_source_status(&id).unwrap_or_else(|_| json!({"unavailable":true})) } else { Value::Null };
+            Ok(json!({"source":source,"operation":operation,"zec_receipt":receipt,"receipt_matches_saved_snapshot":native_receive.then_some(matches_snapshot),"receipt_refresh_unavailable":native_receive.then_some(refresh_unavailable && !matches_snapshot),"payment_instructions":instructions,"treasury_observation":saved.sync}))
         }).await
     }
     async fn refresh_native(&self, operation: &DirectOperation) -> Result<DirectOperation> {
@@ -409,7 +426,14 @@ impl Service {
             changed.as_mut().enable();
             let pending = self.store.call(|s| s.direct_pending()).await?;
             for operation in pending {
-                if operation.route == DirectRoute::Near && self.backend()?.near.is_none() {
+                if operation.route == DirectRoute::Near
+                    && self.backend()?.near.is_none()
+                    && (operation.kind != "send"
+                        || matches!(
+                            self.source_action(&operation.id).await,
+                            Ok(crate::rotation::store::DirectSendAction::NoAutomaticAction)
+                        ))
+                {
                     continue;
                 }
                 if active.insert(operation.id.clone()) {
@@ -417,7 +441,7 @@ impl Service {
                     let stopped = stop.clone();
                     tasks.spawn(async move {
                         let id = operation.id.clone();
-                        service.observe(operation, stopped).await;
+                        service.run_operation(operation, stopped).await;
                         id
                     });
                 }
@@ -426,7 +450,7 @@ impl Service {
                 _ = stop.cancelled() => break,
                 _ = &mut changed => {},
                 joined = tasks.join_next(), if !tasks.is_empty() => {
-                    match joined { Some(Ok(id)) => { active.remove(&id); }, Some(Err(_)) => anyhow::bail!("direct swap observation owner stopped; saved work remains durable"), None => {} }
+                    match joined { Some(Ok(id)) => { active.remove(&id); }, Some(Err(_)) => anyhow::bail!("direct payment processing stopped; accepted work remains durable"), None => {} }
                 }
             }
         }
@@ -473,7 +497,7 @@ impl Service {
             Some("SUCCESS" | "FAILED" | "REFUNDED")
         );
         let id = operation.id.clone();
-        let status = json!({"provider":status,"observed_at":crate::rotation::base::now()?});
+        let status = json!({"provider":status,"observed_at":crate::rotation::base::now().ok()});
         self.store
             .call(move |s| s.save_direct_status(&id, status))
             .await?;
