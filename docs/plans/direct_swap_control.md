@@ -12,7 +12,8 @@ requires both directions and the final combined review.
 
 Starting branch: `main`; implementation branch: `direct_swap_control`. Starting code baseline:
 `b708a06b340dfc7ee695eab5b66a6120c152af61`. At planning, only unrelated untracked
-`.vscode/` and `TODO` were present; preserve them. Status: D0 approved; D1 implemented at `bae7aaa1`, G1 correction/validation in progress.
+`.vscode/` and `TODO` were present; preserve them. Status: D0/D1/D1N complete; G1 passed at `d2c84799`. D2 send implementation
+(native and foreign, with optional total-debit cap) is now in progress.
 No funded validation. Implementation starts from committed plan `8b861bbc141832887ec77a34c47b86f7e1c9fa71`. The implementation request authorizes local implementation and review; the plan
 itself grants no funded execution, deployment, push or merge authority.
 
@@ -402,7 +403,8 @@ a mandatory research project or a source of artificial expiry rules.
 | Direct-send cap design | Fresh `receive_review` approved optional actual total-debit cap, persisted admission authority, actual proposal/publication checks and no unrelated ZEC enforcement. User confirmed omission/"none" unlimited and no new fee preference. Source spending implementation remains D2. |
 | G1 preserved search contract | Root and fresh reviewer found mixed first-party/API search ranked rendered observed-price descriptions and projected complete schemas before pagination. Correction `3ab5dddc` uses borrowed candidates, canonical fallback ranking and page-only rendering; existing pricing-cache regression is extended. Exact fixup/combined code review accepted; compiler/all-target Clippy passed (`target/direct-swap-g1-clippy-search.log`), complete source-matched complexity at `target/complexity-runs/20261107T010723Z-de23df7c`; only previously reviewed serve warning remains. This is a material G1 consumer correction, not deferred. |
 | G1 complexity | `target/complexity-runs/20261107T004651Z-840b8ac0`: complete 477 current / 471 baseline files, no exclusions; reviewer verified every source hash and lockfile. New warnings: `initialize_wallets_mode` Cog 40→43 / Cyc 46→54 (reassess after startup correction); `RunningDeployment::serve` Cog 30→33 / Cyc 43→46 retains coherent independent worker/actor shutdown ownership; score-only extraction rejected. |
-| D2 / G2 | Pending. Both directions required. |
+| G1 accepted | Fresh `native_receive_review` accepted exact combined branch through `d2c84799`, including every prior commit/fixup; no material finding or compelling simplification remains. Compiler and all-target `zcash-regtest` Clippy passed (`target/direct-swap-native-receive-clippy.log`); later description-literal/test-field correction was reviewed and recompiled by focused continuation. Focused unique selection: 74 passed, one isolated child helper ignored; initial73pass/onefixturefailure plus bothaffectedcontinuationpasses (`target/direct-swap-native-receive-focused*.log`). Existing compatibility31passes remain valid exceptaffectedMCP/search consumed by new focusedtests. SDKprivacy, nativefresh/idempotent/restart/partial/excess/spent/reorg, per-row failure isolation and publicstatus freshness execute nonzero tests. Documented macOS linker unwind diagnostic retained, no test failure. Productioncomplexity from816ed993 complete/source-matched with retained dispositions. Receive remains intermediate. |
+| D2 / G2 | In progress after G1. Both native and foreign sends, total-debit authority, exact-byte recovery and finalcombinedreview required. |
 | D3 | Pending final implementation/user review and documentation handoff. |
 
 ## External references to recheck
