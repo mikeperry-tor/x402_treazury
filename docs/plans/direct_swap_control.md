@@ -8,10 +8,10 @@ review receiving first, then continue to sending. The receive gate is an
 intermediate integration boundary, **not completion or a stopping point**. Delivery
 requires both directions and the final combined review.
 
-Starting branch: `main`. Starting code baseline:
+Starting branch: `main`; implementation branch: `direct_swap_control`. Starting code baseline:
 `b708a06b340dfc7ee695eab5b66a6120c152af61`. At planning, only unrelated untracked
-`.vscode/` and `TODO` were present; preserve them. Status: planned, no implementation
-or funded validation. This request authorizes preparation of the plan; the plan
+`.vscode/` and `TODO` were present; preserve them. Status: D0 contract/design review in progress, no implementation
+or funded validation. Implementation starts from committed plan `8b861bbc141832887ec77a34c47b86f7e1c9fa71`. This request authorizes preparation of the plan; the plan
 itself grants no funded execution, deployment, push or merge authority.
 
 Follow [planning workflow](../planning-workflow.md),
@@ -156,6 +156,40 @@ the existing client boundary; never expose keys or sessions as agent arguments.
 - Preserve stable state formats through additive compatible evolution and tests.
   Never log keys, signed bytes or credential-bearing upstream prose; apply the
   owning severity and diagnostic-clarity policy to new and encountered call sites.
+
+## D0 implementation decisions and evidence
+
+- Single-call sends accept exact destination asset ID/chain/atomic amount/recipient
+  and an explicit maximum source principal in zatoshis. Persist the executable
+  quote's exact principal within that per-call authority; the existing transaction
+  fee ceiling remains separate. Previews are dry and confer no authority.
+- One additive encrypted direct-operation record, unique by authenticated listener
+  owner, operation kind and caller request ID, preserves original terms and UUID.
+  Reserve before quote creation; a lost creation response retains uncertainty and
+  does not automatically create another quote. No parallel balance ledger.
+- Receive and refund derivation use all-shielded SDK receivers with snapshot and
+  operation binding persisted before disclosure. No transparent discovery fallback.
+- Direct transport identity is domain separated by treasury UUID and operation UUID,
+  retained through quote/status and treasury transaction reload. Existing funding
+  identity domains and specialized route policy remain intact.
+- Treasury preparation checks durable direct quote/deposit/principal/deadline
+  bindings. Existing accepted input, byte publication and recovery owners remain.
+- Receive/send listener capabilities default off and require authentication. Shared
+  first-party definitions govern advertising/search/dispatch; owned status survives
+  disablement. Receive demand uses the existing SDK observation cadence; provider
+  outcome, receipt evidence and current spendability remain separate.
+- Public unfunded reverse dry quote on 2026-11-07 returned HTTP 201 for Base USDC
+  exact input to the public shielded-only test UA, with recipient echoed unchanged.
+  Private captures: `/tmp/direct-receive-dry.json` and
+  `/tmp/direct-receive-response.json`. Pinned bridge source at
+  `d1361ac1c68fa579ed1a498d30f2124bc16e09cc`, `zcash.rs:378–450`, separately
+  implements shielded withdrawals through `get_orchard_raw_with_memo`; its builder
+  selects Ironwood after activation. This supports the intended shielded receive
+  contract despite the general guide's transparent-only statement; it does not
+  qualify funded delivery. No silent transparent fallback is selected.
+- Fresh reviewer `design_review` identified the identity, jobless preparation,
+  receive observation and on-demand dispatch consumers above. Resolution review
+  is pending. Baseline complexity capture is in progress before Rust changes.
 
 ## Ordered commits and integration gates
 
