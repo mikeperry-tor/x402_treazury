@@ -87,8 +87,9 @@ tests/COMPLEXITY.md and the timer/resource inventories where applicable.
   observation/recovery, publication/input-acceptance and scoped inventory ordering
   remains cohesive; no compelling responsibility deletion or extraction was found.
 - Compiler and all-target Clippy passed without diagnostics at `10934de7` in
-  `target/remove-recovery-limit-clippy-complete.log`; the exact final test-source
-  rerun is pending in `target/remove-recovery-limit-clippy-exact.log`.
+  `target/remove-recovery-limit-clippy-complete.log`; the exact `d5bc3ba5` rerun
+  also passed without diagnostics in `target/remove-recovery-limit-clippy-exact.log`
+  (production 30.59 seconds, all targets 4 minutes 31 seconds).
 - Compatibility: 31 passed in `target/remove-recovery-limit-compat.log`.
   Affected library tests: 184 cumulative passes, one intentional isolated-helper
   ignore, from `target/remove-recovery-limit-runtime-lib.log` and its
@@ -104,8 +105,15 @@ tests/COMPLEXITY.md and the timer/resource inventories where applicable.
 - The known macOS debug test-linker `__eh_frame section too large` diagnostic is
   retained. `target/remove-recovery-limit-unwind.txt` records full `__eh_frame`
   and `__unwind_info` sections in the actual SDK test executable. Affected panic,
-  cancellation and restart lifecycle cases passed; one focused optimized
-  follow-up remains. No panic/profile/toolchain changes or warning suppression.
+  cancellation and restart lifecycle cases passed. The focused optimized follow-up
+  passed all four selected tests, including the three removal-specific
+  startup/Store/recovery reopen cases, in
+  `target/direct-sdk-test-cleanup-optimized.log` (release build 1 minute 13 seconds,
+  runtime 0.10 seconds, no diagnostics). No panic/profile/toolchain changes or
+  warning suppression.
 - Independent combined review at `d5bc3ba5` verified the source/complexity hashes,
   prior fixups and runtime logs and found no unresolved material source finding.
-  Final compiler, optimized follow-up, evidence commit and cleanup review remain.
+  Review also accepted the exact evidence update `3d53f74b` and carried production
+  review through the separately reviewed SDK-test cleanup and fixup `5e1f2d2a`,
+  which change only tests and their guide. Independent G1 review accepted all
+  recovery evidence at `5e1f2d2a`. Final evidence commit and cleanup review remain.
