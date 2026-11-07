@@ -101,9 +101,6 @@ impl FundingBackend for Funding {
     fn swap_timeout_seconds(&self) -> u64 {
         u64::MAX
     }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
-    }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         let id = job.id.clone();
         let operation = job.operation_id.clone();

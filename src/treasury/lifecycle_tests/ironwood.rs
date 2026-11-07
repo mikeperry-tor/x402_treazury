@@ -149,7 +149,7 @@ async fn relocated_ironwood_note_closes_expired_original_when_unspent_or_spent_c
             .call(move |s| {
                 assert_eq!(s.operation(&operation)?.attempts, 0);
                 assert_eq!(s.prepared_inputs(&operation)?, expected_inputs);
-                assert_eq!(s.funding_recovery_count(&original_job)?, 0);
+                assert!(!s.funding_facts(&original_job, &operation)?.archived);
                 Ok(())
             })
             .await
@@ -243,7 +243,7 @@ async fn relocated_ironwood_note_closes_expired_original_when_unspent_or_spent_c
                 assert_eq!(s.prepared_bytes(&operation)?.as_slice(), raw);
                 assert_eq!(s.prepared_inputs(&operation)?, original_inputs);
                 assert!(!s.operation_pending(&operation)?);
-                assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+                assert!(s.funding_facts(&job.id, &operation)?.archived);
                 assert_eq!(s.funding_jobs()?.len(), 1);
                 Ok(())
             })

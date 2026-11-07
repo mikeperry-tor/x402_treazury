@@ -168,17 +168,23 @@ mod tests {
         let next = s.funding_jobs()?.remove(0);
         assert_eq!(next.operation_id, job.operation_id);
         assert_eq!(next.phase, funding::FundingPhase::RecoveryRequired);
-        assert_eq!(s.funding_recovery_count(&job.id)?, 1);
-        assert!(s.reauthorize_closed_funding(&job.id, 0).is_err());
+        assert!(
+            s.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+                params![job.id, job.operation_id],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+        );
         s.funding_restriction =
             super::super::super::restriction::FundingRestriction::DenyNewFunding;
-        assert!(s.reauthorize_closed_funding(&job.id, 1).is_err());
+        assert!(s.reauthorize_closed_funding(&job.id).is_err());
         assert_eq!(
             s.funding_job(&job.id)?.unwrap().operation_id,
             job.operation_id
         );
         s.funding_restriction = super::super::super::restriction::FundingRestriction::Ordinary;
-        s.reauthorize_closed_funding(&job.id, 1)?;
+        s.reauthorize_closed_funding(&job.id)?;
         let replacement = s.funding_job(&job.id)?.unwrap().operation_id;
         s.record_provider_outcome(
             &job.id,
@@ -196,7 +202,14 @@ mod tests {
             s.funding_job(&job.id)?.unwrap().operation_id,
             job.operation_id
         );
-        assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+        assert!(
+            s.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+                params![job.id, job.operation_id],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+        );
         s.resolve_expired(&job.operation_id, revision)?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         s.confirm_spend(&job.operation_id)?;

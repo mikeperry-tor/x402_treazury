@@ -88,7 +88,6 @@ pub trait FundingBackend: Send + 'static {
         let job = job.clone();
         async move { reader.credit(job).await }
     }
-    fn max_attempts(&self, job: &FundingJob) -> u32;
 }
 // Scheduling tests supply an epoch; elapsed work advances that same clock.
 // Every authority decision reads it again after awaited work.
@@ -424,11 +423,10 @@ impl<B: FundingBackend> FundingWorker<B> {
         let quote = self.quote(job).await?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
-        let max_attempts = self.backend.lock().await.max_attempts(job);
         let suitable = self
             .store
             .call(move |s| {
-                s.require_funding_attempt(&id, max_attempts)?;
+                s.require_funding_attempt(&id)?;
                 s.accepted_quote_suits_current_claim(&id, &operation)
             })
             .await?;
@@ -528,24 +526,6 @@ impl Backend {
         };
         config.policy()
     }
-    fn policy(&self, job: &FundingJob) -> Result<(super::near::Limits, u32)> {
-        let super::config::WalletConfig::ZcashRotation { max_attempts, .. } = self
-            .wallets
-            .get(&job.pool_name)
-            .context("funding pool disabled")?
-        else {
-            anyhow::bail!("funding pool disabled")
-        };
-        // SDK spendability governs source funds; the configured reserve bounds nominal output sizing.
-        Ok((
-            super::near::Limits {
-                // Only quote/preparation use this field; they supply the exact
-                // current claim's output ceiling before validating any quote.
-                max_output: u64::MAX,
-            },
-            *max_attempts,
-        ))
-    }
 }
 impl FundingBackend for Backend {
     type Observations = Observations;
@@ -575,7 +555,6 @@ impl FundingBackend for Backend {
         self.treasury
             .recover_funding(
                 job.id.clone(),
-                self.max_attempts(job),
                 self.funding.auto_fund && self.wallets.contains_key(&job.pool_name),
             )
             .await
@@ -587,7 +566,6 @@ impl FundingBackend for Backend {
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {
         self.require_auto_funding()?;
-        let (mut limits, max_attempts) = self.policy(job)?;
         let policy = self.sizing_policy(job).await?;
         let preferred = policy.draw_initial(&mut rand::rng());
         let id = job.id.clone();
@@ -595,18 +573,15 @@ impl FundingBackend for Backend {
         let terms = self
             .store
             .call(move |s| {
-                s.select_quote_terms_for_attempt(
-                    &id,
-                    &operation,
-                    &preferred.to_string(),
-                    max_attempts,
-                )
+                s.select_quote_terms_for_attempt(&id, &operation, &preferred.to_string())
             })
             .await?;
         let target = terms.target.to_string();
         let ceiling =
             u64::try_from(terms.ceiling).context("funding output exceeds route amount range")?;
-        limits.max_output = ceiling;
+        let limits = super::near::Limits {
+            max_output: ceiling,
+        };
         let refund = self.treasury.refund_address(job.id.clone()).await?;
         Ok(QuoteRequest {
             job: job.clone(),
@@ -614,7 +589,6 @@ impl FundingBackend for Backend {
             target,
             limits,
             sizing: policy,
-            max_attempts,
             confidentiality: self.funding.confidentiality.clone(),
             slippage_bps: self.funding.slippage_bps,
             deadline_seconds: self.funding.quote_deadline_seconds,
@@ -623,7 +597,12 @@ impl FundingBackend for Backend {
     async fn prepare(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()
             .map_err(|error| error.context(super::transaction::PreparationDeferred))?;
-        let (mut limits, max_attempts) = self.policy(job)?;
+        ensure!(
+            self.wallets
+                .get(&job.pool_name)
+                .is_some_and(super::config::WalletConfig::managed),
+            "funding pool disabled"
+        );
         let id = job.id.clone();
         let operation = job.operation_id.clone();
         let supplied = serde_json::to_value(quote)?;
@@ -640,8 +619,10 @@ impl FundingBackend for Backend {
                 s.current_funding_claim(&id)
             })
             .await?;
-        limits.max_output = u64::try_from(claim.maximum_output)
-            .context("funding output exceeds route amount range")?;
+        let limits = super::near::Limits {
+            max_output: u64::try_from(claim.maximum_output)
+                .context("funding output exceeds route amount range")?,
+        };
         // Revalidate actual quote bindings; informational pricing and commissions grant no authority.
         let checked = self
             .near
@@ -667,7 +648,6 @@ impl FundingBackend for Backend {
                     managed_funding: Some(super::transaction::ManagedFundingAuthority {
                         job_id: job.id.clone(),
                         auto_fund: self.funding.auto_fund,
-                        max_attempts,
                     }),
 
                     operation_id: job.operation_id.clone(),
@@ -717,9 +697,6 @@ impl FundingBackend for Backend {
             super::transaction::TransactionPresence::Confirmed { .. }
         ))
     }
-    fn max_attempts(&self, job: &FundingJob) -> u32 {
-        self.policy(job).map(|(_, n)| n).unwrap_or(1)
-    }
 }
 
 /// Immutable unsigned input captured after the treasury-owned refund-address
@@ -731,7 +708,6 @@ pub struct QuoteRequest {
     target: String,
     limits: super::near::Limits,
     sizing: super::config::SizingPolicy,
-    max_attempts: u32,
     confidentiality: String,
     slippage_bps: u32,
     deadline_seconds: u64,
@@ -749,16 +725,12 @@ impl Observations {
         request: QuoteRequest,
         clock: impl Fn() -> Result<u64> + Send,
     ) -> Result<Quote> {
-        let (job, operation, max_attempts) = (
-            request.job.id.clone(),
-            request.job.operation_id.clone(),
-            request.max_attempts,
-        );
+        let (job, operation) = (request.job.id.clone(), request.job.operation_id.clone());
         // Recheck before outbound acquisition: a completed prerequisite cannot
         // revive a closed operation or bypass a newly installed funding pause.
         self.store
             .call(move |s| {
-                s.require_funding_attempt(&job, max_attempts)?;
+                s.require_funding_attempt(&job)?;
                 let current = s.funding_job(&job)?.context("funding job missing")?;
                 let facts = s.funding_facts(&job, &operation)?;
                 ensure!(
@@ -1077,7 +1049,7 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "prepared_quote_window_exhausted; the returned swap quote deadline expired; no submission attempted; signed bytes retained; automatic recovery will wait for transaction expiry before retrying funding; wallet recover can inspect recovery";
             }
             "quote_refresh_exhausted" => {
-                return "quote_refresh_exhausted; automatic recovery can retry within the durable recovery limit; use wallet recover for an assessment";
+                return "quote_refresh_exhausted; automatic recovery can retry after safe source closure; use wallet recover for an assessment";
             }
             "source_reconciliation_failed" => {
                 return "source_reconciliation_failed; retain reservation and inspect wallet status";

@@ -35,7 +35,6 @@ pub(crate) struct StartupPath {
     pub operation: Option<OperationStatus>,
     /// Existing exact support, including binding checks. Independent of phase/S/P.
     pub destination_ready: bool,
-    pub recovery_count: u64,
     pub condition: Option<super::super::error::FundingCondition>,
 }
 
@@ -49,11 +48,7 @@ pub(crate) enum StartupDisposition {
 impl StartupPath {
     /// Interpret committed obligations and typed current-process observations;
     /// this does not transition jobs, quote, forecast input cost, or authorize work.
-    pub(crate) fn disposition(
-        &self,
-        max_attempts: u32,
-        treasury_source_pending: bool,
-    ) -> StartupDisposition {
+    pub(crate) fn disposition(&self, treasury_source_pending: bool) -> StartupDisposition {
         use StartupDisposition::*;
         if self.destination_ready {
             return DestinationReady;
@@ -66,7 +61,7 @@ impl StartupPath {
                 .is_some_and(|op| op.submission == "EXPIRED");
         let provider_terminal = self.facts.provider_failed || self.facts.provider_refunded;
         // Original accepted bytes/outcomes remain observed even if permission to
-        // start another attempt has since been disabled or exhausted.
+        // start another attempt has since been disabled.
         if self.facts.claim_fulfilled
             || (!never_disclosed
                 && !closed_expired
@@ -85,9 +80,6 @@ impl StartupPath {
         let terminal_recovery = closed_expired || provider_terminal && can_recover_original;
         if provider_terminal && !terminal_recovery {
             return Obstructed("funding_outcome_requires_review");
-        }
-        if self.recovery_count > u64::from(max_attempts) {
-            return Obstructed("recovery_attempt_limit_reached");
         }
         if self.job.phase == funding::FundingPhase::RecoveryRequired && !can_recover_original {
             return Obstructed("preparation_or_swap_requires_review");
@@ -215,7 +207,6 @@ impl Store {
     pub(crate) fn startup_obstruction(
         &self,
         name: &str,
-        max_attempts: u32,
         claims: &[StartupClaim],
     ) -> Result<Option<Vec<(String, &'static str)>>> {
         let group = self.startup_groups(&[name.to_owned()])?.remove(0);
@@ -225,7 +216,7 @@ impl Store {
         }
         let mut blocked = Vec::new();
         for path in paths {
-            match path.disposition(max_attempts, group.treasury_source_pending) {
+            match path.disposition(group.treasury_source_pending) {
                 StartupDisposition::Obstructed(reason) => {
                     if blocked.len() < 8 {
                         blocked.push((path.job.id, reason));
@@ -327,7 +318,6 @@ impl Store {
             facts,
             operation,
             destination_ready,
-            recovery_count: self.funding_recovery_count(id)?,
         })
     }
 }
@@ -336,7 +326,7 @@ impl Store {
 mod tests {
     use super::*;
     #[test]
-    fn reconstructed_unpublished_intent_uses_current_authority_with_zero_recovery_allowance() {
+    fn reconstructed_unpublished_intent_uses_current_authority() {
         use crate::rotation::{error::FundingCondition, near::SwapStatus};
         for disabled in [false, true] {
             let (_dir, mut store, _pool) = fixture();
@@ -355,7 +345,7 @@ mod tests {
                 .unwrap();
             // Before reconstruction, the accepted live calculation still owns its result.
             assert_eq!(
-                store.startup_path(&job.id).unwrap().disposition(0, false),
+                store.startup_path(&job.id).unwrap().disposition(false),
                 StartupDisposition::Waiting
             );
             store.close_unpublished_preparations().unwrap();
@@ -365,9 +355,9 @@ mod tests {
             let path = store.startup_path(&job.id).unwrap();
             assert!(path.facts.preparation_accepted && path.facts.source_closed);
             assert!(path.facts.provider_incomplete && path.operation.is_none());
-            assert_eq!(path.recovery_count, 0);
+
             assert_eq!(
-                path.disposition(0, false),
+                path.disposition(false),
                 if disabled {
                     StartupDisposition::Obstructed("funding_disabled")
                 } else {
@@ -392,14 +382,14 @@ mod tests {
                 .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 2)
                 .unwrap();
             assert_eq!(
-                store.startup_path(&job.id).unwrap().disposition(0, false),
+                store.startup_path(&job.id).unwrap().disposition(false),
                 StartupDisposition::Waiting
             );
         }
     }
 
     #[test]
-    fn closed_untouched_quote_is_actionable_without_consuming_recovery_allowance() {
+    fn closed_untouched_quote_is_actionable_with_original_identity() {
         use crate::rotation::near::SwapStatus;
         let (_dir, mut store, _pool) = fixture();
         let job = store.funding_jobs().unwrap().remove(0);
@@ -426,8 +416,8 @@ mod tests {
         let path = store.startup_path(&job.id).unwrap();
         assert!(path.facts.source_never_disclosed());
         assert!(!path.facts.preparation_accepted);
-        assert_eq!(path.recovery_count, 0);
-        assert_eq!(path.disposition(0, false), StartupDisposition::Actionable);
+
+        assert_eq!(path.disposition(false), StartupDisposition::Actionable);
         assert_eq!(
             store.funding_job(&job.id).unwrap().unwrap().operation_id,
             job.operation_id
@@ -462,7 +452,7 @@ mod tests {
         }
         assert!(
             store
-                .startup_obstruction("configured", 3, &captured)
+                .startup_obstruction("configured", &captured)
                 .unwrap()
                 .is_none()
         );
@@ -499,7 +489,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, &captured)
+                .startup_obstruction("configured", &captured)
                 .unwrap()
                 .is_none(),
             "accepted original work still has an observation owner"
@@ -525,14 +515,14 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, &captured)
+                .startup_obstruction("configured", &captured)
                 .unwrap()
                 .is_none()
         );
         store.confirm_spend(&job.operation_id).unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, &captured)
+                .startup_obstruction("configured", &captured)
                 .unwrap()
                 .is_none(),
             "canonical source confirmation can still be followed by destination credit"
@@ -553,17 +543,20 @@ mod tests {
         path.facts.source_closed = true;
         path.facts.source_pending = false;
         path.operation.as_mut().unwrap().submission = "EXPIRED".into();
-        assert_eq!(path.disposition(3, false), StartupDisposition::Actionable);
+        assert_eq!(path.disposition(false), StartupDisposition::Actionable);
         path.facts.source_pending = true;
         path.facts.source_closed = false;
         path.operation.as_mut().unwrap().submission = "UNKNOWN".into();
         assert_eq!(
-            path.disposition(3, false),
+            path.disposition(false),
             StartupDisposition::Waiting,
             "a canonical correction restores the original observation owner"
         );
         assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().operation_id,
+            job.operation_id
+        );
     }
 
     #[test]
@@ -654,7 +647,7 @@ mod tests {
                     assert_eq!(operation.operation_id, job.operation_id);
                     assert_eq!(operation.submission, submission);
                     assert_eq!(operation.attempts, 1);
-                    assert_eq!(path.recovery_count, 0);
+
                     assert!(!path.facts.preparation_accepted && path.facts.accepted_quote);
                     assert_eq!(path.facts.source_pending, pending);
                     // Nonterminal originals wait before recovery classification.
@@ -670,7 +663,7 @@ mod tests {
                             .unwrap(),
                         retry_allowed
                     );
-                    assert_eq!(path.disposition(3, false), StartupDisposition::Waiting);
+                    assert_eq!(path.disposition(false), StartupDisposition::Waiting);
                     assert_eq!(
                         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
                         raw.as_slice()
@@ -772,7 +765,7 @@ mod tests {
             .record_provider_outcome(&old.id, &old.operation_id, &SwapStatus::Failed, 1)
             .unwrap();
         store
-            .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+            .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id)
             .unwrap();
         let current = store.funding_job(&old.id).unwrap().unwrap();
         store
@@ -782,8 +775,11 @@ mod tests {
         assert!(path.facts.claim_fulfilled && path.facts.credit_needed());
         assert!(!path.facts.provider_success && !path.facts.new_funding_allowed);
         assert_eq!(path.job.operation_id, current.operation_id);
-        assert_eq!(path.disposition(3, false), StartupDisposition::Waiting);
-        assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 1);
+        assert_eq!(path.disposition(false), StartupDisposition::Waiting);
+        assert!(store.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+            params![old.id, old.operation_id], |r| r.get::<_, bool>(0)
+        ).unwrap());
     }
 
     #[test]
@@ -948,7 +944,7 @@ mod tests {
         assert!(paths.iter().all(|path| path.destination_ready));
         assert!(
             store
-                .startup_obstruction("configured", 3, &group.claims)
+                .startup_obstruction("configured", &group.claims)
                 .unwrap()
                 .is_none()
         );
@@ -995,7 +991,7 @@ mod tests {
                 .unwrap();
             assert!(
                 store
-                    .startup_obstruction("configured", 3, &captured)
+                    .startup_obstruction("configured", &captured)
                     .unwrap()
                     .is_none(),
                 "one blocked quote cannot forecast group exhaustion"
@@ -1017,7 +1013,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 store
-                    .startup_obstruction("configured", 3, &captured)
+                    .startup_obstruction("configured", &captured)
                     .unwrap()
                     .unwrap()
                     .len(),
@@ -1040,11 +1036,11 @@ mod tests {
             })
             .unwrap();
         assert!(matches!(
-            insufficient.disposition(3, false),
+            insufficient.disposition(false),
             StartupDisposition::Obstructed("treasury_insufficient_spendable_funds")
         ));
         assert_eq!(
-            insufficient.disposition(3, true),
+            insufficient.disposition(true),
             StartupDisposition::Waiting,
             "another owned reservation can resolve; not exhaustion"
         );
@@ -1061,7 +1057,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, &captured)
+                .startup_obstruction("configured", &captured)
                 .unwrap()
                 .is_none()
         );
@@ -1099,7 +1095,7 @@ mod typed_condition_tests {
                 false,
             )?;
         }
-        assert!(store.startup_obstruction("typed", 3, &captured)?.is_none());
+        assert!(store.startup_obstruction("typed", &captured)?.is_none());
         for job in &jobs {
             store.observe_funding_condition(
                 &job.id,
@@ -1110,7 +1106,7 @@ mod typed_condition_tests {
         }
         assert_eq!(
             store
-                .startup_obstruction("typed", 3, &captured)?
+                .startup_obstruction("typed", &captured)?
                 .unwrap()
                 .len(),
             2
@@ -1120,7 +1116,7 @@ mod typed_condition_tests {
         }
         assert_eq!(
             store
-                .startup_obstruction("typed", 3, &captured)?
+                .startup_obstruction("typed", &captured)?
                 .unwrap()
                 .len(),
             2
@@ -1128,11 +1124,11 @@ mod typed_condition_tests {
         for job in &jobs {
             store.observe_funding_condition(&job.id, &job.operation_id, None)?;
         }
-        assert!(store.startup_obstruction("typed", 3, &captured)?.is_none());
+        assert!(store.startup_obstruction("typed", &captured)?.is_none());
         store.pause_new_funding();
         assert!(
             store
-                .startup_obstruction("typed", 3, &captured)?
+                .startup_obstruction("typed", &captured)?
                 .unwrap()
                 .iter()
                 .all(|(_, reason)| *reason == "funding_disabled")

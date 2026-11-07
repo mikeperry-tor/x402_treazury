@@ -338,9 +338,6 @@ impl FundingBackend for CreditOnlyBackend {
     async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
         Ok(false)
     }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
-    }
 }
 
 #[tokio::test]
@@ -382,7 +379,6 @@ async fn production_credit_uses_shared_failure_schedule_without_recounting_cache
             Some(&super::super::transaction::ManagedFundingAuthority {
                 job_id: job.id.clone(),
                 auto_fund: true,
-                max_attempts: 3,
             }),
         )
         .unwrap();

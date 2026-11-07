@@ -49,6 +49,15 @@ tests/COMPLEXITY.md and the timer/resource inventories where applicable.
 
 ## Evidence
 
-- Independent reviewer `recovery_limit_review` is reviewing the design. Initial
-  assessment confirms nondisclosure markers have independent ownership consumers
-  and must remain. Code implementation has not started.
+- Independent reviewer `recovery_limit_review` accepted the design and exact plan
+  commit `80668470` before implementation. Nondisclosure markers have independent
+  ownership consumers and remain. ManagedFundingAuthority is transient; no
+  serialized limit adapter or schema change is needed.
+- C1 implementation is complete and awaits exact-SHA/combined review and validation.
+  Root integrated Store and Treasury author changes, removed the placeholder
+  Backend policy tuple, and retains configured managed-profile validation with
+  actual claim ceilings. Tests cover repeated safe closure/reopen, old unclassified
+  archives and obsolete limit diagnostics without discarding financial history.
+  Counter-based test proxies now assert actual operation, archive and journal facts.
+  HTTP/network retry variables and factual submission-attempt evidence remain
+  outside this change. No builds have run; formatting and diff checks passed.

@@ -93,7 +93,6 @@ impl std::error::Error for PreparationAlreadyFulfilled {}
 pub struct ManagedFundingAuthority {
     pub job_id: String,
     pub auto_fund: bool,
-    pub max_attempts: u32,
 }
 
 pub struct PrepareRequest {

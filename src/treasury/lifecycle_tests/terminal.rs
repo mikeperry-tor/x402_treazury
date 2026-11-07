@@ -109,7 +109,7 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
                 assert_eq!(s.operation(&operation)?.attempts, 0);
                 assert_eq!(s.prepared_bytes(&operation)?.as_slice(), raw);
                 assert_eq!(s.prepared_inputs(&operation)?, inputs);
-                assert_eq!(s.funding_recovery_count(&checked_job)?, 1);
+                assert!(s.funding_facts(&checked_job, &operation)?.archived);
                 Ok(())
             })
             .await
@@ -161,17 +161,11 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
                 .unwrap();
             }
             // Canonical confirmation supersedes active expiry as replacement
-            // authority. Its archived proof/count remains immutable history.
-            for (allowed, maximum) in [(false, 0), (true, 0), (false, 1), (true, 1)] {
+            // authority. Its archived proof remains immutable history.
+            for allowed in [false, true] {
                 assert_eq!(
                     owner
-                        .recover_funding_job(
-                            job.id.clone(),
-                            maximum,
-                            allowed,
-                            &mut NoDisclosure,
-                            &stop
-                        )
+                        .recover_funding_job(job.id.clone(), allowed, &mut NoDisclosure, &stop)
                         .await
                         .unwrap(),
                     RecoveryOutcome::Waiting("swap_outcome_pending")
@@ -188,10 +182,9 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
                         s.funding_job(&original.id)?.unwrap().operation_id,
                         original.operation_id
                     );
-                    assert_eq!(
-                        s.funding_recovery_count(&original.id)?,
-                        1,
-                        "historical expiry remains counted without granting another attempt"
+                    assert!(
+                        s.funding_facts(&original.id, &original.operation_id)?
+                            .archived
                     );
                     assert!(s.source_previously_closed(&original.operation_id)?);
                     assert_eq!(s.operation(&original.operation_id)?.submission, "CONFIRMED");
@@ -272,7 +265,7 @@ async fn fulfilled_source_work_survives_sdk_reorg_without_confirmation_or_credit
     }
     assert_eq!(
         owner
-            .recover_funding_job(job.id.clone(), 3, true, &mut NoDisclosure, &stop)
+            .recover_funding_job(job.id.clone(), true, &mut NoDisclosure, &stop)
             .await
             .unwrap(),
         recovery::RecoveryOutcome::Waiting("swap_fulfilled_waiting_for_credit")
@@ -299,7 +292,7 @@ async fn fulfilled_source_work_survives_sdk_reorg_without_confirmation_or_credit
             assert_eq!(s.operation(&operation)?.attempts, 1);
             assert_eq!(s.prepared_bytes(&operation)?.as_slice(), raw);
             assert_eq!(s.prepared_inputs(&operation)?, inputs);
-            assert_eq!(s.funding_recovery_count(&job_id)?, 0);
+            assert!(!s.funding_facts(&job_id, &operation)?.archived);
             let facts = s.funding_facts(&job_id, &operation)?;
             assert!(!facts.initial_credit_recorded);
             assert!(
@@ -363,7 +356,7 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
     let current = owner
         .store
         .call(move |s| {
-            s.reauthorize_closed_funding_for_operation(&previous.id, &previous.operation_id, 3)?;
+            s.reauthorize_closed_funding_for_operation(&previous.id, &previous.operation_id)?;
             Ok(s.funding_job(&previous.id)?.unwrap())
         })
         .await
@@ -415,7 +408,7 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
     let (handle, commands) = actor::channel();
     let task = tokio::spawn(owner.run_commands(commands, observer, stop.clone()));
     let observed = handle
-        .recover_funding(current.id.clone(), 3, false)
+        .recover_funding(current.id.clone(), false)
         .await
         .unwrap();
     assert!(
@@ -435,7 +428,7 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
     }
     handle.sync().await.unwrap();
     let observed = handle
-        .recover_funding(current.id.clone(), 3, false)
+        .recover_funding(current.id.clone(), false)
         .await
         .unwrap();
     assert!(observed.source_observed);
@@ -459,7 +452,10 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
             assert_eq!(s.operation(&old_operation)?.attempts, 1);
             assert!(!s.operation_pending(&old_operation)?);
             assert_eq!(s.funding_jobs()?.len(), 1);
-            assert_eq!(s.funding_recovery_count(&current.id)?, 1);
+            assert!(
+                !s.funding_status_quote(&current.id, &old_operation)?
+                    .is_empty()
+            );
             Ok(())
         })
         .await

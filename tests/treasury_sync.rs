@@ -1856,7 +1856,7 @@ async fn actor_startup_is_finite_and_source_commands_share_its_success_or_failur
         }
         assert!(
             handle
-                .recover_funding("absent".into(), 3, false)
+                .recover_funding("absent".into(), false)
                 .await
                 .is_err()
         );

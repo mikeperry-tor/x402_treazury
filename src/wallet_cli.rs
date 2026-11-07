@@ -681,11 +681,9 @@ async fn recover_funding(
         let mut reports = Vec::new();
         for job in &jobs {
             if !treasury.recovery_needed(job).await? { continue; }
-            let (max_attempts, enabled) = match wallets.get(&job.pool_name) {
-                Some(crate::rotation::config::WalletConfig::ZcashRotation { max_attempts, .. }) => (*max_attempts, allow_new_attempt),
-                _ => (0, false),
-            };
-            let outcome = match treasury.recover_funding_job(job.id.clone(), max_attempts, enabled, &mut sender, &stop).await {
+            let enabled = wallets.get(&job.pool_name).is_some_and(crate::rotation::config::WalletConfig::managed)
+                && allow_new_attempt;
+            let outcome = match treasury.recover_funding_job(job.id.clone(), enabled, &mut sender, &stop).await {
                 Ok(outcome) => serde_json::to_value(outcome)?,
                 Err(error) => serde_json::json!({"status":"check_failed", "reason":crate::treasury::diagnostics::sync_failure(&error)}),
             };

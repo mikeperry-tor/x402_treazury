@@ -67,9 +67,6 @@ impl FundingBackend for Source {
     fn observations(&self) -> Reads {
         self.reads.clone()
     }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
-    }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         self.started.send(job.id.clone()).unwrap();
         self.gate.acquire().await.unwrap().forget();
@@ -586,7 +583,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
         .close_unprepared_funding_for_operation(&old.id, &old.operation_id)
         .unwrap();
     state
-        .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+        .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id)
         .unwrap();
     let replacement = state.funding_job(&old.id).unwrap().unwrap();
     assert_ne!(old.operation_id, replacement.operation_id);
@@ -681,7 +678,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
             let facts = s.funding_facts(&current.id, &current.operation_id)?;
             assert!(!facts.accepted_quote);
             assert_eq!(facts.source_attempts, 0);
-            assert_eq!(s.funding_recovery_count(&current.id)?, 0);
+            assert!(!facts.preparation_accepted && !facts.source_pending);
             Ok(())
         })
         .await
@@ -778,7 +775,6 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                         s.reauthorize_closed_funding_for_operation(
                             &target.id,
                             &target.operation_id,
-                            3,
                         )?;
                     }
                     Ok(s.funding_job(&target.id)?.unwrap().operation_id)
@@ -813,7 +809,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                     assert!(!facts.provider_success && !facts.initial_credit_recorded);
                     assert!(facts.source_submission.is_none());
                     assert_eq!(facts.source_attempts, 0);
-                    assert_eq!(s.funding_recovery_count(&current.id)?, 0);
+                    assert!(!facts.preparation_accepted && !facts.source_pending);
                     assert!(
                         s.funding_facts(&sibling_check.id, &sibling_check.operation_id)?
                             .provider_success
@@ -839,7 +835,6 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                 reopened.funding_job(&old.id).unwrap().unwrap().operation_id,
                 replacement
             );
-            assert_eq!(reopened.funding_recovery_count(&old.id).unwrap(), 0);
             assert_eq!(reopened.status().unwrap().treasury_operations.len(), 1);
         }
     }
@@ -855,7 +850,6 @@ fn submitted(store: &mut Store, job: &FundingJob) {
             Some(&crate::rotation::transaction::ManagedFundingAuthority {
                 job_id: job.id.clone(),
                 auto_fund: true,
-                max_attempts: 3,
             }),
         )
         .unwrap();
@@ -2024,7 +2018,6 @@ async fn fatal_store_error_retains_active_source_lease_and_signed_liability() {
     let operation = reopened.operation(&job.operation_id).unwrap();
     assert_eq!(operation.attempts, 1);
     assert_eq!(operation.submission, "BROADCAST_REQUESTED");
-    assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
 }
 
 #[tokio::test]
@@ -2110,7 +2103,8 @@ async fn cancellation_drops_unsigned_quotes_without_accepting_or_retrying_them()
                 let saved = s.funding_job(&job.id)?.unwrap();
                 assert_eq!(saved.phase, FundingPhase::Allocated);
                 assert_eq!(saved.attempts, 0);
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert_eq!(saved.operation_id, job.operation_id);
+                assert!(!facts.preparation_accepted && !facts.source_pending);
                 Ok(())
             })
             .await
@@ -2430,7 +2424,6 @@ async fn advisory_inventory_and_post_capture_fields_preserve_sources_and_drain_s
             actor.await.unwrap();
             let reopened = Store::open(&state_path, &key_path, &treasury).unwrap();
             for job in &jobs {
-                assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
                 assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
                 assert_eq!(
                     reopened.operation_pending(&job.operation_id).unwrap(),
@@ -2629,7 +2622,10 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
             )
             .unwrap();
             for job in &jobs {
-                assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
+                assert_eq!(
+                    reopened.funding_job(&job.id).unwrap().unwrap().operation_id,
+                    job.operation_id
+                );
                 assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
                 assert_eq!(
                     reopened
@@ -2684,9 +2680,6 @@ impl FundingBackend for RetainedSource {
     fn observations(&self) -> InterruptedReads {
         self.owners.send(tokio::task::id()).unwrap();
         self.reads.clone()
-    }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
     }
     async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
         panic!("unexpected new quote")
@@ -2869,9 +2862,6 @@ impl FundingBackend for ExitingSource {
             "fixture owner exit"
         );
         self.reads.clone()
-    }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
     }
     async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
         panic!("unexpected quote")
@@ -3081,9 +3071,6 @@ impl FundingBackend for LocalHandoff {
     type Observations = Reads;
     fn observations(&self) -> Reads {
         self.reads.clone()
-    }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         self.events.lock().unwrap().push("prerequisite");
@@ -3335,9 +3322,6 @@ impl FundingBackend for ExpiryDecision {
     fn observations(&self) -> Reads {
         panic!("source-only fixture")
     }
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
-    }
     async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
         panic!("no new quote")
     }
@@ -3495,9 +3479,6 @@ impl FundingBackend for FulfilledSource {
     fn observations(&self) -> Reads {
         self.inner.observations()
     }
-    fn max_attempts(&self, job: &FundingJob) -> u32 {
-        self.inner.max_attempts(job)
-    }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         self.inner.quote_prerequisite(job).await
     }
@@ -3607,7 +3588,6 @@ async fn fulfilled_publication_reply_is_successful_progress_without_source_retry
                 s.request_broadcast(&current.operation_id, 1, 1, false)
                     .is_err()
             );
-            assert_eq!(s.funding_recovery_count(&id)?, 0);
             Ok(current)
         })
         .await

@@ -23,9 +23,6 @@ fn cap() -> String {
 fn retirement_tolerance() -> String {
     "0.001".into()
 }
-fn attempts() -> u32 {
-    3
-}
 fn confirmations() -> u64 {
     u64::from(
         zcash_client_backend::data_api::wallet::ConfirmationsPolicy::default()
@@ -312,8 +309,6 @@ pub enum WalletConfig {
         max_api_payment_usdc: String,
         #[serde(default = "retirement_tolerance")]
         max_retirement_remainder_usdc: String,
-        #[serde(default = "attempts")]
-        max_attempts: u32,
     },
 }
 
@@ -335,14 +330,12 @@ impl WalletConfig {
                 reserves,
                 max_retirement_remainder_usdc,
                 max_api_payment_usdc,
-                max_attempts,
             } => {
                 reserves.validate()?;
                 retirement_remainder(max_retirement_remainder_usdc)
                     .context("invalid max_retirement_remainder_usdc")?;
                 SpendPolicy::dollars(max_api_payment_usdc)
                     .context("invalid max_api_payment_usdc")?;
-                ensure!(*max_attempts > 0, "invalid managed wallet limits");
             }
         }
         Ok(())

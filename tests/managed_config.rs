@@ -613,7 +613,13 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
     let wallet = roundtrip::<WalletConfig>(
         "mode='zcash_rotation'\nmax_api_payment_usdc='1'\n[reserves.small]\nfunding_amount_usdc='2'",
     );
-    assert_eq!(wallet["max_attempts"], 3);
+    assert!(wallet.get("max_attempts").is_none());
+    assert!(
+        toml::from_str::<WalletConfig>(
+            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_attempts=3"
+        )
+        .is_err()
+    );
     assert_eq!(wallet["max_retirement_remainder_usdc"], "0.001");
     let treasury = roundtrip::<TreasuryConfig>("state_dir='state'");
     assert_eq!(

@@ -210,10 +210,6 @@ impl FundingBackend for Fake {
         self.store.call(move |s| s.confirm_spend(&id)).await?;
         Ok(true)
     }
-
-    fn max_attempts(&self, _: &FundingJob) -> u32 {
-        3
-    }
 }
 #[tokio::test]
 async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet() {
@@ -576,13 +572,19 @@ async fn unsigned_outage_past_health_threshold_does_not_authorize_recovery() {
     assert_eq!(worker.backend.lock().await.recovery_calls, 0);
     assert_eq!(worker.backend.lock().await.sends, 0);
     let id = original.id.clone();
-    let (job, attempts) = worker
+    let job = worker
         .store
-        .call(move |s| Ok((s.funding_job(&id)?.unwrap(), s.funding_recovery_count(&id)?)))
+        .call(move |s| {
+            let job = s.funding_job(&id)?.unwrap();
+            let facts = s.funding_facts(&id, &job.operation_id)?;
+            assert!(!facts.archived && !facts.preparation_accepted && !facts.source_pending);
+            assert!(facts.source_submission.is_none());
+            s.require_unstarted_preparation(&job.operation_id)?;
+            Ok(job)
+        })
         .await
         .unwrap();
     assert_eq!(job.operation_id, original.operation_id);
-    assert_eq!(attempts, 0);
     drop(worker);
     task.await.unwrap();
 }
@@ -627,7 +629,7 @@ async fn timeout_degrades_pool_but_keeps_reconciling_without_resending() {
 }
 #[tokio::test]
 async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_recovery_authority() {
-    let (_dir, worker, task) = fixture().await;
+    let (dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
     worker.backend.lock().await.quote_deadline = now + 400;
     worker.tick(now).await.unwrap();
@@ -671,14 +673,37 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
         x402_treazury::rotation::store::funding::FundingPhase::Quoted
     );
     let job = status.funding_jobs[0].id.clone();
-    assert_eq!(
-        worker
-            .store
-            .call(move |s| s.funding_recovery_count(&job))
-            .await
-            .unwrap(),
-        0
+    let archived_job = job.clone();
+    let archived_operation = original.clone();
+    worker
+        .store
+        .call(move |s| {
+            s.require_unstarted_preparation(&original)?;
+            assert!(!s.operation_pending(&original)?);
+            assert!(s.status()?.treasury_operations.is_empty());
+            let current = s.funding_job(&job)?.unwrap();
+            assert_ne!(current.operation_id, original);
+            s.require_unstarted_preparation(&current.operation_id)?;
+            assert!(!s.funding_facts(&job, &current.operation_id)?.archived);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let db = rusqlite::Connection::open_with_flags(
+        dir.path().join("state/state.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let retained: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2) AND EXISTS(SELECT 1 FROM funding_quote_refreshes WHERE operation_id=?2)",
+        rusqlite::params![archived_job, archived_operation],
+        |row| row.get(0),
+    ).unwrap();
+    assert!(
+        retained,
+        "the exact original retains its nondisclosure archive"
     );
+    drop(db);
     drop(worker);
     task.await.unwrap();
 }
@@ -968,7 +993,7 @@ async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_sen
             .store
             .call(move |s| {
                 s.require_unstarted_preparation(&operation)?;
-                assert_eq!(s.funding_recovery_count(&id)?, 0);
+                assert!(!s.funding_facts(&id, &operation)?.archived);
                 Ok(())
             })
             .await
@@ -1390,6 +1415,18 @@ async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
     worker.tick(now).await.unwrap();
     worker.tick(now + 100).await.unwrap();
     worker.tick(now + 200).await.unwrap();
+    let original = worker
+        .store
+        .call(|s| {
+            let job = s.funding_jobs()?.remove(0);
+            Ok((
+                job.id,
+                job.operation_id.clone(),
+                s.prepared_bytes(&job.operation_id)?.to_vec(),
+            ))
+        })
+        .await
+        .unwrap();
     worker.backend.lock().await.recovery =
         Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry"));
     for i in 3..6 {
@@ -1401,7 +1438,7 @@ async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
         assert_eq!(worker.backend.lock().await.sends, 0);
     }
     worker.backend.lock().await.recovery = Some(RecoveryOutcome::OperatorRequired(
-        "recovery_attempt_limit_reached",
+        "conflicting_transaction_or_input_evidence",
     ));
     worker.tick(now + 6000).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
@@ -1410,15 +1447,30 @@ async fn recovery_wait_preserves_signed_operation_without_resubmitting() {
             .last_error
             .as_deref()
             .unwrap()
-            .contains("recovery_attempt_limit_reached")
+            .contains("conflicting_transaction_or_input_evidence")
     );
     assert_eq!(worker.backend.lock().await.sends, 0);
+    worker
+        .store
+        .call(move |s| {
+            let (job, operation, bytes) = original;
+            assert_eq!(s.funding_job(&job)?.unwrap().operation_id, operation);
+            assert_eq!(s.operation(&operation)?.submission, "PREPARED");
+            assert_eq!(s.operation(&operation)?.attempts, 0);
+            assert!(s.operation_pending(&operation)?);
+            assert!(!s.funding_facts(&job, &operation)?.archived);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), bytes);
+            assert!(s.require_unstarted_preparation(&operation).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
     drop(worker);
     task.await.unwrap();
 }
 
 #[tokio::test]
-async fn repeated_quote_outages_do_not_consume_recovery_attempts_or_allocate_again() {
+async fn repeated_quote_outages_preserve_original_without_allocating_again() {
     let (_dir, worker, task) = fixture().await;
     worker.backend.lock().await.quote_outage = true;
     let initial = worker.store.call(|s| s.status()).await.unwrap();
@@ -1635,7 +1687,9 @@ async fn assert_due_source_observations(
                 s.prepared_bytes(&operation)?.as_slice(),
                 zcash_transaction::raw(100).as_slice()
             );
-            assert_eq!(s.funding_recovery_count(&s.funding_jobs()?[0].id)?, 0);
+            let facts = s.funding_facts(&s.funding_jobs()?[0].id, &operation)?;
+            assert!(!facts.archived && facts.source_pending);
+            assert_eq!(facts.source_attempts, 1);
             Ok(())
         })
         .await

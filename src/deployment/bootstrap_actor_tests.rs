@@ -351,7 +351,6 @@ async fn pending_bootstrap_completes_captured_credit_while_source_stays_owned() 
         .await
         .unwrap();
     let names = BTreeSet::from(["research".to_owned()]);
-    let attempts = BTreeMap::from([("research".to_owned(), 3)]);
     let captured = capture_startup(&store, &names).await.unwrap();
     assert_eq!(captured["research"].len(), 2);
     let captured_claims: Vec<_> = captured["research"]
@@ -369,7 +368,7 @@ async fn pending_bootstrap_completes_captured_credit_while_source_stays_owned() 
         .await
         .unwrap();
     assert!(
-        !check_startup(&store, &names, &attempts, &captured, false)
+        !check_startup(&store, &names, &captured, false)
             .await
             .unwrap()
     );
@@ -410,7 +409,7 @@ async fn pending_bootstrap_completes_captured_credit_while_source_stays_owned() 
         })),
     };
     let stop = CancellationToken::new();
-    let task = tokio::spawn(supervise(initialized, names, attempts, stop.clone()));
+    let task = tokio::spawn(supervise(initialized, names, stop.clone()));
     tokio::time::timeout(Duration::from_secs(10), f.occupied.cancelled())
         .await
         .unwrap();

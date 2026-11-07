@@ -407,7 +407,7 @@ async fn ironwood_source_command_scan_is_consumed_once_before_unrelated_commands
     for _ in 0..3 {
         assert!(
             handle
-                .recover_funding("missing".into(), 1, false)
+                .recover_funding("missing".into(), false)
                 .await
                 .is_err()
         );

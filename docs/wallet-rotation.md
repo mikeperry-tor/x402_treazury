@@ -159,7 +159,7 @@ USD conversion-overhead ceiling:
 | Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-5 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
 | `max_api_payment_usdc` | Per-x402-payment USDC authority, independent of ZEC funding. Managed profiles require an explicit setting; static default is $1. `none`/`off` means unlimited. |
 | `max_retirement_remainder_usdc` | Automatic retirement threshold, default $0.001; no transfer or replacement authority. |
-| `max_attempts` | Managed-funding transaction recovery-attempt bound, default three; unsigned outages/quote refreshes do not consume it. Direct sends do not gain replacement-payment authority. |
+| Funding recovery authority | No per-job recovery-count cutoff. A replacement requires safe original-source closure, a current unconsumed claim and enabled funding/qualification authority. Direct sends do not gain replacement-payment authority. |
 | `funding.slippage_bps` | Relative quote execution tolerance; default 500 (5%). The full percentage domain 0-10000 basis points (0-100%) is supported; provider quote acceptance remains external. |
 | Quote/refund and signed transaction expiry | External financial authority windows. Managed/send requests default to 1800 seconds; foreign receives request refund handling after 7200 by default. Neither is a completion deadline or replay permission. |
 | x402 signing authority | Newly signed API payment authority lasts at most the lesser of the seller timeout and 300 seconds (`payment/lifetime.rs`); this does not impose an HTTP work deadline. |
@@ -264,8 +264,7 @@ Treasury or its normal Tokio runtime does not discard started accepted work.
 A queued task that never starts cannot accept inputs. Deposit deadline/claim checks
 and shielding stop checks retain their existing acceptance semantics. The preparation phase commits
 with accepted input evidence; known proposal shortages leave the quoted operation
-unstarted without consuming transaction recovery attempts. The
-SDK owns current balances, confirmations, witnesses, spent outputs and chain
+unstarted. The SDK owns current balances, confirmations, witnesses, spent outputs and chain
 corrections. No full historical source/refund traversal gates publication.
 
 The bridge's USD valuation is not an independent exchange-rate oracle. Actual
@@ -430,7 +429,7 @@ so a still-in-bounds saved choice survives a range or fixed configuration change
 Sizing continues while each rejection raises the provider floor within the
 authorized ceiling and the original quote deadline remains valid. Every valid
 replacement draw is persisted before the next request; there is no separate
-attempt cutoff or transaction recovery charge.
+attempt cutoff.
 The preview's NEAR-priced ZEC principal becomes the fixed input of the executable
 `EXACT_INPUT` quote. Acceptance fixes the operation's principal; an unprepared
 quote that no longer satisfies current claim policy is refreshed
@@ -705,8 +704,7 @@ without disclosing a new deposit.
 
 A returned quote deadline that has actually expired prevents a new preparation or
 first submission. Untouched quote refresh requires proof of no accepted calculation
-and no outgoing bytes, then archives the old binding without consuming a signed
-transaction recovery attempt. No local five-minute margin applies.
+and no outgoing bytes, then archives the old binding and its nondisclosure evidence. No local five-minute margin applies.
 
 Recovery eligibility comes from the original operation and its bound closure
 archive, with liabilities rechecked before reuse. Saved error messages grant no
@@ -765,12 +763,12 @@ source confirmation proves delivery to the swap, not absence of future destinati
 credit. A negative provider report, a refund and a fresh random nominal draw do
 not remove that liability. Replacement requires independently established source
 non-disclosure or the existing authenticated finite-expiry proof; the current
-unconsumed claim, enabled funding policy and recovery allowance still apply.
+unconsumed claim, enabled funding policy and qualification authority still apply.
 Verified finite expiry can permit a fresh attempt under current unconsumed claim,
-funding, fee and recovery authority and actual SDK spendable funds. If later
+funding and qualification authority and actual SDK spendable funds. If later
 canonical confirmation establishes that the original source transaction was
 included, that confirmation supersedes active expiry as the basis for a new
-replacement. The prior expiry proof, pinned snapshot and recovery count remain
+replacement. The prior expiry proof, pinned snapshot and original operation remain
 audit history; they do not authorize another deposit after confirmation. The old NEAR
 request remains independently observable until its own terminal outcome.
 
@@ -927,25 +925,22 @@ production does not construct one. Submitted/uncertain operations are observed,
 never automatically replayed. Closing source work does not close an unresolved
 bridge operation. A fresh attempt after expiry requires the original's stored
 canonical closure proof, not an EXPIRED label alone, plus current unconsumed claim,
-funding, fee and recovery authority. An unresolved NEAR request does not veto that
+funding and qualification authority. An unresolved NEAR request does not veto that
 source-expiry proof; it retains its own status observation. Returned coins are
 ordinary SDK funds, without per-job refund attribution.
-The profile's `max_attempts` bounds transaction recovery resets using durable
-history; neither process restart nor operation replacement erases this count.
-Replacement checks this allowance once, after idempotent archival in the Store
-transaction. An archived original confirmed through the canonical-proof/Store
-boundary (including compatible library or legacy state) does not consume another
-entry for the same operation. Ordinary reconciliation remains pending-only;
-scanning a replacement chain does not reopen completed historical source journals.
-Disabled automatic funding is an ordinary wait after safe source closure, not a
-manual-repair warning; a later enabled configuration can resume eligible work.
-An exhausted recovery limit or qualification restriction still requires its
-separate authority before a new attempt.
+There is no per-job recovery-count limit. Another attempt requires the original
+source's established closure and current unconsumed claim, funding and qualification
+authority. Replacement archives each original idempotently in the Store transaction;
+operation history never disables otherwise permitted recovery. Ordinary
+reconciliation remains pending-only; scanning a replacement chain does not reopen
+completed historical source journals. Disabled automatic funding is an ordinary
+wait after safe source closure, not a manual-repair warning; a later enabled
+configuration can resume eligible work.
 Proven never-disclosed resets, including untouched quote refreshes and unpublished
-calculations closed after offline reconstruction, are marked in durable history
-and excluded from that count. Historical unclassified records still count. Earlier binaries reject the newer state schema.
-Unsigned quote outages use bounded per-pass work and backoff without consuming
-transaction recovery attempts.
+calculations closed after offline reconstruction, retain durable markers for source
+and bridge ownership. Unclassified historical records remain preserved obligations;
+they do not consume a retry allowance. Unsigned quote outages retain ordinary
+per-pass work and backoff without authorizing another deposit.
 
 
 The treasury receives/synchronizes Ironwood with capability checks on the injected
@@ -979,8 +974,7 @@ That repair does not remove an accepted original's Store input manifest, signed
 bytes or immutable preparation snapshot. An actually disclosed original retains
 its liability through failed/canceled observations and reopen until canonical
 confirmation or the existing source-disposition proof resolves it. New spendable
-capital and a zero recovery allowance do not authorize another deposit, release
-or replay; an original below its signed expiry continues to wait.
+capital does not authorize another deposit, release or replay; an original below its signed expiry continues to wait.
 
 Reuse existing validated observations, exact operation bindings and confirmed
 journals. Acquire a missing fact only when it can advance the affected operation,

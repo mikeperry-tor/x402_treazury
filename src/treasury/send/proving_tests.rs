@@ -238,7 +238,6 @@ async fn qualify_preparation(case: PreparationCase) {
         managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
             job_id: job.id.clone(),
             auto_fund: true,
-            max_attempts: 3,
         }),
         operation_id: operation.clone(),
         pool_id: Some(job.pool_id.clone()),

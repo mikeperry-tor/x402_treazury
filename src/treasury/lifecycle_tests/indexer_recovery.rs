@@ -54,7 +54,7 @@ impl Original {
                         .as_slice()
                         == original.quote
                 );
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert!(!s.funding_facts(&job.id, &job.operation_id)?.archived);
                 assert_eq!(s.funding_jobs()?.len(), 1);
                 let facts = s.funding_facts(&job.id, &job.operation_id)?;
                 assert_eq!(facts.source_pending, pending);
@@ -431,7 +431,7 @@ async fn proven_deep_fork_finds_prebirthday_credit_but_keeps_orphaned_original_l
     let mut observer = ObserveUnknown { lookups: 0 };
     assert_eq!(
         owner
-            .recover_funding_job(original.job.id.clone(), 0, true, &mut observer, &stop)
+            .recover_funding_job(original.job.id.clone(), true, &mut observer, &stop)
             .await
             .unwrap(),
         recovery::RecoveryOutcome::Waiting("waiting_for_transaction_expiry")

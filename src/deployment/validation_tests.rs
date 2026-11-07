@@ -21,7 +21,7 @@ fn resolved(value: &Value) -> Value {
 }
 fn managed() -> Value {
     json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},
-        "max_api_payment_usdc":"1","max_retirement_remainder_usdc":"0","max_attempts":3})
+        "max_api_payment_usdc":"1","max_retirement_remainder_usdc":"0"})
 }
 fn treasury() -> Value {
     json!({"state_dir":"never-opened-state","confirmations":1})

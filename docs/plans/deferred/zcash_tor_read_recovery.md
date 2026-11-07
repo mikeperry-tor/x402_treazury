@@ -109,7 +109,7 @@ waiter cancellation and owner/runtime termination. Assert exact channel/RPC coun
 retained old-stream progress and next-operation winner use. Reopen durable financial
 fixtures after an ambiguous send: preserve exact bytes, input owner and unknown
 outcome with no automatic rebroadcast or repeated calculation. Confirm treasury
-cadence and recovery-attempt accounting are unchanged. Update wallet/network/
+cadence, accepted ownership and canonical source-closure rules are unchanged. Update wallet/network/
 configuration, both resource inventories and testing guidance in this commit.
 
 **Cumulative gate ZG1, after Z2:** independently review Z1/Z2, all fixups and full

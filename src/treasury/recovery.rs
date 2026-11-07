@@ -61,13 +61,12 @@ impl Treasury {
     pub async fn recover_funding_job(
         &mut self,
         job_id: String,
-        max_attempts: u32,
         allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
     ) -> Result<RecoveryOutcome> {
         Ok(self
-            .recover_funding_observed(job_id, max_attempts, allow_new_attempt, sender, stop, false)
+            .recover_funding_observed(job_id, allow_new_attempt, sender, stop, false)
             .await?
             .outcome)
     }
@@ -75,7 +74,6 @@ impl Treasury {
     pub(crate) async fn recover_funding_observed(
         &mut self,
         job_id: String,
-        max_attempts: u32,
         allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
@@ -86,14 +84,7 @@ impl Treasury {
             source_observed: false,
         };
         let result = self
-            .recover_funding_job_inner(
-                job_id,
-                max_attempts,
-                allow_new_attempt,
-                sender,
-                stop,
-                &mut observation,
-            )
+            .recover_funding_job_inner(job_id, allow_new_attempt, sender, stop, &mut observation)
             .await;
         let confirmation = result.as_ref().err().and_then(|error| {
             error
@@ -116,7 +107,6 @@ impl Treasury {
     async fn recover_funding_job_inner(
         &mut self,
         job_id: String,
-        max_attempts: u32,
         allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
@@ -170,14 +160,10 @@ impl Treasury {
             return Ok(Recovered);
         }
         let Some(operation) = operation.as_ref() else {
-            return self
-                .recover_unprepared_job(&job, max_attempts, allow_new_attempt)
-                .await;
+            return self.recover_unprepared_job(&job, allow_new_attempt).await;
         };
         if matches!(operation.submission.as_str(), "CONFIRMED" | "EXPIRED") {
-            return self
-                .reauthorize_recovery(&job, max_attempts, allow_new_attempt)
-                .await;
+            return self.reauthorize_recovery(&job, allow_new_attempt).await;
         }
         let operation_id = operation.operation_id.clone();
         let expiry = u64::from(operation.facts.expiry_height);
@@ -208,9 +194,7 @@ impl Treasury {
                 {
                     return Ok(Recovered);
                 }
-                return self
-                    .reauthorize_recovery(&job, max_attempts, allow_new_attempt)
-                    .await;
+                return self.reauthorize_recovery(&job, allow_new_attempt).await;
             }
             if expiry > 0
                 && sync.height.is_none_or(|height| {
@@ -258,14 +242,12 @@ impl Treasury {
         {
             return Ok(Recovered);
         }
-        self.reauthorize_recovery(&job, max_attempts, allow_new_attempt)
-            .await
+        self.reauthorize_recovery(&job, allow_new_attempt).await
     }
 
     async fn recover_unprepared_job(
         &mut self,
         job: &FundingJob,
-        max_attempts: u32,
         allow_new_attempt: bool,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
@@ -289,15 +271,13 @@ impl Treasury {
         if completed {
             return Ok(Recovered);
         }
-        self.reauthorize_recovery(job, max_attempts, allow_new_attempt)
-            .await
+        self.reauthorize_recovery(job, allow_new_attempt).await
     }
 
-    /// The Store checks the allowance after idempotently archiving this original.
+    /// Reauthorize only after the original closes and current funding is enabled.
     async fn reauthorize_recovery(
         &mut self,
         job: &FundingJob,
-        max_attempts: u32,
         allow_new_attempt: bool,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
@@ -320,19 +300,10 @@ impl Treasury {
         }
         let id = job.id.clone();
         let expected_operation = job.operation_id.clone();
-        match self
-            .store
-            .call(move |s| {
-                s.reauthorize_closed_funding_for_operation(&id, &expected_operation, max_attempts)
-            })
-            .await
-        {
-            Ok(()) => Ok(Recovered),
-            Err(error) if error.is::<crate::rotation::error::RecoveryAttemptLimit>() => {
-                Ok(OperatorRequired("recovery_attempt_limit_reached"))
-            }
-            Err(error) => Err(error),
-        }
+        self.store
+            .call(move |s| s.reauthorize_closed_funding_for_operation(&id, &expected_operation))
+            .await?;
+        Ok(Recovered)
     }
 
     async fn observe_recovery_source(
@@ -466,7 +437,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recovery_requires_preparation_evidence_and_legacy_count_bound_survives_reopen() {
+    async fn recovery_requires_preparation_evidence_even_when_funding_is_disabled() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -498,7 +469,7 @@ mod tests {
             .unwrap();
         let stop = CancellationToken::new();
         let observation = owner
-            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop, true)
+            .recover_funding_observed(job.id.clone(), true, &mut NoNetwork, &stop, true)
             .await
             .unwrap();
         assert!(
@@ -524,115 +495,35 @@ mod tests {
             .unwrap();
         assert_eq!(
             owner
-                .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
+                .recover_funding_job(job.id.clone(), false, &mut NoNetwork, &stop)
                 .await
                 .unwrap(),
             RecoveryOutcome::OperatorRequired("preparation_outcome_unknown")
         );
-        let job = owner
-            .status()
-            .await
-            .unwrap()
-            .funding_jobs
-            .into_iter()
-            .find(|other| other.id != job.id)
-            .unwrap();
-        let id = job.id.clone();
+        let before = recovery_rows(dir.path(), false);
+        assert_eq!(
+            owner
+                .recover_funding_job(job.id.clone(), true, &mut NoNetwork, &stop)
+                .await
+                .unwrap(),
+            RecoveryOutcome::OperatorRequired("preparation_outcome_unknown")
+        );
+        assert_eq!(recovery_rows(dir.path(), false), before);
+        let original = job.clone();
         owner
             .store
-            .call(move |s| s.close_unprepared_funding(&id))
+            .call(move |store| {
+                let facts = store.funding_facts(&original.id, &original.operation_id)?;
+                assert!(facts.preparation_accepted);
+                assert!(!facts.archived && !facts.source_closed);
+                assert_eq!(
+                    store.funding_job(&original.id)?.unwrap().operation_id,
+                    original.operation_id
+                );
+                Ok(())
+            })
             .await
             .unwrap();
-        // Preserve the old unmarked archive contract in this compatibility test.
-        rusqlite::Connection::open(dir.path().join("state/state.sqlite"))
-            .unwrap()
-            .execute("DELETE FROM funding_quote_refreshes", [])
-            .unwrap();
-        assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
-                .await
-                .unwrap(),
-            RecoveryOutcome::Waiting("funding_disabled")
-        );
-        let closed = owner
-            .status()
-            .await
-            .unwrap()
-            .funding_jobs
-            .into_iter()
-            .find(|j| j.id == job.id)
-            .unwrap();
-        assert_eq!(closed.operation_id, job.operation_id);
-        assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
-                .await
-                .unwrap(),
-            RecoveryOutcome::Recovered
-        );
-        let id = job.id.clone();
-        let count = owner
-            .store
-            .call(move |s| s.funding_recovery_count(&id))
-            .await
-            .unwrap();
-        assert_eq!(count, 1);
-        let id = job.id.clone();
-        owner
-            .store
-            .call(move |s| s.close_unprepared_funding(&id))
-            .await
-            .unwrap();
-        // Preserve the old unmarked archive contract in this compatibility test.
-        rusqlite::Connection::open(dir.path().join("state/state.sqlite"))
-            .unwrap()
-            .execute("DELETE FROM funding_quote_refreshes", [])
-            .unwrap();
-        let treasury_id = owner.status().await.unwrap().treasury_id;
-        owner.close().await.unwrap();
-        let mut owner = Treasury::open(state, key, treasury_id).await.unwrap();
-        assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
-                .await
-                .unwrap(),
-            RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached")
-        );
-        let id = job.id.clone();
-        assert_eq!(
-            owner
-                .store
-                .call(move |s| s.funding_recovery_count(&id))
-                .await
-                .unwrap(),
-            2
-        );
-        let closed = owner
-            .status()
-            .await
-            .unwrap()
-            .funding_jobs
-            .into_iter()
-            .find(|j| j.id == job.id)
-            .unwrap();
-        assert_eq!(closed.phase, FundingPhase::RecoveryRequired);
-        assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), 1, true, &mut NoNetwork, &stop)
-                .await
-                .unwrap(),
-            RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached")
-        );
-        let id = job.id.clone();
-        assert_eq!(
-            owner
-                .store
-                .call(move |s| s.funding_recovery_count(&id))
-                .await
-                .unwrap(),
-            2
-        );
         assert!(owner.status().await.unwrap().treasury_operations.is_empty());
         owner.close().await.unwrap();
     }
@@ -724,7 +615,7 @@ mod tests {
                     stop.cancel();
                 }
                 let outcome = owner
-                    .recover_funding_job(job.id.clone(), 3, true, &mut NoNetwork, &stop)
+                    .recover_funding_job(job.id.clone(), true, &mut NoNetwork, &stop)
                     .await
                     .unwrap();
                 assert_eq!(outcome, RecoveryOutcome::Waiting("swap_outcome_pending"));
@@ -734,7 +625,7 @@ mod tests {
                     .call(move |s| {
                         let current = s.funding_job(&id)?.unwrap();
                         assert_eq!(current.operation_id, original);
-                        assert_eq!(s.funding_recovery_count(&id)?, 0);
+                        assert!(!s.funding_facts(&id, &original)?.archived);
                         assert_eq!(s.operation(&original)?.submission, "CONFIRMED");
                         assert_eq!(s.operation(&original)?.attempts, 1);
                         assert_eq!(
@@ -808,7 +699,6 @@ mod tests {
             let result = owner
                 .recover_funding_observed(
                     job.id.clone(),
-                    1,
                     false,
                     &mut NoNetwork,
                     &CancellationToken::new(),
@@ -835,7 +725,7 @@ mod tests {
         .unwrap();
         drop(db);
         let error = owner
-            .recover_funding_job(job.id, 1, false, &mut NoNetwork, &CancellationToken::new())
+            .recover_funding_job(job.id, false, &mut NoNetwork, &CancellationToken::new())
             .await
             .unwrap_err();
         assert!(
@@ -912,7 +802,7 @@ mod tests {
                 .unwrap();
             let before = recovery_rows(dir.path(), false);
             let result = owner
-                .recover_funding_observed(job.id.clone(), 0, true, &mut NoNetwork, &stop, true)
+                .recover_funding_observed(job.id.clone(), true, &mut NoNetwork, &stop, true)
                 .await
                 .unwrap();
             assert_eq!(
@@ -926,7 +816,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn untouched_incomplete_quote_recovers_without_network_or_attempt_charge() {
+    async fn untouched_incomplete_quote_recovers_without_network_or_source_work() {
         let (_dir, mut owner, jobs) = unfunded_recovery_fixture().await;
         let job = jobs[0].clone();
         let selected = job.clone();
@@ -949,7 +839,7 @@ mod tests {
                 let facts = s.funding_facts(&selected.id, &selected.operation_id)?;
                 assert!(facts.source_never_disclosed() && facts.new_funding_allowed);
                 assert!(!facts.credit_needed() && !facts.status_needed());
-                assert_eq!(s.funding_recovery_count(&selected.id)?, 0);
+                assert!(facts.archived);
                 Ok(())
             })
             .await
@@ -957,7 +847,6 @@ mod tests {
         let result = owner
             .recover_funding_observed(
                 job.id.clone(),
-                0,
                 true,
                 &mut NoNetwork,
                 &CancellationToken::new(),
@@ -980,7 +869,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconstructed_unpublished_funding_resets_without_network_or_recovery_allowance() {
+    async fn reconstructed_unpublished_funding_resets_without_network_or_disclosure() {
         for allowed in [false, true] {
             let (dir, owner, jobs) = unfunded_recovery_fixture().await;
             let job = jobs[0].clone();
@@ -1046,7 +935,7 @@ mod tests {
                     let facts = s.funding_facts(&id, &original)?;
                     assert!(facts.source_never_disclosed());
                     assert!(!facts.credit_needed() && !facts.status_needed());
-                    assert_eq!(s.funding_recovery_count(&id)?, 0);
+                    assert!(facts.archived);
                     assert!(s.require_unstarted_preparation(&original).is_err());
                     let report = s.qualification_state()?;
                     assert!(
@@ -1075,7 +964,6 @@ mod tests {
             let result = owner
                 .recover_funding_observed(
                     job.id.clone(),
-                    0,
                     allowed,
                     &mut NoNetwork,
                     &CancellationToken::new(),
@@ -1121,78 +1009,111 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_unmarked_closure_keeps_count_and_disabled_funding_precedes_attempt_limit() {
+    async fn repeated_safe_recovery_preserves_old_archives_across_reopen() {
         let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
-        let job = &jobs[0];
-        let id = job.id.clone();
-        owner
-            .store
-            .call(move |store| store.close_unprepared_funding(&id))
-            .await
-            .unwrap();
-        // An existing unmarked archive retains its historical recovery count.
-        rusqlite::Connection::open(dir.path().join("state/state.sqlite"))
-            .unwrap()
-            .execute("DELETE FROM funding_quote_refreshes", [])
-            .unwrap();
-        let financial_before = recovery_rows(dir.path(), true);
+        let mut job = jobs[0].clone();
+        let identity = owner.status().await.unwrap().treasury_id;
         let stop = CancellationToken::new();
-        for (allowed, reason) in [
-            (false, "funding_disabled"),
-            (true, "recovery_attempt_limit_reached"),
-            (false, "funding_disabled"),
-            (true, "recovery_attempt_limit_reached"),
-        ] {
-            let observation = owner
-                .recover_funding_observed(job.id.clone(), 0, allowed, &mut NoNetwork, &stop, true)
-                .await
-                .unwrap();
-            assert_eq!(
-                observation.outcome,
-                if allowed {
-                    RecoveryOutcome::OperatorRequired(reason)
-                } else {
-                    RecoveryOutcome::Waiting(reason)
-                }
-            );
-            assert!(!observation.source_observed);
+        let mut archived_operations = Vec::new();
+        for _ in 0..5 {
             let id = job.id.clone();
-            let (current, count) = owner
+            let original = job.operation_id.clone();
+            owner
                 .store
                 .call(move |store| {
-                    Ok((
-                        store.funding_job(&id)?.unwrap(),
-                        store.funding_recovery_count(&id)?,
-                    ))
+                    store.close_unprepared_funding(&id)?;
+                    store.record_source_operator_requirement(
+                        &id,
+                        &original,
+                        "funding_recovery_requires_operator; recovery_attempt_limit_reached",
+                    )
                 })
                 .await
                 .unwrap();
-            assert_eq!(current.operation_id, job.operation_id);
-            assert_eq!(current.phase, FundingPhase::RecoveryRequired);
-            assert_eq!(count, 1, "closure must not archive the same attempt twice");
+            // Existing archives can predate the proven-nondisclosure marker.
+            // Their exact history remains; absence of the marker grants no new authority.
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            db.execute(
+                "DELETE FROM funding_quote_refreshes WHERE operation_id=?1",
+                [&job.operation_id],
+            )
+            .unwrap();
+            drop(db);
+            archived_operations.push(job.operation_id.clone());
+            owner.close().await.unwrap();
+            owner = Treasury::open(
+                dir.path().join("state"),
+                dir.path().join("key"),
+                identity.clone(),
+            )
+            .await
+            .unwrap();
+            let id = job.id.clone();
+            let original = job.operation_id.clone();
+            owner
+                .store
+                .call(move |store| {
+                    let facts = store.funding_facts(&id, &original)?;
+                    assert!(facts.archived && facts.source_closed);
+                    assert!(!facts.preparation_accepted && !facts.source_pending);
+                    assert!(facts.source_submission.is_none());
+                    assert!(!facts.initial_credit_recorded);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let before = recovery_rows(dir.path(), false);
+            let financial_before = recovery_rows(dir.path(), true);
+            for _ in 0..2 {
+                let observation = owner
+                    .recover_funding_observed(job.id.clone(), false, &mut NoNetwork, &stop, true)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    observation.outcome,
+                    RecoveryOutcome::Waiting("funding_disabled")
+                );
+                assert!(!observation.source_observed);
+                assert_eq!(recovery_rows(dir.path(), false), before);
+            }
+            let observation = owner
+                .recover_funding_observed(job.id.clone(), true, &mut NoNetwork, &stop, true)
+                .await
+                .unwrap();
+            assert_eq!(observation.outcome, RecoveryOutcome::Recovered);
+            assert!(!observation.source_observed);
+            let id = job.id.clone();
+            let next = owner
+                .store
+                .call(move |store| {
+                    let next = store.funding_job(&id)?.unwrap();
+                    let facts = store.funding_facts(&id, &next.operation_id)?;
+                    assert!(
+                        !facts.archived && !facts.preparation_accepted && !facts.source_pending
+                    );
+                    assert!(facts.source_submission.is_none());
+                    assert!(!facts.initial_credit_recorded);
+                    Ok(next)
+                })
+                .await
+                .unwrap();
+            assert_ne!(next.operation_id, job.operation_id);
+            assert_eq!(next.phase, FundingPhase::Allocated);
             assert_eq!(recovery_rows(dir.path(), true), financial_before);
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            let mut statement = db.prepare("SELECT operation_id FROM funding_recovery WHERE job_id=?1 ORDER BY operation_id").unwrap();
+            let saved = statement
+                .query_map([&job.id], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let mut expected = archived_operations.clone();
+            expected.sort();
+            assert_eq!(saved, expected, "each exact original remains archived once");
+            assert!(owner.status().await.unwrap().treasury_operations.is_empty());
+            assert!(!owner.status().await.unwrap().outgoing_pending);
+            job = next;
         }
-        let observation = owner
-            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop, true)
-            .await
-            .unwrap();
-        assert_eq!(observation.outcome, RecoveryOutcome::Recovered);
-        assert!(!observation.source_observed);
-        let id = job.id.clone();
-        let (current, count) = owner
-            .store
-            .call(move |store| {
-                Ok((
-                    store.funding_job(&id)?.unwrap(),
-                    store.funding_recovery_count(&id)?,
-                ))
-            })
-            .await
-            .unwrap();
-        assert_ne!(current.operation_id, job.operation_id);
-        assert_eq!(current.phase, FundingPhase::Allocated);
-        assert_eq!(count, 1);
-        assert_eq!(recovery_rows(dir.path(), true), financial_before);
         owner.close().await.unwrap();
     }
 }

@@ -1,6 +1,5 @@
 //! Funding workflow journal. The source operation ID is allocated before any
 //! calculation and remains immutable across crashes and ambiguous submissions.
-pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)";
 
 use super::*;
 
@@ -394,22 +393,10 @@ impl Store {
                 || (attempts == 0 && !confirmed && !incomplete)))
     }
 
-    pub fn require_funding_attempt(&self, job: &str, max_attempts: u32) -> Result<()> {
+    pub fn require_funding_attempt(&self, job: &str) -> Result<()> {
         self.funding_restriction
             .require_new_funding("funding_attempt_start")?;
-        self.check_job_permit(job)?;
-        self.require_funding_recovery_allowance(job, max_attempts)
-    }
-    pub(crate) fn require_funding_recovery_allowance(
-        &self,
-        job: &str,
-        max_attempts: u32,
-    ) -> Result<()> {
-        ensure!(
-            self.funding_recovery_count(job)? <= u64::from(max_attempts),
-            crate::rotation::error::RecoveryAttemptLimit
-        );
-        Ok(())
+        self.check_job_permit(job)
     }
     pub(crate) fn current_funding_claim(&self, job: &str) -> Result<super::capacity::FundingClaim> {
         super::capacity::current_funding_claim(&self.db, job)?
@@ -448,7 +435,7 @@ impl Store {
                     enabled && authority.auto_fund,
                     super::super::error::FundingCondition::Disabled
                 );
-                self.require_funding_attempt(&job, authority.max_attempts)?;
+                self.require_funding_attempt(&job)?;
                 ensure!(
                     self.accepted_quote_suits_current_claim(&job, operation)?,
                     "funding quote unsuitable for current claim"
@@ -548,8 +535,8 @@ impl Store {
     }
 
     /// Test/fixture-facing selection at a proven-clean quote boundary. Production
-    /// attempts use `select_quote_terms_for_attempt`, which also checks the durable
-    /// recovery allowance. This is unsigned request history, never a source
+    /// attempts use `select_quote_terms_for_attempt` with current claim authority.
+    /// This is unsigned request history, never a source
     /// reservation or an accepted quote.
     /// A clean saved choice is reused across ordinary failures and restarts when
     /// it remains within the current claim and operation floor. This avoids a
@@ -566,16 +553,13 @@ impl Store {
         self.select_quote_terms_for_claim(job, operation, &claim, floor, preferred, true)
     }
 
-    /// Serialized selection for a fresh funding attempt. The recovery allowance
-    /// and current permit/claim authority are checked once at this boundary.
+    /// Serialized selection for a fresh funding attempt under current permit/claim authority.
     pub(crate) fn select_quote_terms_for_attempt(
         &mut self,
         job: &str,
         operation: &str,
         preferred: &str,
-        max_attempts: u32,
     ) -> Result<QuoteTerms> {
-        self.require_funding_recovery_allowance(job, max_attempts)?;
         let claim = self.current_funding_claim(job)?;
         self.select_quote_terms_for_claim(
             job,
@@ -1113,12 +1097,6 @@ impl Store {
         Ok(())
     }
 
-    /// Recovery history survives restarts and operation replacement.
-    pub fn funding_recovery_count(&self, job: &str) -> Result<u64> {
-        let count: i64 = self.db.query_row(RECOVERY_COUNT_SQL, [job], |r| r.get(0))?;
-        Ok(u64::try_from(count)?)
-    }
-
     /// Called only after a typed response proving the preparer was never invoked.
     /// Absence of bytes by itself is not authority to repeat preparation.
     pub fn defer_unstarted_preparation(&mut self, job: &str) -> Result<()> {
@@ -1160,7 +1138,7 @@ impl Store {
     }
 
     /// Archive proven-unprepared work without authorizing another attempt. This
-    /// cleanup remains available when current funding policy is disabled/exhausted.
+    /// cleanup remains available when current funding policy is disabled.
     /// PREPARING is deliberately excluded: missing bytes do not prove nonexecution.
     pub fn close_unprepared_funding(&mut self, job: &str) -> Result<()> {
         let operation: String = self.db.query_row(
@@ -1211,26 +1189,23 @@ impl Store {
     }
 
     /// Operator-requested safe closure. New identity and dispatch require the
-    /// separate profile-aware recovery path and its current attempt allowance.
+    /// separate profile-aware recovery path and its current authority.
     pub fn recover_unprepared_funding(&mut self, job: &str) -> Result<()> {
         self.close_unprepared_funding(job)
     }
     /// Reauthorize a previously closed operation without rewriting its history.
-    /// Signed recoveries and unclassified history count against the durable
-    /// recovery allowance; proven never-disclosed resets are excluded.
-    pub fn reauthorize_closed_funding(&mut self, job: &str, max_attempts: u32) -> Result<()> {
+    pub fn reauthorize_closed_funding(&mut self, job: &str) -> Result<()> {
         let operation: String = self.db.query_row(
             "SELECT operation_id FROM funding_progress WHERE job_id=?1",
             [job],
             |r| r.get(0),
         )?;
-        self.reauthorize_closed_funding_for_operation(job, &operation, max_attempts)
+        self.reauthorize_closed_funding_for_operation(job, &operation)
     }
     pub fn reauthorize_closed_funding_for_operation(
         &mut self,
         job: &str,
         expected_operation: &str,
-        max_attempts: u32,
     ) -> Result<()> {
         self.funding_restriction
             .require_new_funding("funding_attempt_start")?;
@@ -1254,11 +1229,6 @@ impl Store {
             "funding closure proof missing"
         );
         tx.execute("INSERT OR IGNORE INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[job])?;
-        let closed: u64 = tx.query_row(RECOVERY_COUNT_SQL, [job], |r| sql_u64(r, 0))?;
-        ensure!(
-            closed <= u64::from(max_attempts),
-            crate::rotation::error::RecoveryAttemptLimit
-        );
         tx.execute("DELETE FROM funding_refunds WHERE job_id=?1", [job])?;
         tx.execute("DELETE FROM funding_health WHERE job_id=?1", [job])?;
         tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,provider_success=0,provider_failed=0,provider_refunded=0,provider_incomplete=0,provider_observed_at=NULL,quote_target=NULL,quote_ceiling=NULL,accepted_output=NULL,accepted_recipient=NULL,attempts=0,next_poll=0,last_error=NULL WHERE job_id=?1",params![job,Uuid::new_v4().to_string()])?;
@@ -1837,7 +1807,10 @@ mod completion_tests {
             store.funding_job(&job.id).unwrap().unwrap().phase,
             FundingPhase::Quoted
         );
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().operation_id,
+            job.operation_id
+        );
         store
             .db
             .execute_batch("DROP TRIGGER reject_preparing")
@@ -1963,7 +1936,10 @@ mod completion_tests {
         );
         assert!(store.operation(&job.operation_id).is_err());
         assert!(store.preparation_intent(&job.operation_id).is_err());
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().operation_id,
+            job.operation_id
+        );
     }
 
     #[test]
@@ -2077,7 +2053,10 @@ mod completion_tests {
                 store.current_funding_claim(&job.id).is_err(),
                 "any positive receipt consumes the initial claim"
             );
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                job.operation_id
+            );
             assert!(store.operation(&job.operation_id).is_err());
         }
     }
@@ -2089,7 +2068,10 @@ mod completion_tests {
         store.db.execute("INSERT INTO treasury_operations(id,facts,submission,attempts) VALUES (?1,'{}','BROADCAST_REQUESTED',1)", [&job.operation_id]).unwrap();
         store.db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
         assert!(store.close_unprepared_funding(&job.id).is_err());
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().operation_id,
+            job.operation_id
+        );
         for table in ["funding_recovery", "funding_quote_refreshes"] {
             assert_eq!(
                 store
@@ -2218,7 +2200,10 @@ mod completion_tests {
                     FundingPhase::Quoted,
                     "repeat reconstruction does not rewrite an already marked current phase"
                 );
-                assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+                assert_eq!(
+                    store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                    job.operation_id
+                );
                 store
                     .db
                     .execute(
@@ -2383,7 +2368,7 @@ mod completion_tests {
             assert_eq!(state, "COMPLETE");
             assert!(
                 store
-                    .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 1)
+                    .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id)
                     .is_err()
             );
             assert_eq!(
@@ -2406,7 +2391,6 @@ mod completion_tests {
             let authority = ManagedFundingAuthority {
                 job_id: job.id.clone(),
                 auto_fund: true,
-                max_attempts: 0,
             };
             if !credit_first {
                 store
@@ -2668,7 +2652,6 @@ mod completion_tests {
         let mut authority = ManagedFundingAuthority {
             job_id: job.id.clone(),
             auto_fund: false,
-            max_attempts: 0,
         };
         assert!(
             store
@@ -2932,7 +2915,6 @@ mod completion_tests {
         let current = store.funding_job(&job.id).unwrap().unwrap();
         assert_eq!(current.operation_id, job.operation_id);
         assert_eq!(current.phase, FundingPhase::Complete);
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
         assert!(!store.operation_pending(&job.operation_id).unwrap());
         assert!(store.operation(&job.operation_id).is_err());
         assert_eq!(store.destination_requirement(&job.id).unwrap().amount, "1");
@@ -2951,7 +2933,6 @@ mod completion_tests {
             let authority = ManagedFundingAuthority {
                 job_id: job.id.clone(),
                 auto_fund: true,
-                max_attempts: 0,
             };
             store
                 .require_preparation_authority(&job.operation_id, Some(&authority))
@@ -2989,7 +2970,6 @@ mod completion_tests {
             assert!(!facts.new_funding_allowed);
             assert_eq!(facts.preparation_accepted, !with_bytes);
             assert_eq!(facts.source_pending, with_bytes);
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
             if with_bytes {
                 assert_eq!(
                     store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
@@ -3074,7 +3054,7 @@ mod completion_tests {
         );
         assert!(
             store
-                .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 1)
+                .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id)
                 .is_err()
         );
         store
@@ -3147,7 +3127,6 @@ mod completion_tests {
             .unwrap();
         assert_eq!(current.operation_id, job.operation_id);
         assert_eq!(current.phase, FundingPhase::RecoveryRequired);
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
         assert!(store.funding_quote(&job.id).is_ok());
         assert!(
             !store
@@ -3240,7 +3219,6 @@ mod completion_tests {
                 Some(&ManagedFundingAuthority {
                     job_id: job.id.clone(),
                     auto_fund: true,
-                    max_attempts: 3,
                 }),
             )
             .unwrap();
@@ -3514,7 +3492,10 @@ mod completion_tests {
                     quote.as_slice()
                 );
                 assert_eq!(store.funding_jobs().unwrap().len(), 2);
-                assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+                assert_eq!(
+                    store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                    job.operation_id
+                );
                 assert!(
                     store
                         .record_provider_outcome(
@@ -3756,7 +3737,7 @@ mod completion_tests {
             .unwrap();
         store.resolve_expired(&old.operation_id, revision).unwrap();
         store
-            .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+            .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id)
             .unwrap();
         store.funding_job(&old.id).unwrap().unwrap()
     }
@@ -3939,7 +3920,10 @@ mod completion_tests {
                 old_quote
             );
             assert_eq!(store.operation(&old.operation_id).unwrap().attempts, 1);
-            assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 1);
+            assert!(store.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+            params![old.id, old.operation_id], |r| r.get::<_, bool>(0)
+        ).unwrap());
             assert!(store.current_funding_claim(&job.id).is_err());
             assert_eq!(
                 store.operation_pending(&job.operation_id).unwrap(),
@@ -3947,7 +3931,7 @@ mod completion_tests {
             );
             assert!(
                 store
-                    .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                    .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id)
                     .is_err()
             );
         }
@@ -4009,7 +3993,10 @@ mod completion_tests {
             store.funding_job(&job.id).unwrap().unwrap().target,
             old.target
         );
-        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
+        assert!(store.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+            params![old.id, old.operation_id], |r| r.get::<_, bool>(0)
+        ).unwrap());
         let prepared: i64 = store
             .db
             .query_row("SELECT COUNT(*) FROM outgoing", [], |r| r.get(0))
@@ -4151,7 +4138,10 @@ mod completion_tests {
                     .finish_funding_if_proven(&job.id, &job.operation_id)
                     .unwrap()
             );
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                job.operation_id
+            );
             assert_eq!(store.funding_jobs().unwrap().len(), 2);
         }
     }
@@ -4672,12 +4662,12 @@ mod completion_tests {
                     );
                     assert!(
                         store
-                            .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                            .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id)
                             .is_err()
                     );
                     assert!(
                         store
-                            .reauthorize_closed_funding_for_operation(&job.id, "stale-operation", 3)
+                            .reauthorize_closed_funding_for_operation(&job.id, "stale-operation")
                             .is_err()
                     );
                     assert!(
@@ -4707,7 +4697,10 @@ mod completion_tests {
                         "CONFIRMED"
                     );
                     assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
-                    assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+                    assert_eq!(
+                        store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                        job.operation_id
+                    );
                     assert!(!store.preparation_pending().unwrap());
                 }
                 // Unreadable advisory flags cannot manufacture replacement authority.
@@ -4719,14 +4712,17 @@ mod completion_tests {
                 );
                 assert!(
                     store
-                        .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 3)
+                        .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id)
                         .is_err()
                 );
                 assert_eq!(
                     store.funding_job(&job.id).unwrap().unwrap().operation_id,
                     job.operation_id
                 );
-                assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+                assert_eq!(
+                    store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                    job.operation_id
+                );
             }
         }
     }
@@ -4815,8 +4811,12 @@ mod recovery_classification_tests {
             let job = store.funding_job(&unknown.id)?.unwrap();
             let facts = store.funding_facts(&job.id, &job.operation_id)?;
             assert!(!can_recover_facts(None, &facts));
+            assert!(!facts.archived && facts.preparation_accepted);
             assert!(store.close_unprepared_funding(&job.id).is_err());
-            assert_eq!(store.funding_recovery_count(&job.id)?, 0);
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                job.operation_id
+            );
             assert_eq!(
                 store.funding_job(&job.id)?.unwrap().operation_id,
                 job.operation_id
@@ -4824,7 +4824,7 @@ mod recovery_classification_tests {
         }
         let closed = &jobs[1];
         store.close_unprepared_funding(&closed.id)?;
-        // Legacy accepted archives were counted; migration must not exempt them.
+        // Legacy archives may lack the nondisclosure classification marker.
         store.db.execute(
             "DELETE FROM funding_quote_refreshes WHERE operation_id=?1",
             [&closed.operation_id],
@@ -4842,7 +4842,10 @@ mod recovery_classification_tests {
             let facts = store.funding_facts(&job.id, &job.operation_id)?;
             assert!(facts.source_closed && can_recover_facts(None, &facts));
             store.close_unprepared_funding(&job.id)?;
-            assert_eq!(store.funding_recovery_count(&job.id)?, 1);
+            assert!(store.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+            params![job.id, job.operation_id], |r| r.get::<_, bool>(0)
+        ).unwrap());
         }
         drop(store);
         let mut store = Store::open(&state, &key, &identity)?;
@@ -4876,7 +4879,7 @@ mod recovery_classification_tests {
                 .source_closed
         );
         assert!(store.close_unprepared_funding(&job.id).is_err());
-        assert!(store.reauthorize_closed_funding(&job.id, 3).is_err());
+        assert!(store.reauthorize_closed_funding(&job.id).is_err());
         assert_eq!(
             store.funding_job(&job.id)?.unwrap().operation_id,
             job.operation_id
@@ -4886,12 +4889,15 @@ mod recovery_classification_tests {
             [&job.operation_id],
         )?;
         store.deny_new_funding();
-        assert!(store.reauthorize_closed_funding(&job.id, 3).is_err());
+        assert!(store.reauthorize_closed_funding(&job.id).is_err());
         assert_eq!(
             store.funding_job(&job.id)?.unwrap().operation_id,
             job.operation_id
         );
-        assert_eq!(store.funding_recovery_count(&job.id)?, 1);
+        assert!(store.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+            params![job.id, job.operation_id], |r| r.get::<_, bool>(0)
+        ).unwrap());
         // An archive under a different job is not provenance for this operation.
         store.db.execute(
             "UPDATE funding_recovery SET job_id=?2 WHERE operation_id=?1",
@@ -5001,15 +5007,15 @@ mod quote_selection_tests {
     }
 
     #[test]
-    fn attempt_selection_checks_recovery_allowance_and_draws_within_the_claim() {
+    fn attempt_selection_preserves_current_claim_despite_unclassified_history() {
         let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
         let first = store
-            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000", 0)
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000")
             .unwrap();
         assert_eq!(first.target, U256::from(3_500_000));
         assert_eq!(first.ceiling, U256::from(5_000_000));
         let reused = store
-            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 0)
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000")
             .unwrap();
         assert_eq!(reused.target, U256::from(3_500_000));
         store
@@ -5019,14 +5025,88 @@ mod quote_selection_tests {
                 params![uuid::Uuid::new_v4().to_string(), job.id],
             )
             .unwrap();
-        let error = store
-            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 0)
-            .unwrap_err();
-        assert!(error.is::<crate::rotation::error::RecoveryAttemptLimit>());
         let allowed = store
-            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 1)
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000")
             .unwrap();
         assert_eq!(allowed.target, U256::from(3_500_000));
+    }
+
+    #[test]
+    fn repeated_closed_reauthorization_retains_history_across_reopen() {
+        let (dir, mut store, original) = scenario(Some("2"), Some("5"), None);
+        let treasury = store.id().to_owned();
+        let mut archived = Vec::new();
+        for attempt in 0..8 {
+            let job = store.funding_job(&original.id).unwrap().unwrap();
+            let selected = store
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000")
+                .unwrap();
+            assert_eq!(selected.target, U256::from(3_500_000));
+            let quote = serde_json::to_vec(&serde_json::json!({
+                "request": {"amount":"3500000", "recipient":job.recipient}
+            }))
+            .unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            store.close_unprepared_funding(&job.id).unwrap();
+            if attempt % 2 == 0 {
+                // Older archives lack the optional nondisclosure classification.
+                store
+                    .db
+                    .execute(
+                        "DELETE FROM funding_quote_refreshes WHERE operation_id=?1",
+                        [&job.operation_id],
+                    )
+                    .unwrap();
+            }
+            drop(store);
+            store = Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &treasury,
+            )
+            .unwrap();
+            let group = store
+                .startup_groups(std::slice::from_ref(&job.pool_name))
+                .unwrap()
+                .remove(0);
+            let path = store
+                .startup_claim_paths(&job.pool_id, &group.claims)
+                .unwrap()
+                .into_iter()
+                .find(|path| path.job.id == job.id)
+                .unwrap();
+            assert!(path.facts.source_closed);
+            assert_eq!(
+                path.disposition(false),
+                super::super::bootstrap::StartupDisposition::Actionable
+            );
+            store.require_funding_attempt(&job.id).unwrap();
+            store
+                .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id)
+                .unwrap();
+            let current = store.funding_job(&job.id).unwrap().unwrap();
+            assert_ne!(current.operation_id, job.operation_id);
+            assert_eq!(current.wallet_id, original.wallet_id);
+            assert_eq!(current.phase, FundingPhase::Allocated);
+            archived.push((job.operation_id, quote));
+            for (operation, accepted_quote) in &archived {
+                assert_eq!(
+                    store
+                        .funding_status_quote(&job.id, operation)
+                        .unwrap()
+                        .as_slice(),
+                    accepted_quote.as_slice()
+                );
+                assert!(store.db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM funding_recovery WHERE job_id=?1 AND operation_id=?2)",
+                    params![job.id, operation], |r| r.get::<_, bool>(0),
+                ).unwrap());
+            }
+            assert!(store.status().unwrap().treasury_operations.is_empty());
+            assert!(!store.status().unwrap().outgoing_pending);
+            assert!(store.preparation_intent(&current.operation_id).is_err());
+            assert_eq!(store.funding_jobs().unwrap().len(), 1);
+        }
     }
 
     #[test]
@@ -5082,10 +5162,10 @@ mod quote_selection_tests {
     }
 
     #[test]
-    fn provider_redraw_does_not_consume_recovery_allowance() {
+    fn provider_redraw_does_not_create_recovery_history() {
         let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
         store
-            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3000000", 0)
+            .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3000000")
             .unwrap();
         assert_eq!(
             store
@@ -5138,7 +5218,7 @@ mod quote_selection_tests {
         let (_dir, mut store, job) = scenario(Some("2"), Some("5"), None);
         assert_eq!(
             store
-                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3000000", 0)
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3000000")
                 .unwrap()
                 .target,
             U256::from(3_000_000)
@@ -5163,7 +5243,7 @@ mod quote_selection_tests {
         reconfigure(&mut store, Some("2"), "2", "5");
         assert_eq!(
             store
-                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000", 0)
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4000000")
                 .unwrap()
                 .target,
             U256::from(3_000_000)
@@ -5171,7 +5251,7 @@ mod quote_selection_tests {
         reconfigure(&mut store, None, "3", "4");
         assert_eq!(
             store
-                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000", 0)
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "3500000")
                 .unwrap()
                 .target,
             U256::from(3_000_000)
@@ -5179,7 +5259,7 @@ mod quote_selection_tests {
         reconfigure(&mut store, None, "4", "5");
         assert_eq!(
             store
-                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4500000", 0)
+                .select_quote_terms_for_attempt(&job.id, &job.operation_id, "4500000")
                 .unwrap()
                 .target,
             U256::from(4_500_000)
@@ -5194,13 +5274,13 @@ mod quote_selection_tests {
         let (first, second) = tokio::join!(
             store.call(move |s| {
                 Ok(
-                    s.select_quote_terms_for_attempt(&job_a.id, &job_a.operation_id, "3000000", 0)?
+                    s.select_quote_terms_for_attempt(&job_a.id, &job_a.operation_id, "3000000")?
                         .target,
                 )
             }),
             store.call(move |s| {
                 Ok(
-                    s.select_quote_terms_for_attempt(&job_b.id, &job_b.operation_id, "4000000", 0)?
+                    s.select_quote_terms_for_attempt(&job_b.id, &job_b.operation_id, "4000000")?
                         .target,
                 )
             })

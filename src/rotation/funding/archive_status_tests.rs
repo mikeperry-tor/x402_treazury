@@ -71,7 +71,7 @@ fn prepare_original(store: &mut Store, job: &FundingJob, disclose: bool) {
     }
 }
 
-fn expire_and_rotate(store: &mut Store, original: &FundingJob, max_attempts: u32) -> FundingJob {
+fn expire_and_rotate(store: &mut Store, original: &FundingJob) -> FundingJob {
     prepare_original(store, original, true);
     let height = u64::from(
         store
@@ -107,11 +107,7 @@ fn expire_and_rotate(store: &mut Store, original: &FundingJob, max_attempts: u32
         .resolve_expired(&original.operation_id, revision)
         .unwrap();
     store
-        .reauthorize_closed_funding_for_operation(
-            &original.id,
-            &original.operation_id,
-            max_attempts,
-        )
+        .reauthorize_closed_funding_for_operation(&original.id, &original.operation_id)
         .unwrap();
     store.funding_job(&original.id).unwrap().unwrap()
 }
@@ -124,7 +120,7 @@ fn archived_status_pages_keep_each_original_under_one_job_across_restart() {
     let mut originals = Vec::new();
     for _ in 0..count {
         let original = current.clone();
-        current = expire_and_rotate(&mut store, &original, u32::try_from(count).unwrap());
+        current = expire_and_rotate(&mut store, &original);
         originals.push(original);
     }
     let identity = store.id().to_owned();
@@ -213,10 +209,13 @@ fn archived_status_pages_keep_each_original_under_one_job_across_restart() {
         current.operation_id
     );
     assert!(store.funding_quote(&current.id).is_err());
-    assert_eq!(
-        store.funding_recovery_count(&current.id).unwrap(),
-        u64::try_from(count).unwrap()
-    );
+    for original in &originals {
+        assert_eq!(
+            store.operation(&original.operation_id).unwrap().submission,
+            "EXPIRED"
+        );
+        assert!(!store.operation_pending(&original.operation_id).unwrap());
+    }
     store
         .record_destination_readiness(&current.id, "1", "initial credit fixture", 1)
         .unwrap();
@@ -301,9 +300,6 @@ impl FundingBackend for ArchiveSource {
             success_operation: self.success_operation.clone(),
         }
     }
-    fn max_attempts(&self, job: &FundingJob) -> u32 {
-        self.inner.max_attempts(job)
-    }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         self.inner.quote_prerequisite(job).await
     }
@@ -322,7 +318,7 @@ impl FundingBackend for ArchiveSource {
 async fn held_archived_success_stops_private_replacement_but_preserves_disclosed_source() {
     for stage in ["untouched", "private", "disclosed"] {
         let (dir, mut raw, original) = fixture();
-        let current = expire_and_rotate(&mut raw, &original, 3);
+        let current = expire_and_rotate(&mut raw, &original);
         let disclosed = stage == "disclosed";
         if stage == "untouched" {
             raw.save_funding_quote(
@@ -544,7 +540,7 @@ async fn held_archived_success_stops_private_replacement_but_preserves_disclosed
 #[tokio::test]
 async fn archived_processing_status_keeps_its_own_completion_floor_after_rollover() {
     let (dir, mut raw, original) = fixture();
-    let current = expire_and_rotate(&mut raw, &original, 3);
+    let current = expire_and_rotate(&mut raw, &original);
     raw.disable_pool("archive").unwrap();
     let identity = raw.id().to_owned();
     let (started, mut entered) = mpsc::unbounded_channel();
@@ -643,7 +639,7 @@ async fn archived_processing_status_keeps_its_own_completion_floor_after_rollove
 fn archived_success_closes_legacy_raw_and_preserves_explicit_disclosed_retry() {
     for disclosed in [false, true] {
         let (dir, mut store, original) = fixture();
-        let current = expire_and_rotate(&mut store, &original, 3);
+        let current = expire_and_rotate(&mut store, &original);
         prepare_original(&mut store, &current, disclosed);
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
         // A legacy binary could leave an already expired old row pending.
@@ -710,7 +706,7 @@ fn archived_success_closes_legacy_raw_and_preserves_explicit_disclosed_retry() {
 fn archived_success_never_hides_orphan_facts_or_ambiguous_job_binding() {
     for corruption in ["orphan_facts", "conflicting_job"] {
         let (dir, mut store, original) = fixture();
-        let current = expire_and_rotate(&mut store, &original, 3);
+        let current = expire_and_rotate(&mut store, &original);
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
         if corruption == "orphan_facts" {
             let facts = serde_json::to_string(&TransactionFacts {
@@ -777,7 +773,7 @@ fn archived_success_never_hides_orphan_facts_or_ambiguous_job_binding() {
 #[tokio::test]
 async fn archived_status_ignores_current_phase_and_health_but_keeps_quote_integrity() {
     let (dir, mut store, original) = fixture();
-    let current = expire_and_rotate(&mut store, &original, 3);
+    let current = expire_and_rotate(&mut store, &original);
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute(
         "UPDATE funding_progress SET phase='invalid' WHERE job_id=?1",

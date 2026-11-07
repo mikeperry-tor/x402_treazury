@@ -3,7 +3,7 @@ use super::*;
 use rusqlite::{Params, StatementStatus, types::Value};
 
 #[test]
-fn indexed_lookups_preserve_retirement_claim_generations_and_refresh_exclusions() {
+fn indexed_lookups_preserve_retirement_and_claim_generations() {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(SCHEMA).unwrap();
     db.execute("INSERT INTO pools(id,name) VALUES ('pool','pool')", [])
@@ -46,18 +46,6 @@ fn indexed_lookups_preserve_retirement_claim_generations_and_refresh_exclusions(
         .0
         .is_empty()
     );
-    for id in ["legacy", "refresh"] {
-        db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,'reserve','\"QUOTED\"')", [id]).unwrap();
-    }
-    db.execute(
-        "INSERT INTO funding_quote_refreshes(operation_id) VALUES ('refresh')",
-        [],
-    )
-    .unwrap();
-    assert_eq!(
-        inspect(&db, funding::RECOVERY_COUNT_SQL, ["reserve"]).0,
-        vec![vec![Value::Integer(1)]]
-    );
 }
 
 fn inspect(db: &Connection, sql: &str, params: impl Params) -> (Vec<Vec<Value>>, i32) {
@@ -96,8 +84,6 @@ fn scoped_query_work_is_independent_of_unrelated_lifetime_history() {
                 bootstrap::STARTUP_CLAIM_SQL,
                 params!["pool", "large", 4],
             ),
-            inspect(db, funding::RECOVERY_COUNT_SQL, ["job"]),
-            inspect(db, funding::RECOVERY_COUNT_SQL, ["missing"]),
         ]
     };
     let before = queries(&db);
@@ -129,6 +115,4 @@ fn scoped_query_work_is_independent_of_unrelated_lifetime_history() {
         vec![vec![Value::Text("job".into()), Value::Integer(0)]]
     );
     assert!(before[3].0.is_empty());
-    assert_eq!(before[4].0, vec![vec![Value::Integer(1)]]);
-    assert_eq!(before[5].0, vec![vec![Value::Integer(0)]]);
 }

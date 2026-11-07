@@ -123,7 +123,7 @@ async fn saved_missing_scanned_boundary_rescans_after_restart_without_losing_ori
             assert_eq!(s.prepared_bytes(&operation)?.as_slice(), raw);
             assert_eq!(s.prepared_inputs(&operation)?, inputs);
             assert_eq!(s.funding_jobs()?.len(), 1);
-            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+            assert!(!s.funding_facts(&job.id, &operation)?.archived);
             Ok(())
         })
         .await

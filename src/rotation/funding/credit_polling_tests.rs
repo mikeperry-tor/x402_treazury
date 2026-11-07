@@ -72,7 +72,6 @@ async fn fresh_and_quoted_allocations_never_poll_credit_even_after_reopen() {
                     assert!(!facts.credit_needed());
                     assert!(!facts.preparation_accepted && !facts.source_pending);
                     assert_eq!(facts.source_attempts, 0);
-                    assert_eq!(s.funding_recovery_count(&job.id)?, 0);
                 }
                 Ok(())
             })
@@ -109,7 +108,6 @@ async fn accepted_work_resumes_credit_immediately_then_waits_a_minute_despite_si
                 Some(&crate::rotation::transaction::ManagedFundingAuthority {
                     job_id: job.id.clone(),
                     auto_fund: true,
-                    max_attempts: 3,
                 }),
             )
             .unwrap();

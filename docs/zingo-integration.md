@@ -295,8 +295,8 @@ live calculation or completed result awaiting publication, closes a funding calc
 and factual transaction journals are both absent. Existing recovery archival
 preserves its encrypted accepted inputs; the next calculation needs a fresh
 operation and current authority. The persisted `funding_quote_refreshes` table also
-marks these proven never-disclosed resets for recovery-count exclusion; its legacy
-name and existing quote-refresh rows remain compatible. Raw pending originals and
+marks these proven never-disclosed resets for source and bridge ownership. Its
+existing name and quote-refresh rows remain unchanged. Raw pending originals and
 committed results with lost acknowledgments retain their owner. A durable commit
 acknowledgment is separate from loading a pending submission view: verified bound
 fulfillment may intentionally leave no pending view, and decoding failure cannot
@@ -317,8 +317,7 @@ finish it only after healthy canonical confirmation without another submission.
 A proven deep replacement reconstructs a new owned credit below declared birthday
 while the orphaned original input, accepted snapshot and signed bytes remain in
 the pending Store journal. Recovered SDK capital is not permission to release
-that liability or create another deposit; an unburied original still waits even
-when the recovery allowance is zero. These local fixtures establish no consensus
+that liability or create another deposit; an unburied original still waits regardless of available capital. These local fixtures establish no consensus
 or live bridge qualification. Existing in-flight sync cancellation tests cover
 the sync-session owner; the pre-canceled request alone does not prove active-I/O
 drain.

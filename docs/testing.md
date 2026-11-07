@@ -782,7 +782,7 @@ through readiness and restart consumers independently of database schema 23 and
 bootstrap summary 3. Eligible funded READY inventory needs no ACTIVE predecessor.
 They distinguish captured-claim completion from ordinary serving readiness,
 including paged vacant inventory, captured completion after
-current generations advance, durable recovery-count boundaries and assessment
+current generations advance, recovery after retained historical attempts and assessment
 without writes. Store-level tests cover claim history and obstruction dispositions;
 owner tests cover cancellation and drain. These are complementary checks, not an
 exhaustive enumeration of concurrency schedules.

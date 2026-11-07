@@ -892,7 +892,6 @@ mod tests {
                 managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
                     job_id: job.id,
                     auto_fund: true,
-                    max_attempts: 3,
                 }),
                 operation_id: job.operation_id,
                 pool_id: Some(job.pool_id),

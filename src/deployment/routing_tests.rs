@@ -368,8 +368,8 @@ fn routing_and_final_listener_filters_share_selected_inventory() {
 
 fn managed() -> Value {
     json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},
-        "max_api_payment_usdc":"1","max_retirement_remainder_usdc":"0",
-        "max_attempts":3})
+    "max_api_payment_usdc":"1","max_retirement_remainder_usdc":"0",
+    })
 }
 
 #[test]

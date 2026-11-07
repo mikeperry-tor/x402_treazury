@@ -1323,7 +1323,7 @@ mod reserve_bootstrap_tests {
                 assert!(paths.iter().all(|path| path.destination_ready));
                 assert!(
                     store
-                        .startup_obstruction("fresh", 3, &captured)
+                        .startup_obstruction("fresh", &captured)
                         .unwrap()
                         .is_none()
                 );

@@ -27,10 +27,10 @@ async fn captured_completion_survives_current_claim_generation_advancement() {
     let jobs = state.funding_jobs().unwrap();
     let (store, worker) = StoreHandle::spawn(state);
     let names = BTreeSet::from(["web".to_owned()]);
-    let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+
     let captured = capture_startup(&store, &names).await.unwrap();
     assert!(
-        !check_startup(&store, &names, &attempts, &captured, false)
+        !check_startup(&store, &names, &captured, false)
             .await
             .unwrap()
     );
@@ -61,12 +61,12 @@ async fn captured_completion_survives_current_claim_generation_advancement() {
     }
     for progress in [false, true] {
         assert!(
-            check_startup(&store, &names, &attempts, &captured, progress)
+            check_startup(&store, &names, &captured, progress)
                 .await
                 .unwrap()
         );
         assert!(
-            !check_startup(&store, &names, &attempts, &current, progress)
+            !check_startup(&store, &names, &current, progress)
                 .await
                 .unwrap()
         );
@@ -76,49 +76,69 @@ async fn captured_completion_survives_current_claim_generation_advancement() {
 }
 
 #[tokio::test]
-async fn startup_recovery_limit_uses_durable_count_and_inclusive_maximum() {
+async fn startup_old_recovery_history_does_not_obstruct_unfilled_claims() {
     let (dir, state) = allocated_readiness_fixture();
     let jobs = state.funding_jobs().unwrap();
+    let id = state.id().to_owned();
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let mut expected = Vec::new();
     for job in &jobs {
-        for index in 0..3 {
-            db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,?2,'\"ALLOCATED\"')", rusqlite::params![format!("history-{}-{index}", job.id), job.id]).unwrap();
+        for index in 0..8 {
+            let operation = format!("history-{}-{index}", job.id);
+            db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES (?1,?2,'\"ALLOCATED\"')", rusqlite::params![operation, job.id]).unwrap();
+            expected.push(operation);
         }
-        assert_eq!(state.funding_recovery_count(&job.id).unwrap(), 3);
     }
+    expected.sort();
+    drop(db);
+    drop(state);
+    let state = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     let (store, worker) = StoreHandle::spawn(state);
     let names = BTreeSet::from(["web".to_owned()]);
     let captured = capture_startup(&store, &names).await.unwrap();
     for progress in [false, true] {
-        for maximum in [3, 4] {
-            let attempts = BTreeMap::from([("web".to_owned(), maximum)]);
-            assert!(
-                !check_startup(&store, &names, &attempts, &captured, progress)
-                    .await
-                    .unwrap()
-            );
-        }
-        let attempts = BTreeMap::from([("web".to_owned(), 2)]);
-        let error = check_startup(&store, &names, &attempts, &captured, progress)
-            .await
-            .unwrap_err();
-        assert!(error.is::<StartupObstructed>());
-        let message = error.to_string();
         assert!(
-            message.contains("recovery_attempt_limit_reached"),
-            "{message}"
+            !check_startup(&store, &names, &captured, progress)
+                .await
+                .unwrap(),
+            "unfilled claims remain pending rather than obstructed by old history"
         );
-        for job in &jobs {
-            assert!(message.contains(&job.id));
-            assert!(!message.contains(&job.recipient));
-        }
     }
+    store
+        .call(move |s| {
+            for job in jobs {
+                assert_eq!(
+                    s.funding_job(&job.id)?.unwrap().operation_id,
+                    job.operation_id
+                );
+                s.record_credit(&job.wallet_id, &job.target, "fixture", 100)?;
+            }
+            assert!(s.status()?.treasury_operations.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        check_startup(&store, &names, &captured, false)
+            .await
+            .unwrap()
+    );
     drop(store);
     worker.await.unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let mut query = db
+        .prepare("SELECT operation_id FROM funding_recovery ORDER BY operation_id")
+        .unwrap();
+    let saved = query
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(saved, expected, "original financial history is preserved");
 }
 
 #[tokio::test]
-async fn paged_vacancies_remain_incomplete_without_mutation_or_missing_policy_shortcut() {
+async fn paged_vacancies_remain_incomplete_without_mutation() {
     let dir = tempfile::tempdir().unwrap();
     let mut state = Store::create(
         &dir.path().join("state"),
@@ -148,21 +168,10 @@ async fn paged_vacancies_remain_incomplete_without_mutation_or_missing_policy_sh
     };
     let before = version();
     let (store, worker) = StoreHandle::spawn(state);
-    let mut attempts: BTreeMap<_, _> = names.iter().map(|n| (n.clone(), 3)).collect();
-    let last = names.last().unwrap().clone();
-    attempts.remove(&last);
     let captured = capture_startup(&store, &names).await.unwrap();
     assert_eq!(captured.len(), GROUP_PAGE + 1);
-    assert_eq!(
-        check_startup(&store, &names, &attempts, &captured, false)
-            .await
-            .unwrap_err()
-            .to_string(),
-        "startup funding policy missing"
-    );
-    attempts.insert(last, 3);
     assert!(
-        !check_startup(&store, &names, &attempts, &captured, true)
+        !check_startup(&store, &names, &captured, true)
             .await
             .unwrap()
     );
@@ -206,7 +215,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         .unwrap();
     let (store, worker) = StoreHandle::spawn(state);
     let names = BTreeSet::from(["web".to_owned()]);
-    let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+
     let captured = capture_startup(&store, &names).await.unwrap();
     assert!(
         store
@@ -215,20 +224,13 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
             .unwrap(),
         "current serving readiness does not complete the other captured claim"
     );
-    assert_eq!(
-        check_startup(&store, &names, &BTreeMap::new(), &captured, false)
-            .await
-            .unwrap_err()
-            .to_string(),
-        "startup funding policy missing"
-    );
     assert!(
-        !check_startup(&store, &names, &attempts, &captured, false)
+        !check_startup(&store, &names, &captured, false)
             .await
             .unwrap()
     );
     assert!(
-        !check_startup(&store, &names, &attempts, &BTreeMap::new(), false)
+        !check_startup(&store, &names, &BTreeMap::new(), false)
             .await
             .unwrap(),
         "missing captured group must fall back to current claims"
@@ -238,7 +240,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         claim.generation += 100;
     }
     assert!(
-        !check_startup(&store, &names, &attempts, &missing, false)
+        !check_startup(&store, &names, &missing, false)
             .await
             .unwrap(),
         "missing historical paths cannot borrow current serving readiness"
@@ -249,7 +251,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         .await
         .unwrap();
     assert!(
-        check_startup(&store, &names, &attempts, &captured, true)
+        check_startup(&store, &names, &captured, true)
             .await
             .unwrap()
     );
@@ -258,7 +260,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         .execute("UPDATE pools SET enabled=0 WHERE name='web'", [])
         .unwrap();
     assert_eq!(
-        check_startup(&store, &names, &BTreeMap::new(), &captured, false)
+        check_startup(&store, &names, &captured, false)
             .await
             .unwrap_err()
             .to_string(),
@@ -312,7 +314,6 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
     let last_index = jobs.iter().position(|j| j.pool_id == last_pool).unwrap();
     let last = jobs.remove(last_index);
     let (store, worker) = StoreHandle::spawn(state);
-    let attempts = names.iter().map(|n| (n.clone(), 3)).collect();
     let captured = capture_startup(&store, &names).await.unwrap();
     let mut completions = Vec::new();
     for job in jobs.into_iter().rev() {
@@ -328,7 +329,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
         task.await.unwrap();
     }
     assert!(
-        !check_startup(&store, &names, &attempts, &captured, false)
+        !check_startup(&store, &names, &captured, false)
             .await
             .unwrap(),
         "a complete first page cannot hide an unfinished final-page claim"
@@ -338,7 +339,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
         .await
         .unwrap();
     assert!(
-        check_startup(&store, &names, &attempts, &captured, true)
+        check_startup(&store, &names, &captured, true)
             .await
             .unwrap()
     );
@@ -366,7 +367,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
     assert_eq!(state.funding_jobs().unwrap().len(), before);
     let (store, worker) = StoreHandle::spawn(state);
     assert!(
-        check_startup(&store, &names, &attempts, &captured, false)
+        check_startup(&store, &names, &captured, false)
             .await
             .unwrap()
     );
@@ -376,15 +377,9 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
     );
     let other = BTreeSet::from(["unselected".to_owned()]);
     assert!(
-        !check_startup(
-            &store,
-            &other,
-            &BTreeMap::from([("unselected".into(), 3)]),
-            &captured,
-            false
-        )
-        .await
-        .unwrap(),
+        !check_startup(&store, &other, &captured, false)
+            .await
+            .unwrap(),
         "completion of selected groups must not complete unrelated claims"
     );
     assert_eq!(
@@ -422,12 +417,12 @@ async fn reopened_shortages_are_rechecked_for_captured_bootstrap() {
     );
     let (store, worker) = StoreHandle::spawn(state);
     let names = BTreeSet::from(["web".to_owned()]);
-    let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+
     let captured = capture_startup(&store, &names).await.unwrap();
     // A saved diagnostic cannot stop captured bootstrap progress, even with
     // an old persisted backoff.
     assert!(
-        !check_startup(&store, &names, &attempts, &captured, false)
+        !check_startup(&store, &names, &captured, false)
             .await
             .unwrap()
     );
@@ -453,7 +448,7 @@ async fn reopened_shortages_are_rechecked_for_captured_bootstrap() {
             .await
             .unwrap();
         assert!(
-            !check_startup(&store, &names, &attempts, &captured, false)
+            !check_startup(&store, &names, &captured, false)
                 .await
                 .unwrap()
         );
@@ -476,7 +471,7 @@ async fn reopened_shortages_are_rechecked_for_captured_bootstrap() {
             .await
             .unwrap();
     }
-    let error = check_startup(&store, &names, &attempts, &captured, false)
+    let error = check_startup(&store, &names, &captured, false)
         .await
         .unwrap_err();
     assert!(
@@ -489,7 +484,10 @@ async fn reopened_shortages_are_rechecked_for_captured_bootstrap() {
                 let current = s.funding_job(&job.id)?.unwrap();
                 assert_eq!(current.operation_id, job.operation_id);
                 assert_eq!(current.attempts, job.attempts);
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert_eq!(
+                    s.funding_job(&job.id)?.unwrap().operation_id,
+                    job.operation_id
+                );
                 s.record_funding_observation_health(&job.id, &job.operation_id, 0, 0, None)?;
                 s.record_credit(&job.wallet_id, &job.target, "fixture", 100)?;
             }
@@ -500,7 +498,7 @@ async fn reopened_shortages_are_rechecked_for_captured_bootstrap() {
         .await
         .unwrap();
     assert!(
-        check_startup(&store, &names, &attempts, &captured, false)
+        check_startup(&store, &names, &captured, false)
             .await
             .unwrap()
     );

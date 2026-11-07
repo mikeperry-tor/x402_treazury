@@ -302,7 +302,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         .call(|s| {
             for name in ["alpha", "beta"] {
                 let group = s.startup_groups(&[name.into()])?.remove(0);
-                assert!(s.startup_obstruction(name, 3, &group.claims)?.is_none());
+                assert!(s.startup_obstruction(name, &group.claims)?.is_none());
             }
             assert!(s.status()?.sync.unwrap().spendable_shielded_zatoshis > 100_000);
             Ok(())
@@ -624,7 +624,7 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
 }
 
 #[tokio::test]
-async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_funded() {
+async fn unstarted_sdk_failures_keep_the_original_quote_until_funded() {
     use crate::rotation::{
         error::FundingCondition, funding::FundingBackend, store::funding::FundingPhase,
     };
@@ -688,7 +688,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         treasury: handle.clone(), store: store.clone(),
         near: NearClient::synthetic_at(&origin).unwrap(),
         base: BaseRpc::new(&format!("{origin}/base")).unwrap(),
-        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_attempts":1})).unwrap())]),
+        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1"})).unwrap())]),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
     };
     let worker = FundingWorker::new(store.clone(), backend, 1);
@@ -719,7 +719,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         .await
         .unwrap();
     let accepted_quote: Quote = serde_json::from_slice(&saved_quote).unwrap();
-    // Exceed max_attempts with actual SDK rejections, then run the coordinator's
+    // Repeat actual SDK rejections, then run the coordinator's
     // next source pass as well: metadata must not turn these into recovery work.
     // Follow the published source schedule, including jitter and elapsed SDK work.
     let mut next_poll = original.next_poll;
@@ -744,7 +744,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
                 let current = s.funding_job(&job.id)?.unwrap();
                 assert_eq!(current.phase, FundingPhase::Quoted);
                 assert_eq!(current.operation_id, job.operation_id);
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert!(!s.funding_facts(&job.id, &job.operation_id)?.archived);
                 assert_eq!(&*s.funding_quote(&job.id)?, quote.as_slice());
                 s.require_unstarted_preparation(&job.operation_id)?;
                 assert!(
@@ -781,7 +781,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
             let current = s.funding_job(&job.id)?.unwrap();
             assert_eq!(current.phase, FundingPhase::Prepared);
             assert_eq!(current.operation_id, job.operation_id);
-            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+            assert!(!s.funding_facts(&job.id, &job.operation_id)?.archived);
             assert!(s.require_unstarted_preparation(&job.operation_id).is_err());
             assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
             assert!(s.status()?.outgoing_pending);

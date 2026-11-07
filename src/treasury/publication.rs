@@ -503,7 +503,7 @@ mod tests {
                 );
                 assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
                 assert_eq!(s.operation(&job.operation_id)?.submission, "PREPARED");
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert!(!s.funding_facts(&job.id, &job.operation_id)?.archived);
                 assert_eq!(
                     s.funding_job(&job.id)?.unwrap().operation_id,
                     job.operation_id
@@ -931,7 +931,7 @@ mod tests {
                 } else {
                     assert!(s.status()?.treasury_operations.is_empty());
                 }
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert!(!s.funding_facts(&job.id, &job.operation_id)?.archived);
                 assert_eq!(
                     s.funding_job(&job.id)?.unwrap().operation_id,
                     job.operation_id

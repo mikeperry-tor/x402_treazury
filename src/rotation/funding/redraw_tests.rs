@@ -102,7 +102,7 @@ fn request(job: &FundingJob, target: u64, max_output: u64, sizing: SizingPolicy)
         target: target.to_string(),
         limits: crate::rotation::near::Limits { max_output },
         sizing,
-        max_attempts: 3,
+
         confidentiality: "public".into(),
         slippage_bps: 500,
         deadline_seconds: 3600,
@@ -555,7 +555,6 @@ async fn an_expired_original_deadline_prevents_another_sizing_request() {
             let current = s.funding_job(&job.id)?.unwrap();
             assert_eq!(current.phase, FundingPhase::Allocated);
             assert_eq!(current.operation_id, job.operation_id);
-            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
             let facts = s.funding_facts(&job.id, &job.operation_id)?;
             assert!(!facts.accepted_quote && !facts.preparation_accepted);
             assert_eq!(facts.source_attempts, 0);

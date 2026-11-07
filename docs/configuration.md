@@ -533,7 +533,7 @@ fixed target keeps its deterministic bridge adjustment. The replacement choice i
 persisted before the next request and reused across ordinary failures and
 restarts. Sizing continues while each rejection raises the provider floor within
 the authorized USDC ceiling and the original quote deadline remains valid; there
-is no separate attempt cutoff or transaction recovery charge. A provider minimum
+is no separate attempt cutoff. A provider minimum
 above the configured maximum stops that round with a funding amount-limit
 explanation and no deposit; the same
 saved draw is retried with normal backoff until configuration or external

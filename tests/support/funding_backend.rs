@@ -149,7 +149,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     );
     // Model a quote crossing its returned deadline after the scheduler commits PREPARING.
     // The concrete adapter must prove no treasury command was dispatched, so the
-    // store can defer and refresh without charging a transaction recovery attempt.
+    // store can defer and refresh without creating source transaction work.
     let other = store
         .call(|s| Ok(s.funding_jobs()?.remove(1)))
         .await
@@ -175,12 +175,22 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     let error = backend.prepare(&other, &expired).await.unwrap_err();
     assert!(error.is::<crate::rotation::transaction::PreparationDeferred>());
     assert!(commands.test_is_empty());
+    let archived_quote = serde_json::to_vec(&expired).unwrap();
     store
         .call(move |s| {
             s.require_unstarted_preparation(&other.operation_id)?;
             s.defer_unstarted_preparation(&other.id)?;
             s.refresh_unprepared_quote(&other.id)?;
-            assert_eq!(s.funding_recovery_count(&other.id)?, 0);
+            assert_eq!(
+                s.funding_status_quote(&other.id, &other.operation_id)?
+                    .as_slice(),
+                archived_quote
+            );
+            s.require_unstarted_preparation(&other.operation_id)?;
+            assert!(!s.operation_pending(&other.operation_id)?);
+            let replacement = s.funding_job(&other.id)?.unwrap();
+            assert_ne!(replacement.operation_id, other.operation_id);
+            s.require_unstarted_preparation(&replacement.operation_id)?;
             Ok(())
         })
         .await
@@ -246,11 +256,10 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             "waiting_for_transaction_expiry"
         ))
     ));
-    let ObservedCommand::RecoverFunding(id, limit, allowed) = observed else {
+    let ObservedCommand::RecoverFunding(id, allowed) = observed else {
         panic!("wrong recovery command")
     };
     assert_eq!(id, job.id);
-    assert_eq!(limit, backend.max_attempts(&job));
     assert_eq!(allowed, backend.funding.auto_fund);
     backend.funding.auto_fund = false;
     assert!(
@@ -266,7 +275,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert!(recovered.unwrap().is_some());
     assert!(matches!(
         observed,
-        ObservedCommand::RecoverFunding(_, _, false)
+        ObservedCommand::RecoverFunding(_, false)
     ));
     let (result, observed) = tokio::join!(backend.reconcile(&job), commands.test_observe());
     assert!(result.is_err());
@@ -339,7 +348,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
                 assert_eq!(id, job.operation_id);
                 assert!(result.is_err());
             }
-            ObservedCommand::RecoverFunding(id, _, false) if proof_due => {
+            ObservedCommand::RecoverFunding(id, false) if proof_due => {
                 assert_eq!(id, job.id);
                 assert!(matches!(result.unwrap(), Observation::None));
             }

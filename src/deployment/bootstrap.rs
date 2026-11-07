@@ -137,8 +137,7 @@ impl Deployment {
         let stop = CancellationToken::new();
         let _cancel_on_drop = stop.clone().drop_guard();
         // The supervisor retains ownership and drains even if its caller disappears.
-        let attempts = startup_attempts(&self.wallet_resolution.wallets);
-        let task = tokio::spawn(supervise(initialized, names, attempts, stop.clone()));
+        let task = tokio::spawn(supervise(initialized, names, stop.clone()));
         crate::wallet_cli::finish_on_shutdown("bootstrap", &stop, async {
             task.await.context("bootstrap supervisor failed")?
         })
@@ -162,7 +161,6 @@ impl InitializedWallets {
 async fn supervise(
     initialized: InitializedWallets,
     names: BTreeSet<String>,
-    attempts: BTreeMap<String, u32>,
     stop: CancellationToken,
 ) -> Result<BootstrapSummary> {
     let InitializedWallets {
@@ -190,7 +188,7 @@ async fn supervise(
             return Err(error);
         }
     };
-    let initial = check_startup(&store, &names, &attempts, &captured, true).await;
+    let initial = check_startup(&store, &names, &captured, true).await;
     if !matches!(initial, Ok(false)) {
         let summary = match initial {
             Ok(_) => bootstrap_summary(&store, &names, &captured).await,
@@ -221,7 +219,7 @@ async fn supervise(
         let mut next_progress = tokio::time::Instant::now();
         loop {
             let progress = tokio::time::Instant::now() >= next_progress;
-            if check_startup(&store, &monitored_names, &attempts, &captured, progress).await? {
+            if check_startup(&store, &monitored_names, &captured, progress).await? {
                 return bootstrap_summary(&store, &monitored_names, &captured).await;
             }
             if progress {
@@ -244,16 +242,6 @@ async fn supervise(
     Ok(summary)
 }
 
-fn startup_attempts(wallets: &BTreeMap<String, WalletConfig>) -> BTreeMap<String, u32> {
-    wallets
-        .iter()
-        .filter_map(|(name, wallet)| match wallet {
-            WalletConfig::ZcashRotation { max_attempts, .. } => Some((name.clone(), *max_attempts)),
-            _ => None,
-        })
-        .collect()
-}
-
 async fn capture_startup(
     store: &StoreHandle,
     names: &BTreeSet<String>,
@@ -274,7 +262,6 @@ async fn capture_startup(
 async fn check_startup(
     store: &StoreHandle,
     names: &BTreeSet<String>,
-    attempts: &BTreeMap<String, u32>,
     captured: &BTreeMap<String, Vec<StartupClaim>>,
     progress: bool,
 ) -> Result<bool> {
@@ -286,9 +273,6 @@ async fn check_startup(
         for group in groups {
             ensure!(group.enabled, "bootstrap group disabled");
             let claims = captured.get(&group.name).unwrap_or(&group.claims).clone();
-            let maximum = *attempts
-                .get(&group.name)
-                .context("startup funding policy missing")?;
             let pool = group.pool.clone();
             let query_claims = claims.clone();
             let paths = store
@@ -298,7 +282,7 @@ async fn check_startup(
                 path_count,
                 pending,
                 actionable,
-            } = assess_startup_paths(paths, maximum, &group, progress);
+            } = assess_startup_paths(paths, &group, progress);
             if path_count == claims.len() && pending == 0 {
                 continue;
             }
@@ -306,7 +290,7 @@ async fn check_startup(
             if !actionable && pending > 0 {
                 let name = group.name.clone();
                 if let Some(obstructions) = store
-                    .call(move |s| s.startup_obstruction(&name, maximum, &claims))
+                    .call(move |s| s.startup_obstruction(&name, &claims))
                     .await?
                 {
                     return Err(StartupObstructed {
@@ -330,7 +314,6 @@ struct PathAssessment {
 
 fn assess_startup_paths(
     paths: Vec<crate::rotation::store::bootstrap::StartupPath>,
-    maximum: u32,
     group: &crate::rotation::store::bootstrap::StartupGroup,
     progress: bool,
 ) -> PathAssessment {
@@ -340,7 +323,7 @@ fn assess_startup_paths(
     let mut logged = 0;
     for path in paths {
         path_count += 1;
-        let disposition = path.disposition(maximum, group.treasury_source_pending);
+        let disposition = path.disposition(group.treasury_source_pending);
         if disposition == StartupDisposition::DestinationReady {
             continue;
         }
@@ -391,9 +374,6 @@ impl std::fmt::Display for StartupObstructed {
                 }
                 "funding_evidence_requires_review" | "destination_support_requires_review" => {
                     "saved funding evidence is inconsistent and requires operator review"
-                }
-                "recovery_attempt_limit_reached" => {
-                    "automatic recovery attempts are exhausted; operator review is required"
                 }
                 "funding_outcome_requires_review" => {
                     "the swap failed, was refunded or has an uncertain outcome; operator review is required"
@@ -514,7 +494,7 @@ mod tests {
             .finish();
         {
             let _guard = tracing::subscriber::set_default(subscriber);
-            assess_startup_paths(paths, 3, &group, true);
+            assess_startup_paths(paths, &group, true);
         }
         let text = std::fs::read_to_string(log.path()).unwrap();
         assert!(text.contains("wallet=web"), "{text}");
@@ -541,15 +521,10 @@ mod tests {
             runtime: ManagedRuntime::StoreOnly(StoreOnlyOwner::new(state)),
             managed_pools: Vec::new(),
         };
-        let error = supervise(
-            initialized,
-            BTreeSet::new(),
-            BTreeMap::new(),
-            CancellationToken::new(),
-        )
-        .await
-        .err()
-        .unwrap();
+        let error = supervise(initialized, BTreeSet::new(), CancellationToken::new())
+            .await
+            .err()
+            .unwrap();
         assert_eq!(
             error.to_string(),
             "explicit bootstrap requires treasury SDK"
@@ -594,10 +569,10 @@ mod tests {
             .unwrap();
         let (store, owner) = StoreHandle::spawn(state);
         let names = BTreeSet::from(["web".to_owned()]);
-        let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+
         let captured = capture_startup(&store, &names).await.unwrap();
         assert!(
-            !check_startup(&store, &names, &attempts, &captured, false)
+            !check_startup(&store, &names, &captured, false)
                 .await
                 .unwrap()
         );
@@ -619,7 +594,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let error = check_startup(&store, &names, &attempts, &captured, false)
+        let error = check_startup(&store, &names, &captured, false)
             .await
             .unwrap_err();
         assert!(error.is::<StartupObstructed>());
@@ -641,7 +616,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            check_startup(&store, &names, &attempts, &captured, false)
+            check_startup(&store, &names, &captured, false)
                 .await
                 .unwrap()
         );

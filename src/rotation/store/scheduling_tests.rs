@@ -87,7 +87,6 @@ fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_o
             Some(&crate::rotation::transaction::ManagedFundingAuthority {
                 job_id: job.id.clone(),
                 auto_fund: true,
-                max_attempts: 3,
             }),
         )
         .unwrap();
@@ -205,7 +204,7 @@ fn captured_phase_and_facts_survive_rollover_and_reopen() {
         .close_unprepared_funding_for_operation(&old.id, &old.operation_id)
         .unwrap();
     store
-        .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+        .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id)
         .unwrap();
     // This was the scheduler's fatal second read. A captured page no longer
     // performs it, and still carries the facts belonging to its old phase.
@@ -263,7 +262,10 @@ fn captured_phase_and_facts_survive_rollover_and_reopen() {
             .operation,
         replacement.job.operation_id
     );
-    assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 0);
+    assert_eq!(
+        store.funding_job(&old.id).unwrap().unwrap().operation_id,
+        replacement.job.operation_id
+    );
     assert!(store.status().unwrap().treasury_operations.is_empty());
 }
 
@@ -388,7 +390,6 @@ fn malformed_phase_routes_recovery_without_releasing_or_replacing_jobs() {
                 )
                 .unwrap();
             assert_eq!(operation, job.operation_id);
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
         }
         assert_eq!(
             store
@@ -570,7 +571,10 @@ fn malformed_health_is_advisory_without_normalizing_values_or_hiding_sql_errors(
                 )
                 .unwrap();
             assert_eq!(after, before);
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                job.operation_id
+            );
         }
         store.db.execute("DROP TABLE funding_health", []).unwrap();
         let error = store

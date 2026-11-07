@@ -485,7 +485,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 assert_eq!(current.last_error.as_deref(), Some(category.as_str()));
                 assert_eq!(current.error_streak, 1);
                 assert!(s.status()?.treasury_operations.is_empty());
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert_eq!(current.operation_id, job.operation_id);
                 Ok(())
             })
             .await

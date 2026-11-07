@@ -37,7 +37,6 @@ fn request(job: &FundingJob, deadline: u64) -> PrepareRequest {
         managed_funding: Some(ManagedFundingAuthority {
             job_id: job.id.clone(),
             auto_fund: true,
-            max_attempts: 3,
         }),
         operation_id: job.operation_id.clone(),
         pool_id: Some(job.pool_id.clone()),
@@ -393,7 +392,6 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
             owner
                 .recover_funding_job(
                     job.id.clone(),
-                    3,
                     false,
                     &mut sender,
                     &CancellationToken::new()
@@ -1427,7 +1425,7 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
         };
         assert_eq!(
             owner
-                .recover_funding_job(job.id.clone(), 3, false, &mut sender, &stop)
+                .recover_funding_job(job.id.clone(), false, &mut sender, &stop)
                 .await
                 .unwrap(),
             recovery::RecoveryOutcome::Waiting("swap_outcome_pending")
@@ -1463,7 +1461,7 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
                     );
                 }
                 assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
-                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert!(!s.funding_facts(&job.id, &operation)?.archived);
                 Ok(())
             })
             .await
@@ -1677,7 +1675,7 @@ async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_n
     for unavailable in [true, false] {
         lookup.unavailable = unavailable;
         let result = owner
-            .recover_funding_observed(job.id.clone(), 3, true, &mut lookup, &stop, true)
+            .recover_funding_observed(job.id.clone(), true, &mut lookup, &stop, true)
             .await;
         if unavailable {
             assert_eq!(
@@ -1700,7 +1698,7 @@ async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_n
         );
         store
             .call(move |s| {
-                assert_eq!(s.funding_recovery_count(&id)?, 0);
+                assert!(!s.funding_facts(&id, &operation)?.archived);
                 assert_eq!(s.operation(&operation)?.attempts, 1);
                 assert!(s.operation_pending(&operation)?);
                 assert_eq!(s.prepared_inputs(&operation)?, inputs);
@@ -1723,7 +1721,7 @@ async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_n
     owner.sync_once(&stop).await.unwrap();
     let mut sender = NoLookup;
     let outcome = owner
-        .recover_funding_observed(job.id.clone(), 3, false, &mut sender, &stop, true)
+        .recover_funding_observed(job.id.clone(), false, &mut sender, &stop, true)
         .await
         .unwrap();
     assert_eq!(
@@ -1738,7 +1736,7 @@ async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_n
             assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
             assert!(!s.operation_pending(&operation)?);
             assert_eq!(s.funding_jobs()?.len(), 1);
-            assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+            assert!(s.funding_facts(&job.id, &operation)?.archived);
             Ok(())
         })
         .await

@@ -234,7 +234,7 @@ x402_treazury wallet bootstrap --config examples/deployments/managed.local.toml
 This declares configured groups, runs the production treasury/funding workers,
 and waits for the first positive credit on its captured enabled
 reserve generations. It closes treasury ownership before exiting, requires
-`funding.auto_fund=true`, and respects actual source spendability, recovery attempts and qualification allocation counts. Static wallets are
+`funding.auto_fund=true`, and respects actual source spendability, safe source closure and qualification allocation counts. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
 signing keys or MCP listeners are needed. Network traffic follows the deployment
 policy, including Tor.
@@ -512,7 +512,7 @@ the damaged metadata; it never grants disclosure authority.
 Runtime recovery also ignores malformed advisory quote/polling health fields;
 an unrecognized phase routes through existing recovery rather than new preparation.
 Strict full-status inspection can still report these fields as unreadable. Reading
-them neither resets financial recovery counts nor rewrites stored history.
+them neither changes financial ownership nor rewrites stored history.
 SDK reorg recovery repairs spendability without reopening completed swap work.
 A validated bound NEAR SUCCESS closes source work regardless of its last observed
 Zcash status. A successful swap awaiting its first positive Base observation keeps
@@ -520,12 +520,11 @@ the credit lane; no credit or source confirmation is fabricated. Unfinished sour
 transactions retain their exact bytes, input owner and finite-expiry recovery.
 Already accepted calculations finish journaling; already submitted I/O drains.
 
-The wallet profile's `max_attempts` also bounds recovery using archived job history
-across process restarts. Proven never-disclosed resets do not consume attempts:
-these include untouched quote refreshes and unpublished calculations closed after
-exclusive offline SDK reconstruction. Unclassified historical records still count.
-Reaching that bound requires
-operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
+Recovery has no per-job retry-count cutoff. Original operation history and
+nondisclosure markers survive restart for source and bridge ownership; they do not
+block an otherwise permitted replacement. Repeating bootstrap/recover cannot
+bypass canonical closure, an unconsumed claim, enabled funding or qualification
+authority. Actual spendable
 source capacity and nominal output bounds apply to every new preparation. Qualification runs enforce reviewed funding-job
 counts and reserve sizing, with actual treasury spendability and operation-specific
 SDK transaction validity governing funding. Recovery still requires its separate
@@ -569,11 +568,10 @@ Existing transparent refund addresses remain unchanged. Shielded receipts need
 ordinary wallet synchronization and confirmations, without an extra shielding
 transaction. `wallet shield-refunds` is unsupported and fails without preparing or
 broadcasting a transparent-input transaction.
-Unsigned quote failures use per-pass backoff,
-without consuming `max_attempts` for transaction recovery. A quote refresh must
+Unsigned quote failures use per-pass backoff. A quote refresh must
 prove no accepted calculation or outgoing record exists; it archives its old bindings, records
 a durable refresh marker and allocates a fresh operation/refund identity.
-Historical unclassified recovery records still count. Signed operations never refresh. Insufficient shielded
+Historical unclassified recovery records retain their original obligations. Signed operations never refresh. Insufficient shielded
 spendable funds leave the job unprepared; another attempt still needs current authority.
 
 Fresh allocations and unsigned funding quotes do not start Base credit polling.
@@ -782,7 +780,7 @@ Original allocation floor and identity stay immutable. Source-input and fee
 safeguards still apply, with actual spendable treasury funds limiting ordinary
 funding. Dry sizing negotiation continues while each bridge-minimum rejection
 raises the floor within the slot maximum and the original quote deadline remains
-valid. Retries do not renew that deadline or consume transaction recovery attempts.
+valid. Retries do not renew that deadline.
 Other failures do not authorize amount changes or payment retries. Beneficial
 extra execution output is not capped by the nominal USDC sizing maximum.
 
@@ -987,7 +985,7 @@ payment cap.
 `max_retirement_remainder_usdc` defaults to `"0.001"` (1,000 atomic USDC units)
 independently per managed group; explicit `"0"` requires exact zero. Retired funds
 remain owned at their addresses, and positive tolerance has no cumulative
-stranded-funds cap. `max_attempts` defaults to 3. Finite sync applies valid
+stranded-funds cap. Finite sync applies valid
 retirement tolerances only to existing configured groups. Invalid retirement
 configuration reports that group's unavailable retirement work while scalar
 observations continue; accepted recipients of removed groups remain scalar-only.

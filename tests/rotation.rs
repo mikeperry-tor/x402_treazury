@@ -803,7 +803,7 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
     .unwrap();
     s.recover_unprepared_funding(&job.id).unwrap();
     assert_eq!(s.funding_jobs().unwrap()[0].operation_id, job.operation_id);
-    s.reauthorize_closed_funding(&job.id, 1).unwrap();
+    s.reauthorize_closed_funding(&job.id).unwrap();
     let next = s.funding_jobs().unwrap().remove(0);
     assert_ne!(next.operation_id, job.operation_id);
     assert_eq!(next.recipient, job.recipient);

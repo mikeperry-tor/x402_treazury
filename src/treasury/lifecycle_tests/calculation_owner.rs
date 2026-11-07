@@ -486,7 +486,7 @@ async fn direct_funding_recovery_drains_dropped_preparation_without_replacing_or
     {
         let store = owner.store.clone();
         let mut recovery =
-            Box::pin(owner.recover_funding_job(job.id.clone(), 0, false, &mut sender, &stop));
+            Box::pin(owner.recover_funding_job(job.id.clone(), false, &mut sender, &stop));
         assert!(futures_util::poll!(recovery.as_mut()).is_pending());
         // The initial Store-only fulfillment query must finish before the next
         // poll, so Pending then proves recovery is draining the held calculation.
@@ -499,7 +499,7 @@ async fn direct_funding_recovery_drains_dropped_preparation_without_replacing_or
     release.release();
     assert_eq!(
         owner
-            .recover_funding_job(job.id.clone(), 0, false, &mut sender, &stop)
+            .recover_funding_job(job.id.clone(), false, &mut sender, &stop)
             .await
             .unwrap(),
         recovery::RecoveryOutcome::Waiting("waiting_for_transaction_expiry")
@@ -512,7 +512,7 @@ async fn direct_funding_recovery_drains_dropped_preparation_without_replacing_or
         .call(move |s| {
             let current = s.funding_job(&job.id)?.unwrap();
             assert_eq!(current.operation_id, job.operation_id);
-            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+            assert!(!s.funding_facts(&job.id, &job.operation_id)?.archived);
             let operation = s.operation(&job.operation_id)?;
             assert_eq!(operation.attempts, 0);
             assert_eq!(operation.submission, "PREPARED");

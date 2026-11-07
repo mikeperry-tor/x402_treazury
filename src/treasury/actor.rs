@@ -15,7 +15,6 @@ enum Command {
     Interrupt(oneshot::Sender<()>, oneshot::Receiver<()>),
     RecoverFunding(
         String,
-        u32,
         bool,
         oneshot::Sender<Result<super::recovery::RecoveryObservation>>,
     ),
@@ -52,10 +51,9 @@ impl TreasuryHandle {
     pub async fn recover_funding(
         &self,
         id: String,
-        max_attempts: u32,
         allow_new_attempt: bool,
     ) -> Result<super::recovery::RecoveryObservation> {
-        self.call(|reply| Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply))
+        self.call(|reply| Command::RecoverFunding(id, allow_new_attempt, reply))
             .await
     }
 
@@ -247,7 +245,7 @@ impl Treasury {
                     match command {
                         #[cfg(test)]
                         Command::Interrupt(entered, release) => { let _ = entered.send(()); release.await.unwrap(); },
-                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, submission, stop, true).await); }
+                        Command::RecoverFunding(id, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, allow_new_attempt, submission, stop, true).await); }
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::DirectAddress(id, reply) => { let _ = reply.send(self.direct_address(id).await); }
@@ -324,7 +322,7 @@ impl Treasury {
 pub(crate) enum ObservedCommand {
     PreviewFee(super::FeeTarget, u64),
     NativeReceipt(String),
-    RecoverFunding(String, u32, bool),
+    RecoverFunding(String, bool),
     Prepare(PrepareRequest),
     Submit(String, bool),
     Reconcile(String),
@@ -344,7 +342,7 @@ impl TreasuryCommands {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
                 ObservedCommand::NativeReceipt(id)
             }
-            Command::RecoverFunding(id, limit, allow_new_attempt, reply) => {
+            Command::RecoverFunding(id, allow_new_attempt, reply) => {
                 let _ = reply.send(Ok(super::recovery::RecoveryObservation {
                     outcome: super::recovery::RecoveryOutcome::Waiting(
                         "waiting_for_transaction_expiry",
@@ -352,7 +350,7 @@ impl TreasuryCommands {
                     source_observed: true,
                     confirmation: None,
                 }));
-                ObservedCommand::RecoverFunding(id, limit, allow_new_attempt)
+                ObservedCommand::RecoverFunding(id, allow_new_attempt)
             }
             Command::Prepare(request, _base, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
@@ -483,7 +481,7 @@ mod tests {
         assert!(
             tokio::time::timeout(
                 Duration::from_secs(5),
-                handle.recover_funding("missing".into(), 1, false)
+                handle.recover_funding("missing".into(), false)
             )
             .await
             .unwrap()
@@ -550,7 +548,7 @@ mod tests {
         });
         assert!(
             handle
-                .recover_funding("missing".into(), 1, false)
+                .recover_funding("missing".into(), false)
                 .await
                 .is_err()
         );
@@ -566,7 +564,7 @@ mod tests {
         .await;
         assert!(
             handle
-                .recover_funding("missing".into(), 1, false)
+                .recover_funding("missing".into(), false)
                 .await
                 .is_err()
         );
@@ -589,7 +587,7 @@ mod tests {
         }
         assert!(
             handle
-                .recover_funding("missing".into(), 1, false)
+                .recover_funding("missing".into(), false)
                 .await
                 .is_err()
         );
@@ -771,7 +769,7 @@ mod tests {
             }
             assert!(
                 handle
-                    .recover_funding("missing".into(), 1, false)
+                    .recover_funding("missing".into(), false)
                     .await
                     .is_err()
             );
@@ -1119,7 +1117,6 @@ mod tests {
                     managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
                         job_id: job.id.clone(),
                         auto_fund,
-                        max_attempts: 1,
                     }),
                     operation_id: job.operation_id.clone(),
                     pool_id: Some(pool),
