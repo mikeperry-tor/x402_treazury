@@ -156,6 +156,7 @@ async fn rpc(
 }
 #[tokio::test]
 async fn listeners_filter_authenticate_route_pay_and_drain_together() {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     tls::install_trust();
     let (a, state, va) = vendor("alpha", "/api").await;
     let (b, beta, vb) = vendor("beta", "/gateway").await;
@@ -253,6 +254,35 @@ async fn listeners_filter_authenticate_route_pay_and_drain_together() {
     assert_eq!(rejected["result"]["isError"], true);
     assert_eq!(state.signed.load(Ordering::SeqCst), 1);
     assert_eq!(beta.signed.load(Ordering::SeqCst), 2);
+    // Identify connections while these listeners still own their addresses.
+    // A new connection after shutdown could instead reach another port-0 fixture.
+    let mut connections = Vec::new();
+    for (address, token) in [(research, "research-secret"), (limited, "beta-secret")] {
+        let connection = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            stream.write_all(format!(
+                "HEAD / HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\n\r\n"
+            ).as_bytes()).await.unwrap();
+            let mut connection = BufReader::new(stream);
+            let mut line = String::new();
+            assert!(connection.read_line(&mut line).await.unwrap() > 0);
+            assert!(line.starts_with("HTTP/1.1 404 "), "{line}");
+            loop {
+                line.clear();
+                assert!(connection.read_line(&mut line).await.unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            assert!(connection.buffer().is_empty(), "HEAD has no response body");
+            assert!(matches!(connection.get_ref().try_read(&mut [0]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+            connection
+        })
+        .await
+        .unwrap();
+        connections.push(connection);
+    }
     // Shutdown must drain an already submitted payment instead of dropping its response.
     state.hold.store(true, Ordering::SeqCst);
     let call = tokio::spawn({
@@ -294,8 +324,8 @@ async fn listeners_filter_authenticate_route_pay_and_drain_together() {
         .unwrap()
         .unwrap()
         .unwrap();
-    for address in addresses.values() {
-        assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    for mut connection in connections {
+        assert_eq!(connection.read(&mut [0]).await.unwrap(), 0);
     }
     va.abort();
     vb.abort();
