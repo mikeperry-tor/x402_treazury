@@ -2,8 +2,10 @@
 
 ## Intent, baseline and status
 
-Implement an optional first-party MCP toolset for both receiving payments through
-asset-to-ZEC swaps and sending payments through ZEC-to-asset swaps. Implement and
+Implement an optional first-party MCP toolset for receiving foreign assets through
+asset-to-ZEC swaps and sending ZEC-to-asset swaps, plus native shielded Zcash
+receiving and sending without NEAR Intents. The user explicitly added native paths
+on 2026-11-07 while D1 validation was running. Implement and
 review receiving first, then continue to sending. The receive gate is an
 intermediate integration boundary, **not completion or a stopping point**. Delivery
 requires both directions and the final combined review.
@@ -57,6 +59,7 @@ ID and chain; symbols alone are ambiguous. Keep amounts exact using decimal
 strings and checked arithmetic adequate for supported token quantities; convert
 only ZEC quantities into the SDK's bounded zatoshi representation.
 
+Native Zcash uses the existing embedded treasury signer; it never calls NEAR.
 No native foreign-chain signer or NEAR wallet is required for these deposit-funded
 transfers. This does not implement NEAR marketplace x402 authorization, general
 foreign-wallet management, USDC sweeping/consolidation, recurring invoices, payment
@@ -180,10 +183,11 @@ the existing client boundary; never expose keys or sessions as agent arguments.
   outcome, receipt evidence and current spendability remain separate.
 - Public unfunded reverse dry quote on 2026-11-07 returned HTTP 201 for Base USDC
   exact input to the public shielded-only test UA, with recipient echoed unchanged.
-  Private captures: `/tmp/direct-receive-dry.json` and
-  `/tmp/direct-receive-response.json`. Pinned bridge source at
+  Private captures: `target/direct-swap-contracts/direct-receive-dry.json` and
+  `target/direct-swap-contracts/direct-receive-response.json`. Pinned bridge source at
   `d1361ac1c68fa579ed1a498d30f2124bc16e09cc`, `zcash.rs:378–450`, separately
-  implements shielded withdrawals through `get_orchard_raw_with_memo`; its builder
+  implements shielded withdrawals through `get_orchard_raw_with_memo`
+  (capture SHA256 `3adb83481ffee7f5d4edb09a3cffd97ad64c2da7d78c35f2bcbe1bfb04614578`); its builder
   selects Ironwood after activation. This supports the intended shielded receive
   contract despite the general guide's transparent-only statement; it does not
   qualify funded delivery. No silent transparent fallback is selected.
@@ -255,6 +259,37 @@ Native exact amount fixes its principal; foreign exchanges retain the caller's
 separate maximum quoted principal. Accepted work keeps its original authority
 through capability/configuration changes.
 
+### D1N — Native shielded receive and independent treasury capability
+
+User scope addition, independently designed by fresh read-only `receive_review`:
+
+- Source asset ZEC on chain `zec` selects native receive, without metadata/quote/
+  status calls to NEAR or a foreign refund address. Each new caller request ID gets
+  a fresh all-shielded SDK receiver. Identical retries preserve the original; an
+  address-less native reservation safely resumes derivation after restart.
+- Add an explicit compatible route distinction to direct records rather than fake
+  provider quotes. Persist exact terms and snapshot/address binding before address
+  disclosure. Native receipt/status derives from actual SDK note recipients and
+  history, confirmations and spendability; partial funds are never called paid.
+- Separate treasury sync/submission/fee capability from optional NEAR transport and
+  quote settings. Native paths require no `[funding]` table or NEAR credentials.
+  Reuse the existing observation defaults/cadence without new policy or limits.
+- Accept supported Sapling receivers and shielded-only UAs; reject transparent/TEX
+  and mixed UAs with transparent fallback. Bridge Orchard-specific refund rules
+  remain separate. Preserve disabled transparent discovery across open/reconstruct/
+  scanning and assert no transparent address RPCs.
+- Test fresh/idempotent receivers, reservation-before-derivation restart, no NEAR
+  calls, native partial/excess receipts, historical receipt versus spendability,
+  table/listener disablement and no Base allocation or ZEC spend.
+- Native send is completed in D2: exact native amount already fixes principal;
+  foreign source-debit ceiling remains required only for exchange uncertainty.
+  There is no provider deadline for native sends. Reuse optional durable facts and
+  SDK consensus expiry without a huge substitute duration. Generalize actual
+  outgoing Sapling/Orchard/Ironwood recipient/value and fee validation, including
+  owned change/self-payments; do not trust UA memo metadata as output proof.
+
+G1 now covers D0/D1/D1N together. It remains intermediate and sending must follow.
+
 ### G1 — Receive integration gate; continue to sending
 
 Independently review D0/D1 together, all exact commits/fixups, configuration through
@@ -270,7 +305,8 @@ Then proceed to D2. Passing G1 does not complete this plan.
 ### D2 — Direct exact-output sends and accepted-work recovery
 
 Add send capability/configuration, useful dry previews and executable exact-output
-sends under the D0 authority contract. Persist accepted swap bindings before source
+sends under the D0 authority contract, plus native shielded Zcash sends without
+NEAR, using the D1N design above. Persist accepted swap bindings before source
 preparation, tie treasury preparation to those bindings, and use the existing input,
 snapshot, signed-byte, submission and canonical-recovery paths. Extend maintenance
 only as needed to own direct operations and their original identities after waiter
@@ -293,7 +329,7 @@ replacement swaps, extra native signers, allocation/top-up or consumed-claim res
 
 ### G2 — Final combined implementation and correction gate
 
-Independently review the full D0–D2 change, every accumulated commit/fixup, complete
+Independently review the full D0–D2 change including D1N, every accumulated commit/fixup, complete
 receive/send/funding consumers, enduring documentation and plan acceptance claims.
 Include the relevant unchanged high-risk financial/network paths and source-matched
 CogC/CycC dispositions. Revisit prior findings for recurring assumptions and testing
@@ -361,7 +397,8 @@ a mandatory research project or a source of artificial expiry rules.
 | D1 / G1 | D1 `bae7aaa1`; fresh read-only `receive_review` examined exact D0/D1 commits and combined call chains. Two material findings: direct settings forced strict startup instead of scoped degradation; second-resolution timestamps could retire receive scan demand too early. Fixup in progress preserves Store-only status and direct-without-Base availability, and uses existing scan-start snapshot revision ordering. Production compiler stopped on newly test-only `search_catalog` dead-code warning; fix is `cfg(test)`. No runtime/Clippy pass claimed yet. |
 | G1 continued corrections | `963fc840` and `aecc4932` reviewed with no remaining issue in those fixes. `aecc4932` production compiler/all-target `zcash-regtest` Clippy passed (logs `target/direct-swap-g1-clippy-continuation.log`). Later design review identified table-removal recovery gap and Store-commit notification ownership gap; correction preserves history-driven status/background work and gives durable quote publication its own existing-style Notify. Exact fixup `943dad95` reviewed with no remaining ownership finding; production compiler/all-target Clippy and fixed compatibility stage passed (`target/direct-swap-g1-clippy-history.log`, `target/direct-swap-g1-compat.log`). Search consumer correction and focused runtime validation remain pending. |
 | Focused baseline receive run | `target/direct-swap-receive-focused.log`: 64 selected tests compiled under `zcash-testutils`; 61 passed and one child helper ignored before one startup assertion failure and one fixture teardown hang. Failure: late listener inventory completeness gate missed status-only table despite early validation allowing it. Hang: fixture waited for owner shutdown while retaining external Store handles. Both focused corrections prepared; no complete runtime pass claimed. macOS linker emitted the documented large `__eh_frame` diagnostic; unwind data/profile retained. |
-| G1 preserved search contract | Root and fresh reviewer found mixed first-party/API search ranked rendered observed-price descriptions and projected complete schemas before pagination. Correction uses borrowed candidates, canonical fallback ranking and page-only rendering; existing pricing-cache regression is extended. This is a material G1 consumer correction, not deferred. |
+| Native scope design | User added native shielded send/receive during D1 validation. `receive_review` independently traced pinned SDK actual outgoing notes, fee calculation, receiver discovery and expiry contracts. D1N above records accepted design and tests; no native implementation claimed yet. |
+| G1 preserved search contract | Root and fresh reviewer found mixed first-party/API search ranked rendered observed-price descriptions and projected complete schemas before pagination. Correction `3ab5dddc` uses borrowed candidates, canonical fallback ranking and page-only rendering; existing pricing-cache regression is extended. Exact fixup/combined code review accepted; compiler/all-target Clippy passed (`target/direct-swap-g1-clippy-search.log`), complete source-matched complexity at `target/complexity-runs/20261107T010723Z-de23df7c`; only previously reviewed serve warning remains. This is a material G1 consumer correction, not deferred. |
 | G1 complexity | `target/complexity-runs/20261107T004651Z-840b8ac0`: complete 477 current / 471 baseline files, no exclusions; reviewer verified every source hash and lockfile. New warnings: `initialize_wallets_mode` Cog 40→43 / Cyc 46→54 (reassess after startup correction); `RunningDeployment::serve` Cog 30→33 / Cyc 43→46 retains coherent independent worker/actor shutdown ownership; score-only extraction rejected. |
 | D2 / G2 | Pending. Both directions required. |
 | D3 | Pending final implementation/user review and documentation handoff. |
