@@ -99,11 +99,13 @@ max_api_payment_usdc = "1.00"
 [sources.banking_compliance]
 extends = "../../providers/banking-compliance/provider.toml"
 send_tools = [
-  # Advisory copy screening complements business's authoritative 2s eCFR text.
-  { to = "finance", tools = ["check", "lookup"] },
-  # Drafting belongs on social, but a sample invented a website and claimed
-  # Member FDIC despite fdic_insured=false. Retain the provider tool for retesting.
-  # Campaign is provider-excluded because its paid request contract is unpublished.
+  # Advisory rule summaries complement business's authoritative 2s eCFR text.
+  { to = "finance", tools = ["lookup"] },
+  # Copy checking returned no violations for guaranteed-return/risk-free/over-limit
+  # FDIC text while flagging "Member FDIC" on a compliant ad, so its warnings are not
+  # a usable screening signal. Drafting belongs on social; a sample invented a website
+  # and claimed Member FDIC despite fdic_insured=false. Campaign is provider-excluded
+  # because its paid request contract is unpublished.
   { to = "exclude" },
 ]
 
@@ -190,22 +192,6 @@ send_tools = [
   # Share guidance or research across the relevant endpoints.
   { to = ["business", "finance"], tools = ["company_facts_ticker", "private_stocks_symbol"] },
   { to = "finance" },
-]
-
-# Only the Federal Register excerpt/public-inspection view and NHC storm
-# positions add value. federal_register_watch is $0.005, $0.001 below 2s
-# gov_federal_register_recent, and adds excerpts, total count and
-# public-inspection links; 2s keeps agency/type/date filters. Other ForgeMesh
-# tools were more expensive or lower quality than their 2s equivalents: contracts
-# $0.01 vs $0.006 and fewer filters; congress trades $0.02 vs $0.003 with
-# duplicate House-only rows; air quality $0.005 vs $0.003 with fewer pollutants;
-# earthquake had no time window and returned older events.
-[sources.forgemesh]
-extends = "../../providers/forgemesh.toml"
-send_tools = [
-  { to = "business", tools = ["federal_register_watch"] },
-  { to = "world", tools = ["hurricane_tracker"] },
-  { to = "exclude" },
 ]
 
 # Select only the unique or cheaper gaps. Other Vextorium tools were more
@@ -343,24 +329,12 @@ send_tools = [
   { to = "finance" },
 ]
 
-# SEC company-facts complement the selected statement/filing sources. Both this
-# gateway and 2s read SEC EDGAR: gateway redundancy is not independent source data.
-# The sampled Horizon POST returned standalone-quarter flows; inspect start/end
-# dates before comparing 2s interim flows, which can be fiscal year-to-date.
-[sources.horizonpulse]
-extends = "../../providers/horizonpulse.toml"
-send_tools = [
-  { to = ["business", "finance"], tools = ["sec_company_facts"] },
-  # Other new routes remain reusable catalog choices, not implicit additions here.
-  { to = "exclude" },
-]
-
 # Retain distinct equity, macro, on-chain, curated social and weather research.
 # Omit generative and model workflows, aggregate mega reports and video generation.
 # Web retrieval alternatives already selected below include Exa Search/Contents,
 # APEX page_markdown/page_extract and StableEnrich Firecrawl. They preserve
 # alternatives to Otto reads without establishing equivalence to its curated
-# crypto summaries or every browser-dependent JSON/link mode.
+# crypto summaries or its browser-dependent JSON extraction.
 [sources.otto]
 extends = "../../providers/otto.toml"
 send_tools = [
@@ -383,6 +357,10 @@ send_tools = [
   ] },
   # Keep provider feedback/refund workflows outside endpoint research; inline schemas replace help.
   { to = "exclude", tools = ["feedback", "help"] },
+  # Cited answers and link extraction have equivalent selected paths: Exa supplies
+  # answer synthesis upstream anyway, and the edge links overlap the selected
+  # rendered and static page readers without paying for a second reader.
+  { to = "exclude", tools = ["web_answer", "web_links"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "13d_activist_watch",
@@ -398,8 +376,8 @@ send_tools = [
   # Route social research families before the primary fallback.
   { to = "social", tools = ["kol_sentiment", "twitter_summary"] },
   # Route web research families before the primary fallback.
-  # Keep rendered reading, cited answers and browser-dependent JSON/links.
-  # Static alternatives below do not qualify all JS-generated fields/links; check
+  # Keep rendered reading and browser-dependent JSON extraction.
+  # Static alternatives below do not qualify all JS-generated fields; check
   # Otto freshness/degradation and destination rather than trusting HTTP success.
   { to = "web", tools = ["web_*"] },
   # Route world research families before the primary fallback.
@@ -486,10 +464,8 @@ send_tools = [
 [sources.stableenrich]
 extends = "../../providers/stableenrich.toml"
 send_tools = [
-  # Preserve the qualified cited-answer tool before excluding other Exa wrappers.
-  { to = "web", tools = ["exa_answer"] },
   { to = "exclude", tools = [
-    "exa_*",               # Use exa directly instead
+    "exa_*",               # Use exa directly instead; includes the redundant exa_answer wrapper.
     "firecrawl_search",    # Direct Exa supplies web discovery; Firecrawl scrape remains enabled.
     "serper_news",         # Upstream credit failure; use Exa's news category and date filters.
     "pdl_people_enrich",   # Use PDL directly instead
@@ -522,16 +498,6 @@ send_tools = [
   { to = "web" },
 ]
 
-# Qualified static-page JSON/links, without enabling the full utility catalog.
-# These fetch HTML rather than rendering JS. The browser-render alternative failed
-# qualification; Otto's distinct browser-dependent tools remain available above.
-[sources.agentutility]
-extends = "../../providers/agentutility/provider.toml"
-send_tools = [
-  { to = "web", tools = ["scrape_to_json", "link_extract", "archive_snapshot"] },
-  { to = "exclude" },
-]
-
 # Replaces Agent402's repository-only github_repo with cheaper GitHub search and
 # ref reads, and supplies the Reddit and X reads removed above. Amazon product
 # reads are new coverage; StableEnrich's multi-retailer Serper shopping remains.
@@ -551,7 +517,9 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Keyword search plus original patent claims; 2s supplies a second search service.
+# Relevance-ranked keyword search plus original claims; 2s supplies cheap EPO
+# bibliography/family/legal records and the US file wrapper rather than another
+# keyword search.
 [sources.google_patents]
 extends = "../../providers/google-patents.toml"
 send_tools = [
@@ -781,14 +749,6 @@ send_tools = [
   { to = "security" },
 ]
 
-# Disabled after cross-family facilitator settlement failures on 2026-10-28.
-# 402radar's latest listed Base payment was 18 days old at review (operator saw >=14):
-# https://402radar.io/vaaya.ai
-# Inactivity supports this deployment choice; it does not establish the failure cause.
-[sources.vaaya]
-extends = "../../providers/vaaya.toml"
-send_tools = [{ to = "exclude" }]
-
 [sources.locus]
 extends = "../../providers/locus/provider.toml"
 send_tools = [
@@ -920,13 +880,14 @@ send_tools = [
     "security_ip_*",              # IPIntel supplies IP enrichment; NetIntel supplies reputation and blacklist checks.
     "law_sanctions_check",        # AgOSINT covers OFAC, EU and UK lists; this lookup covers OFAC only.
     "law_case_search", # CompanyRecords gov_justia_case_law matched all 20 sampled court records, added snippets and advertised a lower price. Keep 2s as a backup in its reusable provider.
+    "patents_search", # Loosely matches every word: "solid state battery electrolyte" returned ball-screw, solid-state lighting and 5G records. Google Patents is the precision search; 2s EPO search remains the worldwide alternative.
   ] },
   { to = "security", tools = ["security_*"] },
   { to = "property", tools = ["property_*", "soil_*", "geo_flood_zone", "gov_epa_facilities", "gov_fair_market_rent", "gov_income_limits", "gov_nfip_claims", "gov_risk_index", "gov_uk_crime"] },
   { to = "science", tools = ["paper_doi_lookup", "papers_citations", "papers_search", "research_*", "bio_*", "chem_*"] },
   { to = "health", tools = ["clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
-  # More metrics/history controls at $0.012 than Horizon's $0.02 latest-facts read;
-  # keep both: interim flow periods are not always equivalent to single quarters.
+  # More metrics/history controls at $0.012 than a latest-facts-only read; interim
+  # flow periods can be fiscal year-to-date, so inspect start/end before comparing.
   { to = ["business", "finance"], tools = ["finance_company_facts"] },
   { to = "finance", tools = ["finance_figi", "finance_security_resolve"] },
   # Generic OSM places are partial resort alternatives; the sample hit Overpass 502.
@@ -939,11 +900,13 @@ send_tools = [
   { to = "world", tools = ["aviation_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # HN search returned dated story links and discussion counts; GitHub failed upstream authentication.
   { to = "social", tools = ["news_hn_search", "news_hn_item", "news_hn_top", "news_hn_user"] },
-  # All seven patent operations returned useful records. Documents are an index;
-  # EPO legal rows are historical events, not a complete current-status verdict.
-  # Legal, political and occupational records remain on business.
-  { to = "business", tools = ["patents_search", "patents_detail", "patents_documents", "patents_epo_search", "patents_epo_biblio", "patents_epo_family", "patents_epo_legal", "law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
-  # Exa, Otto, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
+  # Google Patents supplies relevance-ranked search and full claims; 2s adds the US
+  # file wrapper, EPO worldwide search, family and legal events. USPTO keyword search
+  # is excluded above. Documents are an index; EPO legal rows are historical events,
+  # not a complete current-status verdict. Legal, political and occupational records
+  # remain on business.
+  { to = "business", tools = ["patents_detail", "patents_documents", "patents_epo_search", "patents_epo_biblio", "patents_epo_family", "patents_epo_legal", "law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
+  # Exa, Otto and StableEnrich cover web research; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
   # inflation_hicp returned 2025-12 as latest in October 2026; leave it unselected.
   # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, other trip planning,
@@ -1034,18 +997,6 @@ send_tools = [
   # Web retains page capture; qualified readers/extractors cover pages and Exa covers source discovery.
   # Prefer local text/secret/PII parsing and statistical calculations over additional remote utilities.
   # Site audits, agent-access assessments and provider trust diagnostics are outside this selection.
-  { to = "exclude" },
-]
-
-# Static code/tool-content checks supplement threat and compromised-account intelligence.
-[sources.daedalus]
-extends = "../../providers/daedalus/provider.toml"
-send_tools = [
-  { to = "security", tools = ["security_audit_deep", "ai_skill_safety_scan"] },
-  # Existing research providers cover web, company and market lookups; routine transformations run locally.
-  # Model/code execution, signing/attestation, messaging, ledgers and agent-commerce diagnostics are separate workflows.
-  # Queued audits and unsupported ownership lifecycles are already excluded by the reusable provider.
-  # Provider help/diagnostics are omitted because inline schemas cover these two static scans.
   { to = "exclude" },
 ]
 
@@ -1205,15 +1156,6 @@ send_tools = [
   { to = "exclude" },
 ]
 
-[sources.webintel]
-extends = "../../providers/webintel.toml"
-send_tools = [
-  # News aggregation delivered Bing/GDELT results with an explicit Google timeout.
-  # GDELT Context results are article/sentence matches, not volume/tone timelines.
-  { to = "web", tools = ["search_news_across_the_web", "search_gdelt_news"] },
-  { to = "exclude" },
-]
-
 # --- Listeners ---------------------------------------------------------------
 
 [servers.web]
@@ -1221,7 +1163,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON, static HTML links and closest dated archive snapshots. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use glim_twitter_tweets_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials. WebIntel adds news aggregation with per-engine errors and GDELT article/sentence matches; these are not tone or volume timelines."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Otto's browser-dependent JSON extraction remains available; check freshness, degradation and destination before relying on results. Serper supplies Google image search, reverse image lookup and shopping. Use glim_twitter_tweets_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials."
 
 [servers.science]
 listen = "127.0.0.1:3011"

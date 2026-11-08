@@ -87,50 +87,6 @@ async fn otto_removed_generative_routes_preserve_all_research_destinations() {
 }
 
 #[tokio::test]
-async fn horizon_company_facts_use_reviewed_post_on_dynamic_company_endpoints() {
-    let inventory = research_source(
-        "horizonpulse",
-        include_str!("../providers/horizonpulse-openapi.json"),
-    )
-    .await;
-    for endpoint in ["business", "finance"] {
-        let server = inventory
-            .iter()
-            .find(|server| server.server == endpoint)
-            .unwrap();
-        let tool = server
-            .tools
-            .iter()
-            .find(|entry| entry.tool.name == "horizonpulse_sec_company_facts")
-            .unwrap();
-        assert!(server.discover_on_demand);
-        assert_eq!(tool.tool.method, "POST");
-        assert_eq!(tool.tool.path, "/api/sec/company-facts");
-        assert!(
-            !server
-                .tools
-                .iter()
-                .any(|entry| entry.tool.path == "/api/screenshot")
-        );
-    }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let config: toml::Value = toml::from_str(
-        &std::fs::read_to_string(root.join("examples/deployments/research_desk.toml")).unwrap(),
-    )
-    .unwrap();
-    for endpoint in ["business", "finance"] {
-        let hints = config["servers"][endpoint]["discovery_search_tool_instructions_text"]
-            .as_str()
-            .unwrap();
-        assert!(
-            hints.contains("Horizon Pulse")
-                && hints.contains("SEC company facts")
-                && hints.contains("XBRL")
-        );
-    }
-}
-
-#[tokio::test]
 async fn repaired_csv_weather_and_post_utilities_preserve_research_desk_distribution() {
     let twos = research_source(
         "twos",
