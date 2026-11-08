@@ -128,13 +128,8 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         compiled.decision("stableenrich_google_search").targets,
         ["business"]
     );
-    assert!(
-        compiled
-            .decision("stableenrich_help")
-            .targets
-            .iter()
-            .any(|target| target == "travel")
-    );
+    assert!(compiled.decision("stableenrich_help").excluded);
+    assert!(compiled.decision("stableenrich_serper_lens").excluded);
 }
 fn rules(value: Value) -> Vec<SendToolsRule> {
     serde_json::from_value(value).unwrap()

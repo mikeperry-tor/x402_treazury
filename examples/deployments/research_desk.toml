@@ -333,8 +333,8 @@ send_tools = [
 # Omit generative and model workflows, aggregate mega reports and video generation.
 # Web retrieval alternatives already selected below include Exa Search/Contents,
 # APEX page_markdown/page_extract and StableEnrich Firecrawl. They preserve
-# alternatives to Otto reads without establishing equivalence to its curated
-# crypto summaries or its browser-dependent JSON extraction.
+# alternatives to Otto's rendered reads without establishing equivalence to its
+# curated output.
 [sources.otto]
 extends = "../../providers/otto.toml"
 send_tools = [
@@ -342,8 +342,10 @@ send_tools = [
   { to = "exclude", tools = ["web_search"] }, # Replaced by direct Exa search: $0.007 sampled versus $0.009 for this same-upstream wrapper. Remove this exclusion to restore the wrapper if direct Exa fails.
   # AgOSINT covers domain enrichment; NetIntel supplies DNS and RDAP dates.
   { to = "exclude", tools = ["domain_report"] },
-  # Keep complementary crypto briefings alongside Exa's source-level news search.
-  { to = "web", tools = ["filtered_news", "news_recaps"] },
+  # Crypto-topic synthesis belongs with the other crypto research on finance.
+  { to = "finance", tools = ["filtered_news"] },
+  # The recap digest re-presents the crypto_news upstream already selected on finance.
+  { to = "exclude", tools = ["news_recaps"] },
   # These fresh domain reads matched the alternatives and retain distinct fields.
   { to = "security", tools = ["dns_lookup", "whois_lookup", "domain_age"] },
   { to = "exclude", tools = ["tweet_search"] }, # glim supplies cheaper matching posts and metrics.
@@ -357,10 +359,11 @@ send_tools = [
   ] },
   # Keep provider feedback/refund workflows outside endpoint research; inline schemas replace help.
   { to = "exclude", tools = ["feedback", "help"] },
-  # Cited answers and link extraction have equivalent selected paths: Exa supplies
-  # answer synthesis upstream anyway, and the edge links overlap the selected
-  # rendered and static page readers without paying for a second reader.
-  { to = "exclude", tools = ["web_answer", "web_links"] },
+  # Cited answers, link extraction and generic JSON extraction have equivalent
+  # selected paths: Exa supplies answer synthesis upstream, the edge links overlap
+  # the selected page readers, and Otto's Markdown read together with the caller's
+  # own structuring replaces a second paid LLM extraction pass.
+  { to = "exclude", tools = ["web_answer", "web_links", "web_json_extract"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "13d_activist_watch",
@@ -376,7 +379,7 @@ send_tools = [
   # Route social research families before the primary fallback.
   { to = "social", tools = ["kol_sentiment", "twitter_summary"] },
   # Route web research families before the primary fallback.
-  # Keep rendered reading and browser-dependent JSON extraction.
+  # Keep rendered reading; JSON extraction and crypto summaries are excluded or routed elsewhere.
   # Static alternatives below do not qualify all JS-generated fields; check
   # Otto freshness/degradation and destination rather than trusting HTTP success.
   { to = "web", tools = ["web_*"] },
@@ -467,6 +470,8 @@ send_tools = [
   { to = "exclude", tools = [
     "exa_*",               # Use exa directly instead; includes the redundant exa_answer wrapper.
     "firecrawl_search",    # Direct Exa supplies web discovery; Firecrawl scrape remains enabled.
+    "help",                # Inline schemas and endpoint instructions replace vendor help.
+    "serper_lens",         # $0.20 reverse-image lookup is too costly for routine research.
     "serper_news",         # Upstream credit failure; use Exa's news category and date filters.
     "pdl_people_enrich",   # Use PDL directly instead
     "reddit_*",            # Replaced by cheaper glim Reddit search/get.
@@ -486,8 +491,6 @@ send_tools = [
     "fullenrich_company_search",
     "google_*",
   ] },
-  # Share guidance or research across the relevant endpoints.
-  { to = ["business", "property", "social", "web", "travel"], tools = ["help"] },
   # Route social research families before the primary fallback.
   { to = "social", tools = [
     "fullenrich_people_search",
@@ -509,8 +512,10 @@ send_tools = [
   # Web search costs more than the selected Exa auto default; web fetch adds no
   # cheaper coverage than selected Exa contents; Telegram and YouTube are covered.
   { to = "exclude", tools = ["web_search", "web_fetch", "telegram_*", "youtube_*"] },
-  # Share X discovery and trends with web; account and post reads stay on social.
-  { to = ["web", "social"], tools = ["twitter_tweets_search", "twitter_trends"] },
+  # The basic tweet search duplicates social's richer twitter_search at the same price.
+  { to = "exclude", tools = ["twitter_tweets_search"] },
+  # Trends are shared with web; post search, account and thread reads stay on social.
+  { to = ["web", "social"], tools = ["twitter_trends"] },
   { to = "social", tools = ["twitter_*", "github_*", "reddit_*"] },
   # Amazon product search/detail is marketplace-specific and cheaper than Serper shopping.
   { to = "web", tools = ["amazon_*"] },
@@ -1163,7 +1168,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Otto's browser-dependent JSON extraction remains available; check freshness, degradation and destination before relying on results. Serper supplies Google image search, reverse image lookup and shopping. Use glim_twitter_tweets_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use glim_twitter_trends for X trends and google_trends_trend_over_time for interest timelines. Serper supplies Google image search and shopping. Science owns papers; Strale inspects C2PA media credentials."
 
 [servers.science]
 listen = "127.0.0.1:3011"
@@ -1207,8 +1212,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Banking copy checks and rule summaries are advisory; use business for authoritative eCFR text. Wallet research can return partial coverage and persistent unlisted reports. Use business for organizations and filings; use property for parcel and site records. Inspect company-fact start/end periods; interim flows may be fiscal year-to-date, while balances are point-in-time."
-discovery_search_tool_instructions_text = "Finance keywords: funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, FTD, fails to deliver, settlement fails, technical indicators, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, crypto news and market briefings, DeFi, derivatives and prediction markets. Banking copy checks and rule summaries are advisory; use business for authoritative eCFR text. Wallet research can return partial coverage and persistent unlisted reports. Use business for organizations and filings; use property for parcel and site records. Inspect company-fact start/end periods; interim flows may be fiscal year-to-date, while balances are point-in-time."
+discovery_search_tool_instructions_text = "Finance keywords: funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, crypto news, crypto headlines, market recap, airdrops, DeFi trends, KOL, whale, forecast, Polymarket, Solana, stablecoin, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, FTD, fails to deliver, settlement fails, technical indicators, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 
 [servers.property]
