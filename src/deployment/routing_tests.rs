@@ -129,7 +129,38 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         ["business"]
     );
     assert!(compiled.decision("stableenrich_help").excluded);
+    assert!(compiled.decision("stableenrich_serper_images").excluded);
     assert!(compiled.decision("stableenrich_serper_lens").excluded);
+    assert!(compiled.decision("stableenrich_serper_shopping").excluded);
+    let rules = config.sources["openwebninja"].send_tools.as_ref().unwrap();
+    let compiled = CompiledRules::new(rules, "openweb").unwrap();
+    for (name, target) in [
+        ("openweb_realtime_amazon_data_search", "shopping"),
+        ("openweb_realtime_lens_data_ocr", "shopping"),
+        ("openweb_realtime_zillow_data_search", "property"),
+        ("openweb_real_time_redfin_data_property_details", "property"),
+        ("openweb_jsearch_search_v2", "business"),
+        (
+            "openweb_realtime_glassdoor_data_company_reviews",
+            "business",
+        ),
+        ("openweb_local_business_data_search", "travel"),
+        ("openweb_waze_alerts_and_jams", "travel"),
+        ("openweb_realtime_image_search_search", "web"),
+        ("openweb_reverse_image_search_reverse_image_search", "web"),
+    ] {
+        assert_eq!(compiled.decision(name).targets, [target], "{name}");
+    }
+    for name in [
+        "openweb_realtime_books_data_search",
+        "openweb_realtime_ecommerce_data_google_shopping_product_price_history",
+        "openweb_realtime_amazon_data_product_reviews",
+    ] {
+        assert!(compiled.decision(name).excluded, "{name}");
+    }
+    let rules = config.sources["glim"].send_tools.as_ref().unwrap();
+    let compiled = CompiledRules::new(rules, "glim").unwrap();
+    assert!(compiled.decision("glim_amazon_search").excluded);
 }
 fn rules(value: Value) -> Vec<SendToolsRule> {
     serde_json::from_value(value).unwrap()

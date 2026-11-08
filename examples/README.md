@@ -336,9 +336,9 @@ generic geocoding is shared. Sports data and generative/developer workflows
 remain available through bundled provider selection.
 
 The listener order and ports are web 3010, science 3011, health 3012, social 3013,
-business 3014, finance 3015, property 3016, security 3017, world 3018, travel 3019
-and toolbox 3020. Connect each client to its listed port. Local deployment overrides remain
-operator-owned.
+business 3014, finance 3015, property 3016, security 3017, world 3018, travel 3019,
+toolbox 3020 and shopping 3021. Connect each client to its listed port. Local
+deployment overrides remain operator-owned.
 
 Published schemas and estimates do not establish comparative output quality,
 Tor delivery or funded settlement.

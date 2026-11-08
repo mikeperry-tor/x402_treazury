@@ -1,7 +1,7 @@
 # Research APIs grouped into task-oriented MCP endpoints.
 #
 # Endpoint   Scope                                             Wallet
-# web        Search, retrieval, news and archives              web
+# web        Search, retrieval, news, archives and images      web
 # science    Academic research, papers, funding, biology/chemistry web
 # health     Care access, clinical trials, drugs and public health social
 # social     People, contacts and platform content             social
@@ -12,6 +12,7 @@
 # world      Geopolitics, weather, shipping, regional conditions global
 # travel     Flights, awards, stays, transit and destinations   global
 # toolbox    Dynamic provider management and raw calls          global
+# shopping   Marketplace products, prices, offers and Lens      web
 #
 # Wallets share payer identities within each topical group. Separate groups
 # reduce payer reuse across topics; they do not guarantee unlinkability.
@@ -471,8 +472,10 @@ send_tools = [
     "exa_*",               # Use exa directly instead; includes the redundant exa_answer wrapper.
     "firecrawl_search",    # Direct Exa supplies web discovery; Firecrawl scrape remains enabled.
     "help",                # Inline schemas and endpoint instructions replace vendor help.
-    "serper_lens",         # $0.20 reverse-image lookup is too costly for routine research.
+    "serper_images",       # $0.04 Google Images search replaced by OpenWeb Ninja image search at $0.003.
+    "serper_lens",         # $0.20 reverse-image lookup; use OpenWeb Ninja Lens tools at $0.003.
     "serper_news",         # Upstream credit failure; use Exa's news category and date filters.
+    "serper_shopping",     # $0.04 shopping search replaced by OpenWeb Ninja marketplace search at $0.003.
     "pdl_people_enrich",   # Use PDL directly instead
     "reddit_*",            # Replaced by cheaper glim Reddit search/get.
     # Prefer solar_building_insights for directly usable structured results.
@@ -502,8 +505,8 @@ send_tools = [
 ]
 
 # Replaces Agent402's repository-only github_repo with cheaper GitHub search and
-# ref reads, and supplies the Reddit and X reads removed above. Amazon product
-# reads are new coverage; StableEnrich's multi-retailer Serper shopping remains.
+# ref reads, and supplies the Reddit and X reads removed above. Amazon and Serper
+# shopping tools are excluded in favor of OpenWeb Ninja's shopping catalog.
 [sources.glim]
 extends = "../../providers/glim.toml"
 send_tools = [
@@ -517,8 +520,60 @@ send_tools = [
   # Trends are shared with web; post search, account and thread reads stay on social.
   { to = ["web", "social"], tools = ["twitter_trends"] },
   { to = "social", tools = ["twitter_*", "github_*", "reddit_*"] },
-  # Amazon product search/detail is marketplace-specific and cheaper than Serper shopping.
-  { to = "web", tools = ["amazon_*"] },
+  # Amazon product reads moved to OpenWeb Ninja's cheaper multi-marketplace catalog.
+  { to = "exclude" },
+]
+
+# Marketplace search, product details and offers across Amazon, Google Shopping,
+# Walmart, eBay, Home Depot, Wayfair and Costco, plus Google Lens image tools.
+# The provider excludes duplicate alias trees so generated names follow the
+# shorter family. Books, price history (returned no data), Amazon reviews (caller
+# cookie required) and unqualified seller/influencer routes remain excluded.
+[sources.openwebninja]
+extends = "../../providers/openwebninja.toml"
+send_tools = [
+  { to = "shopping", tools = [
+    "realtime_amazon_data_search",
+    "realtime_amazon_data_product_details",
+    "realtime_amazon_data_product_offers",
+    "realtime_amazon_data_best_sellers",
+    "realtime_amazon_data_products_by_category",
+    "realtime_amazon_data_deals_v2",
+    "realtime_ecommerce_data_google_shopping_search",
+    "realtime_ecommerce_data_google_shopping_product_details",
+    "realtime_ecommerce_data_google_shopping_product_offers",
+    "realtime_ecommerce_data_google_shopping_deals",
+    "realtime_lens_data_visual_matches",
+    "realtime_lens_data_exact_matches",
+    "realtime_lens_data_ocr",
+    "realtime_lens_data_object_detection",
+    "real_time_walmart_data_search",
+    "real_time_walmart_data_product_details",
+    "real_time_walmart_data_products_by_category",
+    "real_time_ebay_data_search",
+    "real_time_ebay_data_product_details",
+    "realtime_homedepot_data_search",
+    "realtime_homedepot_data_product_details",
+    "real_time_wayfair_data_search",
+    "real_time_wayfair_data_product_details",
+    "realtime_costco_data_search",
+    "realtime_costco_data_product_details",
+  ] },
+  # Zillow and Redfin listings, estimates, agents and market trends.
+  { to = "property", tools = ["realtime_zillow_data_*", "real_time_redfin_data_*"] },
+  # Job search, salary estimates and employer reviews/salary data.
+  { to = "business", tools = ["jsearch_*", "realtime_glassdoor_data_*"] },
+  # Google Maps local business research, driving directions and Waze traffic.
+  { to = "travel", tools = [
+    "local_business_data_*",
+    "driving_directions_get_directions",
+    "waze_*",
+  ] },
+  # Google Images text search and reverse-image source pages.
+  { to = "web", tools = [
+    "realtime_image_search_search",
+    "reverse_image_search_reverse_image_search",
+  ] },
   { to = "exclude" },
 ]
 
@@ -587,28 +642,6 @@ send_tools = [
   # Route social research families before the primary fallback.
   { to = "social", tools = ["email_*", "phone_find"] },
   { to = "business" },
-]
-
-# Job-board research is available on business.
-# Small synchronous social probes failed with an expired upstream token.
-[sources.hirescrape]
-extends = "../../providers/hirescrape.toml"
-send_tools = [
-  { to = "exclude", tools = [
-    "help",
-    # Instagram, LinkedIn, TikTok and YouTube returned HTTP 401 "Token expired"
-    # even for one-record synchronous modes; TikTok reported settlement before failure.
-    # Other modes can also hand off to unsupported SIWX snapshot retrieval.
-    "instagram",
-    "linkedin",
-    "tiktok",
-    "tiktok_shop",
-    "youtube",
-  ] },
-  # Route business research families before the primary fallback.
-  { to = "business", tools = ["jobs"] },
-  # An Indeed-only one-record jobs request completed inline; other boards remain unqualified.
-  { to = "exclude" },
 ]
 
 # Network ownership and routing checks are available on security.
@@ -1168,7 +1201,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use glim_twitter_trends for X trends and google_trends_trend_over_time for interest timelines. Serper supplies Google image search and shopping. Science owns papers; Strale inspects C2PA media credentials."
+instructions_text = "Web search, pages, news, archives, trends and images. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use glim_twitter_trends for X trends and google_trends_trend_over_time for interest timelines. OpenWeb Ninja supplies Google Images search and reverse-image source pages; shopping owns marketplace, product and Lens image research. Science owns papers; Strale inspects C2PA media credentials."
 
 [servers.science]
 listen = "127.0.0.1:3011"
@@ -1203,8 +1236,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Compare company facts by their start/end periods: interim flows may be fiscal year-to-date, while balances are point-in-time. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic research; health for healthcare and clinical datasets."
-discovery_search_tool_instructions_text = "Business keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Glassdoor adds employer reviews, salaries and interview reports; JSearch adds job listings and salary estimates. Resolve entity identity before enrichment. Compare company facts by their start/end periods: interim flows may be fiscal year-to-date, while balances are point-in-time. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic research; health for healthcare and clinical datasets."
+discovery_search_tool_instructions_text = "Business keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3015"
@@ -1222,8 +1255,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Preserve record dates, coverage and uncertainty; estimates are not appraisals. Locus groundwater drawdown describes monitoring wells, not a parcel well; the free gateway preview covers one well and the paid read has broader coverage. Locus use restrictions remain: no tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
-discovery_search_tool_instructions_text = "Property keywords: groundwater drawdown, USGS monitoring wells, groundwater depth history, streamflow versus normal, drought history, water supply status, boil-water notices, lead service lines, contractor licensing, estate property, foreclosure process, housing counseling, seller disclosures, FEMA flood-map change notices, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
+instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Zillow and Redfin add listing search, property details, value estimates, agent records and market trends; estimates are not appraisals. Preserve record dates, coverage and uncertainty. Locus groundwater drawdown describes monitoring wells, not a parcel well; the free gateway preview covers one well and the paid read has broader coverage. Locus use restrictions remain: no tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
+discovery_search_tool_instructions_text = "Property keywords: Zillow, Redfin, Zestimate, home value, for sale, for rent, agent, market trends, MLS, groundwater drawdown, USGS monitoring wells, groundwater depth history, streamflow versus normal, drought history, water supply status, boil-water notices, lead service lines, contractor licensing, estate property, foreclosure process, housing counseling, seller disclosures, FEMA flood-map change notices, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
 
 [servers.security]
 listen = "127.0.0.1:3017"
@@ -1250,8 +1283,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
-instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. Google Places and 2s OSM searches add generic nearby places; resolve resort coordinates separately and do not infer lift proximity, menus or ski prices from place listings. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
-discovery_search_tool_instructions_text = "Travel keywords: nearby places, OpenStreetMap POI, POI near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips."
+instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. Google Maps local business search, driving directions and Waze traffic/venues add places, routes and road conditions; hours and prices are directory data, not live occupancy. Google Places and 2s OSM searches add generic nearby places; resolve resort coordinates separately and do not infer lift proximity, menus or ski prices from place listings. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
+discovery_search_tool_instructions_text = "Travel keywords: nearby places, Google Maps, local business, driving directions, traffic, Waze, alerts, jams, venues, OpenStreetMap POI, POI near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips."
 
 [servers.toolbox]
 listen = "127.0.0.1:3020"
@@ -1265,6 +1298,15 @@ remote_provider_directories = ["coinbase", "x402-list"]
 raw_url_calls = true
 instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery. Optional first-party Zcash payment tools appear when the operator enables them: receive or send native Ironwood ZEC, or swap foreign assets. Search the available tools before planning a payment."
 discovery_search_tool_instructions_text = "Search APIs registered on this endpoint and any enabled first-party tools. Use provider-management tools to find and add providers, or raw-call tools for documented URLs. Optional payment keywords: Zcash, ZEC, Ironwood, shielded payment, receive, payment request, send, payout, swap, preview, status. Availability follows operator configuration."
+
+[servers.shopping]
+listen = "127.0.0.1:3021"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "web"
+discover_on_demand = true
+instructions_text = "Product and marketplace research across Amazon, Google Shopping, Walmart, eBay, Home Depot, Wayfair and Costco, plus Google Lens visual matches, exact matches, OCR and object detection. Use search to find the marketplace identifier, product details for specifications and offers for price comparison. Prices, availability, delivery estimates and sponsored placements are sampled offers, not guarantees; identifiers and currencies differ by marketplace. Use web for general search and business for company facts."
+discovery_search_tool_instructions_text = "Shopping keywords: product search, price comparison, offers, deals, marketplace, retail, Amazon, ASIN, Google Shopping, Walmart, eBay, Home Depot, Wayfair, Costco, product details, specifications, availability, shipping, sponsored, visual matches, exact matches, reverse image, Google Lens, OCR, image text, object detection."
 
 # Optional treasury tools: enable each direction deliberately, then restart.
 # Native ZEC needs [treasury]; foreign asset swaps additionally need [funding].

@@ -170,7 +170,7 @@ async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequen
     let shown = Deployment::show_config(&path).await.unwrap();
     for (index, name) in [
         "web", "science", "health", "social", "business", "finance", "property", "security",
-        "world", "travel", "toolbox",
+        "world", "travel", "toolbox", "shopping",
     ]
     .into_iter()
     .enumerate()
@@ -190,6 +190,7 @@ async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequen
     }
     assert_eq!(shown["wallet_summary"]["managed_pool_count"], 4);
     assert_eq!(shown["servers"]["science"]["wallet"], "web");
+    assert_eq!(shown["servers"]["shopping"]["wallet"], "web");
     assert!(shown["source_bindings"]["science"]["findmydirectdoctor"].is_null());
     assert!(shown["source_bindings"]["health"]["findmydirectdoctor"].is_array());
     for (endpoint, source) in [

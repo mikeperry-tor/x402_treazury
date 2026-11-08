@@ -2616,3 +2616,43 @@ brain-MRI hospital prices, New Orleans hospital assistance records and HRSA site
 These establish sampled delivery, not independent listing accuracy or full-catalog
 qualification. Research desk deliberately assigns the full read-only catalog,
 including help, to health for healthcare access and costs.
+
+## openwebninja.toml — OpenWeb Ninja
+
+The published `https://x402.openwebninja.com/openapi.json` (310 operations,
+~1.9 MB) and `/llms.txt` were reviewed; sampled calls on 2026-11-08 verified
+marketplace delivery. All selected commerce routes are GET reads with
+`x-payment-info` fixed USD hints (~$0.003; $0.005 for EV charge lookup).
+
+The catalog contains duplicate alias trees that re-expose the same operations
+under longer names. The provider excludes `/realtime-serp-data`,
+`/realtime-local-and-maps-data`, the Amazon, Google Lens, Walmart, eBay, Home
+Depot, Wayfair and Costco copies under `/realtime-ecommerce-data`,
+`/realtime-jobs-data/glassdoor`, `/realtime-jobs-data/google-jobs`, the Zillow and
+Redfin copies under `/realtime-real-estate-data`, `/ai-answers` and
+`/realtime-web-search/ai-mode`. The shorter surviving names are canonical
+(`realtime-amazon-data`, `realtime-lens-data`, `real-time-walmart-data`,
+`realtime-zillow-data`, `local-business-data`, `waze`, `jsearch`, and so on).
+Amazon `product-reviews` requires a caller-supplied Amazon cookie and is not
+suitable as a managed tool. Google Shopping `product-price-history`
+returned only the echoed product identifier, with no history data, in the sampled
+call; its book search returned empty arrays for "thinking fast and slow",
+"harry potter" (with `document_type=books`) and "dune frank herbert", so it is not
+a usable library source. EV charge search returned stations but empty `connectors`.
+
+Sampled delivery: Amazon search (14 products), product details (specs, rating
+distribution, review aspects, ranks), product offers (59 offers); Walmart 40,
+eBay 60, Home Depot 24, Wayfair 48, Costco 24 products; Google Shopping search
+(10 listings, 3 offers); Google Lens visual matches (59 retailer matches with
+prices). Local business, Glassdoor employer search, `jsearch` and Zillow search
+returned useful records on the same date, establishing sampled delivery only.
+Image tools also delivered: text image search returned 100 results, reverse-image
+and Lens exact matches each returned 398 source pages, and Lens OCR extracted text
+boxes. Trustpilot search was sampled but is not selected: a company-name query
+returned ambiguous and unrelated entities (Stripe & Stare, domain-split Stripe
+records, "Stipt"), so it requires domain-scoped resolution.
+
+Offer lists can repeat the same offer, and price, availability, delivery and
+sponsorship fields are sampled marketplace state rather than guarantees. Response
+bodies are large (50–180 KB) and field names differ per marketplace; preserve
+marketplace identifiers and currency rather than normalizing by field name.
