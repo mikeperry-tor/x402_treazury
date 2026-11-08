@@ -1,0 +1,9 @@
+description = "X/Twitter, Reddit, GitHub, Telegram, YouTube, Amazon and web search/retrieval from one paid gateway."
+# Reusable Rust provider settings. Paths are relative to this file.
+spec = "https://glim.sh/openapi.json"
+name = "glim.sh"
+base_url = "https://glim.sh"
+prefix = "glim"
+include = ["/api/v1"]
+pricing_key = "x-payment-info"
+instructions_text = "Every route is a POST that settles per call. The combined twitter_get helper duplicates the granular tweet/user reads; twitter_search duplicates tweets/search with a different body key. First-page X posts and metrics are qualified, but returned-cursor pagination, follower and retweeter listings are unqualified. Amazon prices and delivery estimates are sampled marketplace observations, not live stock guarantees."

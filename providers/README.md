@@ -89,6 +89,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | FreeQ | `freeq.toml` | Remote REST catalog; pending completion, credential ownership, webhook lifecycles and gift-card purchases excluded |
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
+| glim.sh | `glim.toml` | Vendor OpenAPI; X, Reddit, GitHub, Telegram, YouTube, Amazon and web search/retrieval gateway |
 | Google Trends | `google-trends.toml` | Vendor OpenAPI |
 | Biomedical Grants (x402 Atlas) | `biomedical-grants.toml` | Full NIH RePORTER search, project, publication and funding-aggregate catalog |
 | Global Legal Entities (x402 Atlas) | `legal-entities.toml` | Full GLEIF search, registration and accounting-parent catalog |
