@@ -197,10 +197,10 @@ the initialized treasury and binds the listener before
 background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
 adds multiple research listeners, Tor, relay and persistent source registrations.
 
-Each listener serves stateless Streamable HTTP at `/mcp`. Both deployment and
-standalone HTTP listeners require loopback addresses. Standalone hostnames must
-resolve exclusively to loopback addresses; serving binds those validated addresses.
-There is no hot reload; restart to apply changes.
+Each listener serves stateless Streamable HTTP at `/mcp`. Deployment listeners bind
+their configured address, and standalone HTTP listeners accept any host that
+resolves to bind addresses; use a literal such as `0.0.0.0` when serving from a
+container. There is no hot reload; restart to apply changes.
 Static wallet profiles remain supported and use `mode = "static"` with
 `private_key_env`; they do not require treasury configuration. Static serving
 loads only the keys used by selected tools.

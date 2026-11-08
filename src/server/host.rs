@@ -2,14 +2,6 @@
 use anyhow::{Result, ensure};
 use rmcp::transport::streamable_http_server::StreamableHttpServerConfig;
 
-pub fn require_loopback(address: std::net::IpAddr) -> Result<()> {
-    ensure!(
-        address.is_loopback(),
-        "this release requires a loopback listen address"
-    );
-    Ok(())
-}
-
 #[derive(Clone, Default)]
 pub struct HostPolicy {
     allowed: Option<Vec<String>>,

@@ -37,9 +37,9 @@ financial authority.
 `src/network.rs` owns the process's immutable transport policy, canonical isolation
 identities, reqwest pools and tonic channels. Direct and Tor use the same factory,
 callers and payment/funding state machines. Its separate local listener resolver
-uses system DNS for the operator's bind hostname, validates every result as
-loopback and returns the exact addresses used for binding without another lookup.
-It does not select provider routing or replace Tor's remote DNS. Each HTTP cache slot holds an immutable
+uses system DNS for the operator's bind hostname and returns the exact resolved
+addresses used for binding without another lookup. It does not select provider
+routing or replace Tor's remote DNS. Each HTTP cache slot holds an immutable
 `HttpTransport` record pairing the pooled client with its canonical owner identity
 and effective isolation scope, keyed by `SelectionPolicy` (`Legacy` versus
 `Participating`), protocol compatibility, public-destination enforcement, owning

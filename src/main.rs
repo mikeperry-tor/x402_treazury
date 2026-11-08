@@ -309,7 +309,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         None
     };
     let listen = if args.transport == "http" {
-        Some(x402_treazury::network::loopback_listener_addresses(&args.host, args.port).await?)
+        Some(x402_treazury::network::listener_addresses(&args.host, args.port).await?)
     } else {
         None
     };

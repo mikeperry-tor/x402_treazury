@@ -46,13 +46,3 @@ fn empty_cap_requires_explicit_unlimited_authority() {
         Some(alloy_primitives::U256::ZERO)
     );
 }
-
-#[test]
-fn listener_addresses_require_loopback_for_both_ip_families() {
-    for address in ["127.0.0.1", "127.0.0.2", "::1"] {
-        host::require_loopback(address.parse().unwrap()).unwrap();
-    }
-    for address in ["0.0.0.0", "192.168.1.1", "::", "2001:db8::1"] {
-        assert!(host::require_loopback(address.parse().unwrap()).is_err());
-    }
-}

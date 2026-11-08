@@ -1409,17 +1409,14 @@ mod public_destination_tests {
 #[path = "network_http_tests.rs"]
 mod http_tests;
 
-/// Resolve an operator's local listener host once and validate every bind address.
+/// Resolve an operator's local listener host once and return every bind address.
 /// This local DNS lookup is separate from provider transport and Tor remote DNS.
-pub async fn loopback_listener_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
+pub async fn listener_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
     let addresses: Vec<_> = tokio::net::lookup_host((host, port)).await?.collect();
     ensure!(
         !addresses.is_empty(),
         "HTTP listen host resolved to no addresses"
     );
-    for address in &addresses {
-        crate::server::host::require_loopback(address.ip())?;
-    }
     Ok(addresses)
 }
 

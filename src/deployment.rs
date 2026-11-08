@@ -287,8 +287,6 @@ impl MetaConfig {
             .with_context(|| format!("server {name}: invalid Host policy"))?
             .validate_auth_enabled(server.auth)
             .with_context(|| format!("server {name}"))?;
-            crate::server::host::require_loopback(server.listen.ip())
-                .with_context(|| format!("server {name}"))?;
             ensure!(
                 server.listen.port() == 0 || addresses.insert(server.listen),
                 "duplicate listener {}",

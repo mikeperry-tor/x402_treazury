@@ -98,11 +98,6 @@ fn listener_checks_keep_their_first_error_and_context() {
         .remove("allowed_hosts");
     error(
         &v,
-        "server one: this release requires a loopback listen address",
-    );
-    v["servers"]["one"]["listen"] = json!("127.0.0.1:0");
-    error(
-        &v,
         "server one: bearer_token_env is required unless auth = false",
     );
     v["servers"]["one"]["bearer_token_env"] = json!("TOKEN");

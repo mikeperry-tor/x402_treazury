@@ -798,13 +798,13 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
 }
 
 #[tokio::test]
-async fn standalone_non_loopback_listener_is_rejected_before_provider_io() {
+async fn standalone_wildcard_listener_resolves_before_provider_io() {
     tls::install_trust();
     let directory = tempfile::tempdir().unwrap();
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-        .env("X402_MCP_BEARER_TOKEN", "public-loopback-test-token")
+        .env("X402_MCP_BEARER_TOKEN", "public-wildcard-test-token")
         .current_dir(directory.path())
         .args([
             "serve",
@@ -821,6 +821,6 @@ async fn standalone_non_loopback_listener_is_rejected_before_provider_io() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let diagnostic = String::from_utf8(output.stderr).unwrap();
-    assert!(diagnostic.contains("loopback"), "{diagnostic}");
-    assert!(!diagnostic.contains("missing.toml"), "{diagnostic}");
+    assert!(diagnostic.contains("missing.toml"), "{diagnostic}");
+    assert!(!diagnostic.contains("loopback"), "{diagnostic}");
 }
