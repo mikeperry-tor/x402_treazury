@@ -1,0 +1,17 @@
+description = "Official statistics, public procurement and contract awards, SEC filings, macro and crypto markets, regulation, sanctions, science, weather, geocoding and developer utilities."
+# Range probes over the selected Tor policy ignored byte ranges on llms.txt,
+# openapi.json and the root page; robots.txt supports ranges but is below the
+# default qualification size. Optional cover is disabled for this origin.
+cover_traffic_enabled = false
+spec = "https://api.vextorium.com/openapi.json"
+name = "Vextorium"
+base_url = "https://api.vextorium.com"
+prefix = "vextorium"
+include = ["/v1", ""]
+pricing_key = "x-payment-info"
+read_timeout_seconds = 90
+help_url = "https://api.vextorium.com/llms.txt"
+instructions_text = "All operations use POST JSON bodies. Preserve source and as-of fields; summary flags are options within the advertised per-call price, while dedicated summary endpoints are separately priced."
+
+[overrides.vextorium_help]
+description = "Read Vextorium's catalog and request guide. Only the exposed POST tools and their schemas apply; vendor MCP and manual client workflows are not part of this integration."

@@ -85,6 +85,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Degenscan Intel | `degenscan.toml` | Event intelligence, keyless Carry reads and public forecast submit/poll |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
 | FindMyDirectDoctor | `findmydirectdoctor.toml` | Full read-only doctor/clinic, hospital cash-price and healthcare-access catalog |
+| ForgeMesh Utility Grid | `forgemesh.toml` | Full fixed-price POST catalog; free route menu; duplicate aliases retained |
 | FreeQ | `freeq.toml` | Remote REST catalog; pending completion, credential ownership, webhook lifecycles and gift-card purchases excluded |
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
@@ -116,6 +117,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | StableTravel | `stabletravel/provider.toml` | Full flight-data catalog with authored path-parameter repairs; cash fares, cached awards and operational reads |
 | Straits | `straits/provider.toml` | Authored free/premium JSON, CSV, RSS and HTML contracts |
 | Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |
+| Vextorium | `vextorium.toml` | Full POST catalog; `/v1` naming anchor |
 | VoIPStore | `voipstore.toml` | Virtual-number catalog, quotes, purchases and SMS status; prepaid top-ups excluded |
 | x402-list | `x402-list.toml` | Public directory reads, assessments, suggestions and listing submissions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |

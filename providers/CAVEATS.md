@@ -2255,6 +2255,75 @@ Known-empty Google Flights and failed Wikivoyage remain excluded, and aviation
 weather remains on world. These catalogs share an operator/payment recipient;
 source diversity does not establish independent gateway redundancy.
 
+## ForgeMesh and Vextorium
+
+ForgeMesh ([OpenAPI](https://x402.forgemesh.io/openapi.json),
+[guide](https://x402.forgemesh.io/llms.txt)) advertises 499 paid POST routes and
+one free `GET /menu`. Many paid paths are functional aliases over the same
+upstream data (`earthquake-nearby`, `earthquake-radius-search`,
+`quakes-near-location` and `local-seismic-search`; four air-quality routes; four
+hurricane routes). The reusable definition retains the complete catalog, so
+compare the actual request schema, response fields and observation dates before
+treating aliases as independent coverage. `GET /menu` has no payment metadata in
+the vendor document; the provider overrides its pricing text because a generated
+`Cost: unknown` description would be misleading. The 2026-11-07 Tor range probes
+returned 200 for `llms.txt`, `openapi.json` and the root page; `robots.txt`
+returned 206 but was 885 bytes, below the default qualification size. Optional
+cover is therefore disabled for this origin.
+
+Vextorium ([OpenAPI](https://api.vextorium.com/openapi.json),
+[guide](https://api.vextorium.com/llms.txt)) advertises 244 paid POST routes under
+`/v1`. Its offers include Base USDC alongside other networks; Treazury's delegated
+payments use the Base offer. The same 2026-11-07 probes returned 200 for the guide,
+catalog and root and a 67-byte `robots.txt` with 206; optional cover is disabled.
+Both definitions use the remote vendor schemas and do not pin a local catalog or
+add a provider-specific fixture. Live 402 challenges were observed for both.
+Specific reads were paid-qualified on 2026-11-07, but neither full catalog is
+qualified. In particular, 2s
+`gov_usaspending-awards` is itself a search (recipient, agency, state, award type
+and date filters) and remains broader and cheaper than ForgeMesh
+`federal_contracts_search`, which requires a recipient and supports fewer filters
+at $0.01 versus $0.006.
+
+Paid comparison samples on 2026-11-07 used Base USDC and are evidence for these
+specific requests, not qualification of the full catalogs. For Lockheed Martin
+federal contracts, ForgeMesh and Vextorium returned the same five largest awards
+at $0.01 and $0.005; Vextorium omits the awarding sub-agency and returned one
+empty description. 2s `gov_usaspending-awards` returned 504 at that time and was
+not retried, so it is not evidence of endpoint removal or of relative output
+quality; its schema still offers the broader filters above. For Federal Register
+"stablecoin", ForgeMesh returned the newest ten documents with excerpts, total
+167 and HTML/PDF/public-inspection links for $0.005. 2s
+`gov_federal_register_recent` already provides newest-first scanning with
+agency/type/date filters at $0.006, while `law_federal_register` returned five
+relevance-matched documents without excerpts for $0.0025. ForgeMesh's
+differentiator is match excerpts, total count and public-inspection links at
+$0.001 below the recent feed; it does not add a new newest-first capability.
+
+Congress trades for NVDA exposed a concrete ForgeMesh quality defect: it reported
+162 matches but returned duplicate rows, House-only coverage, and no source PDF
+for $0.02. 2s returned 122 deduplicated House rows with amount ranges,
+days-to-disclose and source links for $0.003. For earthquakes near San Francisco,
+ForgeMesh returned five raw USGS events but exposes no time-window parameter and
+the oldest was about 5.6 days old; 2s `earth-now` returned zero events in 24 hours
+plus wildfire counts. They have different recency contracts, so do not treat
+ForgeMesh as a 24-hour feed. Both air-quality reads returned the same Open-Meteo
+values, but 2s added European AQI, category, SO2 and CO for $0.003 versus
+ForgeMesh's $0.005. ForgeMesh's hurricane tracker returned live NHC storm Pena
+with advisories, track and GIS links for $0.005; no selected 2s tool exposes NHC
+storm positions.
+
+Vextorium's crypto regulation tracker returned no crypto documents for a 14-day
+window and five for 60 days, including duplicate statement/speech entries, at
+$0.018 per call; it covers SEC press/speech and White House sources absent from
+the Federal Register. Its Form D endpoint returned five current private offerings
+with offering/sold amounts, investors and first-sale dates for $0.004, filling a
+gap no selected provider covers. Its fails-to-deliver read returned the same TSLA
+half-month rows as x402stock plus `value_usd` for $0.004 versus $0.02, but only the
+latest half-month file while x402stock reads up to six periods. Its wallet
+sanctions check returned a clean OFAC result and list count for $0.002; AgOSINT
+returned four-list metadata and a signed receipt for $0.015.
+
 ## Research-desk upstream failures
 
 The deployment excludes Vaaya and SocialFetch after the 2026-10-28 probes and
