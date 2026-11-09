@@ -58,7 +58,7 @@ confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 
 # Each pool starts with one small reserve and no separate active wallet.
-# Two groups with default $2-$5 small reserves have $4-$10 nominal bounds including any accepted bridge-minimum redraw; fees and replacements are additional.
+# Two groups with default $2-$4 small reserves have $4-$8 nominal bounds including any accepted bridge-minimum redraw; fees and replacements are additional.
 # Allow additional treasury funds for those costs and replacements after the first payment.
 # Actual deposits reflect each operation's selected nominal amount and bridge minimums. All declared pools initialize, even
 # unused ones: remove unused wallet definitions and update bindings to save funding.
@@ -69,7 +69,7 @@ max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.10"
 
 [wallets.web.reserves.small]
-# Default randomized nominal funding: $2-5.
+# Default randomized nominal funding: $2-4.
 
 # Social, company and toolbox share this pool, reserve and Tor payer identities.
 # The shared $0.50 per-payment cap covers the selected RelayShield tools.
@@ -80,7 +80,7 @@ max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.50"
 
 [wallets.company.reserves.small]
-# Default randomized nominal funding: $2-5.
+# Default randomized nominal funding: $2-4.
 
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's

@@ -49,8 +49,8 @@ qualify independently. A provider failure remains a failure; no automatic paid
 retry is purchased.
 
 Twelve attempts are a finite candidate list, not a promise to rotate every wallet.
-The configured nominal range is $2-$5. The operation's selected draw and any
-accepted bridge minimum can raise its local floor; the upper bound remains $5.
+The configured nominal range is $2-$4. The operation's selected draw and any
+accepted bridge minimum can raise its local floor; the upper bound remains $4.
 ZEC input follows the current quote; no fixed ZEC exposure ceiling or equal-share
 per-job budget is imposed. A minimum above the configured USDC maximum stops new
 unsigned acquisition without a deposit.

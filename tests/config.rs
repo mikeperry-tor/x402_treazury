@@ -164,13 +164,13 @@ async fn every_bundled_provider_validates_offline() {
 }
 
 #[tokio::test]
-async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequential() {
+async fn research_desk_wallet_grouping_and_listener_ports_are_sequential() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/research_desk.toml");
     let shown = Deployment::show_config(&path).await.unwrap();
     for (index, name) in [
-        "web", "science", "health", "social", "business", "finance", "property", "security",
-        "world", "travel", "toolbox", "shopping",
+        "toolbox", "web", "science", "shopping", "world", "social", "property", "travel", "health",
+        "business", "finance", "security",
     ]
     .into_iter()
     .enumerate()
@@ -180,19 +180,31 @@ async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequen
             format!("127.0.0.1:{}", 3010 + index)
         );
     }
+    for (endpoint, wallet) in [
+        ("toolbox", "general"),
+        ("web", "general"),
+        ("science", "general"),
+        ("shopping", "general"),
+        ("world", "general"),
+        ("social", "personal"),
+        ("property", "personal"),
+        ("travel", "personal"),
+        ("health", "health"),
+        ("business", "financial"),
+        ("finance", "financial"),
+        ("security", "financial"),
+    ] {
+        assert_eq!(shown["servers"][endpoint]["wallet"], wallet);
+    }
     for binding in shown["wallet_bindings"]["health"]
         .as_object()
         .unwrap()
         .values()
     {
-        assert_eq!(binding["wallet"], "social");
+        assert_eq!(binding["wallet"], "health");
         assert_eq!(binding["origin"], "servers.health.wallet");
     }
     assert_eq!(shown["wallet_summary"]["managed_pool_count"], 4);
-    assert_eq!(shown["servers"]["science"]["wallet"], "web");
-    assert_eq!(shown["servers"]["shopping"]["wallet"], "web");
-    assert!(shown["source_bindings"]["science"]["findmydirectdoctor"].is_null());
-    assert!(shown["source_bindings"]["health"]["findmydirectdoctor"].is_array());
     for (endpoint, source) in [
         ("finance", "banking_compliance"),
         ("finance", "blockchainmoneymap"),
@@ -200,9 +212,11 @@ async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequen
     ] {
         assert_eq!(
             shown["wallet_bindings"][endpoint][source]["wallet"],
-            "financials"
+            "financial"
         );
     }
+    assert!(shown["source_bindings"]["science"]["findmydirectdoctor"].is_null());
+    assert!(shown["source_bindings"]["health"]["findmydirectdoctor"].is_array());
     assert!(shown["source_bindings"]["toolbox"]["blockchainmoneymap"].is_null());
     assert!(shown["source_bindings"]["social"]["banking_compliance"].is_null());
 }

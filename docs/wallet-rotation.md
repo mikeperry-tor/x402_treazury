@@ -28,6 +28,41 @@ pools. Removing a profile disables its pool while retaining keys, balances and
 work. Agent source registration uses an already configured named profile and
 cannot create a new pool or choose arbitrary signing credentials.
 
+### Wallet grouping, rotation and linkability
+
+Pool names select payer identities, so grouping is a correlation boundary, not
+just an organizational label. Group endpoints by what the upstream can learn
+about the caller: general research reveals an anonymous researcher, personal
+and health requests can carry the caller's own identity, location, contacts or
+medical context, and financial requests carry money interests and crypto
+identities. Isolating health is justified by the sensitivity of medical context,
+not by tool similarity.
+
+Both mechanisms are bounded. Separate pools limit cross-topic payer correlation.
+Funding-tranche rotation limits temporal linkage between calls that use
+different wallets, and smaller nominal reserves create more rotation
+opportunities. Neither hides request content from the vendor on a given call.
+Transport isolation is keyed by payer identity and destination, so the same
+provider reached through different wallets uses separate connections and Tor
+circuits; the vendor can still correlate calls by content or timing within what
+it observes.
+
+Funding uses isolated Tor circuits and a unique shielded refund receiver per
+swap, so its residual correlation is limited to funding time and size against
+the overall volume of ZEC-to-Base USDC swaps; that correlation risk is highest
+during the coordinated consecutive funding of the first USDC wallets, but it
+reduces significantly as USDC wallets rotate independently from then on.
+
+Wallet grouping is therefore a payer-identity control, not a replacement for Tor
+isolation, per-payer transport binding or request-content discipline. More pools
+add funding and rotation work without improving same-vendor content correlation.
+Image or OCR tools disclose the payload itself, which neither wallet grouping
+nor circuit isolation mitigates.
+
+Similarly, remote provider registration and raw URL calls use the endpoint's own
+wallet for those providers, not the wallet of a matching native endpoint (if one
+exists). Routing such calls to that endpoint's wallet is not yet implemented.
+
 A process owns the treasury state directory exclusively. A serialized treasury
 owner manages zingolib sync, preparation and submission; a bounded blocking store
 worker owns SQLite operations. Financial transactions do not hold a database
@@ -156,7 +191,7 @@ USD conversion-overhead ceiling:
 | Control | Scope and purpose |
 | --- | --- |
 | `swap_control.max_send_zec` | Optional direct-tool payment plus actual fee ceiling; default unlimited. Accepted authority remains bound to that operation. |
-| Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-5 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
+| Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-4 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
 | `max_api_payment_usdc` | Per-x402-payment USDC authority, independent of ZEC funding. Managed profiles require an explicit setting; static default is $1. `none`/`off` means unlimited. |
 | `max_retirement_remainder_usdc` | Automatic retirement threshold, default $0.001; no transfer or replacement authority. |
 | Funding recovery authority | No per-job recovery-count cutoff. A replacement requires safe original-source closure, a current unconsumed claim and enabled funding/qualification authority. Direct sends do not gain replacement-payment authority. |
@@ -190,7 +225,7 @@ max_api_payment_usdc = "1.00"
 max_retirement_remainder_usdc = "0.001"
 
 [wallets.research.reserves.small]
-# Default randomized nominal funding: $2-5.
+# Default randomized nominal funding: $2-4.
 
 # Explicitly enabling a large slot opts into its $10-25 default range:
 # [wallets.research.reserves.large]
@@ -198,7 +233,7 @@ max_retirement_remainder_usdc = "0.001"
 
 | Setting | Meaning |
 | --- | --- |
-| `reserves.small` | Omitted or empty defaults to a randomized $2-5 nominal range. |
+| `reserves.small` | Omitted or empty defaults to a randomized $2-4 nominal range. |
 | `reserves.large` | Absent stays disabled; an explicit empty table opts into the $10-25 randomized default. |
 | Slot `funding_amount_usdc` | Fixed positive nominal target; optional `max_funding_amount_usdc` adds bridge-minimum headroom. |
 | Slot `min_funding_amount_usdc` + `max_funding_amount_usdc` | Uniform randomized nominal amount within the inclusive range; equal endpoints are valid. |
@@ -216,7 +251,7 @@ A group cap may exceed its reserve bounds, and bounds may exceed the cap.
 Neither case promises that initial funding can serve every allowed price. The
 fresh initial-inventory range is the sum of slot minima through the sum of slot
 maxima, including bridge-minimum headroom and excluding fees. The default small range alone
-is $2-5; with an explicitly enabled large slot it is $12-30. Report actual
+is $2-4; with an explicitly enabled large slot it is $12-29. Report actual
 credits, output ceilings, retained holdings and costs separately. Smaller reserve
 sizes offer more cheap-call rotation opportunities; larger sizes support expensive
 calls but can keep more traffic on an address. See

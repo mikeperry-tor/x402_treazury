@@ -49,7 +49,7 @@ async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
             );
             assert_eq!(
                 shown["wallets"]["demo"]["reserves"]["small"]["max_funding_amount_usdc"],
-                "5.00"
+                "4.00"
             );
             assert!(
                 shown["treasury"]

@@ -104,7 +104,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    The backup directory must not exist. Store it securely; it contains spending
    material. Never run the original and restored copy concurrently.
 4. Provide the printed **shielded** receive address to the operator. Agree on the
-   ZEC amount using a fresh quote for one $2-$5 nominal USDC deposit, including
+   ZEC amount using a fresh quote for one $2-$4 nominal USDC deposit, including
    source fees and any later replacement permitted by the run authority.
    There is no separate per-transfer ZEC spending budget. Actual spendable treasury
    funds and the SDK-calculated transaction fee govern the transfer. No shielding,
@@ -136,7 +136,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    Start with no MCP clients issuing tool calls. Observe the configured small-slot
    funding job, source confirmations and independent Base credit through
    `wallet status`. For this demo, wait for complete configured inventory: one
-   READY wallet with a first positive USDC credit after its selected $2-$5 nominal
+   READY wallet with a first positive USDC credit after its selected $2-$4 nominal
    size. Readiness does not require the nominal amount or a particular midpoint.
    Ordinary serving can begin with one eligible funded payer; that does not satisfy
    this stronger demo inventory gate. NEAR SUCCESS alone is insufficient.

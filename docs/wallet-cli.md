@@ -971,7 +971,7 @@ RPC policy as the deployment; choosing another provider discloses those addresse
 to that provider.
 
 Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc`. `reserves.small` defaults to a
-randomized $2-5 nominal range; an absent `reserves.large` stays disabled, while an
+randomized $2-4 nominal range; an absent `reserves.large` stays disabled, while an
 explicit empty `[reserves.large]` opts into $10-25. A slot may instead set
 `funding_amount_usdc` for a fixed target (optionally with
 `max_funding_amount_usdc` headroom), or both `min_funding_amount_usdc` and

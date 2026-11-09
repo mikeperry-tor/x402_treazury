@@ -1,21 +1,35 @@
 # Research APIs grouped into task-oriented MCP endpoints.
 #
-# Endpoint   Scope                                             Wallet
-# web        Search, retrieval, news, archives and images      web
-# science    Academic research, papers, funding, biology/chemistry web
-# health     Care access, clinical trials, drugs and public health social
-# social     People, contacts and platform content             social
-# business   Organizations, filings, jobs, funding, reviews     financials
-# finance    Equities, macro, crypto and derivatives            financials
-# property   Parcels, local records, zoning and site context    financials
-# security   Threats, breaches and infrastructure checks        financials
-# world      Geopolitics, weather, shipping, regional conditions global
-# travel     Flights, awards, stays, transit and destinations   global
-# toolbox    Dynamic provider management and raw calls          global
-# shopping   Marketplace products, prices, offers and Lens      web
+# Endpoint   Scope                                              Wallet
+# --------   -----                                              ------
+# toolbox    Dynamic provider management and raw calls          general
+# web        Search, retrieval, news, archives and images       general
+# science    Academic research, papers, funding, bio/chem       general
+# shopping   Marketplace products, prices, offers and Lens      general
+# world      Geopolitics, weather, shipping, regional status    general
+# social     People, contacts and platform content              personal
+# property   Parcels, local records, zoning and site context    personal
+# travel     Flights, awards, stays, transit and destinations   personal
+# health     Care access, clinical trials, drugs, public health health
+# business   Organizations, filings, jobs, funding, reviews     financial
+# finance    Equities, macro, crypto and derivatives            financial
+# security   Threats, breaches and infrastructure checks        financial
 #
-# Wallets share payer identities within each topical group. Separate groups
-# reduce payer reuse across topics; they do not guarantee unlinkability.
+# Wallets group endpoints by what the upstream learns about the caller, not by
+# topic. General research reveals only an anonymous researcher; personal and
+# health requests can carry the caller's own identity, location, contacts or
+# medical context; financial requests carry money interests and crypto
+# identities. Separate pools bound cross-topic payer correlation, and wallet
+# address rotation bounds temporal linkage across funding tranches. Neither
+# hides request content from a vendor, nor prevents same-session content/time
+# correlation.
+#
+# Transport is isolated per payer and destination, so the same provider reached
+# through different wallets uses separate Tor circuits; that does not hide
+# request content from the vendor. For example, shopping image lookups only
+# reach marketplace providers, but a personal image or screenshot still
+# discloses its content to that vendor.
+#
 # Payment caps apply to each challenge, including dynamically priced requests;
 # selected tools can offer request sizes or services above these caps.
 #
@@ -52,39 +66,63 @@ indexer_url = "https://na.zec.rocks:443"
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 
-# Web search, content retrieval and science share this payer pool.
-[wallets.web]
-mode = "zcash_rotation"
-max_api_payment_usdc = "0.50"
-
-[wallets.web.reserves.small]
-# Default randomized nominal funding: $2-5.
-
-# Health, people, contacts and social-platform research share this payer pool.
-[wallets.social]
-mode = "zcash_rotation"
-max_api_payment_usdc = "0.50"
-
-[wallets.social.reserves.small]
-# Default randomized nominal funding: $2-5.
-
-# Business, finance, property and security research share this payer pool.
-# Arkham lookups and x402stock research can exceed $0.50.
-[wallets.financials]
-mode = "zcash_rotation"
-max_api_payment_usdc = "1.00"
-
-[wallets.financials.reserves.small]
-# Default randomized nominal funding: $2-5.
-
-# World, travel and dynamic toolbox calls share this payer pool.
+# General research has the largest API surface and rotates most often.
 # LoneStar CrownBlock region/report calls advertise $1.00 pricing.
-[wallets.global]
+[wallets.general]
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
 
-[wallets.global.reserves.small]
-# Default randomized nominal funding: $2-5.
+[wallets.general.reserves.small]
+# Default randomized nominal funding: $2-4.
+# To set an explicit range, uncomment and adjust:
+# min_funding_amount_usdc = "2.00"
+# max_funding_amount_usdc = "4.00"
+# A smaller range reduces long-term linkability; a larger one may make you
+# stand out compared to other treazury users.
+
+# Identity, contact, home and trip research share this payer pool. These
+# requests can reveal who and where the caller is. Maxwell local tips
+# advertise $1.00 pricing.
+[wallets.personal]
+mode = "zcash_rotation"
+max_api_payment_usdc = "1.00"
+
+[wallets.personal.reserves.small]
+# Default randomized nominal funding: $2-4.
+# To set an explicit range, uncomment and adjust:
+# min_funding_amount_usdc = "2.00"
+# max_funding_amount_usdc = "4.00"
+# A smaller range reduces long-term linkability; a larger one may make you
+# stand out compared to other treazury users.
+
+# Health requests can reveal medical context, so they are isolated from every
+# other payer pool.
+[wallets.health]
+mode = "zcash_rotation"
+max_api_payment_usdc = "0.50"
+
+[wallets.health.reserves.small]
+# Default randomized nominal funding: $2-4.
+# To set an explicit range, uncomment and adjust:
+# min_funding_amount_usdc = "2.00"
+# max_funding_amount_usdc = "4.00"
+# A smaller range reduces long-term linkability; a larger one may make you
+# stand out compared to other treazury users.
+
+# Business, finance and security research share this payer pool. These
+# requests carry money interests and crypto identities. Arkham lookups and
+# x402stock research can exceed $0.50.
+[wallets.financial]
+mode = "zcash_rotation"
+max_api_payment_usdc = "1.00"
+
+[wallets.financial.reserves.small]
+# Default randomized nominal funding: $2-4.
+# To set an explicit range, uncomment and adjust:
+# min_funding_amount_usdc = "2.00"
+# max_funding_amount_usdc = "4.00"
+# A smaller range reduces long-term linkability; a larger one may make you
+# stand out compared to other treazury users.
 
 # Each source owns its ordered exclusions and endpoint assignments. The first
 # matching send_tools rule consumes a tool; destination arrays preserve explicit sharing.
@@ -117,7 +155,7 @@ send_tools = [
   # Snapshot delivered partial token coverage. Saved reports persist at unlisted URLs.
   { to = "finance", tools = ["wallet_snapshot", "batch_wallet_snapshot", "tx_status", "tx_decode", "saved_report"] },
   { to = "security", tools = ["wallet_audit"] },
-  # Deep reports advertise $5, above the existing $1 financials cap.
+  # Deep reports advertise $5, above the existing $1 financial cap.
   # Caller-evidence diagnostics add no independent service/settlement verification;
   # the tested failure classifier only restated the supplied Maxwell errors.
   # Omit those from toolbox, plus operational notary/ledger/propagation workflows
@@ -455,7 +493,7 @@ send_tools = [
 ]
 
 # Use canonical POST tools for same-path GET/POST twins. Preflight exceeds
-# the financials per-payment cap.
+# the financial per-payment cap.
 [sources.genuinegood]
 extends = "../../providers/genuinegood.toml"
 send_tools = [
@@ -666,7 +704,7 @@ send_tools = [
     # URL scan lacks VirusTotal result polling; EVM wallet scan overlaps broader wallet_risk at twice the price.
     "scan_*",
     "v1_*", # Keep public checks and passport/TAP workflows excluded by operator choice.
-    "bulk_identity_risk", # $2 exceeds the $1.00 financials payment cap; use targeted checks.
+    "bulk_identity_risk", # $2 exceeds the $1.00 financial payment cap; use targeted checks.
     "campaign_scan", # $5.50 exceeds the cap; use targeted checks instead of campaign aggregation.
     "cert_expiry", # Narrow CT-based expiry check; AgOSINT domain already includes TLS details.
     "help", # Inline schemas cover selected tools; guide includes metered/account workflows.
@@ -1196,101 +1234,14 @@ send_tools = [
 
 # --- Listeners ---------------------------------------------------------------
 
-[servers.web]
+# Note: Toolbox raw calls and remote-registered providers use the toolbox
+# (general) wallet and its Tor circuit, not the wallet of a matching native
+# endpoint. Routing them to that endpoint's wallet is not yet implemented.
+[servers.toolbox]
 listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends and images. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use glim_twitter_trends for X trends and google_trends_trend_over_time for interest timelines. OpenWeb Ninja supplies Google Images search and reverse-image source pages; shopping owns marketplace, product and Lens image research. Science owns papers; Strale inspects C2PA media credentials."
-
-[servers.science]
-listen = "127.0.0.1:3011"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "web"
-discover_on_demand = true
-instructions_text = "Research literature and scientific reference data: papers, citations, researchers, institutions and grants, plus biological, chemical and species references. Preserve publication dates, identifiers and coverage. HealthTravel PubMed search returns citation metadata (PMID, authors, journal, date, DOI) without abstract text; 2s papers_search returns abstracts across sources. medRxiv listings are date-windowed preprint records, not keyword search, and preprints are not peer-reviewed. Use health for clinical trials, healthcare access, care costs, drug/device records and public-health datasets; web for general search and page retrieval."
-discovery_search_tool_instructions_text = "Science keywords: research literature, scientific reference data, biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, arXiv, PubMed, PubMed E-utilities, PMID, medRxiv, preprint, date-window preprint listing, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics."
-
-[servers.health]
-listen = "127.0.0.1:3012"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "social"
-discover_on_demand = true
-instructions_text = "Health research and care access: doctor and clinic directories, hospital cash prices, insurance plans, financial assistance, clinical trials, drug/device records, code references, nutrition and public-health datasets. Preserve source dates, identifiers, evidence grades and coverage. Listed offices, fees and availability need confirmation. Keep hospital facility prices, Medicare benchmarks, drug acquisition costs and pre-subsidy insurance premiums distinct. WebMD and Healthline directories can include related specialties and incomplete contacts; dentistry delivery remains unqualified. HCPCS and LOINC are reference codes: existence does not establish coverage, and LOINC results omit units and reference ranges. Use science for papers, preprints and research funding; business for investment-oriented pharma catalysts and general product recalls."
-discovery_search_tool_instructions_text = "Health keywords: find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, WebMD, Healthline, Healthline FindCare, HealthCare.gov, HealthData.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, HCPCS, HCPCS Level II, LOINC, lab test code, PubMed, PMID, medRxiv, preprint, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central."
-
-[servers.social]
-listen = "127.0.0.1:3013"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "social"
-discover_on_demand = true
-instructions_text = "Social-platform, GitHub repository and code search, person, public-profile and business-contact research, including email lookup and validation. Search by platform, repository or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
-discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository search, code search, issues, pull requests, discussions and metadata, Hacker News, social research search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, posts and profiles, lists, followers, mentions, curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, contact phone, company phone, LinkedIn company enrichment, Threads profiles and posts, Pinterest pins, Telegram public channels, YouTube transcripts and comments."
-
-[servers.business]
-listen = "127.0.0.1:3014"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "financials"
-discover_on_demand = true
-instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Glassdoor adds employer reviews, salaries and interview reports; JSearch adds job listings and salary estimates. Resolve entity identity before enrichment. Compare company facts by their start/end periods: interim flows may be fiscal year-to-date, while balances are point-in-time. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic research; health for healthcare and clinical datasets."
-discovery_search_tool_instructions_text = "Business keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
-
-[servers.finance]
-listen = "127.0.0.1:3015"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "financials"
-discover_on_demand = true
-instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, crypto news and market briefings, DeFi, derivatives and prediction markets. Banking copy checks and rule summaries are advisory; use business for authoritative eCFR text. Wallet research can return partial coverage and persistent unlisted reports. Use business for organizations and filings; use property for parcel and site records. Inspect company-fact start/end periods; interim flows may be fiscal year-to-date, while balances are point-in-time."
-discovery_search_tool_instructions_text = "Finance keywords: funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, crypto news, crypto headlines, market recap, airdrops, DeFi trends, KOL, whale, forecast, Polymarket, Solana, stablecoin, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, FTD, fails to deliver, settlement fails, technical indicators, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
-
-
-[servers.property]
-listen = "127.0.0.1:3016"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "financials"
-discover_on_demand = true
-instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Zillow and Redfin add listing search, property details, value estimates, agent records and market trends; estimates are not appraisals. Preserve record dates, coverage and uncertainty. Locus groundwater drawdown describes monitoring wells, not a parcel well; the free gateway preview covers one well and the paid read has broader coverage. Locus use restrictions remain: no tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
-discovery_search_tool_instructions_text = "Property keywords: Zillow, Redfin, Zestimate, home value, for sale, for rent, agent, market trends, MLS, groundwater drawdown, USGS monitoring wells, groundwater depth history, streamflow versus normal, drought history, water supply status, boil-water notices, lead service lines, contractor licensing, estate property, foreclosure process, housing counseling, seller disclosures, FEMA flood-map change notices, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
-
-[servers.security]
-listen = "127.0.0.1:3017"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "financials"
-discover_on_demand = true
-instructions_text = "Threat, breach, LLM API-key exposure, network, compliance and public-wallet risk intelligence. BMM wallet audits report attention signals and missing-source coverage, not AML clearance. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety. Vulnerability records, package provenance and static code/instruction scans complement exposure checks."
-discovery_search_tool_instructions_text = "Security keywords: wallet audit, EVM wallet flows, wallet counterparties, token exposure, breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, OFAC SDN, OFAC address screening, crypto address sanctions, wallet sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, static code audit, AI skill safety."
-
-[servers.world]
-listen = "127.0.0.1:3018"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "global"
-discover_on_demand = true
-instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Aviation coverage supplies weather observations/forecasts, in-flight hazards and accident records. NOAA GHCN station history supplies measured daily weather for past dates. Geocoding and FCC spectrum geographies add location context. Straits index history pages at most seven days; pass nextBefore as before for older tick data and preserve cadence/resolution. Use travel for flight prices, status, schedules, airports and trip routes."
-discovery_search_tool_instructions_text = "World keywords: Manifold, Kalshi, Polymarket, geopolitical prediction markets, historical shipping index, tick history, time series, historical vessel counts, tick-level history, Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hurricane, tropical cyclone, tropical storm, NHC, storm track, forecast cone, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, NOAA, GHCN, historical daily station weather, water, maritime, space, geocoding, HS, customs, dangerous goods."
-
-# Destination and leisure research shares the existing global payer pool.
-[servers.travel]
-listen = "127.0.0.1:3019"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "global"
-discover_on_demand = true
-instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. Google Maps local business search, driving directions and Waze traffic/venues add places, routes and road conditions; hours and prices are directory data, not live occupancy. Google Places and 2s OSM searches add generic nearby places; resolve resort coordinates separately and do not infer lift proximity, menus or ski prices from place listings. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
-discovery_search_tool_instructions_text = "Travel keywords: nearby places, Google Maps, local business, driving directions, traffic, Waze, alerts, jams, venues, OpenStreetMap POI, POI near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips."
-
-[servers.toolbox]
-listen = "127.0.0.1:3020"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "global"
+wallet = "general"
 discover_on_demand = true
 provider_management_local = true
 provider_management_remote = true
@@ -1299,18 +1250,106 @@ raw_url_calls = true
 instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery. Optional first-party Zcash payment tools appear when the operator enables them: receive or send native Ironwood ZEC, or swap foreign assets. Search the available tools before planning a payment."
 discovery_search_tool_instructions_text = "Search APIs registered on this endpoint and any enabled first-party tools. Use provider-management tools to find and add providers, or raw-call tools for documented URLs. Optional payment keywords: Zcash, ZEC, Ironwood, shielded payment, receive, payment request, send, payout, swap, preview, status. Availability follows operator configuration."
 
-[servers.shopping]
-listen = "127.0.0.1:3021"
+[servers.web]
+listen = "127.0.0.1:3011"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "web"
+wallet = "general"
+instructions_text = "Web search, pages, news, archives, trends and images. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Consider lite ($0.004) for indexed search with restricted inputs and no live fetching; auto ($0.007) remains the general default. Choose coverage, freshness and answer quality before price. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use glim_twitter_trends for X trends and google_trends_trend_over_time for interest timelines. OpenWeb Ninja supplies Google Images search and reverse-image source pages; shopping owns marketplace, product and Lens image research. Science owns papers; Strale inspects C2PA media credentials."
+
+[servers.science]
+listen = "127.0.0.1:3012"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "general"
+discover_on_demand = true
+instructions_text = "Research literature and scientific reference data: papers, citations, researchers, institutions and grants, plus biological, chemical and species references. Preserve publication dates, identifiers and coverage. HealthTravel PubMed search returns citation metadata (PMID, authors, journal, date, DOI) without abstract text; 2s papers_search returns abstracts across sources. medRxiv listings are date-windowed preprint records, not keyword search, and preprints are not peer-reviewed. Use health for clinical trials, healthcare access, care costs, drug/device records and public-health datasets; web for general search and page retrieval."
+discovery_search_tool_instructions_text = "Science keywords: research literature, scientific reference data, biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, arXiv, PubMed, PubMed E-utilities, PMID, medRxiv, preprint, date-window preprint listing, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics."
+
+[servers.shopping]
+listen = "127.0.0.1:3013"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "general"
 discover_on_demand = true
 instructions_text = "Product and marketplace research across Amazon, Google Shopping, Walmart, eBay, Home Depot, Wayfair and Costco, plus Google Lens visual matches, exact matches, OCR and object detection. Use search to find the marketplace identifier, product details for specifications and offers for price comparison. Prices, availability, delivery estimates and sponsored placements are sampled offers, not guarantees; identifiers and currencies differ by marketplace. Use web for general search and business for company facts."
 discovery_search_tool_instructions_text = "Shopping keywords: product search, price comparison, offers, deals, marketplace, retail, Amazon, ASIN, Google Shopping, Walmart, eBay, Home Depot, Wayfair, Costco, product details, specifications, availability, shipping, sponsored, visual matches, exact matches, reverse image, Google Lens, OCR, image text, object detection."
 
+[servers.world]
+listen = "127.0.0.1:3014"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "general"
+discover_on_demand = true
+instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Aviation coverage supplies weather observations/forecasts, in-flight hazards and accident records. NOAA GHCN station history supplies measured daily weather for past dates. Geocoding and FCC spectrum geographies add location context. Straits index history pages at most seven days; pass nextBefore as before for older tick data and preserve cadence/resolution. Use travel for flight prices, status, schedules, airports and trip routes."
+discovery_search_tool_instructions_text = "World keywords: Manifold, Kalshi, Polymarket, geopolitical prediction markets, historical shipping index, tick history, time series, historical vessel counts, tick-level history, Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hurricane, tropical cyclone, tropical storm, NHC, storm track, forecast cone, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, NOAA, GHCN, historical daily station weather, water, maritime, space, geocoding, HS, customs, dangerous goods."
+
+[servers.social]
+listen = "127.0.0.1:3015"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "personal"
+discover_on_demand = true
+instructions_text = "Social-platform, GitHub repository and code search, person, public-profile and business-contact research, including email lookup and validation. Search by platform, repository or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
+discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository search, code search, issues, pull requests, discussions and metadata, Hacker News, social research search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, posts and profiles, lists, followers, mentions, curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, contact phone, company phone, LinkedIn company enrichment, Threads profiles and posts, Pinterest pins, Telegram public channels, YouTube transcripts and comments."
+
+[servers.property]
+listen = "127.0.0.1:3016"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "personal"
+discover_on_demand = true
+instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Zillow and Redfin add listing search, property details, value estimates, agent records and market trends; estimates are not appraisals. Preserve record dates, coverage and uncertainty. Locus groundwater drawdown describes monitoring wells, not a parcel well; the free gateway preview covers one well and the paid read has broader coverage. Locus use restrictions remain: no tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
+discovery_search_tool_instructions_text = "Property keywords: Zillow, Redfin, Zestimate, home value, for sale, for rent, agent, market trends, MLS, groundwater drawdown, USGS monitoring wells, groundwater depth history, streamflow versus normal, drought history, water supply status, boil-water notices, lead service lines, contractor licensing, estate property, foreclosure process, housing counseling, seller disclosures, FEMA flood-map change notices, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
+
+[servers.travel]
+listen = "127.0.0.1:3017"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "personal"
+discover_on_demand = true
+instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. Google Maps local business search, driving directions and Waze traffic/venues add places, routes and road conditions; hours and prices are directory data, not live occupancy. Google Places and 2s OSM searches add generic nearby places; resolve resort coordinates separately and do not infer lift proximity, menus or ski prices from place listings. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
+discovery_search_tool_instructions_text = "Travel keywords: nearby places, Google Maps, local business, driving directions, traffic, Waze, alerts, jams, venues, OpenStreetMap POI, POI near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips."
+
+[servers.health]
+listen = "127.0.0.1:3018"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "health"
+discover_on_demand = true
+instructions_text = "Health research and care access: doctor and clinic directories, hospital cash prices, insurance plans, financial assistance, clinical trials, drug/device records, code references, nutrition and public-health datasets. Preserve source dates, identifiers, evidence grades and coverage. Listed offices, fees and availability need confirmation. Keep hospital facility prices, Medicare benchmarks, drug acquisition costs and pre-subsidy insurance premiums distinct. WebMD and Healthline directories can include related specialties and incomplete contacts; dentistry delivery remains unqualified. HCPCS and LOINC are reference codes: existence does not establish coverage, and LOINC results omit units and reference ranges. Use science for papers, preprints and research funding; business for investment-oriented pharma catalysts and general product recalls."
+discovery_search_tool_instructions_text = "Health keywords: find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, WebMD, Healthline, Healthline FindCare, HealthCare.gov, HealthData.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, HCPCS, HCPCS Level II, LOINC, lab test code, PubMed, PMID, medRxiv, preprint, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central."
+
+[servers.business]
+listen = "127.0.0.1:3019"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financial"
+discover_on_demand = true
+instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Glassdoor adds employer reviews, salaries and interview reports; JSearch adds job listings and salary estimates. Resolve entity identity before enrichment. Compare company facts by their start/end periods: interim flows may be fiscal year-to-date, while balances are point-in-time. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic research; health for healthcare and clinical datasets."
+discovery_search_tool_instructions_text = "Business keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+
+[servers.finance]
+listen = "127.0.0.1:3020"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financial"
+discover_on_demand = true
+instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, crypto news and market briefings, DeFi, derivatives and prediction markets. Banking copy checks and rule summaries are advisory; use business for authoritative eCFR text. Wallet research can return partial coverage and persistent unlisted reports. Use business for organizations and filings; use property for parcel and site records. Inspect company-fact start/end periods; interim flows may be fiscal year-to-date, while balances are point-in-time."
+discovery_search_tool_instructions_text = "Finance keywords: funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, crypto news, crypto headlines, market recap, airdrops, DeFi trends, KOL, whale, forecast, Polymarket, Solana, stablecoin, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, FTD, fails to deliver, settlement fails, technical indicators, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+
+[servers.security]
+listen = "127.0.0.1:3021"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financial"
+discover_on_demand = true
+instructions_text = "Threat, breach, LLM API-key exposure, network, compliance and public-wallet risk intelligence. BMM wallet audits report attention signals and missing-source coverage, not AML clearance. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety. Vulnerability records, package provenance and static code/instruction scans complement exposure checks."
+discovery_search_tool_instructions_text = "Security keywords: wallet audit, EVM wallet flows, wallet counterparties, token exposure, breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, OFAC SDN, OFAC address screening, crypto address sanctions, wallet sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, static code audit, AI skill safety."
+
 # Optional treasury tools: enable each direction deliberately, then restart.
 # Native ZEC needs [treasury]; foreign asset swaps additionally need [funding].
-# Provider registration and the global Base wallet do not grant payout authority.
+# Provider registration and the general Base wallet do not grant payout authority.
 # [servers.toolbox.swap_control]
 # receive = false
 # send = false

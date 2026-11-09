@@ -27,7 +27,7 @@ max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible 
 max_api_payment_usdc = "0.05"
 
 [wallets.demo.reserves.small]
-# Default randomized nominal funding: $2-5.
+# Default randomized nominal funding: $2-4.
 
 [sources.socialfetch]
 extends = "../../../providers/socialfetch.toml"

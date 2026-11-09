@@ -300,7 +300,7 @@ async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences
     );
     assert_eq!(
         shown["wallet_summary"]["initial_inventory_maximum_atomic"],
-        "10000000"
+        "8000000"
     );
     assert_eq!(shown["wallets"]["web"]["max_api_payment_usdc"], "0.10");
     assert_eq!(shown["wallets"]["company"]["max_api_payment_usdc"], "0.50");
@@ -311,7 +311,7 @@ async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences
         );
         assert_eq!(
             shown["wallets"][name]["reserves"]["small"]["max_funding_amount_usdc"],
-            "5.00"
+            "4.00"
         );
         assert_eq!(
             shown["wallets"][name]["max_retirement_remainder_usdc"],
@@ -370,9 +370,9 @@ fn reserve_shape_resolves_fixed_ranges_and_slot_defaults() {
             "2000000",
             "2000000",
         ),
-        ("[large]\nfunding_amount_usdc='10'", "12000000", "15000000"),
-        ("[small]", "2000000", "5000000"),
-        ("[large]", "12000000", "30000000"),
+        ("[large]\nfunding_amount_usdc='10'", "12000000", "14000000"),
+        ("[small]", "2000000", "4000000"),
+        ("[large]", "12000000", "29000000"),
     ] {
         let reserves: ReservesConfig = toml::from_str(text).unwrap();
         reserves.validate().unwrap();

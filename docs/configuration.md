@@ -451,7 +451,7 @@ max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
 max_retirement_remainder_usdc = "0.001" # Default per group; explicit "0" requires exact zero.
 
 [wallet_templates.small.reserves.small]
-# Default randomized nominal funding: $2-5.
+# Default randomized nominal funding: $2-4.
 
 # Explicitly enabling a large slot opts into its $10-25 default range:
 # [wallet_templates.small.reserves.large]
@@ -504,7 +504,7 @@ caps retain their default; missing managed caps remain errors.
 A cap above every nominal bound is valid, and nominal bounds above the cap are
 valid; neither arrangement authorizes extra funding.
 
-`reserves.small` defaults to a randomized $2-5 nominal range when omitted or empty.
+`reserves.small` defaults to a randomized $2-4 nominal range when omitted or empty.
 `reserves.large` is optional; an absent large table stays disabled, while an
 explicit empty `reserves.large` enables the randomized $10-25 default. Defaults are
 resolved per slot, so the small range never applies to large. A slot configures
@@ -636,7 +636,7 @@ explicit unreferenced profiles; it excludes unused templates and static wallets.
 These are configured nominal bounds, not a live balance, guaranteed inventory total
 or quote for additional funds: the fresh-group formula is the sum of slot minima
 through the sum of slot maxima, including bridge-minimum headroom. With the
-default small range and an enabled large default it is $12-$30. Existing addresses
+default small range and an enabled large default it is $12-$29. Existing addresses
 keep their captured targets; accumulated retained holdings, fees and retirement
 amounts are separate. Offline inspection cannot infer migration cost or usable
 capacity.
@@ -669,7 +669,7 @@ order, with creation order within each role. Unknown or low estimates remain
 fallbacks. It does not sort wallets by balance; cheap calls can keep using a
 large-funded active wallet.
 
-With the default small and large ranges, each fresh wallet draws between $2-5 or
+With the default small and large ranges, each fresh wallet draws between $2-4 or
 $10-25 respectively. Repeated calls can still leave remainders at several
 addresses; those balances cannot collectively authorize one payment. This
 illustrates sizing below the recommendation, not a wallet-count limit, and

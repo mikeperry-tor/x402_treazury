@@ -46,7 +46,7 @@ fn quote_window() -> u64 {
     1800
 }
 const DEFAULT_SMALL_MINIMUM_USDC: &str = "2.00";
-const DEFAULT_SMALL_MAXIMUM_USDC: &str = "5.00";
+const DEFAULT_SMALL_MAXIMUM_USDC: &str = "4.00";
 const DEFAULT_LARGE_MINIMUM_USDC: &str = "10.00";
 const DEFAULT_LARGE_MAXIMUM_USDC: &str = "25.00";
 
@@ -688,7 +688,7 @@ mod tests {
     fn empty_or_absent_slots_resolve_their_own_defaults() {
         let empty: ReservesConfig = toml::from_str("").unwrap();
         assert_eq!(empty.small.minimum_atomic().unwrap(), 2_000_000);
-        assert_eq!(empty.small.maximum_atomic().unwrap(), 5_000_000);
+        assert_eq!(empty.small.maximum_atomic().unwrap(), 4_000_000);
         assert!(empty.large.is_none());
         let large: ReservesConfig = toml::from_str("[large]").unwrap();
         assert_eq!(
