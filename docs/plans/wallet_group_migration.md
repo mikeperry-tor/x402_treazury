@@ -11,7 +11,7 @@ its payer identities and historical correlation.
 
 Starting branch: `main`. Source baseline:
 `6f3e1e6fd6738c5fece86dc796c5ef0686653552`.
-Status: planning only; no implementation or state migration performed. Preserve the
+Status: implementation in progress on `wallet_group_migration`; no operator state migration performed. Preserve the
 unrelated untracked `kilo.json` and `state`; do not inspect real wallet secrets or
 perform a migration against operator state for validation.
 
@@ -222,3 +222,10 @@ commit, preserving the full ancestry and review evidence in Git history.
   validation passed. WG1/WG2/WG3: not implemented. I1/I2: pending.
 - Record exact plan and implementation SHAs, design findings/dispositions, fixups,
   source/build evidence, executed checks and missing coverage here as work proceeds.
+
+- Implementation D1: fresh read-only reviewer `/root/design` reviewed exact plan
+  commit `53478e522a8ba9b3b815b49900b73db5a9fd8598` and actual CLI, store,
+  assignment, startup and funding consumers. No material blockers. Reuse shared
+  location validation for rename, coherent identity/status inspection for preview,
+  and persisted bounds for policy comparison; historical sizing mode and auto_fund
+  are not persisted and must not be reconstructed. No new dependency or framework.
