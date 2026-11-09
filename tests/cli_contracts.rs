@@ -2087,3 +2087,100 @@ async fn standalone_inspection_validates_authority_without_token_secrets() {
         assert!(error.contains("API payment cap is empty"), "{error}");
     }
 }
+
+#[tokio::test]
+async fn wallet_group_rename_uses_only_location_and_authenticated_store_owner() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    let state = dir.join("wallet");
+    let key = state.join("wallet.key");
+    let mut store = Store::create(&state, &key, 1, b"deliberately not SDK encoded").unwrap();
+    let pool = store
+        .ensure_capacity_group("old", &capacity_fixture::small_reserve("2"), None, 0)
+        .unwrap();
+    let before = serde_json::to_value(store.status().unwrap()).unwrap();
+    std::fs::write(
+        dir.join("deployment.toml"),
+        r#"version=1
+[network]
+trusted_ca_files=["/definitely-absent-wallet-rename-ca.pem"]
+[treasury]
+state_dir='wallet'
+indexer_url='invalid unused endpoint'
+indexer_url_env='ALSO_UNUSED'
+[sources.unused]
+provider='does-not-exist.toml'
+[wallets.unrelated]
+mode='static'
+private_key_env='MISSING_KEY'
+[servers.unused]
+listen='127.0.0.1:0'
+auth=true
+bearer_token_env='MISSING_TOKEN'
+wallet='unrelated'
+sources=['unused']
+"#,
+    )
+    .unwrap();
+    let args = [
+        "wallet",
+        "rename",
+        "old",
+        "new",
+        "--config",
+        "deployment.toml",
+        "--json",
+    ];
+    assert!(bad(run(dir, &args, &[]).await).contains("state_in_use"));
+    assert_eq!(
+        serde_json::to_value(store.status().unwrap()).unwrap(),
+        before
+    );
+    drop(store);
+    let renamed = good(run(dir, &args, &[]).await);
+    assert_eq!(
+        renamed,
+        json!({"old_name":"old","new_name":"new","group_id":pool})
+    );
+    let reopened = Store::open(&state, &key, before["treasury_id"].as_str().unwrap()).unwrap();
+    let mut expected = before.clone();
+    expected["pools"][0]["name"] = json!("new");
+    assert_eq!(
+        serde_json::to_value(reopened.status().unwrap()).unwrap(),
+        expected
+    );
+    drop(reopened);
+    let renamed = good(
+        run(
+            dir,
+            &[
+                "wallet",
+                "rename",
+                "new",
+                "auto_v1_deployment",
+                "--state-dir",
+                "wallet",
+                "--json",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(renamed["group_id"], pool);
+    assert!(
+        bad(run(
+            dir,
+            &[
+                "wallet",
+                "rename",
+                "missing",
+                "missing",
+                "--state-dir",
+                "wallet"
+            ],
+            &[]
+        )
+        .await)
+        .contains("source wallet group")
+    );
+}

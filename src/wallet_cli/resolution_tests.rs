@@ -4,6 +4,15 @@ use std::{path::Path, process::Command as ProcessCommand};
 
 fn command_value(command: Command) -> Value {
     match command {
+        Command::Rename {
+            state_dir,
+            key_file,
+            treasury_id,
+            old,
+            new,
+        } => {
+            json!({"kind":"rename","state":state_dir,"key":key_file,"id":treasury_id,"old":old,"new":new})
+        }
         Command::Bootstrap { meta_config } => json!({"kind":"bootstrap","config":meta_config}),
         Command::Sync {
             meta_config,

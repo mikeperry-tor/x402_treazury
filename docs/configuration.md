@@ -436,6 +436,15 @@ all declared server/source bindings, including sources whose tools are filtered
 out; only effective static wallets used by selected tools load private keys.
 Inspection never reads wallet secrets or opens treasury state.
 
+Managed names select saved group UUIDs. Editing a TOML name alone selects a new
+group rather than moving the old group's keys or work. To retain an existing
+identity under a different name, back up and stop serving, run
+`wallet rename OLD NEW --config FILE`, then update declarations and references
+before restarting. Both names need not appear in the file used by rename. A saved
+destination, even empty or disabled, blocks rename. See
+[managed group rename](wallet-cli.md#rename-a-managed-wallet-group) for identity,
+collision and historical-linkability contracts.
+
 To avoid repeating managed wallet definitions, define one template and an
 automatic assignment policy. To adapt the managed starter, replace its
 `[wallets.research]` definition and reserve with this template/policy and remove

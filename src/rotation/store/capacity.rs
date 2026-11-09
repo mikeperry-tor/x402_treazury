@@ -215,7 +215,38 @@ pub(super) fn dispute_endpoint_support(db: &Connection, endpoint: &str) -> Resul
     Ok(())
 }
 
+fn validate_group_name(name: &str) -> Result<()> {
+    ensure!(
+        regex::Regex::new("^[a-z][a-z0-9_]*$")?.is_match(name),
+        "invalid pool name"
+    );
+    Ok(())
+}
+
 impl Store {
+    /// Change a lookup name while preserving the durable group and all its work.
+    pub fn rename_capacity_group(&mut self, old: &str, new: &str) -> Result<String> {
+        validate_group_name(old)?;
+        validate_group_name(new)?;
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id: String = tx
+            .query_row("SELECT id FROM pools WHERE name=?1", [old], |r| r.get(0))
+            .optional()?
+            .context("source wallet group does not exist")?;
+        if old != new {
+            let occupied: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pools WHERE name=?1)",
+                [new],
+                |r| r.get(0),
+            )?;
+            ensure!(!occupied, "destination wallet group already exists");
+            tx.execute("UPDATE pools SET name=?2 WHERE id=?1", params![id, new])?;
+        }
+        tx.commit()?;
+        Ok(id)
+    }
     /// Configuration creates the group and its declared empty slots only. The
     /// separate funding owner checks allocation authority for every vacancy.
     pub fn ensure_capacity_group(
@@ -225,10 +256,7 @@ impl Store {
         limit: Option<U256>,
         retirement: u64,
     ) -> Result<String> {
-        ensure!(
-            regex::Regex::new("^[a-z][a-z0-9_]*$")?.is_match(name),
-            "invalid pool name"
-        );
+        validate_group_name(name)?;
         reserves.validate()?;
         ensure!(
             retirement <= i64::MAX as u64,

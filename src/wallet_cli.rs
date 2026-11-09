@@ -26,6 +26,14 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Rename an existing managed group offline; stop serving first.
+    Rename {
+        old: String,
+        new: String,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Fund captured enabled reserve claims; wait for initial USDC credit without discovery.
     Bootstrap {
         /// Print machine-readable JSON.
@@ -140,11 +148,7 @@ fn resolve_args_with_network(
 ) -> Result<Command> {
     use anyhow::Context;
     require_supported_action(&args.command)?;
-    let settings = load_wallet_settings(
-        args.config.as_ref(),
-        policy,
-        matches!(&args.command, Action::Sync { .. }),
-    )?;
+    let settings = load_wallet_settings(args.config.as_ref(), policy, &args.command)?;
     if let Some(command) = configured_command(&args.command, args.config.as_ref())? {
         return Ok(command);
     }
@@ -190,6 +194,13 @@ fn resolve_args_with_network(
             state_dir,
             key_file,
         },
+        Action::Rename { old, new, .. } => Command::Rename {
+            state_dir,
+            key_file,
+            treasury_id,
+            old,
+            new,
+        },
         Action::Notes { txid } => Command::Notes {
             state_dir,
             key_file,
@@ -225,7 +236,7 @@ fn resolve_args_with_network(
 fn load_wallet_settings(
     config_path: Option<&PathBuf>,
     policy: Option<&crate::network::NetworkConfig>,
-    sync_only: bool,
+    action: &Action,
 ) -> Result<Option<crate::rotation::config::TreasuryConfig>> {
     use anyhow::{Context, ensure};
     let settings = if let Some(path) = config_path {
@@ -236,9 +247,11 @@ fn load_wallet_settings(
             policy,
         )?;
         ensure!(config.version == 1, "unsupported deployment version");
-        crate::network::install(config.network)?;
+        if !matches!(action, Action::Rename { .. }) {
+            crate::network::install(config.network)?;
+        }
         let mut treasury = config.treasury.context("missing [treasury]")?;
-        if sync_only {
+        if matches!(action, Action::Sync { .. } | Action::Rename { .. }) {
             treasury.validate_shared()?;
         } else {
             treasury.validate()?;
@@ -246,7 +259,9 @@ fn load_wallet_settings(
         treasury.resolve(path);
         Some(treasury)
     } else {
-        if let Some(policy) = policy {
+        if let Some(policy) = policy
+            && !matches!(action, Action::Rename { .. })
+        {
             crate::network::install(policy.network.clone())?;
         }
         None
@@ -357,6 +372,13 @@ fn resolve_administrative_identity(
 }
 
 enum Command {
+    Rename {
+        state_dir: PathBuf,
+        key_file: PathBuf,
+        treasury_id: String,
+        old: String,
+        new: String,
+    },
     Notes {
         state_dir: PathBuf,
         key_file: PathBuf,
@@ -444,11 +466,39 @@ async fn run_args(
         Action::Init { json, .. }
         | Action::Sync { json, .. }
         | Action::Status { json }
+        | Action::Rename { json, .. }
         | Action::Bootstrap { json } => *json,
         _ => true,
     };
     let policy = network_override(&args)?;
     let command = resolve_args_with_network(args, policy.as_ref())?;
+    if let Command::Rename {
+        state_dir,
+        key_file,
+        treasury_id,
+        old,
+        new,
+    } = command
+    {
+        let result = tokio::task::spawn_blocking(move || {
+            let mut store =
+                crate::rotation::store::Store::open(&state_dir, &key_file, &treasury_id)?;
+            let id = store.rename_capacity_group(&old, &new)?;
+            Ok::<_, anyhow::Error>(serde_json::json!({"old_name":old,"new_name":new,"group_id":id}))
+        })
+        .await??;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            println!(
+                "Renamed wallet group {} to {} (unchanged UUID: {}). Update configuration references before restarting serving.",
+                result["old_name"].as_str().unwrap(),
+                result["new_name"].as_str().unwrap(),
+                result["group_id"].as_str().unwrap()
+            );
+        }
+        return Ok(());
+    }
     if let Command::Sync {
         meta_config,
         qualification_parent_stdin,
@@ -640,6 +690,7 @@ async fn execute_wallet_command(
             treasury
         }
         Command::Bootstrap { .. }
+        | Command::Rename { .. }
         | Command::Notes { .. }
         | Command::Addresses { .. }
         | Command::Status { .. }

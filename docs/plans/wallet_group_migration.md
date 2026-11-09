@@ -229,3 +229,41 @@ commit, preserving the full ancestry and review evidence in Git history.
   location validation for rename, coherent identity/status inspection for preview,
   and persisted bounds for policy comparison; historical sizing mode and auto_fund
   are not persisted and must not be reconstructed. No new dependency or framework.
+- WG1 implemented: authenticated exclusive Store rename, shared name validation,
+  one immediate name-only transaction, CLI location-only resolution, generic guides
+  and exact logical-state/key/pending-byte regressions. Pre-commit read-only review
+  `/root/design` found inherited network installation could read unrelated CA files;
+  rename now skips that setup and its CLI fixture contains a missing CA file.
+  The test fixture's missing accepted preparation/revision was corrected before
+  commit. Store rename tests executed 2/2 successfully (`/tmp/wg1-tests.log`);
+  macOS linker emitted its existing large unwind-section warning, no runtime failure.
+  First `make check-clippy` passed (`/tmp/wg1-clippy.log`); later CLI resolution/test
+  changes require the final compiler gate. CLI execution, complexity and exact-SHA
+  review pending. Operator state and unrelated files remain untouched.
+- WG1 exact implementation: `680a3248`. Executable rename regression initially
+  failed because its assertion expected prose containing "own" rather than the
+  existing `state_in_use` category. Corrected only that assertion; rerun executed
+  1/1 successfully (`/tmp/wg1-cli-fix.log`), including missing custom CA and exclusive
+  ownership. The prior 2/2 store-test evidence remains valid. Fixup review pending.
+- WG1 exact-SHA review: `/root/design` independently reviewed `680a3248` and
+  evidence commit `3d00a0bb`, then fixup `585f1d67`; no unresolved production
+  findings. Added coverage in the existing concrete funding-backend fixture:
+  accept original quote, rename, resolve the same job by UUID, select current-name
+  sizing, then continue its original preparation/submission/recovery path. No new
+  harness or financial authority; execution and exact fixup review pending.
+- WG2 implemented in the working tree: pure validated resolution, coherent
+  identity/status inspection, deterministic versioned comparison and human output,
+  CLI routing before generic state/key setup, and generic maintained guides.
+  Fresh read-only combined snapshot review `/root/design` found no material
+  correctness issues. `make check-clippy` passed (`/tmp/wg2-clippy.log`). Initial
+  preview unit run executed 5 cases but failed because the shared synthetic routing
+  fixture used two unconditional rules; corrected it to the existing single-rule
+  multiple-destination contract. No production relaxation. Runtime rerun pending.
+- Complexity: complete pinned baseline comparison against `6f3e1e6f`, 490 files,
+  zero exclusions, artifact `target/complexity-runs/20261109T051227Z-ef499928`.
+  Independent review retained the explicit `run_args` dispatcher (CogC 14→22,
+  CycC 35→45): early returns expose offline/SDK ownership boundaries; extracting
+  dispatch only moves complexity. Selected simplification replaces rename's dynamic
+  JSON/three unwraps with a typed result. Preview report (11/24) and human formatter
+  (13/12), shared status rendering, startup and funding consumers were reviewed.
+  Final source-matched refresh and compiler gate are pending after these changes.

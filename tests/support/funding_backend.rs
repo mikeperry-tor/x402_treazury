@@ -71,6 +71,23 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .call(move |s| s.save_funding_quote(&original_job.id, &original_quote))
         .await
         .unwrap();
+    // Reopening configuration under a new lookup name must resume the original
+    // accepted quote and select sizing using the renamed group's current profile.
+    let job_id = job.id.clone();
+    let pool_id = job.pool_id.clone();
+    let job = store
+        .call(move |s| {
+            assert_eq!(s.rename_capacity_group("pool", "renamed")?, pool_id);
+            s.funding_job(&job_id)?
+                .context("renamed funding job missing")
+        })
+        .await
+        .unwrap();
+    backend.wallets = std::collections::BTreeMap::from([("renamed".into(), policy())]);
+    assert_eq!(
+        backend.sizing_policy(&job).await.unwrap().minimum(),
+        5_000_000
+    );
     let before = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
     for field in [
         "recipient",
@@ -241,7 +258,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             .contains("fixture command observed")
     );
     assert!(commands.test_is_empty());
-    backend.wallets.insert("pool".into(), policy());
+    backend.wallets.insert("renamed".into(), policy());
     let (result, observed) = tokio::join!(backend.submit(&job), commands.test_observe());
     assert!(result.is_err());
     let ObservedCommand::Submit(id, retry) = observed else {

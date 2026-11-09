@@ -5,6 +5,48 @@ This reference covers treasury commands, funding controls and operator recovery.
 For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
 Commands run from the repository root; `x402_treazury` means the built executable on PATH.
 
+## Rename a managed wallet group
+
+Back up the treasury and stop serving before changing a group name:
+
+```sh
+x402_treazury wallet backup --config deployment.toml --destination secrets/backup
+x402_treazury wallet rename research general --config deployment.toml
+# Update wallet declarations and source/listener wallet references in deployment.toml.
+x402_treazury serve --config deployment.toml
+```
+
+`wallet rename OLD NEW [--config FILE | --state-dir DIR] [--json]` changes
+only the saved group's lookup name. Standalone commands also accept `--key-file`
+and an optional expected `--treasury-id`. With configuration, only treasury
+location and identity settings are used; neither name must occur in that file.
+The command authenticates and exclusively owns the store without decoding the SDK
+wallet, loading catalogs, contacting the network, or allocating/funding wallets.
+Existing supported additive store initializers may run on opening.
+
+The stable group UUID, payer keys, roles, claims, generations, balances, accepted
+inputs, signed bytes and pending obligations remain owned by the same group.
+Disabled groups and groups with pending work can be renamed. Renaming an existing
+group to itself succeeds; a missing source always fails. Names follow the saved
+store's lowercase letter/digit/underscore rules, beginning with a letter. Explicit
+migration to or from generated `auto_v1_` names is supported; declaring those names
+as explicit TOML wallet profiles remains prohibited.
+
+An occupied destination is an error, including an empty group declared by an
+earlier startup. Rename never overwrites or merges groups, edits TOML, transfers
+funds, or grants funding authority. After changing configuration references,
+restart reapplies the selected group's configured payment and reserve policies.
+A larger configured group count can declare additional groups; a smaller count
+retains omitted groups and their history under normal startup rules. Reusing a
+group preserves payer identities and historical correlation, even for a new purpose.
+If the command's acknowledgment is lost, inspect saved state before proceeding;
+do not create a replacement identity. JSON returns `old_name`, `new_name` and the
+unchanged `group_id`.
+
+Listener principals own persisted source registries and direct payments separately.
+Renaming a wallet group does not reassign those owners. Automatic wallet assignment
+supplies bindings for defined listeners; it does not create listener definitions.
+
 ## One configuration for wallet commands
 
 Use the same deployment file for initialization, inspection, backup, sync and

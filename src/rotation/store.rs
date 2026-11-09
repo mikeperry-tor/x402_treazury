@@ -11,6 +11,8 @@ pub(crate) mod observation;
 mod preflight;
 #[cfg(test)]
 mod query_tests;
+#[cfg(test)]
+mod rename_tests;
 pub(crate) mod retirement;
 #[cfg(test)]
 pub(crate) mod test_support;
