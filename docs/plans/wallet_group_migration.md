@@ -11,7 +11,9 @@ its payer identities and historical correlation.
 
 Starting branch: `main`. Source baseline:
 `6f3e1e6fd6738c5fece86dc796c5ef0686653552`.
-Status: implementation in progress on `wallet_group_migration`; no operator state migration performed. Preserve the
+Status: WG1/WG2 implemented, validated and independently reviewed on
+`wallet_group_migration`; I1 passed. WG3 cleanup and I2 remain. No operator state
+migration performed. Preserve the
 unrelated untracked `kilo.json` and `state`; do not inspect real wallet secrets or
 perform a migration against operator state for validation.
 
@@ -267,3 +269,39 @@ commit, preserving the full ancestry and review evidence in Git history.
   JSON/three unwraps with a typed result. Preview report (11/24) and human formatter
   (13/12), shared status rendering, startup and funding consumers were reviewed.
   Final source-matched refresh and compiler gate are pending after these changes.
+
+- Exact WG1 fixup `925d10629f31a06418aa37294d827d9687665019` and WG2
+  `06fa308c066fba6501a2837255764cf7c7fbc3e9` independently reviewed by
+  `/root/design`, including their combined ancestry, unchanged affected consumers,
+  maintained guides and prior findings. No unresolved correctness findings or
+  compelling simplifications remain. I1 passed after inspecting actual evidence.
+- Final pinned production compiler and all-target Clippy warning gate:
+  `make check-clippy` passed without diagnostics (`/tmp/wg-final-clippy.log`).
+  Source-matched complexity refresh
+  `target/complexity-runs/20261109T051437Z-6d952672` is complete, with zero
+  exclusions and all 490 source hashes verified. Baseline and warning disposition
+  above remain applicable; the independent reviewer verified the exact source.
+- Selected runtime evidence, 78 distinct executed cases, all passed:
+  store rename 2 (`/tmp/wg1-tests.log`); preview unit 5
+  (`/tmp/wg2-preview-unit-final.log`); preview executable 3 and CLI layout 3
+  (`/tmp/wg2-preview-cli.log`); concrete funding backend 1
+  (`/tmp/wg1-backend-socket.log`); fixed `make check-compat` 31
+  (`/tmp/wg-compat.log`); assignment 7 and managed configuration 17
+  (`/tmp/wg-assign-config.log`); CLI resolution 8 (`/tmp/wg-resolution.log`);
+  final executable rename 1 (`/tmp/wg-rename-final.log`). Earlier valid store
+  evidence reused; final CLI source revalidated. The concrete backend's initial
+  ordinary-sandbox run reached a later existing localhost fixture and failed on
+  socket permission; rerunning with socket access passed without source changes.
+  Compatibility and assignment fixtures used socket-capable execution up front.
+  Test linking reports macOS's existing large unwind-section warning; production
+  compiler/Clippy gate emitted none. No live funds, real wallet secrets, Docker,
+  Tor or operator state used. This is focused offline/macOS evidence, not full-suite,
+  live-settlement or Linux qualification.
+- Final `make fmt-check`, `git diff --check`, and validation of 98 maintained-guide
+  local Markdown targets/anchors passed. WG3 guidance verified: backup/stopped
+  rename, config edits, preview/restart, different counts, collisions and historical
+  linkability; separate listener registry/direct-payment principals; assignment does
+  not create listeners. No split/merge/transfer or operator-state migration added.
+  Only unrelated `state` remains untracked. Cleanup removes this plan and its index
+  link; this evidence remains in the parent commit's Git history. I2 must review
+  the exact cleanup SHA, this evidence commit and complete accumulated branch.
