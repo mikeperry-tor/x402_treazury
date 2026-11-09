@@ -28,6 +28,19 @@ pools. Removing a profile disables its pool while retaining keys, balances and
 work. Agent source registration uses an already configured named profile and
 cannot create a new pool or choose arbitrary signing credentials.
 
+Saved group names resolve stable UUIDs; EVM key authentication and financial
+relationships bind those UUIDs rather than lookup names. The offline
+[`wallet rename`](wallet-cli.md#rename-a-managed-wallet-group) command changes only
+the name under exclusive authenticated store ownership. Disabled and pending-work
+groups remain valid rename sources, and occupied destinations are rejected.
+Configured policy applies on restart; rename itself grants no allocation or funding.
+[`wallet preview`](wallet-cli.md#preview-configuration-against-saved-groups) compares
+pure validated assignments with one read-only public metadata snapshot, including
+while serving. It grants no authority and does not authenticate encrypted contents.
+With no managed profiles startup skips `configure_profiles`, preserving saved group
+enablement, although saved names still prevent static reuse. Direct-swap treasury
+opening remains governed separately.
+
 ### Wallet grouping, rotation and linkability
 
 Pool names select payer identities, so grouping is a correlation boundary, not

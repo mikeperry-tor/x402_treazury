@@ -3,6 +3,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 mod output;
+mod preview;
 mod sync;
 use std::path::PathBuf;
 
@@ -26,6 +27,12 @@ pub struct WalletArgs {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Compare deployment wallet bindings with saved state without changing it.
+    Preview {
+        /// Print versioned machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rename an existing managed group offline; stop serving first.
     Rename {
         old: String,
@@ -148,6 +155,13 @@ fn resolve_args_with_network(
 ) -> Result<Command> {
     use anyhow::Context;
     require_supported_action(&args.command)?;
+    if matches!(args.command, Action::Preview { .. }) {
+        return Ok(Command::Preview {
+            meta_config: args
+                .config
+                .context("wallet preview requires --config FILE")?,
+        });
+    }
     let settings = load_wallet_settings(args.config.as_ref(), policy, &args.command)?;
     if let Some(command) = configured_command(&args.command, args.config.as_ref())? {
         return Ok(command);
@@ -372,6 +386,9 @@ fn resolve_administrative_identity(
 }
 
 enum Command {
+    Preview {
+        meta_config: PathBuf,
+    },
     Rename {
         state_dir: PathBuf,
         key_file: PathBuf,
@@ -454,6 +471,13 @@ enum Command {
         treasury_id: String,
     },
 }
+#[derive(serde::Serialize)]
+struct RenameOutput {
+    old_name: String,
+    new_name: String,
+    group_id: String,
+}
+
 pub async fn run(args: WalletArgs) -> Result<()> {
     run_args(args, crate::rotation::store::TreasuryNetwork::Mainnet).await
 }
@@ -467,11 +491,25 @@ async fn run_args(
         | Action::Sync { json, .. }
         | Action::Status { json }
         | Action::Rename { json, .. }
+        | Action::Preview { json }
         | Action::Bootstrap { json } => *json,
         _ => true,
     };
     let policy = network_override(&args)?;
     let command = resolve_args_with_network(args, policy.as_ref())?;
+    if let Command::Preview { meta_config } = command {
+        let report = preview::report(&meta_config, policy.as_ref())?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print!("{}", report.human());
+        }
+        anyhow::ensure!(
+            report.startup_conflicts.is_empty(),
+            "wallet preview found managed/static name conflicts that prevent startup"
+        );
+        return Ok(());
+    }
     if let Command::Rename {
         state_dir,
         key_file,
@@ -484,7 +522,11 @@ async fn run_args(
             let mut store =
                 crate::rotation::store::Store::open(&state_dir, &key_file, &treasury_id)?;
             let id = store.rename_capacity_group(&old, &new)?;
-            Ok::<_, anyhow::Error>(serde_json::json!({"old_name":old,"new_name":new,"group_id":id}))
+            Ok::<_, anyhow::Error>(RenameOutput {
+                old_name: old,
+                new_name: new,
+                group_id: id,
+            })
         })
         .await??;
         if json {
@@ -492,9 +534,7 @@ async fn run_args(
         } else {
             println!(
                 "Renamed wallet group {} to {} (unchanged UUID: {}). Update configuration references before restarting serving.",
-                result["old_name"].as_str().unwrap(),
-                result["new_name"].as_str().unwrap(),
-                result["group_id"].as_str().unwrap()
+                result.old_name, result.new_name, result.group_id
             );
         }
         return Ok(());
@@ -690,6 +730,7 @@ async fn execute_wallet_command(
             treasury
         }
         Command::Bootstrap { .. }
+        | Command::Preview { .. }
         | Command::Rename { .. }
         | Command::Notes { .. }
         | Command::Addresses { .. }

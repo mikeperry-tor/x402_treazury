@@ -19,6 +19,8 @@ subcommand; running it without arguments displays help and never starts serving.
 | `config check --config FILE --explain-routing` | Print JSON validation results and per-tool source distribution decisions |
 | `wallet bootstrap --config FILE` | Fund captured managed reserve claims, without listeners; requires `auto_fund=true` |
 | `wallet sync --config FILE` | Discover ZEC and existing configured managed-USDC balances once, including outstanding funding recipients |
+| `wallet preview --config FILE` | Compare validated wallet assignments with saved public state without changing it |
+| `wallet rename OLD NEW --config FILE` | Rename a saved managed group offline, preserving its UUID and work |
 | `wallet ...` | Administer the treasury |
 | `sources inspect --config FILE` | Read persisted agent-added source records |
 | `build-info` | Print build identity and provenance |
@@ -435,6 +437,13 @@ identifies its binding. `config check` prints these mappings as well. Mappings c
 all declared server/source bindings, including sources whose tools are filtered
 out; only effective static wallets used by selected tools load private keys.
 Inspection never reads wallet secrets or opens treasury state.
+
+`wallet preview --config FILE` compares the same pure validated wallet resolution
+with a coherent saved-state snapshot, without keys, catalogs or credentials.
+It reports reuse/reactivation, policy changes, missing and omitted managed groups,
+and static-name conflicts. Static-only startup does not disable saved groups.
+Configured reserve sizing is nominal; balances and pending work are saved
+observations. See [preview output and authority](wallet-cli.md#preview-configuration-against-saved-groups).
 
 Managed names select saved group UUIDs. Editing a TOML name alone selects a new
 group rather than moving the old group's keys or work. To retain an existing

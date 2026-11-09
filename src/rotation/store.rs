@@ -1031,6 +1031,19 @@ pub fn static_ownership(dir: &Path) -> Result<(String, Vec<String>)> {
     })
 }
 
+/// Public saved metadata and identity assertion from one read-only snapshot.
+/// This neither authenticates the encrypted wallet nor acquires its owner.
+pub(crate) fn preview_status(dir: &Path, expected_id: Option<&str>) -> Result<Status> {
+    inspect_state(dir, |db| {
+        let id = read_runtime_identity(db)?;
+        ensure!(
+            expected_id.is_none_or(|expected| expected == id),
+            "state identity mismatch"
+        );
+        read_status(db)
+    })
+}
+
 pub fn status(dir: &Path) -> Result<Status> {
     inspect_state(dir, read_status)
 }

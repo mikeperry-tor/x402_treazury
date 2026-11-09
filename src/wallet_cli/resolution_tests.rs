@@ -4,6 +4,7 @@ use std::{path::Path, process::Command as ProcessCommand};
 
 fn command_value(command: Command) -> Value {
     match command {
+        Command::Preview { meta_config } => json!({"kind":"preview","config":meta_config}),
         Command::Rename {
             state_dir,
             key_file,

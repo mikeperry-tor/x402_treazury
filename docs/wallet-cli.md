@@ -5,6 +5,52 @@ This reference covers treasury commands, funding controls and operator recovery.
 For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
 Commands run from the repository root; `x402_treazury` means the built executable on PATH.
 
+## Preview configuration against saved groups
+
+```sh
+x402_treazury wallet preview --config deployment.toml
+x402_treazury wallet preview --config deployment.toml --json
+```
+
+Preview requires a deployment file (also selected by `X402_TREAZURY_CONFIG`) and
+initialized treasury state. It validates pure configuration and resolves effective
+source/listener wallet bindings without loading provider files, catalogs, listener
+tokens, static signing keys, Base/NEAR credentials, or the treasury encryption key.
+It reads public saved metadata and the optional treasury-ID assertion in one
+coherent read-only transaction, including while serving owns the store. This is
+unauthenticated metadata inspection, not cryptographic verification or authority
+to spend. SQLite may perform its existing read coordination; logical state and
+original journals remain unchanged. `config show` remains entirely state-free.
+
+The report identifies managed groups to reuse, reactivate or declare; requested
+payment, retirement and reserve policies that differ from saved settings; omitted
+groups already disabled or due to be disabled; stable UUIDs; effective bindings
+and their explicit/generated origins; and saved inventory and pending work.
+Every resolved managed profile is included, even if unbound. Saved balances are
+advisory observations, never fresh reads or promises of capacity. Requested reserve
+ranges authorize nominal USDC sizing only; accepted funding terms and actual
+spendable capacity remain distinct. Historical auto-funding and fixed/range sizing
+modes are not persisted and cannot be reconstructed for comparison.
+
+Static profiles cannot reuse saved managed names, including disabled ones.
+With no managed profiles, normal startup skips managed profile configuration;
+preview therefore reports saved groups as retained unchanged rather than disabled.
+Separately authorized direct-swap admission/recovery can still open the treasury.
+Omitted holdings, identities and history remain owned: no automatic transfer,
+deletion or sweeping occurs. Preview never infers rename matches or executes a
+migration. Inspect name collisions before using the offline rename command below.
+
+Valid differences return success. Invalid configuration, missing/unsupported state,
+identity mismatch and startup-blocking managed/static conflicts return nonzero.
+For mode conflicts the comparison report is printed before failure; other failures
+produce diagnostics without a report. Deterministic JSON uses `schema_version=1`,
+with `managed`, `omitted`, `startup_conflicts`, `bindings`, `generated`, `summary`,
+`configure_managed_profiles`, `requested_auto_fund`, and the existing `saved` status
+projection. Managed entries expose `action`, `saved_id`, `requested_policy` and
+`changed_saved_policy_fields`; omitted entries expose `saved_id` and `action`.
+The report is a snapshot, not an executable plan or authority token. Rename and
+startup recheck current names/configuration when they execute.
+
 ## Rename a managed wallet group
 
 Back up the treasury and stop serving before changing a group name:
@@ -13,6 +59,7 @@ Back up the treasury and stop serving before changing a group name:
 x402_treazury wallet backup --config deployment.toml --destination secrets/backup
 x402_treazury wallet rename research general --config deployment.toml
 # Update wallet declarations and source/listener wallet references in deployment.toml.
+x402_treazury wallet preview --config deployment.toml
 x402_treazury serve --config deployment.toml
 ```
 
