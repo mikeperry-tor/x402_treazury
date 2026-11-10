@@ -869,6 +869,9 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
             let after = worker.store.call(|s| s.status()).await.unwrap();
             let expected = match phase {
                 FundingPhase::VerifyingCredit => FundingPhase::Complete,
+                FundingPhase::RefundPending if status() == SwapStatus::Success => {
+                    FundingPhase::Complete
+                }
                 FundingPhase::RefundPending => FundingPhase::RefundPending,
                 _ => match status() {
                     SwapStatus::Success => FundingPhase::Complete,
@@ -886,8 +889,15 @@ async fn swap_status_matrix_preserves_quarantine_accounting_and_single_submissio
                         .await
                         .status_calls
                         .load(Ordering::SeqCst),
-                    calls,
-                    "saved SUCCESS/REFUNDED stops ordinary status polling"
+                    calls
+                        + if phase == FundingPhase::VerifyingCredit {
+                            0
+                        } else if status() == SwapStatus::Success {
+                            1
+                        } else {
+                            2
+                        },
+                    "saved SUCCESS stops polling; REFUNDED continues until receiver observation or subsequent SUCCESS"
                 );
             }
             assert_eq!(worker.backend.lock().await.sends, 1);
