@@ -123,3 +123,27 @@ fn saved_status_explains_zero_balances_and_unavailable_snapshot_amounts() {
     assert!(!text.contains("no broadcast"));
     assert!(status(&saved, None).contains("Shielded balances: unknown"));
 }
+
+#[test]
+fn completed_uncredited_reserve_status_reports_checks_without_asserting_open_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::config::ReservesConfig::default();
+    store
+        .ensure_capacity_group("pool", &reserves, Some(alloy_primitives::U256::from(1)), 0)
+        .unwrap();
+    let mut saved = store.status().unwrap();
+    saved.pools[0].reserve_claims[0].blocked_funding_job_id = Some("completed-job".into());
+    let text = status(&saved, None);
+    assert!(
+        text.contains("small reserve occupied by completed, uncredited funding job completed-job")
+    );
+    assert!(text.contains("awaiting replacement checks when automatic funding is enabled"));
+    assert!(!text.contains("replacement follows resolution"));
+}

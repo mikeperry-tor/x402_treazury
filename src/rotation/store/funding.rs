@@ -306,6 +306,15 @@ impl Store {
     /// One configured group, two independent vacancy commits. Failure in one
     /// slot never rolls back another or changes an existing operation.
     pub(crate) fn fill_funding_vacancies(&mut self, name: &str) -> Result<()> {
+        self.fill_vacancies(name, true)
+    }
+
+    /// Bootstrap retries vacancies without replacing its captured generations.
+    pub(crate) fn fill_bootstrap_vacancies(&mut self, name: &str) -> Result<()> {
+        self.fill_vacancies(name, false)
+    }
+
+    fn fill_vacancies(&mut self, name: &str, replace_completed: bool) -> Result<()> {
         let pool: Option<String> = self
             .db
             .query_row(
@@ -319,9 +328,13 @@ impl Store {
         };
         let mut failure = None;
         for kind in [super::AllocationKind::Small, super::AllocationKind::Large] {
-            if let Err(error) = self
-                .replace_completed_reserve(&pool, kind)
-                .and_then(|()| self.allocate_capacity_kind(&pool, kind, true))
+            let replacement = if replace_completed {
+                self.replace_completed_reserve(&pool, kind)
+            } else {
+                Ok(())
+            };
+            if let Err(error) =
+                replacement.and_then(|()| self.allocate_capacity_kind(&pool, kind, true))
             {
                 failure.get_or_insert(error);
             }

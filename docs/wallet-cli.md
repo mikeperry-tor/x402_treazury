@@ -338,6 +338,9 @@ exit status. Add `--json` for the versioned machine-readable result, including
 `balance_estimates` with `wallet_name`, `wallet_type`, and decimal
 `balance_estimate_usdc` fields. The JSON result separates current serving/inventory readiness from
 completion of captured work (see [capacity output](#versioned-capacity-output)).
+Bootstrap allocates its captured vacant claims promptly, without ordinary serving's
+30–120-second opportunities or proactive rotation of captured payers. It observes
+those original obligations without chasing replacement generations.
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
 source work closes after canonical confirmation or buried finite signed expiry
 with completed SDK coverage. A confirmed deposit with unresolved settlement waits
@@ -362,7 +365,10 @@ funding. MCP HTTP availability follows each endpoint's `wait_for_catalogs` setti
 Remote catalog discovery and pending paid
 relay discovery continue under the retained owner; relay discovery
 waits for its assigned payer without allocating wallets itself. Serving does not
-wait for bootstrap completeness. `auto_fund=false` pauses new funding and makes
+wait for bootstrap completeness. Ordinary serving first schedules each group's
+independent 30–120-second refill opportunity; restart redraws and downtime or funding
+work can extend actual waiting. Exhaustion adds no emergency refill.
+`auto_fund=false` pauses new funding and makes
 explicit bootstrap fail, while accepted operations remain observed; qualification
 funding restrictions retain their existing lifecycle. `catalog warm` never starts
 funding: use `wallet bootstrap` first when warming needs a managed paid relay wallet.

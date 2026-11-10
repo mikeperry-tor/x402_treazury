@@ -581,12 +581,62 @@ promotion does not invalidate another permitted authorization.
 
 A READY payer consumes its exact reserve claim atomically: the former active
 becomes RETAINED, the payer becomes ACTIVE, and the reserve generation advances.
-Ordinary background funding can fill the vacancy. Admission never allocates or
-retires wallets. An expired unpublished signature fails before disclosure; no
+Ordinary background funding can fill the vacancy at its next independent opportunity.
+Admission never allocates or retires wallets. An expired unpublished signature fails before disclosure; no
 local evidence/signature recovery loop remains. Unknown journal outcomes grant no replay.
 
 The serialized Store owns commits after waiter cancellation. Signing and network
 I/O do not hold a group turn to stabilize advisory balances.
+
+### Early rotation and refill opportunities
+
+Ordinary automatic funding gives each configured eligible group an independent
+uniform integer interval of 30–120 seconds (nominal mean 75 seconds). Startup draws
+one interval per group and does not eagerly allocate vacancies. One volatile
+monotonic due instant per group survives unrelated payment/capacity wakes and
+completion activity. Due groups rearm from one captured instant before Store work,
+run once without intervening idle sleeps, and skip missed intervals after suspension.
+Restart redraws; downtime, Store/source load and unavailable capital can extend
+actual waiting beyond 120 seconds. There is no emergency refill on exhaustion and
+no funding-completion or unlinkability guarantee. A group's small/large fills still
+commit independently, and failures cannot stop sibling groups or accepted work.
+
+At an opportunity, a used ACTIVE wallet can become RETAINED while an existing
+funded READY reserve becomes ACTIVE, small slot first. Use is established by its
+existing payment journal. For immutable first positive observed credit `F` and the
+current payment cap `M`, integer micro-USDC bounds are `U=min(M,floor(F/4))` and
+`L=floor(U/5)` (unlimited cap uses `F/4`). The threshold is a stable private unbiased
+integer in inclusive `[L,U]`, derived by library HMAC-SHA256 with the Store key and
+a versioned, length-framed treasury/pool/wallet identity domain. Rejection sampling
+uses counter-separated blocks. No seed or threshold is persisted or exposed.
+Renames/restart preserve the draw; cap changes can change bounds. Tiny intervals
+can include zero. The first observed credit is advisory, not historical receipt proof.
+
+An immediate Store transaction rechecks current ACTIVE identity, journal use,
+estimate, credit, cap, group enablement and the exact eligible READY claim and
+generation. Estimate at or below the threshold permits one transition only; missing
+credit/estimate or READY skips it without affecting payment eligibility. The new
+ACTIVE must first be used before any later proactive transition. Concurrent first-use
+admission shares the atomic claim transition: captured payers remain usable and a
+generation cannot be consumed twice. Source/retirement protections and permanent
+initial-claim consumption remain intact; early rotation authorizes no top-up.
+A due opportunity can refill the resulting vacancy; immediate READY first-use
+promotion still works when calls outpace preparation and waits for a later opportunity
+to refill. Accepted jobs, quote/source work, retries, credit/status observation and
+recovery retain their existing schedules independently of future opportunities.
+
+The existing owner uses one earliest-due wait for opportunities and eligible
+inventory/retry work, plus completion/shutdown. Exhausted inventory still rereads
+on `funding.poll_seconds` to discover committed work; the redundant one-second
+wake is removed. Whole-second inventory and observation deadlines round outward
+from completion so absolute waits preserve their existing cadence/failure floors;
+financial timestamps, immediate handoffs and recipient-owned credit due times retain
+their separate meanings. Opportunity counts alone establish no process/power saving.
+Explicit bootstrap fills promptly without proactive rotation or chasing replacement
+generations; one-pass tick retains explicit allocation semantics. Offline sync and
+inspection allocate nothing. Qualification retains its separately authorized funding
+semantics. With `auto_fund=false`, no new allocations or proactive rotation occur;
+accepted-work observation continues.
 
 ## Automatic retirement
 
@@ -1438,9 +1488,12 @@ delivery remain unchanged. Late credit stays usable on the retained wallet and
 cannot reclaim the replacement slot. Low balances on previously credited wallets
 never trigger this recovery or authorize top-ups.
 
-Committed replacement logs at INFO. A completed uncredited slot still waiting
-for source ownership is identified once at funding-owner startup at INFO and in
-wallet status as degraded inventory; recurring checks remain DEBUG. This condition does not assert insufficient ZEC. Pending
+Committed replacement logs at INFO. A completed uncredited slot awaiting
+replacement checks is identified once at funding-owner startup at INFO and in
+wallet status as degraded inventory; recurring checks remain DEBUG. Its original
+source ownership may already be closed while the slot awaits the next randomized
+funding opportunity. These diagnostics do not assert unresolved source ownership
+or insufficient ZEC. Pending
 original source work retains its independent observation and recovery. Replaced
 or disabled claims do not keep discovery running; validated accepted transactions
 retain their independent journal-based observation demand.

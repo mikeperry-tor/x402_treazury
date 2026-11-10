@@ -408,7 +408,7 @@ fn replacement_logs_recovery_once_and_pending_source_as_delay() {
     store.fill_funding_vacancies("pool").unwrap();
     let logged = std::fs::read_to_string(log.path()).unwrap();
     assert!(
-        logged.contains("INFO") && logged.contains("replacement is waiting"),
+        logged.contains("INFO") && logged.contains("awaiting automatic replacement checks"),
         "{logged}"
     );
     assert_eq!(
@@ -426,6 +426,51 @@ fn replacement_logs_recovery_once_and_pending_source_as_delay() {
         !logged.contains("exact signed bytes") && !logged.contains("settlement_unverified"),
         "{logged}"
     );
+}
+
+#[test]
+fn closed_source_startup_notice_reports_pending_checks_without_mutating_inventory() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::store::reserve_replacement::tests::closed_source_startup_notice_reports_pending_checks_without_mutating_inventory",
+    ) {
+        return;
+    }
+    let (_dir, mut store, job) = fixture();
+    prepare(&mut store, &job);
+    complete(&store, &job);
+    store.confirm_spend(&job.operation_id).unwrap();
+    let before = binding(&store, &job);
+    let changes = store.db.total_changes();
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    store.report_blocked_reserves("pool").unwrap();
+    assert_eq!(binding(&store, &job), before);
+    assert_eq!(store.db.total_changes(), changes);
+    let logged = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logged.contains("awaiting automatic replacement checks"),
+        "{logged}"
+    );
+    assert!(
+        logged.contains(&job.id) && logged.contains("small"),
+        "{logged}"
+    );
+    assert!(
+        !logged.contains("waiting for original Zcash source ownership to resolve"),
+        "{logged}"
+    );
+    assert_eq!(
+        store.operation(&job.operation_id).unwrap().submission,
+        "CONFIRMED"
+    );
+    store.fill_funding_vacancies("pool").unwrap();
+    assert_ne!(binding(&store, &job).0, before.0);
 }
 
 #[test]

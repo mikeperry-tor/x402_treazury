@@ -3128,7 +3128,7 @@ impl FundingBackend for LocalHandoff {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn successful_quote_prepare_submit_handoffs_do_not_wait_for_observation_cooldown() {
     let dir = tempfile::tempdir().unwrap();
     let mut raw = Store::create(
@@ -3204,7 +3204,7 @@ async fn successful_quote_prepare_submit_handoffs_do_not_wait_for_observation_co
     actor.await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn successful_no_progress_keeps_configured_source_polling_due() {
     for blocked_by_owner in [false, true] {
         let dir = tempfile::tempdir().unwrap();

@@ -3,8 +3,13 @@
 These tests use public deterministic keys, localhost fixtures and isolated regtest
 chains. None spends mainnet funds or contacts NEAR's production API.
 Store-worker fixtures cover accepted and disconnected callers, absence of closure
-replay, independent Store progress and sanitized terminal failure. Treasury
-publication loss runs in an isolated child: the original completed result remains
+replay, independent Store progress and sanitized terminal failure.
+Early-rotation StoreHandle coverage queues first-use authorization and background
+promotion/refill in both deterministic orders. It checks captured payer survival,
+one claim-generation advance and replacement allocation, immutable first credits
+and original funding identities, and retained payment liabilities after later
+observations. It uses no network or submitted treasury source transaction.
+Treasury publication loss runs in an isolated child: the original completed result remains
 owned, graceful drain stays pending and forced runtime teardown is confined to
 that child. These controls do not qualify power-loss recovery or settlement.
 The full concurrent worker's local bridge, Base RPC and paid API share a verified
@@ -179,6 +184,7 @@ ownership and exclusive Store reopen together in that representative case.
 | --- | --- | --- |
 | Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. Qualification restart observations separately preserve the selected reserve slot, generation and wallet while allowing readiness and unrelated inventory progress. |
 | Refund status and pool isolation | `managed::lifecycle::failed_swap_retains_original_source_terms_while_another_pool_serves` | API refund status cannot manufacture treasury credit; bound fulfillment preserves original source terms without inventing native confirmation, while another funded pool keeps paying. |
+| Advisory early rotation and independent refill | `rotation::store::early_rotation::tests`, `rotation::funding::scheduler::opportunity_tests` | Private threshold/framing vectors, tiny and unlimited bounds, rejection mapping, first-credit preservation, used-wallet guard, small-first exact claim consumption, captured payer stability, reopen/rename stability and no allocation during promotion. Injected scheduling and paused-time worker tests cover initial serving delay, accepted jobs and prompt bootstrap. Local tests do not qualify live timing or unlinkability. |
 | Quote refresh, empty treasury, timeouts and backoff | `tests/funding.rs` | Unprepared-only bounded refresh, independent per-kind backoff and saved health reporting, sanitized diagnostics, degraded timeout with continued reconciliation and no repeated send. |
 | Provider-sized fixed-input funding | `rotation::config::tests`, `rotation::store::funding::quote_selection_tests`, `rotation::funding::redraw_tests`, `rotation::near::tests`, `rotation::store::funding::completion_tests::input_quote_journals_usdc_and_preserves_nominal_authority_across_restart` | Slot-aware fixed/range parsing and defaults, inclusive deterministic draws, saved-choice reuse, fixed-mode identity, and provider-floor redraw persistence before the next preview. Increasing-floor responses cannot renew the original deadline; expiry stops further previews without executable quotes or source work. Zero-slippage dry output preview supplies each executable input; live slippage applies once. Expected USDC, chosen nominal sizing and source zatoshis remain distinct across restart. Historical output quotes retain their terms; extra output does not expand source spending, and any positive receipt consumes the initial claim. HTTP fixtures do not establish live settlement speed or route minimums. |
 | Payment ambiguity and admission | `tests/managed.rs` | Typed insufficient-funds traversal retains every signed attempt; other uncertainty grants no paid replay. Advisory balance hints, durable liabilities, qualification nonce proofs, pool isolation and atomic promotion. |

@@ -104,6 +104,18 @@ pub(super) fn consume_reserve(
     if ownership.role != "READY" {
         return Ok(None);
     }
+    promote_ready(db, pool, wallet, ownership).map(Some)
+}
+
+/// Shared atomic role/claim mechanics. Caller owns an immediate transaction and
+/// establishes either journal admission or the background promotion predicates.
+pub(super) fn promote_ready(
+    db: &Connection,
+    pool: &str,
+    wallet: &str,
+    ownership: PaymentOwnership,
+) -> Result<ConsumedReserve> {
+    ensure!(ownership.role == "READY", "reserve_role_conflict");
     let slot = ownership.slot.context("reserve_claim_missing")?;
     let generation = ownership
         .claim_generation
@@ -123,11 +135,11 @@ pub(super) fn consume_reserve(
         )? == 1,
         "reserve_role_conflict"
     );
-    Ok(Some(ConsumedReserve {
+    Ok(ConsumedReserve {
         slot,
         generation,
         next_generation,
-    }))
+    })
 }
 
 /// Shared role publication after immutable destination readiness has been

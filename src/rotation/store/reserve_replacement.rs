@@ -28,7 +28,7 @@ impl Store {
                         wallet = name,
                         slot = kind.as_str(),
                         job_id = job,
-                        "Completed funding still occupies an uncredited reserve; replacement is waiting for original Zcash source ownership to resolve; existing wallets remain usable and automatic checks continue"
+                        "Completed funding still occupies an uncredited reserve; awaiting automatic replacement checks, including original Zcash source ownership; existing wallets remain usable"
                     );
                 }
             }

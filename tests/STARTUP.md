@@ -32,6 +32,12 @@ qualification stay strict in these synchronous tests. Its isolated SOCKS subproc
 catalog requests retain origin-based discovery identities: same-origin paths
 share credentials, different origins do not. It does not require real Tor.
 
+`rotation::funding::scheduler::opportunity_tests` checks deferred ordinary allocation,
+prompt accepted-job recovery and explicit bootstrap using paused time and unfunded
+stores. Pure injected interval tests cover activity-independent scheduling, all-due
+rearming and skipped missed opportunities. These tests do not qualify live funding
+time or process/power savings.
+
 `deployment::bootstrap::actor_tests` also exercises explicit wallet bootstrap's
 pending monitor through the real funding worker and local Base adapter. One
 captured claim is already credited; the other completes while its original

@@ -221,7 +221,7 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff() {
     if crate::test_log_capture::run_in_child(
         "rotation::funding::scheduler::tests::diagnostics::retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff",

@@ -700,27 +700,29 @@ strict price-class separation.
 
 A $10 wallet settles two $4 calls and retains $2; two $3.34 calls retain $3.32.
 A later smaller call can use retained capacity, but fragmented balances cannot be
-summed to authorize one payment. Cold selection uses the default payer before
-learning prices. A sufficient bound payer remains stable. Otherwise, selection
-uses the first estimated-affordable existing wallet in ACTIVE, RETAINED, READY
-order, with creation order within each role. Unknown or low estimates remain
-fallbacks. It does not sort wallets by balance; cheap calls can keep using a
-large-funded active wallet.
+summed to authorize one payment. Before its first unsigned request, selection uses
+a fresh observed price or otherwise a usable advertised amount. With a hint,
+prefer estimated-affordable RETAINED, ACTIVE, then READY wallets, oldest within each
+role. Without a hint, prefer healthy positive ACTIVE, then RETAINED and READY.
+Low, unknown and zero estimates remain fallbacks. A sufficient bound payer stays
+stable after challenge discovery; role preference alone adds no unsigned handoff.
+It does not sort by balance or sum fragments.
 
 With the default small and large ranges, each fresh wallet draws between $2-4 or
 $10-25 respectively. Repeated calls can still leave remainders at several
 addresses; those balances cannot collectively authorize one payment. This
 illustrates sizing below the recommendation, not a wallet-count limit, and
 randomized draws do not promise a particular remainder distribution.
-Learned cheap calls can drain compatible smaller balances; cold calls, expired
-hints or unavailable evidence can keep using a sufficient large active payer.
+Observed or advertised cheap calls can use compatible retained balances, including
+on their first invocation. Missing or expired hints can keep using a healthy ACTIVE.
 Neither case establishes a quantitative privacy guarantee.
 
 For target `L` and repeated settled payments `p`, the unusable remainder for
 another same-price call is `L - floor(L/p)*p`. At a maximum payment of 25% of the
 wallet target, the remainder is below 20% for identical prices and below 25% for
 mixed prices. These bounds assume settled payments, no other liabilities or
-unexpected credits, and replacement because the next payment no longer fits.
+unexpected credits, and replacement because the next payment no longer fits; proactive early rotation
+can retain a larger remainder.
 They describe one wallet's remainder, not total deployment holdings; pending
 payment authorizations can cause earlier reserve consumption.
 
@@ -729,6 +731,15 @@ payment authorizations can cause earlier reserve consumption.
 Ordinary enabled serving binds listener sockets before starting funding;
 MCP availability follows each endpoint's `wait_for_catalogs` setting independently
 of wallet funding readiness.
+Ordinary serving first waits for an independent 30–120-second refill opportunity
+per eligible group (uniform integer seconds, nominal mean 75). It does not eagerly
+allocate on startup or refill immediately on exhaustion. Restart redraws and
+suspension/Store/source delays can extend wall-clock waiting beyond 120 seconds.
+Existing allocated work resumes promptly. At opportunities, a used ACTIVE at its
+stable private 5%–25% initial-credit threshold may promote a funded READY reserve;
+retained balances remain usable. The current cap scales both threshold endpoints.
+No credit history, balance RPC or additional monetary budget is introduced. See
+[early rotation](wallet-rotation.md#early-rotation-and-refill-opportunities).
 Small and large reserve funding may finish in either order. An empty managed pool
 returns typed unavailability until an eligible funded payer exists. No ACTIVE wallet is
 required: a funded READY reserve can serve immediately. Unsigned requests do not

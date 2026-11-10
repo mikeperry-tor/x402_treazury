@@ -234,7 +234,7 @@ async fn supervise(
     let summary = run_workers(
         monitor,
         owner.run_commands(commands, sender, stop.clone()),
-        worker.run(stop.clone()),
+        worker.run_bootstrap(stop.clone()),
         stop,
     )
     .await?;

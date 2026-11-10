@@ -105,6 +105,10 @@ impl TickClock {
     fn now(&self) -> u64 {
         self.epoch.saturating_add(self.started.elapsed().as_secs())
     }
+    fn after_poll(&self, seconds: u64) -> u64 {
+        self.ceil_epoch(tokio::time::Instant::now())
+            .saturating_add(seconds)
+    }
     fn ceil_epoch(&self, due: tokio::time::Instant) -> u64 {
         let elapsed = due.saturating_duration_since(self.started);
         self.epoch
@@ -176,12 +180,28 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
     }
     pub async fn run(self, stop: CancellationToken) -> Result<()> {
+        self.run_mode(
+            stop,
+            if crate::qualification::active() {
+                scheduler::Mode::Explicit
+            } else {
+                scheduler::Mode::Serving
+            },
+        )
+        .await
+    }
+    /// Explicit bootstrap allocates promptly, without early rotation or following
+    /// replacement generations. Its monitor owns captured-claim completeness.
+    pub(crate) async fn run_bootstrap(self, stop: CancellationToken) -> Result<()> {
+        self.run_mode(stop, scheduler::Mode::Bootstrap).await
+    }
+    async fn run_mode(self, stop: CancellationToken, mode: scheduler::Mode) -> Result<()> {
         loop {
             if stop.is_cancelled() {
                 return Ok(());
             }
             let result = match now() {
-                Ok(instant) => self.schedule(instant, stop.clone(), false).await,
+                Ok(instant) => self.schedule_mode(instant, stop.clone(), mode).await,
                 Err(error) => Err(error),
             };
             match result {

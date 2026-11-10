@@ -32,6 +32,7 @@ pub use capacity::AllocationKind;
 mod evidence;
 pub use evidence::BalanceSupport;
 pub(crate) mod bootstrap;
+mod early_rotation;
 mod expiry;
 pub mod funding;
 pub(crate) mod history;

@@ -21,6 +21,86 @@ const OBSERVATION_POLL_SECONDS: u64 = 60;
 // forgotten; in-flight ownership and an unelapsed backoff cannot be evicted.
 const RECORDS: usize = 256;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Mode {
+    Serving,
+    Bootstrap,
+    Explicit,
+    Once,
+}
+
+fn draw_interval() -> std::time::Duration {
+    use rand::RngExt;
+    std::time::Duration::from_secs(rand::rng().random_range(30..=120))
+}
+
+struct Opportunities(BTreeMap<String, tokio::time::Instant>);
+impl Opportunities {
+    fn new(
+        groups: Vec<String>,
+        now: tokio::time::Instant,
+        mut draw: impl FnMut() -> std::time::Duration,
+    ) -> Self {
+        Self(
+            groups
+                .into_iter()
+                .map(|name| (name, now + draw()))
+                .collect(),
+        )
+    }
+
+    fn take_due(
+        &mut self,
+        now: tokio::time::Instant,
+        mut draw: impl FnMut() -> std::time::Duration,
+    ) -> Vec<String> {
+        self.0
+            .iter_mut()
+            .filter_map(|(name, due)| {
+                if *due > now {
+                    return None;
+                }
+                *due = now + draw();
+                Some(name.clone())
+            })
+            .collect()
+    }
+}
+
+/// Inventory polling remains the discovery mechanism for newly committed work.
+/// Blocked pages wait for completion/capacity or eligible metadata expiry rather
+/// than spinning on their already-elapsed page deadline.
+fn next_wake(
+    inventory: &[LaneInventory; 4],
+    pending: &VecDeque<Pending>,
+    retry_due: Option<u64>,
+    clock: &TickClock,
+    opportunities: &Opportunities,
+    once: bool,
+    explicit_due: Option<tokio::time::Instant>,
+) -> Option<tokio::time::Instant> {
+    let now = clock.now();
+    let inventory_due = inventory
+        .iter()
+        .filter(|lane| !(once && lane.exhausted))
+        .filter(|lane| lane.pass_due > now || !pending.iter().any(|item| item.lane() == lane.kind))
+        .map(|lane| lane.pass_due);
+    inventory_due
+        .chain(retry_due)
+        .min()
+        .into_iter()
+        // An epoch beyond the platform's representable monotonic range cannot
+        // become due in this owner; it must not panic or hide nearer work.
+        .filter_map(|due| {
+            clock.started.checked_add(std::time::Duration::from_secs(
+                due.saturating_sub(clock.epoch),
+            ))
+        })
+        .chain(opportunities.0.values().copied())
+        .chain(explicit_due)
+        .min()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Kind {
     Credit,
@@ -335,6 +415,16 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         stop: CancellationToken,
         once: bool,
     ) -> Result<()> {
+        self.schedule_mode(instant, stop, if once { Mode::Once } else { Mode::Serving })
+            .await
+    }
+
+    pub(super) async fn schedule_mode(
+        &self,
+        instant: u64,
+        stop: CancellationToken,
+        mode: Mode,
+    ) -> Result<()> {
         let lease = Arc::new(
             self.store
                 .funding_owner()
@@ -343,7 +433,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         );
         let worker = self.clone();
         // The spawn, not its response waiter, owns accepted work and the lease.
-        tokio::spawn(async move { worker.schedule_owned(lease, instant, stop, once).await })
+        tokio::spawn(async move { worker.schedule_owned(lease, instant, stop, mode).await })
             .await
             .context("funding owner stopped")?
     }
@@ -353,8 +443,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         lease: Lease,
         instant: u64,
         stop: CancellationToken,
-        once: bool,
+        mode: Mode,
     ) -> Result<()> {
+        let once = mode == Mode::Once;
         let clock = TickClock {
             epoch: instant,
             started: tokio::time::Instant::now(),
@@ -367,6 +458,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 backend.allocation_groups(),
             )
         };
+        let mut opportunities = Opportunities::new(
+            if mode == Mode::Serving {
+                allocation_groups.clone()
+            } else {
+                Vec::new()
+            },
+            tokio::time::Instant::now(),
+            draw_interval,
+        );
+        let mut explicit_due = matches!(mode, Mode::Bootstrap | Mode::Explicit).then(|| {
+            tokio::time::Instant::now() + std::time::Duration::from_secs(self.poll_seconds.max(1))
+        });
         // Configuration is immutable for this owner. Current store restrictions,
         // group enablement, cap and exact claim are rechecked on every commit.
         for name in &allocation_groups {
@@ -374,9 +477,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             if self
                 .store
                 .call(move |s| {
-                    let result = s.fill_funding_vacancies(&name);
-                    s.report_blocked_reserves(&name)?;
-                    result
+                    let allocation = match mode {
+                        Mode::Serving => Ok(()),
+                        Mode::Bootstrap => s.fill_bootstrap_vacancies(&name),
+                        Mode::Once | Mode::Explicit => s.fill_funding_vacancies(&name),
+                    };
+                    let report = s.report_blocked_reserves(&name);
+                    allocation.and(report)
                 })
                 .await
                 .is_err()
@@ -384,8 +491,6 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 tracing::debug!("funding vacancy allocation unavailable");
             }
         }
-        let mut allocation_cursor = 0usize;
-        let mut allocation_due = clock.now().saturating_add(self.poll_seconds.max(1));
         let mut flight = InFlight::new();
         let mut pending = VecDeque::<Pending>::new();
         // Quote here names the prerequisite inventory lane; its owned step
@@ -412,21 +517,42 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let mut stopping = false;
         loop {
             stopping |= stop.is_cancelled();
-            if !once && !stopping && !allocation_groups.is_empty() && clock.now() >= allocation_due
-            {
-                let name = allocation_groups[allocation_cursor].clone();
-                if self
-                    .store
-                    .call(move |s| s.fill_funding_vacancies(&name))
-                    .await
-                    .is_err()
-                {
-                    tracing::debug!("funding vacancy allocation unavailable");
-                }
-                allocation_cursor += 1;
-                if allocation_cursor == allocation_groups.len() {
-                    allocation_cursor = 0;
-                    allocation_due = clock.now().saturating_add(self.poll_seconds.max(1));
+            if !stopping {
+                // Rearm all due groups before any Store/source work. Completion
+                // traffic and payment wakes cannot advance or redraw this schedule.
+                let now = tokio::time::Instant::now();
+                let groups = if explicit_due.is_some_and(|due| due <= now) {
+                    explicit_due =
+                        Some(now + std::time::Duration::from_secs(self.poll_seconds.max(1)));
+                    allocation_groups.clone()
+                } else {
+                    opportunities.take_due(now, draw_interval)
+                };
+                for name in groups {
+                    if self
+                        .store
+                        .call(move |s| {
+                            // Promotion is advisory; a local failure must not suppress
+                            // independent vacancy work for this group or its siblings.
+                            if mode == Mode::Bootstrap {
+                                return s.fill_bootstrap_vacancies(&name);
+                            }
+                            let promotion = if mode == Mode::Serving {
+                                s.promote_low_active(&name).map(|_| ())
+                            } else {
+                                Ok(())
+                            };
+                            let refill = s.fill_funding_vacancies(&name);
+                            promotion?;
+                            refill
+                        })
+                        .await
+                        .is_err()
+                    {
+                        tracing::debug!(
+                            "funding opportunity could not complete; existing work remains owned"
+                        );
+                    }
                 }
             }
             if !stopping {
@@ -440,8 +566,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         first_error.get_or_insert(error);
                     }
                 }
-                self.dispatch_pending(&mut pending, &mut flight, &reader, &lease, &clock);
+                // Launch a prepared unsigned quote first: clearing its pending
+                // handoff can make the prerequisite page runnable immediately.
                 self.dispatch_quote(&mut flight, &reader, &lease, &clock);
+                self.dispatch_pending(&mut pending, &mut flight, &reader, &lease, &clock);
             }
             if stopping {
                 pending.clear();
@@ -464,6 +592,28 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     && clock.now() >= lane.pass_due
                     && !pending.iter().any(|item| item.lane() == lane.kind)
             });
+            let retry_due = if !pending.is_empty() || flight.quote_pending.is_some() {
+                lease
+                    .state
+                    .lock()
+                    .expect("funding schedule lock")
+                    .records
+                    .values()
+                    .filter(|record| record.due > clock.now())
+                    .map(|record| record.due)
+                    .min()
+            } else {
+                None
+            };
+            let next_wake = next_wake(
+                &inventory,
+                &pending,
+                retry_due,
+                &clock,
+                &opportunities,
+                once,
+                explicit_due,
+            );
             let completion = if needs_page && !stopping {
                 flight.reads.next().now_or_never().flatten()
             } else {
@@ -473,7 +623,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         stopping = true;
                         None
                     },
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)), if !stopping => None,
+                    _ = async {
+                        match next_wake {
+                            Some(due) => tokio::time::sleep_until(due).await,
+                            None => std::future::pending().await,
+                        }
+                    }, if !stopping => None,
                 }
             };
             if let Some(completion) = completion {
@@ -529,7 +684,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     &mut lane.read_failure,
                 )?
                 else {
-                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    lane.pass_due = clock.after_poll(self.poll_seconds.max(1));
                     continue;
                 };
                 lane.through = through;
@@ -547,13 +702,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     .call(move |s| s.funding_status_page(&after, upper))
                     .await;
                 let Some(page) = read_result(page, &mut lane.read_failure)? else {
-                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    lane.pass_due = clock.after_poll(self.poll_seconds.max(1));
                     lane.exhausted |= once;
                     continue;
                 };
                 if page.is_empty() {
                     lane.exhausted = true;
-                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    lane.pass_due = clock.after_poll(self.poll_seconds.max(1));
                     continue;
                 }
                 #[cfg(test)]
@@ -580,13 +735,13 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 .call(move |s| s.funding_work_page(&after, upper))
                 .await;
             let Some(page) = read_result(page, &mut lane.read_failure)? else {
-                lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                lane.pass_due = clock.after_poll(self.poll_seconds.max(1));
                 lane.exhausted |= once;
                 continue;
             };
             if page.is_empty() {
                 lane.exhausted = true;
-                lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                lane.pass_due = clock.after_poll(self.poll_seconds.max(1));
                 continue;
             }
             #[cfg(test)]
@@ -913,7 +1068,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             state.complete(
                 (&request.id, &request.operation_id),
                 Kind::Status,
-                instant,
+                clock.ceil_epoch(tokio::time::Instant::now()),
                 RetrySchedule::Poll(self.poll_seconds, false),
                 error.clone(),
                 condition,
@@ -1102,7 +1257,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             state.complete(
                 (&job.id, &job.operation_id),
                 kind,
-                instant,
+                clock.ceil_epoch(tokio::time::Instant::now()),
                 credit_due.map_or(
                     RetrySchedule::Poll(self.poll_seconds, job.timed_out),
                     RetrySchedule::At,
@@ -1438,3 +1593,7 @@ impl State {
 #[cfg(test)]
 #[path = "scheduler_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "opportunity_tests.rs"]
+mod opportunity_tests;

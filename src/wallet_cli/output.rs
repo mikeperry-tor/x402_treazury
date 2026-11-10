@@ -225,7 +225,7 @@ pub(super) fn status(
         .unwrap();
         for claim in &pool.reserve_claims {
             if let Some(job) = &claim.blocked_funding_job_id {
-                writeln!(text, "    {} reserve blocked by completed, uncredited funding job {job}; when automatic funding is enabled, replacement follows resolution of original source ownership", claim.slot).unwrap();
+                writeln!(text, "    {} reserve occupied by completed, uncredited funding job {job}; awaiting replacement checks when automatic funding is enabled, including original Zcash source ownership", claim.slot).unwrap();
             }
         }
         for wallet in pool

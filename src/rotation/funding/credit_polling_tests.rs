@@ -84,7 +84,7 @@ async fn fresh_and_quoted_allocations_never_poll_credit_even_after_reopen() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn accepted_work_resumes_credit_immediately_then_waits_a_minute_despite_sibling_progress() {
     for stage in ["preparation", "submitted", "confirmed"] {
         let dir = tempfile::tempdir().unwrap();
