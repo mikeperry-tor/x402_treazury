@@ -2197,6 +2197,58 @@ acquisition, without origin validator promotion or stale delivery. Warming scans
 `fresh_via_relay` for a fresh catalog; responses excluded by cache policy report
 `not_stored`. No live paid delivery or Tor qualification is implied by offline tests.
 
+Provider advertisements use explicit pricing configuration:
+
+```toml
+[pricing]
+source = "catalog"
+format = "payment-info"
+key = "x-payment-info" # optional; this format's default
+unit = "call" # reviewed default only when metadata omits its unit
+usd_as_usdc = true # opt in only for documented USD-denominated USDC tariffs
+```
+
+`payment-info` reads structured operation metadata; `x402` defaults to the
+`x-x402` operation member and also supports its dollar-prefixed `price` strings.
+`pricing_key` remains shorthand for catalog `payment-info` with that key, preserving
+legacy display behavior. A local `pricing` or `pricing_key` declaration replaces
+both inherited declarations as one setting; the `pricing` table replaces in full.
+Same-file declarations may coexist only when they select the same catalog
+payment-info member. Configuration inspection reports the winning fields' origins.
+
+A pricing source can instead be an explicitly configured HTTPS URL with
+format `x402-resources` (a `resources` array) or `x402-discovery` (an `items` array).
+External formats use resource payment requirements and do not accept `key`.
+Operator-configured pricing URLs follow catalog destination rules; dynamic source
+management retains its existing public-destination restrictions.
+There is no automatic well-known lookup. External acquisition is optional and
+cannot delay tool publication or an invocation.
+
+Normalized advertisements preserve unknown, explicit free/zero, fixed,
+dynamic/range and unsupported tariffs. Selection estimates require exact
+nonnegative per-call USDC amounts with at most six decimal places. The optional
+`unit` default accepts `call` or `request`; explicit vendor units, including
+unsupported or malformed units, take precedence. Legacy display's `/call` default
+does not itself establish a selection unit. USD amounts require the provider's
+explicit `usd_as_usdc` opt-in, backed by its settlement documentation; generic
+x402 metadata alone does not establish that conversion. Unsupported explicit
+assets or networks do not become USDC hints. Atomic payment alternatives require
+Base mainnet's USDC contract and six-decimal units; compatible alternatives are
+chosen individually rather than summed. Metered, credit, dynamic and ambiguous
+tariffs remain display-only. Explicit `min`/`max` fields keep a tariff display-only
+even alongside an `amount` or payment alternative; incomplete or malformed ranges
+retain vendor details rather than becoming fixed estimates. Authored prose and
+credit conversion never become monetary inputs.
+
+The normalized amount is advisory: valid observed offers take precedence, then
+fresh advertisements, then unknown-price selection. Each invocation still obtains
+and validates its own challenge. Advertised metadata is separate from the observed
+price cache, so a local catalog can supply its first hint without a cache row or
+previous API request. Remote advertisements use the existing configured catalog lifetime (seven days
+by default) measured from their own acquisition; unrelated catalog reads do not
+renew external metadata. Storage success is not a prerequisite. Loading a replacement source creates new
+advertisement handles.
+
 Pricing suffixes use compact provenance labels:
 
 - `Cost: ~$0.015/call [spec].` or `Cost: ~$0.01–$0.20/call [spec].`

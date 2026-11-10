@@ -43,6 +43,7 @@ pub async fn read_table(path: &Path) -> Result<toml::Table> {
 }
 pub fn validate(settings: &Config) -> Result<()> {
     ensure!(!settings.spec.trim().is_empty(), "spec is required");
+    settings.effective_pricing()?;
     for url in settings.base_url.iter().chain(settings.help_url.iter()) {
         crate::network::provider_url(url)?;
     }
@@ -134,15 +135,23 @@ pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<Resolve
             provider.display()
         );
         // Validate inherited fields even if a local override would hide an error.
-        let _: Config = toml::Value::Table(inherited.clone())
+        let inherited_settings: Config = toml::Value::Table(inherited.clone())
             .try_into()
             .context("invalid provider fields")?;
+        inherited_settings.effective_pricing()?;
         for key in inherited.keys() {
             origins.insert(key.clone(), provider.display().to_string());
         }
         resolve_spec(&mut inherited, &provider);
     }
     resolve_spec(&mut local, &declaring);
+    // The legacy shorthand and typed declaration are one replaceable setting.
+    if local.contains_key("pricing") || local.contains_key("pricing_key") {
+        inherited.remove("pricing");
+        inherited.remove("pricing_key");
+        origins.remove("pricing");
+        origins.remove("pricing_key");
+    }
     // Top-level fields replace in full; arrays and override maps never concatenate.
     for (key, value) in local {
         origins.insert(key.clone(), declaring.display().to_string());

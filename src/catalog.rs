@@ -183,6 +183,8 @@ pub struct Config {
     pub exclude_tags: Vec<String>,
     pub pricing_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<crate::pricing::advertised::PricingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_pricing: Option<CreditPricing>,
     pub overrides: Value,
     pub additional_properties: Option<bool>,
@@ -192,6 +194,24 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn effective_pricing(&self) -> Result<Option<crate::pricing::advertised::PricingConfig>> {
+        use crate::pricing::advertised::PricingConfig;
+        if let Some(pricing) = &self.pricing {
+            pricing.validate()?;
+            if let Some(key) = &self.pricing_key {
+                ensure!(
+                    pricing.source == "catalog"
+                        && pricing.format == crate::pricing::advertised::PricingFormat::PaymentInfo
+                        && pricing.catalog_key() == Some(key.as_str()),
+                    "pricing_key contradicts explicit pricing settings"
+                );
+            }
+            Ok(Some(pricing.clone()))
+        } else {
+            Ok(self.pricing_key.as_deref().map(PricingConfig::legacy))
+        }
+    }
+
     /// Compile advice once for an operator inventory; tool contracts stay unchanged.
     pub fn recommendation_matcher(&self) -> Result<impl Fn(&str) -> bool> {
         let patterns = self
@@ -252,6 +272,7 @@ impl Default for Config {
             tags: vec![],
             exclude_tags: vec![],
             pricing_key: None,
+            pricing: None,
             credit_pricing: None,
             overrides: json!({}),
             additional_properties: None,
@@ -287,6 +308,8 @@ pub struct DescriptionRendering {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
+    #[serde(skip)]
+    pub advertised_pricing: crate::pricing::advertised::AdvertisedPricing,
     #[serde(skip)]
     pub catalog_hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -576,6 +599,8 @@ pub async fn load_json_with_limit(
 pub struct LoadedCatalog {
     pub document: std::sync::Arc<Value>,
     pub hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
+    /// None is an authored local document; remote expiry is independent of storage.
+    pub advertised_expires: Option<u64>,
 }
 impl std::ops::Deref for LoadedCatalog {
     type Target = Value;
@@ -593,16 +618,19 @@ impl From<std::sync::Arc<Value>> for LoadedCatalog {
         Self {
             document,
             hints: None,
+            advertised_expires: None,
         }
     }
 }
 fn loaded(
     document: Value,
     hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
+    advertised_expires: Option<u64>,
 ) -> LoadedCatalog {
     LoadedCatalog {
         document: std::sync::Arc::new(document),
         hints,
+        advertised_expires,
     }
 }
 pub(crate) enum CatalogLoad {
@@ -695,6 +723,10 @@ impl RelayContinuation {
         })?;
         // The relay has already validated complete JSON before caching the response.
         let document = parse_document(&response.body)?;
+        let expires = crate::http_cache::now().saturating_add(
+            crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds)
+                .saturating_sub(response.catalog_cache_age().as_secs()),
+        );
         let hints = if let Some(slot) = crate::discovery_relay::slot_for(
             cfg,
             &cfg.spec,
@@ -727,7 +759,7 @@ impl RelayContinuation {
         } else {
             None
         };
-        Ok(loaded(document, hints))
+        Ok(loaded(document, hints, Some(expires)))
     }
 }
 
@@ -790,7 +822,12 @@ pub(crate) async fn prepare_json_discovery_bounded(
                 cache = "relay_disk_hit",
                 "Catalog JSON read from fresh relay cache; content supplied by configured relay; tool generation and validation still required"
             );
-            return Ok(CatalogLoad::Ready(loaded(document, entry.hints)));
+            let expires = entry.metadata.expires;
+            return Ok(CatalogLoad::Ready(loaded(
+                document,
+                entry.hints,
+                Some(expires),
+            )));
         }
         slot.write(None).await;
     }
@@ -839,6 +876,7 @@ async fn load_json_discovery_origin(
         return Ok(loaded(
             parse_document(&bytes).map_err(crate::network::acquisition::Failure::validation)?,
             None,
+            None,
         ));
     }
 
@@ -856,7 +894,8 @@ async fn load_json_discovery_origin(
         );
         return Ok({
             let (entry, document) = cached.expect("fresh cached document");
-            loaded(document, entry.hints)
+            let expires = entry.metadata.expires;
+            loaded(document, entry.hints, Some(expires))
         });
     }
 
@@ -952,6 +991,9 @@ async fn fetch_catalog_origin(
                         anyhow::Error::new(IncompleteRelayCatalog).context(LoadStage::Body),
                     ));
                 }
+                let expires = crate::http_cache::now().saturating_add(
+                    crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds),
+                );
                 let hints = revalidate_cached_catalog(response.headers(), conditional, slot)
                     .await
                     .map_err(Failure::validation)?;
@@ -959,6 +1001,7 @@ async fn fetch_catalog_origin(
                     serde_json::from_slice(&conditional.expect("validated cached entry").data)
                         .map_err(|error| Failure::validation(error.into()))?,
                     hints,
+                    Some(expires),
                 ));
             }
             // An unfollowed redirect may still carry a valid legacy catalog body.
@@ -988,8 +1031,11 @@ async fn fetch_catalog_origin(
                 })?;
             let document =
                 parse_document(&bytes).map_err(|error| Failure::remote_content(error, policy))?;
+            let expires = crate::http_cache::now().saturating_add(
+                crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds),
+            );
             let hints = persist_catalog_response(status, &headers, bytes, slot).await;
-            Ok(loaded(document, hints))
+            Ok(loaded(document, hints, Some(expires)))
         },
     )
     .await?;
@@ -1575,64 +1621,6 @@ pub fn tag_counts(root: &Value) -> Result<BTreeMap<String, usize>> {
     Ok(counts)
 }
 
-fn money(value: &Value) -> Option<String> {
-    if !(value.is_string() || value.is_u64() || value.is_i64()) {
-        return None;
-    }
-    let value = arg_text(value).trim().to_owned();
-    static RE: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"^\d+(?:\.\d+)?$").expect("constant regex"));
-    if !RE.is_match(&value) {
-        return None;
-    }
-    Some(if let Some((a, b)) = value.split_once('.') {
-        let b = b.trim_end_matches('0');
-        format!("{a}.{b:0<2}")
-    } else {
-        value
-    })
-}
-
-fn price(op: &Value) -> String {
-    let p = &op["pricing"];
-    if p.is_null() || p == &json!({}) {
-        return DEFAULT_PRICE.into();
-    }
-    if p["authMode"] == "free" && p.get("price").is_none() {
-        return "Cost: free [spec].".into();
-    }
-    let block = p.get("price").filter(|v| v.is_object()).unwrap_or(p);
-    let block = block
-        .get("fixed")
-        .filter(|v| v.is_object())
-        .unwrap_or(block);
-    let unit = block["unit"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("call");
-    let show = |amount: String| match block["currency"].as_str() {
-        Some(c) if c.eq_ignore_ascii_case("USD") || c.eq_ignore_ascii_case("USDC") => {
-            format!("${amount}")
-        }
-        Some(c) => format!("{amount} {c}"),
-        None => amount,
-    };
-    if let Some(amount) = money(&block["amount"]) {
-        let dynamic = block["mode"]
-            .as_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case("dynamic"));
-        format!(
-            "Cost: ~{}/{unit} [spec{}].",
-            show(amount),
-            if dynamic { ", dynamic" } else { "" }
-        )
-    } else if let (Some(lo), Some(hi)) = (money(&block["min"]), money(&block["max"])) {
-        format!("Cost: ~{}–{}/{unit} [spec].", show(lo), show(hi))
-    } else {
-        format!("Pricing: {p} [spec].")
-    }
-}
-
 pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolSpec>> {
     build_catalog(cfg, root, prefix)?.complete()
 }
@@ -1651,6 +1639,7 @@ pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<Catalog
 }
 
 fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
+    cfg.effective_pricing()?;
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
             error,
@@ -1683,7 +1672,7 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { catalog_hints: None, response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
+        tools.push(ToolSpec { advertised_pricing: Default::default(), catalog_hints: None, response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
             method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
             param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), wire_names:BTreeMap::new(),whole_body:None,body_closed:false,json_media_type:None });
@@ -1790,7 +1779,9 @@ struct OperationSelection {
 fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<OperationSelection> {
     let mut ops = operations_with_credits(
         root,
-        cfg.pricing_key.as_deref(),
+        cfg.effective_pricing()?
+            .as_ref()
+            .and_then(|p| p.catalog_key()),
         cfg.credit_pricing
             .as_ref()
             .map(|c| c.credit_cost_key.as_str()),
@@ -1939,6 +1930,7 @@ fn operation_description(
     cfg: &Config,
     op: &Value,
     credit_estimate: Option<String>,
+    advertised_price: &crate::pricing::advertised::NormalizedPrice,
 ) -> (String, DescriptionRendering) {
     let method = op["method"].as_str().unwrap();
     let text = op["description"]
@@ -1947,7 +1939,7 @@ fn operation_description(
         .or_else(|| op["summary"].as_str().filter(|s| !s.is_empty()))
         .map(str::to_owned)
         .unwrap_or_else(|| format!("{} {}", method.to_uppercase(), op["path"].as_str().unwrap()));
-    let mut price = price(op);
+    let mut price = advertised_price.description().to_owned();
     if let Some(estimate) = credit_estimate {
         price = if price == DEFAULT_PRICE {
             estimate
@@ -2006,8 +1998,23 @@ fn operation_tool(
         credit_diagnostics.record(&name, reason);
         description
     });
-    let (description, description_rendering) = operation_description(cfg, op, credit_estimate);
+    let pricing = cfg.effective_pricing()?;
+    let normalized = crate::pricing::advertised::NormalizedPrice::parse(
+        &pricing
+            .clone()
+            .unwrap_or_else(|| crate::pricing::advertised::PricingConfig::legacy("")),
+        &op["pricing"],
+    );
+    let (description, description_rendering) =
+        operation_description(cfg, op, credit_estimate, &normalized);
+    let advertised_pricing = crate::pricing::advertised::AdvertisedPricing::new(
+        normalized,
+        cfg.spec.clone(),
+        (cfg.spec.starts_with("http://") || cfg.spec.starts_with("https://"))
+            .then(std::time::Instant::now),
+    );
     Ok(ToolSpec {
+        advertised_pricing,
         catalog_hints: None,
         response_mapping: cfg
             .response_mappings
@@ -2103,6 +2110,10 @@ fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "catalog/advertised_tests.rs"]
+mod advertised_tests;
 
 #[cfg(test)]
 #[path = "catalog/description_tests.rs"]

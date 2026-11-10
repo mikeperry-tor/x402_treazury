@@ -36,6 +36,14 @@ pub(crate) fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+/// Disabling persistence does not make newly acquired advertisements timeless.
+pub(crate) fn advertised_ttl(ttl_seconds: u64) -> u64 {
+    if ttl_seconds == 0 {
+        crate::limits::API_CACHE_TTL_SECONDS
+    } else {
+        ttl_seconds
+    }
+}
 fn date(value: &str) -> Option<u64> {
     httpdate::parse_http_date(value)
         .ok()?

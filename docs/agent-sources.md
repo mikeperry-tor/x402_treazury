@@ -236,6 +236,15 @@ constraints without explaining transport fallback costs or implementation mechan
 Distinguish searching the loaded catalog (no provider requests) from remote
 provider discovery and paid tool invocation.
 
+Registered tools retain normalized provider advertisements separately from observed
+challenge hints. An initial managed call can rank wallets using fresh advertised
+per-call prices before sending its first unsigned request; this read performs no
+balance observation or funding and grants no signing authority. Authored description
+overrides and converted credit estimates remain display-only. Dynamic source imports
+retain accepted provider pricing settings and rebuild runtime metadata rather than
+trusting serialized advertised hints. See
+[pricing configuration](configuration.md#pricing-metadata-and-runtime-hints).
+
 Keep pricing concise. Omit repeated warnings that displayed prices are estimates,
 may vary or do not prove settlement, and generic advice to distrust prices or
 avoid calls. Preserve billing facts that affect requests: metering units, paid

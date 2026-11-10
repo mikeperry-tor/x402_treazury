@@ -1,4 +1,5 @@
-//! Advisory hints learned only from validated challenges on actual API calls.
+//! Advisory prices from provider metadata and validated challenges.
+pub mod advertised;
 pub(crate) mod runtime;
 
 use alloy_primitives::U256;

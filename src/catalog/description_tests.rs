@@ -224,6 +224,9 @@ fn naming_and_display_keep_unicode_lowercase_and_value_kind_boundaries() {
         (json!("1e3"), None),
         (json!(".50"), None),
     ] {
-        assert_eq!(money(&value).as_deref(), expected);
+        assert_eq!(
+            crate::pricing::advertised::money(&value).as_deref(),
+            expected
+        );
     }
 }

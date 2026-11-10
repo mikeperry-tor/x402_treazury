@@ -859,3 +859,53 @@ shared_header = 'Exact quote identifier'
     }
     assert!(toml::from_str::<Config>("spec='one'\nspec='two'").is_err());
 }
+
+#[tokio::test]
+async fn pricing_composition_replaces_legacy_and_typed_declarations_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = dir.path().join("provider.toml");
+    let source = dir.path().join("source.toml");
+    std::fs::write(&provider, "spec='local.json'\npricing_key='x-old'\n").unwrap();
+    let resolved=config::resolve(toml::from_str("extends='provider.toml'\n[pricing]\nsource='catalog'\nformat='payment-info'\nunit='call'\nusd_as_usdc=true").unwrap(),&source).await.unwrap();
+    assert!(resolved.settings.pricing_key.is_none());
+    assert_eq!(
+        resolved.settings.pricing.as_ref().unwrap().catalog_key(),
+        Some("x-payment-info")
+    );
+    assert_eq!(resolved.origins["pricing"], source.display().to_string());
+    assert_eq!(resolved.origins["pricing_key"], "default");
+    std::fs::write(&provider,"spec='local.json'\n[pricing]\nsource='catalog'\nformat='x402'\nunit='call'\nusd_as_usdc=true").unwrap();
+    let resolved = config::resolve(
+        toml::from_str("extends='provider.toml'\npricing_key='x-other'").unwrap(),
+        &source,
+    )
+    .await
+    .unwrap();
+    assert!(resolved.settings.pricing.is_none());
+    assert_eq!(
+        resolved
+            .settings
+            .effective_pricing()
+            .unwrap()
+            .unwrap()
+            .catalog_key(),
+        Some("x-other")
+    );
+    for body in [
+        "spec='local.json'\npricing_key='x-other'\n[pricing]\nsource='catalog'\nformat='payment-info'",
+        "spec='local.json'\n[pricing]\nsource='catalog'\nformat='x402-resources'",
+        "spec='local.json'\n[pricing]\nsource='catalog'\nformat='payment-info'\nunit='record'",
+        "spec='local.json'\n[pricing]\nsource='catalog'\nformat='payment-info'\nunknown=true",
+    ] {
+        assert!(
+            config::resolve(toml::from_str(body).unwrap(), &source)
+                .await
+                .is_err(),
+            "{body}"
+        );
+    }
+    let compatible = "spec='local.json'\npricing_key='x-payment-info'\n[pricing]\nsource='catalog'\nformat='payment-info'\nunit='call'\nusd_as_usdc=true";
+    config::resolve(toml::from_str(compatible).unwrap(), &source)
+        .await
+        .unwrap();
+}

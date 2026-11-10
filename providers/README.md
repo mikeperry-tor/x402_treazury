@@ -252,6 +252,16 @@ Prices for a different tool or conditional fee formulas can remain when they
 explain the workflow. Preserve arbitrary vendor prose and description-only external
 overrides without inferring tariff ownership from their text. See
 [pricing metadata](../docs/configuration.md#pricing-metadata-and-runtime-hints).
+Declare reusable advertised pricing in `[pricing]` when the catalog supports a
+known format. Prefer `source = "catalog"`; external resource documents require an
+explicit public URL and their matching format. Keep compatible `pricing_key`
+shorthand when no extra interpretation is needed. Set `unit = "call"` only after
+reviewing the provider's per-call billing contract, and `usd_as_usdc = true` only
+for a documented USD-denominated USDC tariff. Vendor units and explicit unsupported
+rails override these defaults. Dynamic, credit and metered prices can remain
+useful display-only metadata; do not manufacture a fixed amount. See
+[pricing configuration](../docs/configuration.md#pricing-metadata-and-runtime-hints).
+
 Provider-specific tests and fixtures need a concrete quirk, historical
 failure or authored transformation. Prefer small faithful inputs and assertions
 for that responsibility, with synthetic shared tests for generic behavior. A new
