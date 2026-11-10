@@ -1,7 +1,7 @@
 # Improved pricing discovery
 
-Status: proposed implementation; initial independent plan review passed, with
-exact committed-state review pending. No implementation or live
+Status: proposed implementation; initial plan commit and coverage clarification
+snapshot independently approved; exact coverage commit review pending. No implementation or live
 payment qualification has occurred.
 
 ## Intent, baseline and scope
@@ -109,6 +109,47 @@ dynamic minimums, credit rates and per-record/per-token tariffs must not silentl
 become fixed call charges. Preserve such tariffs for display where supported.
 Request-dependent total calculation is outside the initial implementation.
 
+### Initial provider adoption scope
+
+The first rollout must cover the reusable provider files referenced by
+[`examples/deployments/research_desk.toml`](../../examples/deployments/research_desk.toml),
+not just demonstrate the parser with a few providers. At the starting baseline
+there are 45 active source definitions and 45 distinct source `extends` files.
+Also include the two additional relay-only definitions,
+`providers/curl/provider.toml` and `providers/agproxy.toml`, for 47 distinct provider
+files used by this deployment. Relay-only coverage means reviewing their own tool
+pricing/configuration compatibility; it does not authorize paying for metadata
+or enable hints on unrelated relayed operations. Commented-out SocialFetch is not
+an active dependency. Resolve the actual source and relay references again during
+P4 so changes to the deployment cannot silently escape coverage.
+
+Apply supported pricing declarations in the reusable provider files, with existing
+`pricing_key` retained where compatible shorthand suffices. Do not satisfy coverage
+with research-desk-only overrides, runtime provider dispatch, or a blanket change
+that merely declares every provider priced. Include local authored schemas as
+well as remote catalogs, and preserve authored input/method repairs and tool
+selection. Review other deployment consumers of every changed reusable definition
+under the existing provider-maintenance policy.
+
+For each in-scope provider file, P4 must record the chosen source/format/key,
+currency/unit interpretation, and whether its relevant operations yield initial
+selection hints. Where a file or operation remains display-only or unknown, record
+the concrete reason and verify best-effort selection remains usable. A recognized
+dynamic tariff is covered even when it cannot supply a fixed call estimate;
+coverage does not mean inventing one. Review all configured operations and check
+the research-desk-selected subset explicitly, rather than assuming a priced
+operation elsewhere in the provider covers its deployed tools.
+
+Required cases include ordinary `x-payment-info`, botsmith/Kronos `x-x402`,
+HALOWERK/Brazilayer external metadata, authored local catalogs (including Banking
+Compliance and Concordance), dynamic/metered tariffs and relay-provider definitions.
+Treat the earlier audit's source choices as candidates to verify; external failure
+or unsupported semantics must receive an explicit disposition, not disappear from
+the denominator. Keep detailed generated per-provider evidence under ignored
+`target/`; retain concise acceptance totals, exceptions and findings in this plan
+and durable quirks in owning provider caveats. Do not add a universal fixture or
+settings snapshot to prove inventory coverage.
+
 ### Initial selection, including cold caches
 
 At the initial managed payer selection, before provider transport acquisition and
@@ -204,7 +245,7 @@ Stable identifiers remain in this plan through implementation and review.
 | P1 | Typed pricing configuration, legacy compatibility and normalized catalog pricing. Consumers: config composition/origins, catalog conversion, local/remote tool metadata, descriptions and search output. | Focused parser/config/normalization tests; legacy display/credit/override behavior preserved. Update configuration, agent-source guidance and provider policy as applicable. |
 | P2 | Carry advertised metadata into initial selection independently of observed cache ownership. Consumers: bound tools, registered/dynamic invocation paths, operation URLs, PaidClient and managed selection. | First-call cold-cache, local catalog, no-store/cache-write-failure, observed precedence/expiry, zero/unknown and advisory fallback tests. Assert selected identity before any unsigned request and forbidden RPC/funding/signing effects. Update architecture, wallet-selection and testing guides. Gate G1 covers combined P1–P2. |
 | P3 | Optional explicit external metadata acquisition, freshness and unambiguous operation matching. Consumers: source build/publication/reload, shared network/cache lifecycle and tool execution metadata. | Localhost tests for delayed/failed/402 metadata with tools remaining usable; source replacement/removal, stale completion, no-store/expiry and method/template ambiguity. Assert no paid relay/payment, duplicate active acquisition or new readiness dependency. Update network/cache/resource inventories and source guidance where behavior changes. |
-| P4 | Configure supported pricing for audited providers; prefer catalog, add well-known for Brazilayer/HALOWERK. Review existing pricing_key providers and enable botsmith/Kronos x-x402 interpretation. | Review every active research-desk source with an explicit usable/unusable disposition; validate changed provider compositions and research-desk routing through production catalog paths. Small authored fixtures only for named quirks; no universal inventory snapshots. Update owning caveats and permanent guides. Final gate G2 covers all commits, fixups and affected call chains. |
+| P4 | Complete the initial provider adoption scope: all 45 active source provider files and two relay-only files currently referenced by research-desk. Prefer catalog, add well-known for Brazilayer/HALOWERK, retain compatible pricing_key shorthand and enable botsmith/Kronos x-x402 interpretation in reusable definitions. | Re-resolve all references and reconcile every provider file and deployed operation to a usable/display-only/unknown disposition. Validate composition and research-desk routing through production catalog paths, plus affected consumers in other deployments. Exercise initial hints for each supported layout and local/remote acquisition class with focused tests; small authored fixtures only for named quirks. Record coverage totals/exceptions, update caveats/guides. G2 requires complete accounted scope, not universal fixed-price availability, and covers all commits/fixups/call chains. |
 | P5 | After G2 and applicable user review rounds, remove completed plan and repair its index link. | Enduring contracts in owning guides; exact cleanup SHA and final branch independently reviewed; unsquashed plan/review history preserved. |
 
 D0 is a fresh independent design review of the exact plan snapshot and current
@@ -289,6 +330,16 @@ reviewed state at each handoff.
   findings. Reviewer verified current pricing/selection/operation-URL call chains;
   disabled-cache in-memory lifetime and late-enrichment ownership were identified
   as explicit D0 implementation decisions above. Relative file links and
-  `git diff --check` passed. Exact committed-state review remains pending; D0 must
-  also approve the resolved implementation decisions before substantive work.
+  `git diff --check` passed. Exact P0 commit
+  `2d3cb49732e5cb680280b97b6fe0b8277efd5627` and its combined change against the
+  starting baseline independently approved with no material findings. D0 must
+  still approve resolved implementation decisions before substantive work.
+- Coverage clarification requested after P0: make reusable research-desk provider
+  files the mandatory initial adoption set, including the two relay-only files;
+  strengthen P4/G2 acceptance without claiming every tariff is a fixed call price.
+  Independent snapshot review against P0 approved with no material findings
+  (SHA-256 `1fbc8037706fc3b6a43673e96c1c6b06f559838d43c557a4cd8ae5984050943f`).
+  Reviewer independently verified the 45 + 2 file denominator, selected-operation
+  coverage and relay-only distinction; relative links and diff checks passed.
+  Exact committed-state review is pending.
 - P1–P5, G1/G2: not started. No compiler/runtime validation claimed.
