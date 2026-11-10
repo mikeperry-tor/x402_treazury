@@ -1157,7 +1157,7 @@ async fn sizing_policy_uses_the_default_small_range_when_reserves_are_omitted() 
         backend.sizing_policy(&job).await.unwrap(),
         crate::rotation::config::SizingPolicy::Range {
             minimum: 2_000_000,
-            maximum: 5_000_000,
+            maximum: 4_000_000,
         }
     );
 }
