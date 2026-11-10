@@ -406,10 +406,12 @@ async fn handle(State(rpc): State<Arc<Rpc>>, Json(request): Json<Value>) -> Json
             "eth_chainId" => (json!("0x2105"), false),
             "eth_getBlockByNumber" => {
                 let tag = request["params"][0].as_str().unwrap();
-                let height = if matches!(tag, "latest" | "finalized") {
-                    state.head
-                } else {
-                    u64::from_str_radix(&tag[2..], 16).unwrap()
+                let height = match tag {
+                    "latest" => state.head,
+                    // Synthetic finalized history is distinct from the latest
+                    // balance; this gap is fixture data, not a production rule.
+                    "finalized" => state.head - 12,
+                    _ => u64::from_str_radix(&tag[2..], 16).unwrap(),
                 };
                 (
                     json!({"number":format!("0x{height:x}"), "hash":format!("0x{height:064x}"), "timestamp":format!("0x{:x}",state.timestamp)}),
