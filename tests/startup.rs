@@ -773,7 +773,6 @@ async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
     let original = std::fs::read_to_string(&path).unwrap();
     for selection in [
         "include_tools=['this_is_a_local_typo']",
-        "exclude_tools=['this_is_a_local_typo']",
         "exclude_tools=['*']",
         "include=['/missing']",
     ] {
@@ -791,6 +790,21 @@ async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
             "{selection}: {error:#}"
         );
     }
+    let advisory = original.replace(
+        "[sources.s00]",
+        "[sources.s00]\noptional_startup=true\nexclude_tools=['this_is_a_local_typo']",
+    );
+    std::fs::write(&path, advisory).unwrap();
+    let inventory = Deployment::load_for_unsigned_serving(&path)
+        .await
+        .unwrap()
+        .inventory();
+    assert!(
+        inventory
+            .iter()
+            .flat_map(|server| &server.tools)
+            .any(|tool| tool.tool.name == "s00_read")
+    );
 }
 
 #[tokio::test]

@@ -362,6 +362,31 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
             .len(),
         2
     );
+    let advisory = configuration().replace(
+        "exclude_tools = [\"alpha_hidden\"]",
+        "exclude_tools = [\"alpha_typo\"]",
+    );
+    let inventory = Deployment::load(&write_config(dir.path(), &advisory))
+        .await
+        .unwrap()
+        .inventory();
+    let tools: std::collections::BTreeSet<_> = inventory
+        .iter()
+        .find(|server| server.server == "research")
+        .unwrap()
+        .tools
+        .iter()
+        .map(|tool| tool.tool.name.as_str())
+        .collect();
+    assert_eq!(
+        tools,
+        std::collections::BTreeSet::from([
+            "alpha_expensive",
+            "alpha_hidden",
+            "alpha_pay",
+            "beta_pay"
+        ])
+    );
     let invalid = [
         (
             configuration().replace("version = 1", "version = 2"),
@@ -377,8 +402,8 @@ async fn validation_and_inventory_need_no_wallet_credentials() {
         ),
         (
             configuration().replace(
-                "exclude_tools = [\"alpha_hidden\"]",
-                "exclude_tools = [\"alpha_typo\"]",
+                "include_tools = [\"beta_pay\"]",
+                "include_tools = [\"beta_typo\"]",
             ),
             "unknown tool selector",
         ),
