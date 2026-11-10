@@ -110,6 +110,9 @@ pub async fn warm_cache_with_network(
         }
         let deployment = Deployment {
             direct_history: None,
+            catalog_capacity: std::sync::Arc::new(crate::network::DiscoveryCapacity::new(
+                config.startup.catalog_concurrency,
+            )),
             listeners: EffectiveBindings::resolve(&config)?.listeners(&config),
             search_relay: None,
             prebound: BTreeMap::new(),

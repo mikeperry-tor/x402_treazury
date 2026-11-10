@@ -440,7 +440,7 @@ impl Relay {
         url: &str,
         limit: usize,
         setting: &'static str,
-        gate: Option<Arc<tokio::sync::Semaphore>>,
+        gate: Option<Arc<crate::network::DiscoveryCapacity>>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
         retry_after: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
@@ -508,7 +508,7 @@ impl Relay {
         url: &str,
         limit: usize,
         setting: &'static str,
-        capacity: Vec<Arc<tokio::sync::Semaphore>>,
+        capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
         retry_after: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
         let target = adapters::TargetRequest {
@@ -557,7 +557,7 @@ impl Relay {
     async fn fetch_owned(
         &self,
         request: StaticFetch,
-        capacity: Vec<Arc<tokio::sync::Semaphore>>,
+        capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
     ) -> Result<Arc<Response>> {
         request
             .prepared

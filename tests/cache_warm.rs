@@ -441,7 +441,7 @@ sources=['z_remote','m_local','a_remote']
 }
 
 #[tokio::test]
-async fn warming_rolls_forward_within_source_bound_and_sorts_completion_order() {
+async fn direct_warming_bypasses_tor_capacity_and_sorts_completion_order() {
     use tokio::sync::{Semaphore, mpsc};
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("state")).unwrap();
@@ -491,34 +491,21 @@ async fn warming_rolls_forward_within_source_bound_and_sorts_completion_order() 
         .await
     });
     let timeout = std::time::Duration::from_secs(10);
-    let first = tokio::time::timeout(timeout, arrivals.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = tokio::time::timeout(timeout, arrivals.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_ne!(first, second);
-    assert!(first < 2 && second < 2);
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), arrivals.recv())
-            .await
-            .is_err(),
-        "third catalog must wait for a source slot"
-    );
-    // Leave the first source blocked: completing its peer must advance the
-    // rolling window, rather than waiting for the entire first batch.
-    gates[second].add_permits(1);
-    assert_eq!(
-        tokio::time::timeout(timeout, arrivals.recv())
-            .await
-            .unwrap()
-            .unwrap(),
-        2
-    );
-    gates[2].add_permits(1);
-    gates[first].add_permits(1);
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        seen.push(
+            tokio::time::timeout(timeout, arrivals.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    seen.sort();
+    assert_eq!(seen, [0, 1, 2]);
+    // Every direct request starts before any response is released.
+    for id in (0..3).rev() {
+        gates[id].add_permits(1);
+    }
     let output = warming.await.unwrap();
     assert!(
         output.status.success(),

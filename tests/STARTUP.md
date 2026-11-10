@@ -16,9 +16,10 @@ causes without an SDK wallet or network calls. Warnings show only safe top-level
 configuration errors, omit endpoint/header values and retain scoped degradation
 without allocating funding jobs.
 
-`tests/startup.rs` checks rolling replenishment, the default two-request catalog bound,
-failure and caller cancellation closing active requests, untouched queued sources,
-serial/parallel inventory equality, compatible alias sharing (concurrent and queued),
+`tests/startup.rs` checks direct downloads bypass Tor isolation capacity, the
+default two-scope setting, failure and caller cancellation closing every active
+direct request, inventory ordering independent of completion and the configured
+Tor capacity, compatible alias sharing,
 strict-limit/timeout separation, shared-download cancellation and fresh loads,
 per-alias overrides/filters/wallets, strict configuration, and JSON stdout with
 progress on stderr. The CLI boundary regression parses the complete tool inventory,
@@ -117,8 +118,9 @@ Strict inspection and frozen reload must agree with publication and wallet
 bindings; routing explanations include exclusions without adding catalog reads or
 funding work. See the maintained
 [distribution contract](../docs/configuration.md#source-tool-distribution).
-The catalog capacity subprocess saturates both slots with indefinite server delays
-and verifies a queued healthy source publishes a callable tool. It also exercises
+The catalog capacity subprocess exercises indefinite server delays and verifies
+a healthy source publishes a callable tool while delayed attempts hold no active
+isolation slot. It also exercises
 strict loading and warming, which download the healthy source while remaining
 pending for completeness; cancellation cannot dispatch delayed retries.
 
@@ -172,7 +174,9 @@ request contracts with nested arrays and a path template, a larger lookup
 inventory, and embedded-price/GET-POST variants. Five sources include two aliases
 sharing three unique spec URLs while retaining distinct prefixes. Localhost adds
 100 ms per request. The test compares complete inventories across three samples
-at each concurrency level. Aliases must not duplicate catalog requests, and no
+at each configured Tor capacity. Its direct requests bypass that capacity, so
+these runs measure direct acquisition and inventory stability rather than Tor
+admission or a concurrency speedup. Aliases must not duplicate catalog requests, and no
 endpoint pricing requests are made. The server rejects payment-signature headers.
 No provider fixture, external service, Tor daemon, secret, funded wallet or signature is
 involved. Compiling this ignored test does not run a measurement or establish
@@ -183,16 +187,25 @@ body, parsing and tool construction separately; full startup also includes
 wallet binding. Record peak memory, request counts, failures and identical tool
 inventories, not only successful elapsed times. Keep results under ignored `target/`.
 
-## Defaults and working theory
+## Default capacity and Conflux rationale
 
-Catalog concurrency defaults to 2 (configurable 1..64). Compatible catalog aliases
-share one download per load, while local files and separate loads remain independent.
+Deployment catalog Tor isolation capacity defaults to 2 (configurable 1..64).
+Catalog, optional pricing and relay requests with the same effective SOCKS
+credentials share one slot and run in parallel while distinct scopes wait.
+Different transport/retry scopes count separately even on one domain. The last
+full-body holder releases capacity before retry/handoff delays. Direct egress,
+including explicit direct warming, bypasses the gate; idle Tor circuits and pooled
+sockets do not count. Compatible catalog aliases share one download per load,
+while local files and separate loads remain independent. Runtime dynamic imports
+outside this deployment acquisition owner retain their existing scheduling.
 A separate live comparison must declare its selected provider workload and
 retain failures without changing runtime selection to improve the result.
 
-The catalog default reflects a working theory that leaving headroom below an
-anticipated three prebuilt Conflux sets helps transfer tails when a set is unavailable.
-This is not an observed Conflux assignment or proven optimum. For rigorous live
+Tor normally targets three fresh prebuilt multipath Conflux sets. Admitting two
+active isolation scopes leaves headroom for replenishment, making Conflux use
+more likely for catalog downloads. The operator's live Tor performance testing
+also identified two as a sweet spot. This motivates the default without proving a
+universal optimum or guaranteeing a particular Conflux assignment. For rigorous live
 comparison, alternate limits against fixed catalogs, retain failures, observe
 actual circuit/Conflux assignments and use dedicated persistent Tor state with
 mature circuit-build learning. Record changes in that learning and connection

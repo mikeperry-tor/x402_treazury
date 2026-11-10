@@ -153,7 +153,7 @@ async fn capacity_fixture() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let gate = Arc::new(tokio::sync::Semaphore::new(1));
+    let gate = Arc::new(crate::network::DiscoveryCapacity::new(1));
     let client = PaidClient::unsigned()
         .for_relay()
         .with_attempt_capacity(std::slice::from_ref(&gate));
@@ -175,12 +175,23 @@ async fn capacity_fixture() {
     tokio::time::timeout(Duration::from_secs(5), reached.cancelled())
         .await
         .unwrap();
+    let other_url = "https://other.example.com/catalog";
+    let other = crate::network::global()
+        .http_participating(
+            &crate::network::IsolationId::discovery(other_url).unwrap(),
+            other_url,
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    let mut pending = Box::pin(gate.acquire(&other));
     assert!(
-        gate.try_acquire().is_err(),
-        "active HTTP attempt owns existing capacity"
+        futures_util::FutureExt::now_or_never(pending.as_mut()).is_none(),
+        "active Tor scope owns existing capacity"
     );
     release.cancel();
-    let available = tokio::time::timeout(Duration::from_millis(500), gate.acquire())
+    let available = tokio::time::timeout(Duration::from_millis(500), pending)
         .await
         .expect("retry delay must release capacity before the next HTTP attempt")
         .unwrap();

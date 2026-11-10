@@ -184,6 +184,7 @@ pub struct Deployment {
     search_relay: Option<std::sync::Arc<crate::discovery_relay::SearchRelay>>,
     unavailable_sources: BTreeMap<String, String>,
     pending_sources: BTreeMap<String, startup::PendingSource>,
+    catalog_capacity: std::sync::Arc<crate::network::DiscoveryCapacity>,
     defer_discovery: bool,
     initialized: Option<InitializedWallets>,
     config: MetaConfig,
@@ -715,6 +716,9 @@ impl Deployment {
         };
         let mut deployment = Self {
             direct_history,
+            catalog_capacity: std::sync::Arc::new(crate::network::DiscoveryCapacity::new(
+                config.startup.catalog_concurrency,
+            )),
             listeners: wallet_resolution.source_bindings.listeners(&config),
             prebound: BTreeMap::new(),
             search_relay,
@@ -765,6 +769,7 @@ impl Deployment {
                 relay,
                 deployment.defer_discovery,
                 all_tools,
+                deployment.catalog_capacity.clone(),
             )
             .await?;
             deployment.unavailable_sources = unavailable_sources;

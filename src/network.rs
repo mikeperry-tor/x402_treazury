@@ -1,5 +1,8 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
 pub(crate) mod acquisition;
+mod discovery_capacity;
+pub use discovery_capacity::DiscoveryCapacity;
+pub(crate) use discovery_capacity::DiscoveryPermit;
 mod grpc;
 mod indexer;
 pub(crate) use grpc::ConnectionDiagnostic;
@@ -419,8 +422,12 @@ pub struct HttpTransport {
     pub identity: IsolationId,
     pub scope: IsolationId,
     key: HttpKey,
+    tor: bool,
 }
 impl HttpTransport {
+    pub(crate) fn uses_tor(&self) -> bool {
+        self.tor
+    }
     pub fn selection(&self) -> SelectionPolicy {
         self.key.selection
     }
@@ -825,6 +832,7 @@ impl NetworkContext {
             identity: key.identity.clone(),
             scope,
             key,
+            tor: self.policy.mode == Mode::Tor,
         }))
     }
     pub fn discovery(

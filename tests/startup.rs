@@ -130,7 +130,7 @@ fn config(
     path
 }
 #[tokio::test]
-async fn rolling_slots_and_inventory_match_serial_loading() {
+async fn direct_downloads_bypass_tor_capacity_and_keep_inventory_order() {
     tls::install_trust();
     let mut fixture = Fixture::new(5, None).await;
     let dir = tempfile::tempdir().unwrap();
@@ -143,17 +143,16 @@ async fn rolling_slots_and_inventory_match_serial_loading() {
     );
     let load_path = path.clone();
     let task = tokio::spawn(async move { Deployment::load(&load_path).await });
-    let mut first = vec![fixture.next().await, fixture.next().await];
-    first.sort();
-    assert_eq!(first, [0, 1]);
-    assert!(fixture.arrivals.try_recv().is_err());
-    // Keep source 0 held while successive sources consume the other rolling slot.
-    for id in 1..4 {
-        fixture.release(id);
-        assert_eq!(fixture.next().await, id + 1);
+    let mut arrivals = Vec::new();
+    for _ in 0..5 {
+        arrivals.push(fixture.next().await);
     }
-    fixture.release(4);
-    fixture.release(0);
+    arrivals.sort();
+    assert_eq!(arrivals, [0, 1, 2, 3, 4]);
+    // Release in reverse order; direct downloads hold no Tor capacity slots.
+    for id in (0..5).rev() {
+        fixture.release(id);
+    }
     let parallel = task.await.unwrap().unwrap();
     let inventory = serde_json::to_value(parallel.inventory()).unwrap();
     assert_eq!(inventory[0]["tools"][0]["source"], "s00"); // tool-name order, not completion order
@@ -167,11 +166,14 @@ async fn rolling_slots_and_inventory_match_serial_loading() {
     for id in 0..5 {
         fixture.release(id);
     }
-    let serial = Deployment::load(&path).await.unwrap();
-    assert_eq!(inventory, serde_json::to_value(serial.inventory()).unwrap());
+    let single_scope_limit = Deployment::load(&path).await.unwrap();
+    assert_eq!(
+        inventory,
+        serde_json::to_value(single_scope_limit.inventory()).unwrap()
+    );
 }
 #[tokio::test]
-async fn default_limit_is_two_and_abort_drops_active_requests() {
+async fn default_tor_capacity_is_two_and_abort_drops_all_direct_requests() {
     tls::install_trust();
     let mut fixture = Fixture::new(3, None).await;
     let dir = tempfile::tempdir().unwrap();
@@ -188,24 +190,28 @@ async fn default_limit_is_two_and_abort_drops_active_requests() {
     );
     let task = tokio::spawn(async move { Deployment::load(&path).await });
     let mut seen = Vec::new();
-    for _ in 0..2 {
+    for _ in 0..3 {
         seen.push(fixture.next().await);
     }
     seen.sort();
-    assert_eq!(seen, (0..2).collect::<Vec<_>>());
-    assert!(fixture.arrivals.try_recv().is_err());
+    assert_eq!(seen, [0, 1, 2]);
     task.abort();
     assert!(matches!(task.await, Err(error) if error.is_cancelled()));
-    for _ in 0..2 {
-        tokio::time::timeout(Duration::from_secs(5), fixture.cancelled.recv())
-            .await
-            .unwrap()
-            .unwrap();
+    let mut cancelled = Vec::new();
+    for _ in 0..3 {
+        cancelled.push(
+            tokio::time::timeout(Duration::from_secs(5), fixture.cancelled.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
     }
+    cancelled.sort();
+    assert_eq!(cancelled, [0, 1, 2]);
     assert!(fixture.arrivals.try_recv().is_err());
 }
 #[tokio::test]
-async fn failure_cancels_other_fetches_and_never_starts_queued_sources() {
+async fn failure_cancels_other_active_direct_fetches() {
     tls::install_trust();
     let mut fixture = Fixture::new(3, Some(0)).await;
     let dir = tempfile::tempdir().unwrap();
@@ -217,22 +223,30 @@ async fn failure_cancels_other_fetches_and_never_starts_queued_sources() {
         "",
     );
     let task = tokio::spawn(async move { Deployment::load(&path).await });
-    let mut first = vec![fixture.next().await, fixture.next().await];
-    first.sort();
-    assert_eq!(first, [0, 1]);
+    let mut arrivals = Vec::new();
+    for _ in 0..3 {
+        arrivals.push(fixture.next().await);
+    }
+    arrivals.sort();
+    assert_eq!(arrivals, [0, 1, 2]);
     fixture.release(0);
     let error = task.await.unwrap().err().unwrap();
     assert!(format!("{error:#}").contains("source s00: loading spec"));
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(5), fixture.cancelled.recv())
-            .await
-            .unwrap(),
-        Some(1)
-    );
+    let mut cancelled = Vec::new();
+    for _ in 0..2 {
+        cancelled.push(
+            tokio::time::timeout(Duration::from_secs(5), fixture.cancelled.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    cancelled.sort();
+    assert_eq!(cancelled, [1, 2]);
     assert!(fixture.arrivals.try_recv().is_err());
 }
 #[tokio::test]
-async fn failed_inspection_finishes_independent_catalogs_with_rolling_bound() {
+async fn failed_inspection_finishes_all_independent_direct_catalogs() {
     tls::install_trust();
     let mut fixture = Fixture::new(3, Some(0)).await;
     let dir = tempfile::tempdir().unwrap();
@@ -244,12 +258,13 @@ async fn failed_inspection_finishes_independent_catalogs_with_rolling_bound() {
         "",
     );
     let task = tokio::spawn(async move { Deployment::inspect_catalogs(&path).await });
-    let mut first = vec![fixture.next().await, fixture.next().await];
-    first.sort();
-    assert_eq!(first, [0, 1]);
-    assert!(fixture.arrivals.try_recv().is_err());
+    let mut arrivals = Vec::new();
+    for _ in 0..3 {
+        arrivals.push(fixture.next().await);
+    }
+    arrivals.sort();
+    assert_eq!(arrivals, [0, 1, 2]);
     fixture.release(0);
-    assert_eq!(fixture.next().await, 2);
     assert!(!task.is_finished());
     fixture.release(2);
     fixture.release(1);

@@ -323,7 +323,7 @@ impl SearchRelay {
         outer_limit: Option<usize>,
         help_limit: usize,
         timeout: Option<Duration>,
-        capacity: &[Arc<tokio::sync::Semaphore>],
+        capacity: &[Arc<crate::network::DiscoveryCapacity>],
         cache: Option<(Arc<tokio::sync::Mutex<State>>, &str)>,
         initial_delay: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
@@ -404,7 +404,7 @@ impl Prepared {
         outer_limit: Option<usize>,
         help_limit: usize,
         timeout: Option<Duration>,
-        capacity: &[Arc<tokio::sync::Semaphore>],
+        capacity: &[Arc<crate::network::DiscoveryCapacity>],
         cache: Option<(Arc<tokio::sync::Mutex<State>>, &str)>,
         mut initial_delay: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {

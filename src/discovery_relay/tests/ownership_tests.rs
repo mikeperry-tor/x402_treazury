@@ -2,6 +2,44 @@
 use super::*;
 use tokio_util::sync::CancellationToken;
 
+async fn tor_fixture_context() -> crate::test_socks::Socks {
+    let proxy = crate::test_socks::Socks::start(
+        std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    crate::network::install_test_context(
+        crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some(proxy.address.into()),
+            tor_isolation_retries: Some(0),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
+    );
+    proxy
+}
+
+async fn wait_for_serialized_callers(relay: &Relay, callers: usize) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let state = relay.state.lock().await;
+            let gate = state.providers.get(&provider_key(relay)).unwrap();
+            // The map and active OwnedMutexGuard own two references. Each
+            // pending lock_owned future owns one more while serialization waits.
+            if Arc::strong_count(gate) == callers + 2 {
+                break;
+            }
+            drop(state);
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("relay callers did not reach provider serialization");
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Outcome {
     Success,
@@ -12,6 +50,12 @@ enum Outcome {
 
 #[tokio::test]
 async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::tests::ownership_tests::cancelled_waiters_keep_serialization_and_publish_terminal_outcomes",
+    ) {
+        return;
+    }
+    let _proxy = tor_fixture_context().await;
     for outcome in [
         Outcome::Success,
         Outcome::TargetFailure,
@@ -83,8 +127,8 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             );
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let capacity = vec![
-                Arc::new(tokio::sync::Semaphore::new(1)),
-                Arc::new(tokio::sync::Semaphore::new(1)),
+                Arc::new(crate::network::DiscoveryCapacity::new(1)),
+                Arc::new(crate::network::DiscoveryCapacity::new(1)),
             ];
             let waiter = tokio::spawn({
                 let relay = relay.clone();
@@ -130,11 +174,13 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             second.state = relay.state.clone();
             second.key = "second-wallet".into();
             second.client = second_wallet(&relay).client;
-            let mut queued = Box::pin(other.fetch(other_url, 4096, "max_spec_bytes"));
+            let queued = tokio::spawn({
+                let other = other.clone();
+                async move { other.fetch(other_url, 4096, "max_spec_bytes").await }
+            });
+            wait_for_serialized_callers(&relay, 1).await;
             assert!(
-                tokio::time::timeout(std::time::Duration::from_millis(50), queued.as_mut())
-                    .await
-                    .is_err(),
+                !queued.is_finished(),
                 "queued fetch bypassed the active owner: {outcome:?}"
             );
             assert_eq!(other_fixture.calls.load(Ordering::SeqCst), 0);
@@ -142,6 +188,7 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             body_release.cancel();
             let result = tokio::time::timeout(std::time::Duration::from_secs(5), queued)
                 .await
+                .unwrap()
                 .unwrap();
             assert_eq!(result.is_err(), matches!(outcome, Outcome::RelayFailure));
             assert_eq!(
@@ -183,6 +230,12 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
 
 #[tokio::test]
 async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::tests::ownership_tests::queued_and_cached_relay_calls_do_not_reserve_request_capacity",
+    ) {
+        return;
+    }
+    let _proxy = tor_fixture_context().await;
     let (mut relay, fixture, unused) = fixture(envelope(TARGET), false, false).await;
     unused.abort();
     let arrived = CancellationToken::new();
@@ -226,7 +279,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
             }),
         );
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let capacity = Arc::new(tokio::sync::Semaphore::new(16));
+    let capacity = Arc::new(crate::network::DiscoveryCapacity::new(16));
     let active = tokio::spawn({
         let relay = relay.clone();
         let capacity = capacity.clone();
@@ -252,9 +305,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
             }
         }));
     }
-    // Give every queued owner a chance to reach serialization. The active owner
-    // cannot finish until explicitly released, regardless of this fixture wait.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_for_serialized_callers(&relay, 16).await;
     assert!(queued.iter().all(|task| !task.is_finished()));
     assert_eq!(
         capacity.available_permits(),
@@ -263,12 +314,26 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
     );
     let healthy_url = format!("https://{address}/healthy");
     let healthy = crate::network::global()
-        .discovery(&healthy_url, None)
+        .http_participating(
+            &crate::network::IsolationId::discovery(&healthy_url).unwrap(),
+            &healthy_url,
+            None,
+            false,
+            Default::default(),
+        )
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_millis(500), async {
-        let _permit = capacity.acquire().await.unwrap();
+        let permit = capacity.acquire(&healthy).await.unwrap();
+        assert!(permit.is_some());
+        assert_eq!(capacity.available_permits(), 14);
         assert_eq!(
-            healthy.get(&healthy_url).send().await.unwrap().status(),
+            healthy
+                .client
+                .get(&healthy_url)
+                .send()
+                .await
+                .unwrap()
+                .status(),
             200
         );
     })
@@ -289,7 +354,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
     assert_eq!(capacity.available_permits(), 16);
 
     // A cached result must remain available even when no request slot exists.
-    let unavailable = Arc::new(tokio::sync::Semaphore::new(0));
+    let unavailable = Arc::new(crate::network::DiscoveryCapacity::new(0));
     tokio::time::timeout(
         std::time::Duration::from_millis(500),
         relay.fetch_with_capacity(TARGET, 4096, "max_spec_bytes", vec![unavailable], None),

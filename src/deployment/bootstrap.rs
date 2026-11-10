@@ -93,6 +93,9 @@ pub async fn bootstrap_wallets_with_network(
     crate::discovery::policy::validate_registry_path(&config, path)?;
     let deployment = Deployment {
         direct_history: None,
+        catalog_capacity: std::sync::Arc::new(crate::network::DiscoveryCapacity::new(
+            config.startup.catalog_concurrency,
+        )),
         listeners: wallet_resolution.source_bindings.listeners(&config),
         search_relay: None,
         prebound: BTreeMap::new(),

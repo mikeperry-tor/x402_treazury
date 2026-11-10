@@ -18,7 +18,7 @@ pub(crate) fn fallback<'a>(
     request: &'a reqwest::Request,
     failure: Failure,
     progress: &'a SubmissionProgress,
-    capacity: &'a [Arc<tokio::sync::Semaphore>],
+    capacity: &'a [Arc<crate::network::DiscoveryCapacity>],
 ) -> futures_util::future::BoxFuture<'a, Result<(HttpOutput, Option<crate::payment::ResponseFacts>)>>
 {
     Box::pin(async move {

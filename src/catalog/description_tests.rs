@@ -83,6 +83,17 @@ fn observed_rendering_replaces_the_whole_owned_credit_section() {
     );
     assert!(tool.description.contains("Original credit conditions."));
     assert!(tool.description.contains("0.014 USDC/request"));
+    let bound = crate::catalog_state::bind(vec![(
+        tool.clone(),
+        crate::payment::PaidClient::unsigned(),
+        "https://api.example.com".into(),
+    )])
+    .remove(0);
+    assert_eq!(
+        bound.description(),
+        tool.description,
+        "catalog metadata cannot erase the credit fallback"
+    );
     assert_eq!(
         tool.render_description(observed()),
         "Find posts. Observed cost: ~$0.005/call."

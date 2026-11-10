@@ -3,6 +3,28 @@ use super::*;
 use crate::catalog::Config;
 use crate::discovery::curated::AcceptedProvider;
 
+#[test]
+fn accepted_provider_keeps_advertised_lifetime_without_enabling_disk_cache() {
+    let accepted = AcceptedProvider::new(
+        "fixture",
+        Config {
+            catalog_cache_ttl_seconds: 123,
+            ..Default::default()
+        },
+    );
+    assert_eq!(accepted.settings.catalog_cache_ttl_seconds, 123);
+    assert!(!accepted.settings.http_cache_enabled);
+    assert!(
+        crate::http_cache::Slot::new(
+            &accepted.settings,
+            "https://api.example.com/prices",
+            "catalog",
+            1024
+        )
+        .is_none()
+    );
+}
+
 fn authored() -> AcceptedProvider {
     AcceptedProvider::new("retired-provider-not-in-bundle", Config {
         spec: "accepted-schema.json".into(),

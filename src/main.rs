@@ -375,6 +375,7 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if inspect_standalone(&args, &cfg, &base, &tools).await? {
         return Ok(());
     }
+    catalog::enrich_pricing(&cfg, &root.document, &base, &mut tools, None);
     let server = prepare_standalone_server(&args, &env, cfg, base, tools, policy).await?;
     if args.transport == "stdio" {
         serve_standalone_stdio(server).await?;

@@ -7,6 +7,33 @@ network policy and uses the existing inactivity timeout without an overall
 deadline. No cache, wallet, payment, relay or direct-fallback path is invoked.
 Offline replay performs no network reads.
 
+Explicit pricing documents use the same acquisition policy as their source
+catalogs: static sources reuse the catalog loader and configured relay, while
+dynamic sources use the shared public document reader and authenticated source
+management principal. Pricing has no separate retry count, timeout, destination
+restriction or paid-delivery authority. Existing transport compatibility,
+Retry-After handling and configured metadata relay preferences apply. Optional
+pricing participates in deployment catalog Tor isolation capacity, sharing one
+slot with concurrent requests using the same effective SOCKS credentials. Distinct
+scopes wait for capacity. Direct pricing acquisition bypasses it. There is no
+additional pricing gate or deadline; the source's tools remain usable while
+optional pricing acquisition runs.
+Individual unmatched or conflicting records use DEBUG diagnostics; exhausted
+source-level pricing acquisition/format failures use INFO without upstream prose.
+Cancelling enrichment stops its publication waiter; existing retained relay work
+still finishes journaled financial obligations and cache publication.
+
+Each serving source build/refresh also acquires or revalidates its configured pricing URL,
+including when an expired OpenAPI document returns unchanged bytes or HTTP 304.
+The pricing document uses the same configured catalog lifetime (seven days by
+default) measured from its own acquisition. A fresh independent cache hit is
+reusable; refreshing OpenAPI alone cannot renew external pricing. There is no
+pricing poller or readiness gate.
+Inspection and qualification catalog loading do not start optional pricing
+acquisition. For stopped-server dynamic maintenance, the next source load starts enrichment
+from the newly accepted catalog; there is no detached pricing fetch on the CLI's
+behalf after it exits.
+
 See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
 for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
 
@@ -66,16 +93,20 @@ or eligible transport/timeout failures retry on fresh candidate scopes according
 before the next candidate attempt and before any paid discovery-relay fallback.
 A valid delay beyond the platform clock's range remains pending and cancellable;
 it cannot collapse into an immediate retry or relay dispatch. This introduces no
-local delay cap or substitute timer. Catalog download capacity covers each active
-attempt and is released during server delays. All logical source loads can wait
+local delay cap or substitute timer. Deployment discovery capacity counts active
+Tor isolation scopes through full response bodies. Same-scope attempts share one
+slot; the last active holder releases it before server delays. Fresh retry scopes
+count separately, even on the same domain. Direct attempts bypass this capacity.
+All logical source loads can wait
 independently, including inspection and warming, while compatible aliases keep one
 coalesced owner. Unfollowed catalog redirects retain baseline
 complete-body parsing: a valid JSON catalog succeeds, while rejected content can
 use existing relay fallback, without another origin circuit attempt. A
 candidate promotes only after complete valid JSON parse or valid HTTP 304
 revalidation for catalogs; fresh disk-cache hits and relay-supplied results never promote a scope.
-Relay request permits cover each HTTP attempt/body after serialization, cache and
-readiness checks. Retry delays and wallet traversal release these permits; the
+Tor relay attempts share discovery capacity by their actual transport scope
+after serialization, cache and readiness checks, through the full HTTP body.
+Retry delays and wallet traversal release their holders; the
 accepted-work owner retains same-provider serialization through decoding and
 publication even if its waiter disconnects. Other providers and cached results
 remain available.
@@ -528,10 +559,17 @@ loader can omit explicitly optional remote failures. Ordinary deployment serving
 publishes catalogs in the background after binding sockets. Each endpoint defaults
 to waiting for its own catalogs; `wait_for_catalogs = false` exposes available tools
 while discovery remains pending. See [catalog startup](configuration.md#multiple-mcp-ports-from-one-configuration)
-for endpoint failure isolation and optional sources. The active catalog-download limit defaults to 2
-(configurable 1..64); server-delay waits hold no download permit, including during
-inspection and warming. Concurrent catalogs retain discovery-origin
-credentials; paths on the same origin share an identity, different origins do not.
+for endpoint failure isolation and optional sources. Deployment catalog acquisition
+limits active admitted Tor isolation scopes to 2 by default (configurable 1..64),
+including optional pricing, relay work, inspection and warming. Requests with the
+same effective SOCKS credentials share one slot and proceed in parallel even
+while distinct scopes wait; distinct transport/retry scopes count separately even
+on the same domain. The last full-body holder releases capacity before retry or
+handoff delays. Direct egress, including explicit direct warming, bypasses it.
+Cache hits, local files and relay serialization/readiness waits hold no slots;
+idle Tor circuits and pooled sockets do not count. Dynamic imports outside the
+deployment acquisition owner retain existing scheduling. Concurrent catalogs
+retain discovery-origin credentials; compatible same-origin paths share an identity.
 Compatible aliases coalesce downloads within the load. See
 [runtime architecture](architecture.md#catalog-configuration-and-execution) for
 independent loading and publication. Frozen catalogs avoid those startup
@@ -867,7 +905,7 @@ financial or qualification authority.
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Treasury observation: consensus block interval after success; consecutive errors wait 90, 180, then 300 seconds | Available treasury startup and explicit sync request one pass. Current enabled unfilled funding demand, current managed FAILED/REFUNDED without confirmed refund-receiver receipt, or validated pending source/shielding work owns recurring scans; idle treasury performs none. Successful shared scans use the SDK consensus block interval at the next established scanned height (75 seconds before NU7, 25 after), without another tip query. Timing is measured from attempt completion, so long later command work cannot postpone an already-due scan. Busy/locked read-only demand acquisition uses a 60-second local reevaluation wake while commands and notifications remain usable; unknown demand never authorizes a scan or resets observation timing. Scheduled source observers reuse healthy current-owner persisted scans without intervening tip probes; actual new-action validation still checks exact canonical height/hash and snapshot revision. Publication and SDK reconstruction have independent 60-second retries and never justify another scan alone. Owned shutdown retains identical completed-result publication retries without another calculation or submission. Scheduling/reuse never renews the original observation time or financial authority. Successful needed scans reconcile accepted source bytes without allocating transparent-input shielding. Removed age/lag gates remain removed; expiry closure uses one completed canonical tip scan, the authenticated signed finite expiry and final unchanged Ready snapshot coverage, without a second corroborating scan or indexer-presence veto. Signed protocol expiry remains authoritative. Offline SDK reconstruction can close proven never-disclosed calculations locally without another observation; it repairs current spendability without reopening terminal source work; bound NEAR SUCCESS ends source observation while its existing destination-credit lane can continue. No historical source pass, idle watcher or new network lane is added. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
 | Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Caller/query ownership survives retry waits; active RPC permits cover individual requests/body collection and are released before backoff or `Retry-After`. Saturation rejects unsigned acquisition with WARN `base_query_busy` / `base_rpc_callers_busy`; active-I/O waiting emits DEBUG `base_active_rpcs_busy`. No whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
-| Catalog downloads: `startup.catalog_concurrency`, default 2 | Bounds active origin downloads and admitted relay work per deployment load or deferred runtime. Logical retry delays, relay serialization/readiness waits and cache hits reserve no download capacity. Strict loads/warming retain completeness and single-fetch relay semantics; serving may wait for discovery readiness. Saturated origin and relay-attempt acquisition emit DEBUG identifying `startup.catalog_concurrency` before retaining the same wait. |
+| Deployment discovery Tor isolation: `startup.catalog_concurrency`, default 2, range 1–64 | Bounds active admitted Tor isolation scopes for deployment catalog acquisition, including optional pricing and relay attempts. Requests with the same effective SOCKS credentials share one slot and proceed in parallel; distinct transport/retry scopes count separately even on the same domain. Holders cover full response bodies; the last holder releases capacity before retry/handoff delays. Direct egress (including direct warming), cache hits, local files and relay serialization/readiness waits hold none. Idle circuits and pooled sockets do not count. Strict inspection/warming completeness and accepted ownership remain independent; runtime dynamic imports outside this owner retain existing scheduling. |
 | Endpoint catalog readiness: `servers.NAME.wait_for_catalogs`, default true | Waits without an overall deadline for the endpoint's own configured catalogs to publish before serving MCP HTTP. Sockets bind and funding/discovery run first. Required failure closes only affected waiting endpoints with ERROR; optional failure omits that source. False permits incremental availability. No additional network attempts, funding authority or transport timeout. See [catalog startup](configuration.md#multiple-mcp-ports-from-one-configuration). |
 | Foreground work ownership | Accepted workflows remain tracked through output and disconnect and drain on shutdown. Nested work retains ownership. No aggregate count bounds retained tasks or response memory; concrete operation-specific guards remain, with no replacement admission gate. |
 | Store/treasury command queues: 32 / 8 | Full-queue submission emits DEBUG `store_queue_full` / `treasury_queue_full` and waits with the original command; no new timeout, replay or authority. Accepted work retains its existing cancellation/shutdown contract. |

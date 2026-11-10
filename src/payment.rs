@@ -157,7 +157,7 @@ pub struct PaidClient {
     relay_call: bool,
     document_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
     relay_purpose: crate::discovery_relay::Purpose,
-    attempt_capacity: Vec<Arc<tokio::sync::Semaphore>>,
+    attempt_capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
     unavailable: Option<crate::rotation::error::AdmissionError>,
     selection: crate::network::SelectionPolicy,
     transport: crate::network::HttpPolicy,
@@ -316,24 +316,24 @@ impl PaidClient {
     /// Existing acquisition gates apply to active attempts, never retry delays.
     pub(crate) fn with_attempt_capacity(
         mut self,
-        capacity: &[Arc<tokio::sync::Semaphore>],
+        capacity: &[Arc<crate::network::DiscoveryCapacity>],
     ) -> Self {
         self.attempt_capacity = capacity.to_vec();
         self
     }
-    async fn acquire_attempt_capacity(&self) -> Result<Vec<tokio::sync::OwnedSemaphorePermit>> {
+    async fn acquire_attempt_capacity(
+        &self,
+        transport: &crate::network::HttpTransport,
+    ) -> Result<Vec<crate::network::DiscoveryPermit>> {
         let mut permits = Vec::new();
         for gate in &self.attempt_capacity {
-            permits.push(
-                crate::limits::acquire_owned_capacity(
-                    gate.clone(),
-                    "catalog_relay_attempts_busy",
-                    None,
-                    "startup.catalog_concurrency",
-                )
+            if let Some(permit) = gate
+                .acquire(transport)
                 .await
-                .context("relay acquisition capacity closed")?,
-            );
+                .context("relay acquisition capacity closed")?
+            {
+                permits.push(permit);
+            }
         }
         Ok(permits)
     }
@@ -693,7 +693,7 @@ impl PaidClient {
                 // own permits; no acquisition slot spans retry/handoff delays.
                 attempt_capacity.clear();
                 attempt_capacity = self
-                    .acquire_attempt_capacity()
+                    .acquire_attempt_capacity(&transport)
                     .await
                     .context(challenge_facts)?;
                 if let Some(pool) = &self.managed {
@@ -930,7 +930,7 @@ impl PaidClient {
                 diagnostics::unsigned_attempt(attempt, max_attempts);
                 diagnostics::stage("unsigned_request");
                 let attempt_capacity = self
-                    .acquire_attempt_capacity()
+                    .acquire_attempt_capacity(&transport)
                     .await
                     .map_err(Failure::local)?;
                 // A claim may expire while waiting for transport or capacity.
@@ -1220,7 +1220,7 @@ struct UnsignedStage {
     retry: reqwest::Request,
     receipt: Option<crate::pricing::runtime::Receipt>,
     cover: Option<crate::cover::runtime::Call>,
-    attempt_capacity: Vec<tokio::sync::OwnedSemaphorePermit>,
+    attempt_capacity: Vec<crate::network::DiscoveryPermit>,
 }
 
 async fn static_payment(

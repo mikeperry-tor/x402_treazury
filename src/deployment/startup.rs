@@ -40,7 +40,7 @@ enum PreparedDocument {
 impl DeferredDocument {
     async fn resume(
         &self,
-        gate: Arc<tokio::sync::Semaphore>,
+        gate: Arc<crate::network::DiscoveryCapacity>,
         can_allocate: bool,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<Document> {
@@ -90,19 +90,21 @@ impl PendingSource {
     pub async fn resume(
         &self,
         id: &str,
-        gate: Arc<tokio::sync::Semaphore>,
+        gate: Arc<crate::network::DiscoveryCapacity>,
         can_allocate: bool,
         status: tokio::sync::watch::Sender<bool>,
     ) -> Result<Source> {
         let document = self
             .document
-            .resume(gate, can_allocate, Some(status))
+            .resume(gate.clone(), can_allocate, Some(status))
             .await?;
         if let Some(hints) = &document.hints {
             hints.slot.record_configuration(&self.config).await;
         }
-        Source::from_document(id, self.config.clone(), document)?
-            .with_send_tools(id, self.send_tools.clone())
+        let mut source = Source::from_document(id, self.config.clone(), document)?
+            .with_send_tools(id, self.send_tools.clone())?;
+        source.enrich_pricing(Some(gate));
+        Ok(source)
     }
 }
 
@@ -171,7 +173,7 @@ struct Downloads {
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
     direct_warm_target: Option<crate::network::NetworkPolicy>,
-    gate: Option<Arc<tokio::sync::Semaphore>>,
+    gate: Option<Arc<crate::network::DiscoveryCapacity>>,
 }
 impl Downloads {
     async fn configure(
@@ -324,6 +326,7 @@ impl std::fmt::Display for RemoteCatalogUnavailable {
 }
 impl std::error::Error for RemoteCatalogUnavailable {}
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn load(
     config: &MetaConfig,
     bindings: &EffectiveBindings,
@@ -332,6 +335,7 @@ pub(super) async fn load(
     relay: crate::discovery_relay::Relays,
     defer: bool,
     all_tools: bool,
+    capacity: Arc<crate::network::DiscoveryCapacity>,
 ) -> Result<(
     BTreeMap<String, Source>,
     BTreeMap<String, String>,
@@ -347,7 +351,7 @@ pub(super) async fn load(
         defer,
         all_tools,
         relay,
-        gate: Some(Arc::new(tokio::sync::Semaphore::new(limit))),
+        gate: Some(capacity),
         direct_warm_target: None,
         entries: Mutex::default(),
         cache_directory: config
@@ -525,9 +529,24 @@ impl Source {
         if let Some(hints) = &document.hints {
             hints.slot.record_configuration(&cfg).await;
         }
-        Self::from_document(id, cfg, document)?
-            .with_send_tools(id, source.send_tools.clone())
-            .map(SourceLoad::Ready)
+        let mut source = Self::from_document(id, cfg, document)?
+            .with_send_tools(id, source.send_tools.clone())?;
+        if downloads.purpose.for_current_operation() == CatalogPurpose::Serving {
+            source.enrich_pricing(downloads.gate.clone());
+        }
+        Ok(SourceLoad::Ready(source))
+    }
+    fn enrich_pricing(&mut self, gate: Option<Arc<crate::network::DiscoveryCapacity>>) {
+        if CatalogPurpose::Serving.for_current_operation() != CatalogPurpose::Serving {
+            return;
+        }
+        crate::pricing::discovery::attach_static(
+            &self.config,
+            &self.document,
+            &self.base_url,
+            &mut self.tools,
+            gate,
+        );
     }
     pub(super) fn from_document(
         id: &str,
@@ -641,7 +660,7 @@ pub(super) async fn warm(
         defer: false,
         all_tools: false,
         relay,
-        gate: Some(Arc::new(tokio::sync::Semaphore::new(
+        gate: Some(Arc::new(crate::network::DiscoveryCapacity::new(
             config.startup.catalog_concurrency,
         ))),
         entries: Mutex::default(),
@@ -779,7 +798,7 @@ mod deferred_tests {
             pending
                 .resume(
                     "fixture",
-                    Arc::new(tokio::sync::Semaphore::new(1)),
+                    Arc::new(crate::network::DiscoveryCapacity::new(1)),
                     false,
                     status,
                 )
@@ -894,7 +913,7 @@ mod deferred_tests {
                 .await
                 .unwrap();
         });
-        let gate = Arc::new(tokio::sync::Semaphore::new(1));
+        let gate = Arc::new(crate::network::DiscoveryCapacity::new(1));
         let task_gate = gate.clone();
         let mut resumes = tokio::spawn(async move {
             tokio::join!(
@@ -906,7 +925,12 @@ mod deferred_tests {
             () = entered.cancelled() => {},
             result = &mut resumes => panic!("catalog resumed without reaching the fixture: {result:?}"),
         }
-        assert_eq!(gate.available_permits(), 0);
+        assert_eq!(
+            gate.available_permits(),
+            1,
+            "direct acquisition consumes no Tor slot"
+        );
+        assert_eq!(gate.live_scope_count(), 0);
         release.cancel();
         let (a, b) = resumes.await.unwrap();
         assert!(Arc::ptr_eq(&a.unwrap(), &b.unwrap()));
@@ -995,5 +1019,290 @@ mod price_alias_tests {
         }
         server.abort();
         let _ = server.await;
+    }
+}
+
+#[cfg(test)]
+mod external_pricing_refresh_tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use axum::response::IntoResponse;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn inspection_and_qualification_do_not_start_optional_metadata() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let (address, server) = crate::test_tls::serve(axum::Router::new().fallback(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                axum::Json(serde_json::json!({"x402Version":2,"items":[]}))
+            }
+        }))
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let spec = root.path().join("schema.json");
+        std::fs::write(&spec, r#"{"paths":{"/read":{"get":{}}}}"#).unwrap();
+        let definition: SourceConfig = toml::from_str(&format!(
+            "spec='{}'\nbase_url='https://api.example.com'\n[pricing]\nsource='https://{address}/prices'\nformat='x402-discovery'\n", spec.display()
+        )).unwrap();
+        let path = root.path().join("deployment.toml");
+        let mut sources = Vec::new();
+        for purpose in [CatalogPurpose::Inspection, CatalogPurpose::Qualification] {
+            let downloads = Downloads {
+                purpose,
+                ..Default::default()
+            };
+            let cfg = downloads
+                .configure("fixture", &definition, &path, false)
+                .await;
+            let SourceLoad::Ready(source) = load_one("fixture", &definition, cfg, &downloads)
+                .await
+                .unwrap()
+            else {
+                panic!("ready source expected")
+            };
+            assert!(!source.tools[0].advertised_pricing.has_acquisition_owner());
+            sources.push(source);
+        }
+        // Evidence collection overrides even a caller requesting serving.
+        let downloads = Downloads {
+            purpose: CatalogPurpose::Serving,
+            ..Default::default()
+        };
+        let cfg = downloads
+            .configure("fixture", &definition, &path, false)
+            .await;
+        let (source, _) =
+            catalog_evidence::capture(load_one("fixture", &definition, cfg, &downloads)).await;
+        let SourceLoad::Ready(source) = source.unwrap() else {
+            panic!("ready source expected")
+        };
+        assert!(!source.tools[0].advertised_pricing.has_acquisition_owner());
+        sources.push(source);
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        // The same definition still starts acquisition for ordinary serving.
+        let cfg = downloads
+            .configure("fixture", &definition, &path, false)
+            .await;
+        let SourceLoad::Ready(serving) = load_one("fixture", &definition, cfg, &downloads)
+            .await
+            .unwrap()
+        else {
+            panic!("ready source expected")
+        };
+        assert!(serving.tools[0].advertised_pricing.has_acquisition_owner());
+        // Serving's network request is covered by the held-body test below;
+        // retaining all inspection sources proves they own no pending work.
+        drop((sources, serving));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn direct_metadata_does_not_consume_tor_capacity() {
+        use axum::body::{Body, Bytes};
+        use axum::serve::Listener as _;
+        let dir = tempfile::tempdir().unwrap();
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let listener = crate::test_tls::listener().await;
+        let base = format!("https://{}", listener.local_addr().unwrap());
+        let schema = serde_json::json!({"paths":{"/read":{"get":{}}}});
+        let prices = serde_json::json!({"x402Version":2,"items":[{"resource":format!("{base}/read"),"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"1000"}]}]}).to_string();
+        let app = axum::Router::new()
+            .route(
+                "/spec",
+                axum::routing::get({
+                    let schema = schema.clone();
+                    move || async move { axum::Json(schema) }
+                }),
+            )
+            .route(
+                "/prices",
+                axum::routing::get({
+                    let arrived = arrived.clone();
+                    let release = release.clone();
+                    move || {
+                        let (arrived, release, prices) =
+                            (arrived.clone(), release.clone(), prices.clone());
+                        async move {
+                            // One real body chunk progresses before the next is held.
+                            let chunks = stream::once(async move {
+                                arrived.notify_one();
+                                Ok::<_, std::io::Error>(Bytes::from_static(b" "))
+                            })
+                            .chain(stream::once(async move {
+                                release.notified().await;
+                                Ok::<_, std::io::Error>(Bytes::from(prices))
+                            }));
+                            Body::from_stream(chunks)
+                        }
+                    }
+                }),
+            );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let local = dir.path().join("schema.json");
+        std::fs::write(&local, schema.to_string()).unwrap();
+        let definition: SourceConfig = toml::from_str(&format!(
+            "spec='{}'\nbase_url='{base}'\n[pricing]\nsource='{base}/prices'\nformat='x402-discovery'\n", local.display()
+        )).unwrap();
+        let gate = Arc::new(crate::network::DiscoveryCapacity::new(1));
+        let downloads = Downloads {
+            purpose: CatalogPurpose::Serving,
+            gate: Some(gate.clone()),
+            ..Default::default()
+        };
+        let path = dir.path().join("deployment.toml");
+        let cfg = downloads
+            .configure("optional", &definition, &path, false)
+            .await;
+        let SourceLoad::Ready(optional) = load_one("optional", &definition, cfg, &downloads)
+            .await
+            .unwrap()
+        else {
+            panic!("ready source expected")
+        };
+        arrived.notified().await;
+        assert_eq!(gate.available_permits(), 1);
+        assert_eq!(gate.live_scope_count(), 0);
+        assert!(optional.tools[0].advertised_pricing.amount().is_none());
+        let required: SourceConfig =
+            toml::from_str(&format!("spec='{base}/spec'\nbase_url='{base}'\n")).unwrap();
+        let cfg = downloads
+            .configure("required", &required, &path, false)
+            .await;
+        // Watchdog only: completion must precede releasing the metadata body.
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            load_one("required", &required, cfg, &downloads),
+        )
+        .await;
+        let still_pending = optional.tools[0].advertised_pricing.amount().is_none();
+        release.notify_one();
+        let SourceLoad::Ready(required) = result.unwrap().unwrap() else {
+            panic!("ready source expected")
+        };
+        assert_eq!(required.tools.len(), 1);
+        assert!(still_pending);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while optional.tools[0].advertised_pricing.amount() != Some(U256::from(1000)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn unchanged_openapi_304_still_refreshes_expired_external_prices() {
+        let root = tempfile::tempdir().unwrap();
+        let price = Arc::new(AtomicUsize::new(1000));
+        let catalogs = Arc::new(AtomicUsize::new(0));
+        let metadata = Arc::new(AtomicUsize::new(0));
+        let metadata_validations = Arc::new(AtomicUsize::new(0));
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let listener = crate::test_tls::listener().await;
+        use axum::serve::Listener as _;
+        let base = format!("https://{}", listener.local_addr().unwrap());
+        let app=axum::Router::new().fallback({
+            let price=price.clone();let catalogs=catalogs.clone();let metadata=metadata.clone();let metadata_validations=metadata_validations.clone();let arrived=arrived.clone();let release=release.clone();let base=base.clone();
+            move |request:axum::extract::Request| {
+                let price=price.clone();let catalogs=catalogs.clone();let metadata=metadata.clone();let metadata_validations=metadata_validations.clone();let arrived=arrived.clone();let release=release.clone();let base=base.clone();
+                async move {
+                    assert!(!request.headers().contains_key("payment-signature"));
+                    if request.uri().path()=="/spec" {
+                        catalogs.fetch_add(1,Ordering::SeqCst);
+                        if request.headers().contains_key("if-none-match") {
+                            (axum::http::StatusCode::NOT_MODIFIED,[("etag","\"same\"")],"").into_response()
+                        } else {
+                            ([("etag","\"same\"")],axum::Json(json!({"openapi":"3.0.3","paths":{"/read":{"get":{}}}}))).into_response()
+                        }
+                    } else {
+                        assert_eq!(request.uri().path(),"/prices");
+                        metadata.fetch_add(1,Ordering::SeqCst);
+                        if request.headers().contains_key("if-none-match"){metadata_validations.fetch_add(1,Ordering::SeqCst);}
+                        if price.load(Ordering::SeqCst)==2000 {arrived.notify_one();release.notified().await;}
+                        ([("etag","\"price\"")],axum::Json(json!({"x402Version":2,"items":[{"resource":format!("{base}/read"),"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":price.load(Ordering::SeqCst).to_string()}]}]}))).into_response()
+                    }
+                }
+            }
+        });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let definition:SourceConfig=toml::from_str(&format!("spec='{base}/spec'\nbase_url='{base}'\nprefix='external'\ncatalog_cache_ttl_seconds=120\n[pricing]\nsource='{base}/prices'\nformat='x402-discovery'\n")).unwrap();
+        let path = root.path().join("deployment.toml");
+        let downloads = || Downloads {
+            purpose: CatalogPurpose::Serving,
+            cache_directory: Some(root.path().join("cache")),
+            ..Default::default()
+        };
+        let first_downloads = downloads();
+        let cfg = first_downloads
+            .configure("source", &definition, &path, false)
+            .await;
+        let SourceLoad::Ready(first) = load_one("source", &definition, cfg, &first_downloads)
+            .await
+            .unwrap()
+        else {
+            panic!("ready source expected")
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while first.tools[0].advertised_pricing.amount() != Some(U256::from(1000)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        for url in [format!("{base}/spec"), format!("{base}/prices")] {
+            let slot = crate::http_cache::Slot::new(
+                &first.config,
+                &url,
+                "catalog",
+                first.config.max_spec_bytes,
+            )
+            .unwrap();
+            let mut entry = slot.read().await.unwrap();
+            entry.metadata.expires = 0;
+            slot.write(Some(entry)).await;
+        }
+        price.store(2000, Ordering::SeqCst);
+        let second_downloads = downloads();
+        let cfg = second_downloads
+            .configure("source", &definition, &path, false)
+            .await;
+        let SourceLoad::Ready(second) = load_one("source", &definition, cfg, &second_downloads)
+            .await
+            .unwrap()
+        else {
+            panic!("ready source expected")
+        };
+        arrived.notified().await;
+        assert!(second.tools[0].advertised_pricing.amount().is_none());
+        assert!(
+            second.tools[0]
+                .route(&second.base_url, &Default::default())
+                .is_ok()
+        );
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while second.tools[0].advertised_pricing.amount() != Some(U256::from(2000)) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            first.tools[0].advertised_pricing.amount(),
+            Some(U256::from(1000))
+        );
+        assert_eq!(catalogs.load(Ordering::SeqCst), 2);
+        assert_eq!(metadata.load(Ordering::SeqCst), 2);
+        assert_eq!(metadata_validations.load(Ordering::SeqCst), 1);
+        server.abort();
     }
 }

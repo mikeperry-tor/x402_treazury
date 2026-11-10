@@ -64,6 +64,32 @@ struct Record {
     built: Option<Arc<import::Built>>,
 }
 impl Record {
+    fn prepare_with_client(&mut self, client: PaidClient) -> Result<()> {
+        if self.built.is_some() {
+            return Ok(());
+        }
+        self.prepare()?;
+        if let Some(provider) = &self.candidate.provider {
+            if provider
+                .settings
+                .effective_pricing()?
+                .is_none_or(|pricing| pricing.source == "catalog")
+            {
+                return Ok(());
+            }
+            let root = Arc::new(crate::catalog::parse_document(self.document.as_bytes())?);
+            let built = Arc::get_mut(self.built.as_mut().expect("prepared source"))
+                .expect("newly prepared source");
+            crate::pricing::discovery::attach_dynamic(
+                &provider.settings,
+                &root,
+                &built.base,
+                &mut built.tools,
+                client,
+            );
+        }
+        Ok(())
+    }
     // Candidate/document setters invalidate this process-local result before reuse.
     fn prepare(&mut self) -> Result<()> {
         if self.built.is_none() {
@@ -430,7 +456,10 @@ impl Manager {
                             targets == record.targets,
                             "saved source scope is not endpoint-local"
                         );
-                        record.prepare()
+                        let client = self
+                            .document_client(&record.owner)
+                            .unwrap_or_else(|_| PaidClient::unsigned());
+                        record.prepare_with_client(client)
                     })
                     .err()
                     .map(|_| "policy_or_catalog_invalid".into())
@@ -1049,7 +1078,10 @@ impl Manager {
                 "source_name_reserved"
             );
             record.targets = this.targets(&owner, &record.candidate)?;
-            record.prepare()?;
+            let client = this
+                .document_client(&owner)
+                .unwrap_or_else(|_| PaidClient::unsigned());
+            record.prepare_with_client(client)?;
             let id = record.id.clone();
             state.records.insert(id.clone(), record);
             state.generation = state

@@ -225,9 +225,7 @@ impl Runtime {
         let failure = std::future::pending::<()>();
         tokio::pin!(failure);
         let mut work = FuturesUnordered::new();
-        let gate = Arc::new(tokio::sync::Semaphore::new(
-            self.deployment.config.startup.catalog_concurrency,
-        ));
+        let gate = self.deployment.catalog_capacity.clone();
         for (id, pending) in &self.deployment.pending_sources {
             let id = id.clone();
             let pending = pending.clone();
@@ -776,6 +774,7 @@ discover_on_demand=true
             BTreeMap::from([("a".into(), relay.clone()), ("b".into(), relay)]),
             true,
             false,
+            deployment.catalog_capacity.clone(),
         )
         .await
         .unwrap();

@@ -73,25 +73,37 @@ Zcash support does not spend funds. Source limits remain required. See the
 
 ## Multiple MCP ports from one configuration
 
-Deployment catalogs share download capacity. The default is 2 active downloads;
-set a value from 1 to 64 in the deployment TOML:
+Deployment catalog acquisition shares capacity for active Tor isolation scopes.
+The default is 2 scopes; set a value from 1 to 64 in the deployment TOML:
 
 ```toml
 [startup]
 catalog_concurrency = 2
 ```
 
-Two catalog slots are a provisional default. The working theory is that fewer
-simultaneous large downloads leave headroom when Tor’s prebuilt Conflux capacity
-is unavailable. Current measurements do not establish that mechanism or an optimal
-limit; see [startup qualification](../tests/STARTUP.md).
+The default of 2 comes from the operator's live Tor performance testing, which
+identified two concurrent isolation scopes as a sweet spot for catalog downloads.
+Tor normally works to maintain [three fresh prebuilt multipath Conflux sets](https://lists.torproject.org/mailman3/hyperkitty/list/tor-commits@lists.torproject.org/thread/NGD4PUZLR2YNGSVBS3XIGXT56OM7RAGB/); using
+two leaves headroom for replenishment and makes Conflux use more likely for these
+downloads. Counting effective SOCKS isolation scopes reflects demand for separate
+circuit sets: parallel requests sharing credentials do not consume another slot.
+Tor's [Conflux prebuilding policy](https://spec.torproject.org/proposals/329-traffic-splitting.html)
+is consensus-controlled, and exhausting the prebuilt pool can fall back to ordinary
+circuits. This gate neither reserves Conflux sets nor guarantees their use. See
+[startup qualification](../tests/STARTUP.md) for offline versus live evidence.
 
-A free slot starts the next ready download immediately. Logical loads waiting for
-`Retry-After` release download capacity while retaining their retry sequence and
-deadline. The same scheduling applies to inspection, warming and deferred serving;
-inspection and warming still require their complete selected results. Relay work
-reserves capacity for each HTTP attempt/body after serialization/cache/readiness
-checks and releases it before retry delays. Accepted ownership retains publication. Synchronous relay fallback traverses its configured list once;
+Catalog, optional pricing and relay requests using the same effective SOCKS
+isolation credentials share one slot and can proceed in parallel while other
+scopes wait. Distinct transport or retry scopes count separately even on the same
+domain. A slot lasts through full response-body collection and is released when
+its last active holder finishes, before retry delays or wallet handoffs. Cache
+hits, local files, relay serialization/readiness waits and direct egress consume
+no slots; this includes `catalog warm --direct`. Idle Tor circuits and pooled
+sockets do not count. The same scheduling applies to inspection, warming and
+deferred serving; inspection and warming still require their complete selected
+results. Dynamic imports outside deployment catalog acquisition retain their
+existing scheduling. Accepted ownership retains publication. Synchronous relay
+fallback traverses its configured list once;
 only deferred serving waits for discovery readiness. Ordinary deployment serving loads
 local catalogs and binds every listener socket before funding and background remote
 catalog discovery start. Each endpoint defaults to `wait_for_catalogs = true`:
@@ -166,8 +178,9 @@ remain strict. The synchronous unsigned-serving loader can omit remote failures
 only with `sources.NAME.optional_startup = true`; required failures cancel its
 unfinished loads. Ordinary deployment serving publishes remote catalogs as they
 finish. Failed sources are not retried during the run;
-restart to retry them. A source that keeps downloading occupies its normal slot
-until completion. Tool ordering and wallet bindings do not depend on completion
+restart to retry them. A Tor source that keeps downloading retains its shared
+isolation slot until its last active response finishes. Tool ordering and wallet
+bindings do not depend on completion
 order for unambiguous names. If loaded catalogs define the same tool name on a
 listener after tag selection, ordinary serving omits every binding of that name
 and reports the ambiguity in MCP instructions. Unique tools and other listeners
@@ -2205,7 +2218,7 @@ source = "catalog"
 format = "payment-info"
 key = "x-payment-info" # optional; this format's default
 unit = "call" # reviewed default only when metadata omits its unit
-usd_as_usdc = true # opt in only for documented USD-denominated USDC tariffs
+usd_as_usdc = true # explicit nominal USDC interpretation of reviewed USD tariffs
 ```
 
 `payment-info` reads structured operation metadata; `x402` defaults to the
@@ -2219,10 +2232,30 @@ payment-info member. Configuration inspection reports the winning fields' origin
 A pricing source can instead be an explicitly configured HTTPS URL with
 format `x402-resources` (a `resources` array) or `x402-discovery` (an `items` array).
 External formats use resource payment requirements and do not accept `key`.
+Both read x402 v2 exact Base USDC offers. Resource records require an explicit
+HTTP method; discovery items may omit it only when the original catalog identifies
+one matching operation, including methods hidden by tool filtering. Original operation
+URLs are parsed once and indexed by origin, query, method and literal path or
+a static template segment; literal/template overlaps remain ambiguous. Bulk
+inventory and matching run off the async runtime workers.
 Operator-configured pricing URLs follow catalog destination rules; dynamic source
 management retains its existing public-destination restrictions.
-There is no automatic well-known lookup. External acquisition is optional and
-cannot delay tool publication or an invocation.
+There is no automatic well-known lookup. External acquisition starts for serving sources, including runtime registrations;
+inspection and qualification catalog loads start no optional pricing requests.
+Pricing completion is not a readiness condition for tool publication or invocation.
+During deployment acquisition, its active Tor response shares the catalog
+isolation capacity: matching SOCKS credentials share one slot, while a distinct
+scope may wait for capacity held by other catalog or pricing work. Already
+published tools remain usable. Direct acquisition bypasses that capacity; there
+is no additional pricing gate or deadline.
+It uses the source catalog's retry policy and configured paid relay fallbacks,
+with the same payer authority and payment limits. Source refreshes also refresh
+the configured pricing document; unchanged/304 OpenAPI data does not skip that
+acquisition. Existing fresh pricing cache data may be reused. Each document keeps
+its own acquisition expiry under the same configured lifetime.
+Stopped-server maintenance refreshes save accepted catalog bytes; external runtime
+enrichment starts when those sources are next loaded. It does not buy transient
+pricing data for a source with no running tools.
 
 Normalized advertisements preserve unknown, explicit free/zero, fixed,
 dynamic/range and unsupported tariffs. Selection estimates require exact
@@ -2230,8 +2263,9 @@ nonnegative per-call USDC amounts with at most six decimal places. The optional
 `unit` default accepts `call` or `request`; explicit vendor units, including
 unsupported or malformed units, take precedence. Legacy display's `/call` default
 does not itself establish a selection unit. USD amounts require the provider's
-explicit `usd_as_usdc` opt-in, backed by its settlement documentation; generic
-x402 metadata alone does not establish that conversion. Unsupported explicit
+explicit `usd_as_usdc` opt-in to nominal one-dollar/one-USDC ranking; generic
+x402 metadata alone does not establish that interpretation. This does not claim
+live settlement verification. Unsupported explicit
 assets or networks do not become USDC hints. Atomic payment alternatives require
 Base mainnet's USDC contract and six-decimal units; compatible alternatives are
 chosen individually rather than summed. Metered, credit, dynamic and ambiguous

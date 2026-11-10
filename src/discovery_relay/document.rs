@@ -19,6 +19,8 @@ pub(crate) enum RequestKind {
     OpenApiProbe,
     DirectoryProbe,
     DocumentationProbe,
+    /// Optional enrichment reports terminal availability through its source owner.
+    Pricing,
 }
 
 #[derive(Clone)]

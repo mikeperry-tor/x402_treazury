@@ -383,7 +383,10 @@ impl ToolSpec {
 
     /// Present a current scoped observation without changing canonical catalog text.
     pub fn render_description(&self, observed: Option<crate::output::ObservedPrice>) -> String {
-        let Some(observed) = observed else {
+        let fragment = observed
+            .map(|observed| format!("Observed cost: ~${observed}/call."))
+            .or_else(|| self.advertised_pricing.external_description());
+        let Some(fragment) = fragment else {
             return self.description.clone();
         };
         let (base, max) = self
@@ -393,10 +396,7 @@ impl ToolSpec {
                 (rendering.base.as_str(), rendering.max_chars)
             });
         let separator = if base.is_empty() { "" } else { " " };
-        truncate_description(
-            &format!("{base}{separator}Observed cost: ~${observed}/call."),
-            max,
-        )
+        truncate_description(&format!("{base}{separator}{fragment}"), max)
     }
 
     pub fn route(&self, base_url: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
@@ -644,29 +644,48 @@ pub(crate) struct RelayContinuation {
 }
 impl RelayContinuation {
     pub(crate) async fn resume(&self) -> Result<LoadedCatalog> {
-        self.resume_mode(None, None, false).await
+        self.resume_mode(
+            None,
+            None,
+            false,
+            crate::discovery_relay::document::RequestKind::Document,
+        )
+        .await
     }
     async fn resume_bounded(
         &self,
-        gate: std::sync::Arc<tokio::sync::Semaphore>,
+        gate: std::sync::Arc<crate::network::DiscoveryCapacity>,
     ) -> Result<LoadedCatalog> {
-        self.resume_mode(Some(gate), None, false).await
+        self.resume_mode(
+            Some(gate),
+            None,
+            false,
+            crate::discovery_relay::document::RequestKind::Document,
+        )
+        .await
     }
     pub(crate) async fn resume_when_ready(
         &self,
-        gate: std::sync::Arc<tokio::sync::Semaphore>,
+        gate: std::sync::Arc<crate::network::DiscoveryCapacity>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<LoadedCatalog> {
-        self.resume_mode(Some(gate), operator_status, true).await
+        self.resume_mode(
+            Some(gate),
+            operator_status,
+            true,
+            crate::discovery_relay::document::RequestKind::Document,
+        )
+        .await
     }
     #[tracing::instrument(name = "catalog_relay", skip_all, fields(
         source = self.config.discovery_source.as_deref().or(self.config.prefix.as_deref()).unwrap_or("standalone")
     ))]
     async fn resume_mode(
         &self,
-        gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+        gate: Option<std::sync::Arc<crate::network::DiscoveryCapacity>>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
         wait_for_ready: bool,
+        kind: crate::discovery_relay::document::RequestKind,
     ) -> Result<LoadedCatalog> {
         let cfg = &self.config;
         let error = &self.origin_error;
@@ -687,14 +706,16 @@ impl RelayContinuation {
                 .map(|s| s.label())
                 .unwrap_or("fetch")
         };
-        crate::discovery_relay::log_fallback(
-            cfg,
-            "catalog",
-            reason,
-            http_error
-                .and_then(reqwest::Error::status)
-                .map(|s| s.as_u16()),
-        );
+        if kind != crate::discovery_relay::document::RequestKind::Pricing {
+            crate::discovery_relay::log_fallback(
+                cfg,
+                "catalog",
+                reason,
+                http_error
+                    .and_then(reqwest::Error::status)
+                    .map(|s| s.as_u16()),
+            );
+        }
         let relay = cfg.relay_fallback.as_ref().expect("captured relay");
         let response = if wait_for_ready {
             relay
@@ -719,7 +740,9 @@ impl RelayContinuation {
                 .await
         }
         .inspect_err(|error| {
-            crate::discovery_relay::log_failure(cfg, "catalog", error);
+            if kind != crate::discovery_relay::document::RequestKind::Pricing {
+                crate::discovery_relay::log_failure(cfg, "catalog", error);
+            }
         })?;
         // The relay has already validated complete JSON before caching the response.
         let document = parse_document(&response.body)?;
@@ -780,7 +803,7 @@ pub(crate) async fn load_json_discovery_with(
 pub async fn load_json_discovery_bounded(
     cfg: &Config,
     network: &crate::network::NetworkContext,
-    gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+    gate: Option<std::sync::Arc<crate::network::DiscoveryCapacity>>,
 ) -> Result<LoadedCatalog> {
     match prepare_json_discovery_bounded(cfg, network, gate.clone()).await? {
         CatalogLoad::Ready(document) => Ok(document),
@@ -788,6 +811,28 @@ pub async fn load_json_discovery_bounded(
             Some(gate) => pending.resume_bounded(gate).await,
             None => pending.resume().await,
         },
+    }
+}
+
+/// Optional pricing shares acquisition and financial ownership with catalogs;
+/// its source-generation owner reports terminal availability at INFO.
+pub(crate) async fn load_json_pricing(
+    cfg: &Config,
+    network: &crate::network::NetworkContext,
+    gate: Option<std::sync::Arc<crate::network::DiscoveryCapacity>>,
+) -> Result<LoadedCatalog> {
+    match prepare_json_discovery_bounded(cfg, network, gate.clone()).await? {
+        CatalogLoad::Ready(document) => Ok(document),
+        CatalogLoad::RelayPending(pending) => {
+            pending
+                .resume_mode(
+                    gate,
+                    None,
+                    false,
+                    crate::discovery_relay::document::RequestKind::Pricing,
+                )
+                .await
+        }
     }
 }
 
@@ -803,7 +848,7 @@ pub(crate) async fn prepare_json_discovery_with(
 pub(crate) async fn prepare_json_discovery_bounded(
     cfg: &Config,
     network: &crate::network::NetworkContext,
-    gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+    gate: Option<std::sync::Arc<crate::network::DiscoveryCapacity>>,
 ) -> Result<CatalogLoad> {
     if cfg.spec.starts_with("http://") || cfg.spec.starts_with("https://") {
         crate::network::provider_url(&cfg.spec)?;
@@ -835,7 +880,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
         cfg,
         network,
         crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes),
-        gate.as_deref(),
+        gate.as_ref(),
     )
     .await;
     let failure = match result {
@@ -864,7 +909,7 @@ async fn load_json_discovery_origin(
     cfg: &Config,
     network: &crate::network::NetworkContext,
     slot: Option<crate::http_cache::Slot>,
-    gate: Option<&tokio::sync::Semaphore>,
+    gate: Option<&std::sync::Arc<crate::network::DiscoveryCapacity>>,
 ) -> std::result::Result<LoadedCatalog, crate::network::acquisition::Failure> {
     let source = &cfg.spec;
     if !source.starts_with("https://") && !source.starts_with("http://") {
@@ -937,7 +982,7 @@ async fn fetch_catalog_origin(
     network: &crate::network::NetworkContext,
     conditional: Option<&crate::http_cache::Entry>,
     slot: Option<&crate::http_cache::Slot>,
-    gate: Option<&tokio::sync::Semaphore>,
+    gate: Option<&std::sync::Arc<crate::network::DiscoveryCapacity>>,
 ) -> std::result::Result<LoadedCatalog, crate::network::acquisition::Failure> {
     use crate::network::acquisition::{self, Failure, FallbackPolicy};
     let policy = FallbackPolicy::RemoteFailures;
@@ -955,16 +1000,7 @@ async fn fetch_catalog_origin(
         cfg.http_cache_direct_warm_target.is_some(),
         |current, _, _| async move {
             let _permit = match gate {
-                Some(gate) => Some(
-                    crate::limits::acquire_capacity(
-                        gate,
-                        "catalog_downloads_busy",
-                        None,
-                        "startup.catalog_concurrency",
-                    )
-                    .await
-                    .expect("owned catalog gate"),
-                ),
+                Some(gate) => gate.acquire(&current).await.expect("owned catalog gate"),
                 None => None,
             };
             let started = std::time::Instant::now();
@@ -991,10 +1027,13 @@ async fn fetch_catalog_origin(
                         anyhow::Error::new(IncompleteRelayCatalog).context(LoadStage::Body),
                     ));
                 }
+                let headers = response.headers().clone();
+                drop(response);
+                drop(_permit);
                 let expires = crate::http_cache::now().saturating_add(
                     crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds),
                 );
-                let hints = revalidate_cached_catalog(response.headers(), conditional, slot)
+                let hints = revalidate_cached_catalog(&headers, conditional, slot)
                     .await
                     .map_err(Failure::validation)?;
                 return Ok(loaded(
@@ -1029,6 +1068,8 @@ async fn fetch_catalog_origin(
                     failure.error = failure.error.context(LoadStage::Body);
                     failure
                 })?;
+            // Tor I/O is complete; local parsing/cache publication owns no slot.
+            drop(_permit);
             let document =
                 parse_document(&bytes).map_err(|error| Failure::remote_content(error, policy))?;
             let expires = crate::http_cache::now().saturating_add(
@@ -1209,6 +1250,42 @@ pub fn operations(root: &Value, pricing_key: Option<&str>) -> Result<Vec<Value>>
     operations_with_credits(root, pricing_key, None)
 }
 
+const OPENAPI_METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
+
+/// Borrow the original inventory without projecting request schemas or applying
+/// compatibility, POST preference or tool filters. The loaded catalog owns input
+/// validation; this identity-only view must not repeat schema expansion.
+pub(crate) fn operation_identities(root: &Value) -> Result<Vec<(&str, &str, &Value)>> {
+    if let Some(paths) = root.get("paths") {
+        let mut identities = Vec::new();
+        for (path, item) in paths.as_object().context("paths must be an object")? {
+            for (method, operation) in item.as_object().context("invalid path item")? {
+                if OPENAPI_METHODS.contains(&method.as_str()) {
+                    identities.push((method.as_str(), path.as_str(), operation));
+                }
+            }
+        }
+        Ok(identities)
+    } else {
+        root.get("operations")
+            .and_then(Value::as_array)
+            .context("expected OpenAPI paths or operations digest")?
+            .iter()
+            .map(|operation| {
+                Ok((
+                    operation["method"]
+                        .as_str()
+                        .context("operation method missing")?,
+                    operation["path"]
+                        .as_str()
+                        .context("operation path missing")?,
+                    operation,
+                ))
+            })
+            .collect()
+    }
+}
+
 pub(crate) fn operations_with_credits(
     root: &Value,
     pricing_key: Option<&str>,
@@ -1225,7 +1302,7 @@ pub(crate) fn operations_with_credits(
         .context("paths must be an object")?
     {
         for (method, op) in item.as_object().context("invalid path item")? {
-            if !["get", "post", "put", "patch", "delete"].contains(&method.as_str()) {
+            if !OPENAPI_METHODS.contains(&method.as_str()) {
                 continue;
             }
             ops.push(openapi_operation(
@@ -1623,6 +1700,18 @@ pub fn tag_counts(root: &Value) -> Result<BTreeMap<String, usize>> {
 
 pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolSpec>> {
     build_catalog(cfg, root, prefix)?.complete()
+}
+
+/// Start optional pricing enrichment under the catalog's acquisition authority.
+/// Cloned tools retain the source-generation owner; publication never waits here.
+pub fn enrich_pricing(
+    cfg: &Config,
+    root: &std::sync::Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    gate: Option<std::sync::Arc<crate::network::DiscoveryCapacity>>,
+) {
+    crate::pricing::discovery::attach_static(cfg, root, base, tools, gate);
 }
 
 pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {

@@ -28,7 +28,6 @@ owns allowed Zcash pools, the narrow NEAR deposit exception and unavoidable SDK 
 [Plans](plans/) describe unfinished work, including artifact storage,
 [stale cache expiry](plans/stale_cache_expiry.md),
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
-[advertised pricing discovery and initial wallet hints](plans/improved-pricing-discovery.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
 [Deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md)

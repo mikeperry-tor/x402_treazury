@@ -1106,8 +1106,8 @@ mod tests {
         expire.store(false, Ordering::SeqCst);
         db.execute("UPDATE cases SET window_end=?1", [now().unwrap() + 600])
             .unwrap();
-        let entered = Arc::new(tokio::sync::Semaphore::new(1));
-        let blocked = Arc::new(tokio::sync::Semaphore::new(1));
+        let entered = Arc::new(crate::network::DiscoveryCapacity::new(1));
+        let blocked = Arc::new(crate::network::DiscoveryCapacity::new(1));
         let gated = client
             .clone()
             .with_attempt_capacity(&[entered.clone(), blocked.clone()]);
@@ -1115,7 +1115,18 @@ mod tests {
         assert_eq!(control.bytes, b"complete free relay result");
         assert_eq!(origin_calls.load(Ordering::SeqCst), 3);
         assert_eq!(relay_calls.load(Ordering::SeqCst), 2);
-        let held = blocked.clone().acquire_owned().await.unwrap();
+        let holder_url = "https://capacity-holder.example.com/";
+        let holder_transport = crate::network::global()
+            .http_participating(
+                &crate::network::IsolationId::discovery(holder_url).unwrap(),
+                holder_url,
+                None,
+                true,
+                Default::default(),
+            )
+            .unwrap();
+        let held = blocked.acquire(&holder_transport).await.unwrap();
+        assert!(held.is_some());
         let request = route();
         let pending =
             tokio::spawn(async move { claim.invoke(gated.execute_response(request)).await });

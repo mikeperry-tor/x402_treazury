@@ -20,7 +20,6 @@ impl AcceptedProvider {
     pub fn new(id: &str, mut settings: Config) -> Self {
         // Accepted bytes replace static discovery, warming and probe machinery.
         settings.http_cache_enabled = false;
-        settings.catalog_cache_ttl_seconds = 0;
         settings.use_recommended_tools = false;
         settings.cover_traffic = None;
         Self {

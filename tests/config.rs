@@ -908,4 +908,13 @@ async fn pricing_composition_replaces_legacy_and_typed_declarations_atomically()
     config::resolve(toml::from_str(compatible).unwrap(), &source)
         .await
         .unwrap();
+    for url in [
+        "https://127.0.0.1/prices",
+        "https://catalog.internal/prices",
+    ] {
+        let body = format!("spec='local.json'\n[pricing]\nsource='{url}'\nformat='x402-resources'");
+        config::resolve(toml::from_str(&body).unwrap(), &source)
+            .await
+            .unwrap();
+    }
 }

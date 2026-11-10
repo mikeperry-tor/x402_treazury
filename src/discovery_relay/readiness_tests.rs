@@ -479,7 +479,7 @@ async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
     let ready_inner = Arc::get_mut(&mut ready).unwrap();
     ready_inner.key = "independent".into();
     ready_inner.state = waiting.state.clone();
-    let gate = Arc::new(tokio::sync::Semaphore::new(1));
+    let gate = Arc::new(crate::network::DiscoveryCapacity::new(1));
     let mut waiters = Vec::new();
     for _ in 0..140 {
         let relay = waiting.clone();

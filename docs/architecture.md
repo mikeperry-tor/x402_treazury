@@ -45,6 +45,9 @@ updates both the canonical text and retained base; serialized registrations rebu
 metadata on import. Listener selection reuses accepted tools; it projects source
 operations for tag matching only when that listener configures tag filters.
 Building a tag-free listener inventory needs no schema projection.
+Advertised-price matching reads borrowed method/path and configured URL metadata
+from the original OpenAPI or digest inventory without projecting request schemas
+again. Hidden or unsupported operations still participate in ambiguity checks.
 Provider files in `providers/` carry selections, help URLs, pricing settings and
 explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
@@ -193,10 +196,17 @@ without `send_tools` retain legacy behavior. See
 [source tool distribution](configuration.md#source-tool-distribution) for syntax
 and diagnostic contracts.
 
-Local catalogs load before ordinary deployment serving. Remote catalogs share capacity
-for 2 active downloads by default (`startup.catalog_concurrency`, 1..64), after
-listeners bind. Server-directed retry waits release download capacity while their
-logical loads remain pending. Each listener defaults to `wait_for_catalogs = true`:
+Local catalogs load before ordinary deployment serving; deferred remote catalogs
+start after listeners bind. One shared capacity owner spans initial pricing for
+local catalogs and deferred catalog, pricing and relay attempts, admitting 2 active
+Tor isolation scopes by default (`startup.catalog_concurrency`, 1..64). Requests using the same effective SOCKS
+credentials share one slot and proceed in parallel, including when distinct scopes
+are queued. Different transport or retry scopes count separately even on one
+domain. The last full-body holder releases its slot before retry/handoff delays;
+logical loads remain pending. Direct egress, including `catalog warm --direct`,
+cache hits, local files and relay serialization/readiness waits hold no slots.
+Idle Tor circuits and pooled sockets do not count. Dynamic imports outside this
+deployment owner retain their existing scheduling. Each listener defaults to `wait_for_catalogs = true`:
 after socket binding, funding/reconciliation and deferred discovery run while HTTP
 serving waits for that listener's effectively bound sources. The catalog owner signals
 readiness only after publication; no duplicate source-outcome ledger or overall
