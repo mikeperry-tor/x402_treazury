@@ -399,13 +399,14 @@ impl Store {
     }
 }
 
-const ROLE_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE p.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND w.role=?2 ORDER BY w.sequence";
-const READY_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN reserve_claims c ON c.wallet_id=w.id WHERE w.pool_id=?1 AND w.role=?2 AND c.enabled=1 ORDER BY CASE c.slot WHEN 'small' THEN 0 ELSE 1 END,w.sequence";
+const ROLE_IDENTITY_SQL: &str = "SELECT w.id,w.role,w.address FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE p.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND w.role=?2 ORDER BY w.sequence";
+const READY_IDENTITY_SQL: &str = "SELECT w.id,w.role,w.address FROM wallets w JOIN reserve_claims c ON c.wallet_id=w.id WHERE w.pool_id=?1 AND w.role=?2 AND c.enabled=1 ORDER BY CASE c.slot WHEN 'small' THEN 0 ELSE 1 END,w.sequence";
 
 /// Read-only default identity selection, also used by startup. A malformed
 /// wallet cannot hide independent funded capacity; retain its diagnostic when
 /// there is no eligible alternative. No balance acquisition or role change.
 pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(String, String)>> {
+    let mut malformed_address = false;
     for role in ["ACTIVE", "RETAINED", "READY"] {
         let sql = if role == "READY" {
             READY_IDENTITY_SQL
@@ -417,10 +418,21 @@ pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(St
         while let Some(row) = rows.next()? {
             let wallet: String = row.get(0)?;
             if payment_ownership(db, pool, &wallet)?.is_some() {
+                let address = row.get_ref(2)?.as_str().ok();
+                if address
+                    .is_none_or(|address| address.parse::<alloy_primitives::Address>().is_err())
+                {
+                    malformed_address = true;
+                    continue;
+                }
                 return Ok(Some((wallet, role.to_owned())));
             }
         }
     }
+    ensure!(
+        !malformed_address,
+        "wallet identity unavailable; malformed wallet address and no healthy eligible alternative"
+    );
     Ok(None)
 }
 
@@ -1102,6 +1114,131 @@ mod tests {
         assert_eq!(documentation_address(&db, "pool").unwrap(), expected);
         assert_eq!(role(&db, &job), "RETAINED");
         assert_eq!(db.total_changes(), before);
+    }
+
+    #[test]
+    fn documentation_identity_skips_malformed_active_without_mutating_siblings() {
+        for sibling_role in ["RETAINED", "READY"] {
+            let db = database();
+            let prior = active(&db);
+            let sibling = allocation(&db, "small");
+            funded(&db, &sibling);
+            db.execute(
+                "UPDATE wallets SET address='private-invalid-address' WHERE id=?1",
+                [wallet(&db, &prior)],
+            )
+            .unwrap();
+            db.execute(
+                "UPDATE wallets SET role=?1 WHERE id=?2",
+                params![sibling_role, wallet(&db, &sibling)],
+            )
+            .unwrap();
+            let expected: String = db
+                .query_row(
+                    "SELECT address FROM wallets WHERE id=?1",
+                    [wallet(&db, &sibling)],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let before = db.total_changes();
+            assert_eq!(documentation_address(&db, "pool").unwrap(), expected);
+            assert_eq!(role(&db, &sibling), sibling_role);
+            assert_eq!(db.total_changes(), before);
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            db.execute(
+                "UPDATE wallets SET address=X'00' WHERE id=?1",
+                [wallet(&db, &sibling)],
+            )
+            .unwrap();
+            let before = db.total_changes();
+            let error = documentation_address(&db, "pool").unwrap_err().to_string();
+            assert!(error.contains("malformed wallet address and no healthy eligible alternative"));
+            assert!(!error.contains("private-invalid-address"));
+            assert_eq!(db.total_changes(), before);
+        }
+    }
+
+    #[tokio::test]
+    async fn managed_documentation_client_uses_healthy_existing_identity_without_side_effects() {
+        use crate::payment::{PaidClient, SpendPolicy};
+        use crate::rotation::{base::BaseRpc, manager::ManagedPool};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = state
+            .ensure_capacity_group("docs", &reserves(true), Some(U256::from(100)), 0)
+            .unwrap();
+        state.fill_funding_vacancies("docs").unwrap();
+        let jobs = state.funding_jobs().unwrap();
+        for job in &jobs {
+            state
+                .record_credit(&job.wallet_id, "1", "fixture", 100)
+                .unwrap();
+        }
+        state
+            .db
+            .execute(
+                "UPDATE wallets SET role='ACTIVE',address='private-invalid-address' WHERE id=?1",
+                [&jobs[0].wallet_id],
+            )
+            .unwrap();
+        let expected = crate::network::IsolationId::evm(&jobs[1].recipient).unwrap();
+        let before = serde_json::to_value(state.status().unwrap()).unwrap();
+        state.db.execute_batch("CREATE TRIGGER no_documentation_wallet_write BEFORE UPDATE ON wallets BEGIN SELECT RAISE(ABORT,'documentation wallet mutation'); END;
+            CREATE TRIGGER no_documentation_claim_write BEFORE UPDATE ON reserve_claims BEGIN SELECT RAISE(ABORT,'documentation claim mutation'); END;
+            CREATE TRIGGER no_documentation_allocation BEFORE INSERT ON wallets BEGIN SELECT RAISE(ABORT,'documentation allocation'); END;
+            CREATE TRIGGER no_documentation_funding BEFORE INSERT ON funding_jobs BEGIN SELECT RAISE(ABORT,'documentation funding'); END;
+            CREATE TRIGGER no_documentation_payment BEFORE INSERT ON payment_attempts BEGIN SELECT RAISE(ABORT,'documentation payment'); END;").unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let manager = ManagedPool::new(
+            store.clone(),
+            pool,
+            BaseRpc::new("http://127.0.0.1:1").unwrap(),
+            SpendPolicy::dollars("1").unwrap(),
+        )
+        .unwrap();
+        let client = PaidClient::managed(Arc::new(manager));
+        assert_eq!(client.documentation_identity().await.unwrap(), expected);
+        let after = store
+            .call(|state| Ok(serde_json::to_value(state.status()?)?))
+            .await
+            .unwrap();
+        assert_eq!(after, before);
+        drop(client);
+        drop(store);
+        worker.await.unwrap();
+    }
+
+    #[test]
+    fn default_identity_preserves_authority_and_database_failures() {
+        let db = database();
+        let prior = active(&db);
+        db.execute(
+            "UPDATE wallets SET address='invalid' WHERE id=?1",
+            [wallet(&db, &prior)],
+        )
+        .unwrap();
+        db.execute("UPDATE pools SET payment_limit='invalid'", [])
+            .unwrap();
+        let error = default_identity(&db, "pool").unwrap_err().to_string();
+        assert!(!error.contains("malformed wallet address"));
+        db.execute(
+            "ALTER TABLE reserve_claims RENAME TO unavailable_claims",
+            [],
+        )
+        .unwrap();
+        assert!(default_identity(&db, "pool").is_err());
     }
 
     #[test]
