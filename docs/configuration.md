@@ -660,6 +660,12 @@ amounts are separate. Offline inspection cannot infer migration cost or usable
 capacity.
 None of these inspection commands allocates keys or funds.
 
+Managed refunded funding retains NEAR checks and consensus-paced Zcash scans until
+confirmed Ironwood receipt at its saved receiver. Bound REFUNDED, source closure
+and that receipt permit replacement under current enabled funding and an unused
+initial claim; every replacement obtains a fresh quote and receiver. Provider
+FAILED alone never authorizes replacement. See [refund recovery](wallet-rotation.md#refunds-state-and-recovery).
+
 `funding.quote_deadline_seconds` defaults to 1,800 seconds and preserves explicit
 operator overrides. It requests a quote window; the returned deadline governs
 preparation/disclosure independently of the SDK's consensus-derived signed block

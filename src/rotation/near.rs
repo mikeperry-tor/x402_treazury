@@ -84,6 +84,40 @@ pub enum SwapStatus {
     Failed,
     Unknown,
 }
+/// Value-only provider diagnostics; never preserve arbitrary upstream prose.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct StatusDetails {
+    pub refund_reason: Option<&'static str>,
+    pub deposited_zatoshi: Option<u64>,
+    pub refunded_zatoshi: Option<u64>,
+}
+pub struct StatusObservation {
+    pub status: SwapStatus,
+    pub details: StatusDetails,
+}
+impl From<SwapStatus> for StatusObservation {
+    fn from(status: SwapStatus) -> Self {
+        Self {
+            status,
+            details: StatusDetails::default(),
+        }
+    }
+}
+impl SwapStatus {
+    pub fn provider_name(self) -> &'static str {
+        match self {
+            Self::PendingDeposit => "PENDING_DEPOSIT",
+            Self::KnownDeposit => "KNOWN_DEPOSIT_TX",
+            Self::IncompleteDeposit => "INCOMPLETE_DEPOSIT",
+            Self::Processing => "PROCESSING",
+            Self::Success => "SUCCESS",
+            Self::Refunded => "REFUNDED",
+            Self::Failed => "FAILED",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct BridgeMinimum(pub(crate) u64);
 impl std::fmt::Display for BridgeMinimum {
@@ -491,6 +525,9 @@ impl NearClient {
         self.validate_saved_quote(&quote, limits, now)
     }
     pub async fn status(&self, quote: &Quote) -> Result<SwapStatus> {
+        Ok(self.status_observation(quote).await?.status)
+    }
+    pub async fn status_observation(&self, quote: &Quote) -> Result<StatusObservation> {
         let deposit = quote
             .deposit
             .as_deref()
@@ -519,7 +556,14 @@ impl NearClient {
             _ => SwapStatus::Unknown,
         };
         log_status(&v, status);
-        Ok(status)
+        Ok(StatusObservation {
+            status,
+            details: StatusDetails {
+                refund_reason: refund_reason(&v["swapDetails"]["refundReason"]),
+                deposited_zatoshi: diagnostic_atomic(&v["swapDetails"]["depositedAmount"]),
+                refunded_zatoshi: diagnostic_atomic(&v["swapDetails"]["refundedAmount"]),
+            },
+        })
     }
 }
 pub fn validate_assets(v: &Value) -> Result<Assets> {

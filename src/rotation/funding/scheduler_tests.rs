@@ -139,6 +139,7 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
         timed_out: false,
         next_poll: 0,
         last_error: None,
+        provider_outcome: None,
         provider_observed_at: None,
     };
     let mut state = State::default();
@@ -224,6 +225,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         timed_out: false,
         next_poll: 0,
         last_error: None,
+        provider_outcome: None,
         provider_observed_at: None,
     };
     for kind in [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote] {
@@ -660,7 +662,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
         .publish_status(
             &lease,
             request,
-            Ok(SwapStatus::Success),
+            Ok(SwapStatus::Success.into()),
             &TickClock {
                 epoch: 1000,
                 started: tokio::time::Instant::now(),
@@ -2269,6 +2271,7 @@ fn sibling_observations_report_current_phase_once_per_operation() {
     let mut state = State::default();
     let record = || Record {
         reported_phase: None,
+        reported_status: None,
         due: 0,
         streak: 0,
         error: None,
@@ -2750,6 +2753,7 @@ async fn scheduler_replacement_waits_for_retained_source_and_preserves_backoff()
                 },
                 Record {
                     reported_phase: None,
+                    reported_status: None,
                     due: u64::MAX,
                     streak: 3,
                     error: Some("retained outage".into()),

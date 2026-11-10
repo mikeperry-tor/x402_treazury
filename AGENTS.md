@@ -102,8 +102,11 @@ quirks, workarounds, and compatibility exemptions are documented in
 - Journal before disclosure. Preserve exact accepted inputs, signed bytes, original
   identities and liabilities through cancellation/restart; missing results do not
   prove nothing happened.
-- SDK/blockchain state owns current supported Ironwood spendability. Refunds do
-  not authorize another funding deposit. Unsupported pool holdings do not grant
+- SDK/blockchain state owns current supported Ironwood spendability. Managed
+  funding may replace a bound REFUNDED swap after confirmed receiver observation
+  and source closure under a current unused claim; follow the
+  [refund recovery policy](docs/wallet-rotation.md#refunds-state-and-recovery).
+  A refund alone grants no replay authority. Unsupported pool holdings do not grant
   spending, shielding or fallback authority.
 - Each wallet's initial funding claim is consumed by its first positive USDC
   observation; low estimates never reopen it or authorize top-ups.

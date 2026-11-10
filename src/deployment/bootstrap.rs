@@ -331,8 +331,13 @@ fn assess_startup_paths(
         actionable |= !matches!(disposition, StartupDisposition::Obstructed(_));
         if progress && logged < 8 {
             logged += 1;
-            let waiting_for = if path.job.phase
-                == crate::rotation::store::funding::FundingPhase::Quoted
+            let waiting_for = if path.facts.refund_observation_needed() {
+                "confirmed ZEC refund at the saved receiver; NEAR checks and Zcash scans continue"
+            } else if path.facts.provider_refunded {
+                "replacement funding under current authority"
+            } else if path.facts.provider_failed {
+                "NEAR refund outcome; provider checks continue"
+            } else if path.job.phase == crate::rotation::store::funding::FundingPhase::Quoted
                 && group.treasury_source_pending
             {
                 "another treasury transaction to confirm"

@@ -26,8 +26,10 @@ use std::{
 struct Bridge {
     store: StoreHandle,
     deposits: Arc<Vec<String>>,
+    refund_deposit: Option<String>,
     quotes: Arc<Mutex<BTreeMap<String, Value>>>,
     quote_count: Arc<AtomicUsize>,
+    refund_status_calls: Arc<AtomicUsize>,
     base_calls: Arc<AtomicUsize>,
     quotes_entered: Arc<tokio::sync::Semaphore>,
     release_quotes: CancellationToken,
@@ -73,9 +75,13 @@ async fn status(
         .as_str()
         .unwrap()
         .to_owned();
+    let refunded = f.refund_deposit.as_deref() == Some(query["depositAddress"].as_str());
     let delivered = credited(&f.store, recipient).await;
+    if refunded && delivered {
+        f.refund_status_calls.fetch_add(1, Ordering::SeqCst);
+    }
     Json(
-        json!({"status":if delivered {"SUCCESS"} else {"PENDING_DEPOSIT"},"quoteResponse":response}),
+        json!({"status":if delivered && refunded {"REFUNDED"} else if delivered {"SUCCESS"} else {"PENDING_DEPOSIT"},"quoteResponse":response}),
     )
 }
 async fn credited(store: &StoreHandle, recipient: String) -> bool {
@@ -92,14 +98,21 @@ async fn credited(store: &StoreHandle, recipient: String) -> bool {
 }
 async fn base(State(f): State<Bridge>, Json(v): Json<Value>) -> Json<Value> {
     f.base_calls.fetch_add(1, Ordering::SeqCst);
+    let refund_deposit = f.refund_deposit.clone();
     let confirmed = f
         .store
-        .call(|s| {
+        .call(move |s| {
             Ok(s.funding_jobs()?
                 .into_iter()
                 .filter(|j| {
-                    s.operation(&j.operation_id)
-                        .is_ok_and(|o| o.submission == "CONFIRMED")
+                    let eligible = s
+                        .funding_quote(&j.id)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<Quote>(&bytes).ok())
+                        .is_some_and(|quote| quote.deposit != refund_deposit);
+                    eligible
+                        && s.operation(&j.operation_id)
+                            .is_ok_and(|o| o.submission == "CONFIRMED")
                 })
                 .map(|j| j.recipient.to_ascii_lowercase())
                 .collect::<Vec<_>>())
@@ -234,7 +247,7 @@ async fn complete(
 }
 
 #[tokio::test]
-async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
+async fn production_worker_bootstraps_groups_and_retries_refunded_ready_wallet_rotation() {
     let (dir, mut net, owner, endpoint) = funded_fixture(2).await;
     let mut external = net
         .client(
@@ -243,7 +256,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         )
         .await;
     let mut deposits = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         let (_, address) = external
             .generate_transparent_address(zip32::AccountId::ZERO, false)
             .await
@@ -311,9 +324,11 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         .unwrap();
     let f = Bridge {
         store: store.clone(),
+        refund_deposit: Some(deposits[2].clone()),
         deposits: Arc::new(deposits),
         quotes: Default::default(),
         quote_count: Default::default(),
+        refund_status_calls: Default::default(),
         base_calls: Default::default(),
         quotes_entered: Arc::new(tokio::sync::Semaphore::new(0)),
         release_quotes: CancellationToken::new(),
@@ -476,23 +491,99 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         .unwrap(),
     );
     let payer = crate::payment::PaidClient::managed(manager);
-    payer
-        .execute(crate::catalog::RoutedRequest {
-            json_media_type: None,
-            headers: Default::default(),
-            method: "GET".into(),
-            url: format!("{origin}/pay"),
-            query: BTreeMap::new(),
-            body: None,
+    let paid_request = || crate::catalog::RoutedRequest {
+        json_media_type: None,
+        headers: Default::default(),
+        method: "GET".into(),
+        url: format!("{origin}/pay"),
+        query: BTreeMap::new(),
+        body: None,
+    };
+    payer.execute(paid_request()).await.unwrap();
+    assert_eq!(f.signed.lock().unwrap().len(), 1);
+    // Serving consumes READY into ACTIVE, then refills its slot. The bridge
+    // refunds that refill; existing ACTIVE remains usable throughout recovery.
+    let mut refunded = None;
+    for _ in 0..80 {
+        for _ in 0..3 {
+            tick(&worker, clock).await;
+        }
+        refunded = store
+            .call(|s| {
+                Ok(s.funding_jobs()?
+                    .into_iter()
+                    .find(|j| j.provider_outcome.as_deref() == Some("REFUNDED")))
+            })
+            .await
+            .unwrap();
+        if refunded.is_some() {
+            break;
+        }
+        {
+            let mut chain = net.chain.write().await;
+            chain.mine_mempool();
+            chain.mine_empty_blocks(1);
+        }
+        tokio::time::advance(Duration::from_secs(61)).await;
+    }
+    let original = refunded.expect("rotation refill must reach REFUNDED");
+    assert_eq!(f.quote_count.load(Ordering::SeqCst), 3);
+    let operation = original.operation_id.clone();
+    store
+        .call(move |s| {
+            let status = s.status()?;
+            let pool = status.pools.iter().find(|p| p.name == "alpha").unwrap();
+            assert!(pool.serving_ready && !pool.inventory_ready);
+            assert!(s.treasury_observation_needed(&[])?);
+            assert!(s.funding_facts(&original.id, &operation)?.status_needed());
+            Ok(())
         })
         .await
         .unwrap();
-    assert_eq!(f.signed.lock().unwrap().len(), 1);
-    // Actual signed admission consumes the reserve, then the same worker funds
-    // exactly one replacement without resolving the old payment liability.
-    complete(&worker, &net, 3, clock).await;
+    // Existing ACTIVE can still sign and finish another paid call while the
+    // reserve refill waits for its refund. Neither payment reopens that claim.
+    payer.execute(paid_request()).await.unwrap();
+    assert_eq!(f.signed.lock().unwrap().len(), 2);
+    // Provider REFUNDED alone neither stops polling nor starts another deposit.
+    tokio::time::advance(Duration::from_secs(61)).await;
+    tick(&worker, clock).await;
+    assert!(f.refund_status_calls.load(Ordering::SeqCst) >= 2);
     assert_eq!(f.quote_count.load(Ordering::SeqCst), 3);
-    assert_eq!(sends.load(Ordering::SeqCst), 3);
+    let bound =
+        f.quotes.lock().unwrap()[f.refund_deposit.as_ref().unwrap()]["quoteRequest"]["refundTo"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let refund = net.funding_transaction(vec![(&bound, 25_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![refund]);
+        chain.mine_empty_blocks(1);
+    }
+    tokio::time::advance(Duration::from_secs(61)).await;
+    complete(&worker, &net, 3, clock).await;
+    assert_eq!(f.quote_count.load(Ordering::SeqCst), 4);
+    assert_eq!(sends.load(Ordering::SeqCst), 4);
+    {
+        let quotes = f.quotes.lock().unwrap();
+        assert_ne!(
+            quotes[&f.deposits[2]]["quoteRequest"]["refundTo"],
+            quotes[&f.deposits[3]]["quoteRequest"]["refundTo"]
+        );
+    }
+    store
+        .call(|s| {
+            let pool = s
+                .status()?
+                .pools
+                .into_iter()
+                .find(|p| p.name == "alpha")
+                .unwrap();
+            assert!(pool.serving_ready && pool.inventory_ready);
+            Ok(())
+        })
+        .await
+        .unwrap();
     store
         .call(|s| {
             let jobs = s.funding_jobs()?;
@@ -512,7 +603,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(unresolved, 1);
+    assert_eq!(unresolved, 2);
     drop(db);
     drop(payer);
     drop(worker);
@@ -651,8 +742,10 @@ async fn unstarted_sdk_failures_keep_the_original_quote_until_funded() {
     let f = Bridge {
         store: store.clone(),
         deposits: Arc::new(vec![DEPOSIT.into()]),
+        refund_deposit: None,
         quotes: Default::default(),
         quote_count: Default::default(),
+        refund_status_calls: Default::default(),
         base_calls: Default::default(),
         quotes_entered: Arc::new(tokio::sync::Semaphore::new(0)),
         release_quotes: CancellationToken::new(),

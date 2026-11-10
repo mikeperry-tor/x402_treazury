@@ -217,6 +217,7 @@ impl Treasury {
                     Err(error) => return Err(error),
                 }
             }
+            self.observe_funding_refunds().await?;
             let requested = if self.startup_discovery && startup_ready {
                 Some(true)
             } else {

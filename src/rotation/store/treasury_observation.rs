@@ -24,7 +24,10 @@ impl Store {
         if accepted {
             return Ok(true);
         }
-        if self.direct_receive_needed()? || self.direct_source_needed()? {
+        if self.funding_refund_scan_needed()?
+            || self.direct_receive_needed()?
+            || self.direct_source_needed()?
+        {
             return Ok(true);
         }
         // Invalid published bytes keep their owner. Unpublished intent history

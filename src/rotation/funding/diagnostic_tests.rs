@@ -89,7 +89,7 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
         );
         let unavailable = "NEAR swap status check could not complete";
         let recovered = "NEAR swap status checks resumed successfully";
-        for n in 0..6 {
+        for n in 0..7 {
             if n == 4 {
                 db.execute_batch("CREATE TRIGGER reject_provider_update BEFORE UPDATE OF provider_success ON funding_progress BEGIN SELECT RAISE(ABORT,'private storage failure'); END;").unwrap();
             } else if n == 5 {
@@ -107,7 +107,14 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
                 .publish_status(
                     &lease,
                     request.clone(),
-                    result,
+                    result.map(|status| crate::rotation::near::StatusObservation {
+                        status,
+                        details: crate::rotation::near::StatusDetails {
+                            refund_reason: Some("NO_LIQUIDITY"),
+                            deposited_zatoshi: Some(50_000),
+                            refunded_zatoshi: Some(25_000),
+                        },
+                    }),
                     &TickClock {
                         epoch: instant,
                         started: tokio::time::Instant::now(),
@@ -140,10 +147,17 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
                 "{logged}"
             );
             assert_eq!(
-                logged.matches("NEAR reported").count(),
-                usize::from(n == 5),
+                logged.matches("near_status=\"").count(),
+                usize::from(n >= 5),
                 "{logged}"
             );
+            if n >= 5 {
+                assert!(
+                    logged.contains("refund_reason=\"NO_LIQUIDITY\""),
+                    "{logged}"
+                );
+                assert!(logged.contains("refunded_zatoshi=25000"), "{logged}");
+            }
             if n == 4 {
                 assert!(logged.contains("stage=\"publication\""), "{logged}");
                 assert!(
@@ -173,7 +187,7 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
                         0 | 1 => None,
                         2 => Some(1360),
                         3 | 4 => Some(1540),
-                        _ => Some(1900),
+                        _ => Some(instant),
                     };
                     assert_eq!(saved.provider_observed_at, expected);
                     assert_eq!(s.operation(&operation)?.attempts, 1);
@@ -783,13 +797,14 @@ async fn retained_request_debug_matches_actual_status_acquisitions_without_short
         .await
         .unwrap();
     worker.tick(terminal_due).await.unwrap();
-    assert!(observed.try_recv().is_err());
+    assert_eq!(observed.try_recv().unwrap(), job.id);
     assert_eq!(
         std::fs::read_to_string(log.path())
             .unwrap()
             .matches(message)
             .count(),
-        2
+        2,
+        "the current refund poll is not an unknown archived-request acquisition"
     );
     let operation = job.operation_id.clone();
     store

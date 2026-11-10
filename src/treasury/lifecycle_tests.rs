@@ -9,6 +9,7 @@ mod discovery;
 mod indexer_recovery;
 mod indexer_regression;
 mod ironwood;
+mod managed_refunds;
 mod native_receive;
 mod native_send;
 mod refund_addresses;

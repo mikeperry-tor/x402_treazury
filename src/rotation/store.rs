@@ -11,6 +11,7 @@ pub(crate) mod observation;
 mod preflight;
 #[cfg(test)]
 mod query_tests;
+mod refunds;
 #[cfg(test)]
 mod rename_tests;
 pub(crate) mod retirement;
@@ -236,6 +237,7 @@ pub struct Store {
     // must be retried by this owner before they can obstruct startup.
     funding_conditions:
         std::collections::BTreeMap<String, (String, super::error::FundingCondition)>,
+    refund_observations: std::collections::BTreeMap<String, (i64, bool)>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
     direct_changes: std::sync::Arc<tokio::sync::Notify>,
@@ -428,6 +430,7 @@ impl Store {
             evidence_cache: Default::default(),
             evidence_order: 0,
             funding_conditions: Default::default(),
+            refund_observations: Default::default(),
             retirement_work: Default::default(),
             #[cfg(test)]
             inventory_failure: Default::default(),
@@ -491,6 +494,7 @@ impl Store {
             evidence_cache: Default::default(),
             evidence_order: 0,
             funding_conditions: Default::default(),
+            refund_observations: Default::default(),
             retirement_work: Default::default(),
             #[cfg(test)]
             inventory_failure: Default::default(),

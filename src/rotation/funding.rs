@@ -27,6 +27,12 @@ pub trait FundingObservations: Clone + Send + Sync + 'static {
     type QuoteRequest: Clone + Send + Sync + 'static;
     fn quote(&self, request: Self::QuoteRequest) -> impl Future<Output = Result<Quote>> + Send;
     fn status(&self, quote: Quote) -> impl Future<Output = Result<SwapStatus>> + Send;
+    fn status_observation(
+        &self,
+        quote: Quote,
+    ) -> impl Future<Output = Result<super::near::StatusObservation>> + Send {
+        async move { self.status(quote).await.map(Into::into) }
+    }
     fn credit(&self, job: FundingJob) -> impl Future<Output = Result<()>> + Send;
     fn credit_observation(
         &self,
@@ -841,6 +847,9 @@ impl FundingObservations for Observations {
     }
     async fn status(&self, quote: Quote) -> Result<SwapStatus> {
         self.near.status(&quote).await
+    }
+    async fn status_observation(&self, quote: Quote) -> Result<super::near::StatusObservation> {
+        self.near.status_observation(&quote).await
     }
     async fn credit(&self, job: FundingJob) -> Result<()> {
         self.credit_observation(job).await.result

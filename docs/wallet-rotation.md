@@ -801,25 +801,30 @@ consumes the initial claim and can publish the usable wallet before settlement.
 This scalar is advisory readiness, not finalized transfer evidence. Bound provider
 SUCCESS plus that initial credit completes the existing funding job. A successful
 operation awaiting credit remains in VERIFYING_CREDIT without source-chain work.
-Earlier negative reports cannot veto success or reopen the claim. FAILED/REFUNDED
-ends bridge-status observation; a genuinely pending original source transaction
-keeps its own confirmation/finite-expiry observation. Unknown, processing and
-incomplete bridge outcomes remain unresolved automatic waits; they do not
-manufacture an integrity error or operator-review requirement. Source expiry or
-receipt of returned coins cannot by itself prove the bridge has no delivery
-obligation. A confirmed deposit with unresolved settlement waits for that outcome.
-FAILED/REFUNDED does not independently authorize replacing a confirmed deposit:
-source confirmation proves delivery to the swap, not absence of future destination
-credit. A negative provider report, a refund and a fresh random nominal draw do
-not remove that liability. Replacement requires independently established source
-non-disclosure or the existing authenticated finite-expiry proof; the current
-unconsumed claim, enabled funding policy and qualification authority still apply.
+Earlier negative reports cannot veto success or reopen the claim. Provider SUCCESS
+stops status work. FAILED retains checks until a bound REFUNDED or SUCCESS;
+REFUNDED retains checks until the saved refund receiver has a confirmed Ironwood
+receipt in the SDK snapshot. Failed/refunded current operations request shared ZEC
+scans while that receipt is absent, even after disabling new funding. Original
+source work keeps independent confirmation/finite-expiry observation.
+
+A bound REFUNDED outcome closes that swap's delivery obligation. After positive
+confirmed receipt at its exact saved refund receiver and original source closure,
+managed funding may archive the attempt and obtain a fresh operation, quote and
+refund receiver under current enabled funding authority and the same unconsumed
+claim. Receipt alone, FAILED, elapsed time, unrelated incoming funds and unsupported
+pools cannot authorize replacement. Positive initial USDC credit or bound SUCCESS
+vetoes replacement at its serialized mutation boundary. Direct sends never gain
+replacement authority. Unknown, processing and incomplete bridge outcomes remain
+unresolved automatic waits; they do not manufacture an integrity error or operator
+requirement. Source expiry alone cannot prove the bridge has no delivery obligation.
 Verified finite expiry can permit a fresh attempt under current unconsumed claim,
 funding and qualification authority and actual SDK spendable funds. If later
 canonical confirmation establishes that the original source transaction was
 included, that confirmation supersedes active expiry as the basis for a new
 replacement. The prior expiry proof, pinned snapshot and original operation remain
-audit history; they do not authorize another deposit after confirmation. The old NEAR
+audit history; confirmation requires the separate bound-refund recovery path
+before any replacement. The old NEAR
 request remains independently observable until its own terminal outcome.
 
 Status observations retain each accepted request's exact operation and saved quote,
@@ -875,8 +880,8 @@ changes use a separate progress message. Each validated NEAR status enum logs at
 DEBUG with the operation identity. Observation unavailable/recovered transitions
 log at INFO using existing job records, with repeated failures at DEBUG. Terminal
 provider outcomes log only after persistence: `FAILED` is not proof of no receipt,
-and `REFUNDED` is a provider claim, not an SDK-observed refund. No refund amount or
-detail is inferred from an unparsed response. These diagnostics add no state,
+and `REFUNDED` is a provider claim, not an SDK-observed refund. Safe parsed
+refund reason and reported atomic amounts accompany INFO outcome transitions; these remain provider reports, not wallet receipt evidence. These diagnostics add no state,
 polling or financial authority. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
 polls log at debug level, clear stale error status and use the normal polling interval.
@@ -950,8 +955,8 @@ Reports distinguish recovered, waiting, failed checks and operator-required case
 Unpublished calculations recover at the exclusive reconstructed SDK owner;
 missing immutable records required to resolve genuinely disclosed work still
 require scoped review before replacing that funding attempt. A confirmed source with an
-unresolved swap remains automatic pending work for the existing provider/credit
-lanes; a refund alone cannot authorize a replacement deposit. Ordinary discovery and shielding
+unresolved swap remains automatic pending work. FAILED/REFUNDED also retain refund
+observation as described below; a refund alone cannot authorize replacement. Ordinary discovery and shielding
 of owned outputs can continue under the current funding authority.
 
 A prepared deposit retains its exact bytes and input owner when its external quote
@@ -1042,13 +1047,16 @@ calculated refund total. This does not relax quote acceptance or signing authori
 The first positive USDC credit consumes its initial funding claim even below its nominal minimum.
 An empty refund address after shielding, or later spending of recovered funds,
 does not invalidate historical recovery. Refund receipt and shielding must not
-become additional prerequisites for an independently established terminal outcome.
+become additional prerequisites for an independently established SUCCESS; the
+managed refund observation sequence below governs replacement after REFUNDED.
 
 Keep uncertainty attached to the actual unresolved obligation. Preserve current
 authority checks, journal-before-disclosure, accepted input ownership, canonical
 unfinished-source confirmation/finite-expiry recovery and unresolved payment authorizations. Receipt
-or shielding of a refund does not prove non-submission or absence of future USDC
-delivery, release another attempt's inputs, or authorize another deposit. Genuinely
+or shielding alone does not prove non-submission, release another attempt's inputs
+or authorize another deposit. Managed refund replacement combines bound REFUNDED,
+source closure and current unused-claim authority with the receiver observation
+sequence described below. Genuinely
 conflicting execution/ownership evidence or unrecoverable required facts warrant
 scoped investigation; they do not justify halting unrelated work.
 
@@ -1138,9 +1146,24 @@ Mnemonic recovery discovers shielded receipts through viewing keys without addre
 gap scanning; a seed does not recover off-chain liabilities or undisclosed issuance
 frontiers, so retain the complete encrypted state and key backup.
 
+Managed refund observation reuses the SDK's historical Ironwood notes matched to
+the actual receiver in the exact accepted quote. Positive confirmed receipts count
+when below the deposited amount or subsequently spent; no deposit/refund equality,
+provider amount comparison or per-refund spendability ledger is maintained. Current
+SDK funds still govern the next preparation. This is an observation sequence for
+managed replacement, not an additional balance budget or a prerequisite for an
+independently established SUCCESS. Store-lifetime metadata caches positive and
+absent receipts per operation and snapshot revision, rebuilds from saved SDK facts
+after reopen, and is re-evaluated when the snapshot changes. Committed replacement
+archives the original unchanged; archived terminal refunds are not reopened or
+watched. INFO distinguishes the provider outcome, absent/confirmed receiver receipt
+and committed replacement. Bootstrap's INFO wait message identifies refund discovery
+instead of reporting every refund wait as initial USDC credit.
+
 Refund visibility does not make funds automatically spendable for another deposit.
 Only actual owned Ironwood funds enter supported spendability. A returned payment
-never reopens an initial funding claim or authorizes another deposit. The saved
+never reopens a consumed initial funding claim. Managed replacement requires
+the bound provider refund outcome and closed source under the existing unused claim. The saved
 `funding_refunds` records retain exact routing evidence; they are not a refund
 balance ledger. New transparent-input shielding and `wallet shield-refunds` are
 unsupported and fail before calculation or network work. Serving never allocates
@@ -1257,7 +1280,8 @@ The observation scope, cadence and completion rule belong to the work requesting
 | Recognized signed-payment insufficient funds | Asynchronous scalar Base refresh when due, coalesced per wallet; each repeated read starts at least 60 seconds after the previous read completes | Success, including zero, finishes the captured request. Failure or a notification arriving during the read retains follow-up work |
 | Eligible retained-wallet retirement | Candidate-scoped canonical authorization pages and dual balance proof under the existing per-wallet owner, 60-second completion floor and error backoff | Retired or verified latest above tolerance finishes captured demand; confirmed above tolerance with latest low, valid unused authorization or transient failure retains work. Canonical-history changes retain reconstruction work; ineligible or unrecoverably corrupt original work stops locally |
 | Validated pending source or shielding transaction | Shared ZEC scans use the next block's SDK consensus spacing after successful completion; source operation observations use configured funding polling plus existing jitter, with independent error backoff. The funding scheduler owns current operations even after job completion; treasury maintenance owns jobless and archived pending originals | Bound NEAR SUCCESS closes swap source work; otherwise canonical confirmation or signed finite-expiry recovery resolves the source obligation, including after credit, disablement, removal or restart |
-| Submitted swap awaiting provider outcome, including archived attempts | Independent exact-operation NEAR status observations; successful completion schedules the next check after `funding.poll_seconds` plus existing jitter; failures retain their independent backoff with a 60-second floor | Validated SUCCESS/FAILED/REFUNDED stops that operation's status work; SUCCESS closes its own source work and fulfills the initial claim, without creating spendable funds or releasing a different disclosed original |
+| Submitted swap awaiting provider outcome, including archived attempts | Independent exact-operation NEAR status observations; successful completion schedules the next check after `funding.poll_seconds` plus existing jitter; failures retain their independent backoff with a 60-second floor | SUCCESS stops status work; current FAILED keeps polling, and current REFUNDED stops after confirmed receiver receipt; archived terminal outcomes remain stopped; SUCCESS closes its own source work and fulfills the initial claim, without creating spendable funds or releasing a different disclosed original |
+| Current managed FAILED/REFUNDED without confirmed receiver receipt | Shared ZEC scans on existing consensus cadence, independent of new-funding enablement; exact-request NEAR checks retain existing polling/backoff | Confirmed positive Ironwood receipt stops refund scans; FAILED still polls until bound REFUNDED/SUCCESS. Source ownership and destination credit retain separate stop rules. No archived refund watcher |
 | Disclosed direct receive invoice | Shared SDK scan on the existing consensus cadence; independent provider status reads on configured funding polling plus operation jitter, with 60–300-second error backoff | Terminal provider failure/refund stops demand; success requests one subsequent completed SDK scan, without attribution or amount equality. Owned status remains available after admission disablement. |
 | Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients and one eligible-retirement attempt | Report asset results and unresolved retirement work; create no background watcher and require serving to be stopped |
 | Completed-result publication or SDK reconstruction | Existing local owner retries after 60 seconds, independently of scan scheduling | Publish the identical result or reconstruct the SDK; this work alone requests no network scan or new calculation |

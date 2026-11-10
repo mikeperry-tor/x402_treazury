@@ -186,6 +186,9 @@ pub(super) fn status(
             usdc(&job.target)
         )
         .unwrap();
+        if let Some(outcome) = &job.provider_outcome {
+            writeln!(text, "  Saved NEAR outcome: {outcome} (provider report; not proof of a Zcash refund receipt)").unwrap();
+        }
         if let Some(selected) = &job.selected_output {
             writeln!(text, "  Selected nominal amount: {}", usdc(selected)).unwrap();
         }

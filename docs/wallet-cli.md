@@ -140,10 +140,13 @@ An outgoing transaction can therefore leave both confirmed and spendable shielde
 balances at zero while its change is pending. If the key or SDK snapshot is
 unavailable, the summary explicitly falls back to saved sync amounts for confirmed
 and spendable shielded balances; the additional amounts display `unknown`.
+Incoming notes are not listed as separate operations in this summary; use
+`wallet notes` for retained receiving and spending history. An unchanged aggregate
+balance does not establish whether a specific refund was received.
 Outgoing treasury operations show the
 principal and fee from existing transaction facts and saved source status
 separately from cross-chain swap progress. Swap progress includes the last
-validated response's local observation time, last safe error, and `timed_out`
+validated response's local observation time, saved terminal NEAR outcome, last safe error, and `timed_out`
 health threshold. The observation time includes pending/unknown responses and is
 not the provider's `updatedAt`. Swap amounts show the operation's original allocation floor
 and, when recorded, its selected nominal amount and accepted bridge output, not
@@ -690,7 +693,15 @@ deposit addresses. The coordinator resumes phases without repeating ambiguous
 submissions, reconciles source confirmation, polls the same deposit, and independently
 checks Base credit. Until [funding completion is proven](wallet-rotation.md#funding-and-source-safety),
 provider-reported partial deposits enter `recovery_required`; failed/refunded swaps
-stay `refund_pending`. Later negative reports retain their audit facts without
+stay `refund_pending`, distinct from the saved provider `FAILED` or `REFUNDED`.
+Current negative outcomes keep NEAR checks and shared Zcash scans until confirmed
+receipt at the saved refund receiver; FAILED continues NEAR checks until a final
+refund/success outcome. INFO reports safe provider refund details and local receipt
+transitions. A bound REFUNDED plus confirmed receiver receipt and closed source
+permits a fresh operation/quote under current enabled funding and an unused claim.
+Receipt below the original amount or subsequently spent still counts; actual SDK
+funds govern preparation. Restart rebuilds this observation from saved notes.
+SUCCESS or first positive USDC credit prevents replacement. Later negative reports retain their audit facts without
 revoking that completion proof. The SDK owns incoming returns and current spendable inputs. Local refund credits,
 principal caps and historical refund revalidation are removed; provider status alone
 never proves an on-chain return or authorizes a new deposit.

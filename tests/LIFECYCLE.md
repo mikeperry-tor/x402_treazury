@@ -80,8 +80,11 @@ cheap Store tests cover additional malformed disclosure/health permutations.
 
 The Store bootstrap fixture covers operation-backed recovery without proving:
 accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
-outcomes permit recovery assessment but cannot authorize replacement of a confirmed
-deposit. Store regressions exercise fixed and ranged nominal policies through
+outcomes permit recovery assessment. Only bound REFUNDED with a confirmed
+receiver receipt and source closure permits a confirmed-deposit replacement under
+current unused-claim authority. `managed_refunds` proves receiver-specific partial
+receipt, unrelated credit rejection, confirmation depth, restart reconstruction,
+disabled funding, fresh replacement receiver and original-byte retention without replay. Store regressions exercise fixed and ranged nominal policies through
 restart, retaining the same selected terms, accepted output, original bytes and
 unchanged original ownership after refusal. Stale bindings and malformed advisory
 negative flags grant no authority. Proven non-disclosure and completed SDK

@@ -139,6 +139,7 @@ impl Treasury {
         if crate::qualification::active() {
             return Ok(OperatorRequired("qualification_recovery_requires_review"));
         }
+        self.observe_funding_refunds().await?;
         let (job, operation) = self
             .store
             .call(move |s| s.funding_recovery_context(&job_id))
@@ -290,6 +291,8 @@ impl Treasury {
             return Ok(Waiting(
                 if self.source_work_fulfilled(&job.operation_id).await? {
                     "swap_fulfilled_waiting_for_credit"
+                } else if job.provider_outcome.as_deref() == Some("REFUNDED") {
+                    "waiting_for_confirmed_refund"
                 } else {
                     "swap_outcome_pending"
                 },

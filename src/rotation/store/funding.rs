@@ -120,6 +120,9 @@ pub struct FundingJob {
     /// Advisory reporting only; not the provider's update time or current status.
     #[serde(default)]
     pub provider_observed_at: Option<u64>,
+    /// Saved terminal provider evidence, distinct from local workflow phase.
+    #[serde(default)]
+    pub provider_outcome: Option<String>,
 }
 /// Exact persisted obligations for one attempt. This is a read snapshot of the
 /// existing journals, not another durable work state or source of authority.
@@ -139,6 +142,7 @@ pub struct FundingFacts {
     pub claim_fulfilled: bool,
     pub provider_failed: bool,
     pub provider_refunded: bool,
+    pub refund_observed: bool,
     pub provider_incomplete: bool,
     pub source_submission: Option<String>,
     pub source_attempts: u32,
@@ -165,8 +169,12 @@ impl FundingFacts {
                 || self.source_submission.as_deref() == Some("CONFIRMED")
                 || self.provider_incomplete)
             && !self.provider_success
-            && !self.provider_failed
-            && !self.provider_refunded
+            && !(self.provider_refunded && self.refund_observed)
+    }
+    pub fn refund_observation_needed(&self) -> bool {
+        !self.provider_success
+            && (self.provider_failed || self.provider_refunded)
+            && !self.refund_observed
     }
     pub fn source_reconciliation_needed(&self) -> bool {
         !self.provider_success && self.source_pending && self.source_attempts > 0
@@ -331,10 +339,11 @@ impl Store {
             params![job,operation], |r| Ok((FundingFacts {
                 initial_credit_recorded:r.get(0)?, accepted_quote:r.get(1)?, archived:r.get(2)?, source_closed: false,
                 provider_success:false, claim_fulfilled:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:None, source_attempts:0,
+                source_submission:None, source_attempts:0, refund_observed:false,
                 new_funding_allowed:r.get(9)?, source_pending:r.get::<_,bool>(10)? || (!fulfilled && r.get::<_,bool>(14)?),preparation_accepted:r.get(11)?,
             }, provider_flags(r, 3), observation_disclosure(r,7,8,r.get(12)?,r.get(13)?)?)),
         ).context("funding operation binding changed")?;
+        facts.refund_observed = self.funding_refund_observed(operation)?;
         facts.source_submission = submission;
         facts.source_attempts = u32::try_from(attempts).unwrap_or(1);
         (
@@ -378,17 +387,20 @@ impl Store {
 
     /// Verified native expiry permits a fresh current-authority attempt while the
     /// original accepted request remains independently observed by Status. A
-    /// negative provider report cannot prove that a confirmed deposit will not
-    /// also fulfill the claim; it grants no replacement authority.
+    /// FAILED alone grants no replacement authority. A bound REFUNDED plus
+    /// observed receiver receipt and closed source permits current-claim recovery.
     pub(crate) fn funding_retry_allowed(&self, job: &str, operation: &str) -> Result<bool> {
-        let ((success, _failed, _refunded, incomplete), attempts, confirmed, no_journal) = self.db.query_row(
+        let ((success, _failed, refunded, incomplete), attempts, confirmed, no_journal) = self.db.query_row(
             "SELECT j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,COALESCE(o.attempts,0),COALESCE(o.submission='CONFIRMED',0),NOT EXISTS(SELECT 1 FROM outgoing WHERE id=j.operation_id) AND o.id IS NULL,o.submission,o.id IS NOT NULL,EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) FROM funding_progress j LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE j.job_id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((provider_flags(r,0)?,observation_disclosure(r,7,4,r.get(8)?,r.get(9)?)?.1,r.get::<_,bool>(5)?,r.get::<_,bool>(6)?)),
         )?;
         let expired: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM expired_operations e JOIN outgoing x ON x.id=e.id WHERE e.id=?1 AND x.state='RESOLVED')",[operation],|r|r.get(0))?;
         Ok(!success
             && !claim_succeeded(&self.db, operation)?
-            && (expired
+            && (refunded
+                && self.funding_refund_observed(operation)?
+                && source_attempt_closed(&self.db, job, operation)?
+                || expired
                 || source_attempt_closed(&self.db, job, operation)? && no_journal
                 || (attempts == 0 && !confirmed && !incomplete)))
     }
@@ -851,6 +863,17 @@ impl Store {
             derive_operation_phase(&tx, job, &current_operation)?;
         }
         tx.commit()?;
+        if matches!(status, SwapStatus::Success) {
+            self.refund_observations.remove(operation);
+        }
+        if (matches!(status, SwapStatus::Failed) && !failed)
+            || (matches!(status, SwapStatus::Refunded) && !refunded)
+            || (matches!(status, SwapStatus::Success) && !success)
+        {
+            // Wake an idle treasury to discover new refund work (or stop it).
+            // Repeated polls cannot shorten the existing scan cadence.
+            self.treasury_changes.notify_one();
+        }
         Ok(())
     }
 }
@@ -1233,6 +1256,12 @@ impl Store {
         tx.execute("DELETE FROM funding_health WHERE job_id=?1", [job])?;
         tx.execute("UPDATE funding_progress SET operation_id=?2,phase='\"ALLOCATED\"',quote=NULL,provider_success=0,provider_failed=0,provider_refunded=0,provider_incomplete=0,provider_observed_at=NULL,quote_target=NULL,quote_ceiling=NULL,accepted_output=NULL,accepted_recipient=NULL,attempts=0,next_poll=0,last_error=NULL WHERE job_id=?1",params![job,Uuid::new_v4().to_string()])?;
         tx.commit()?;
+        self.refund_observations.remove(expected_operation);
+        tracing::info!(
+            job_id = job,
+            operation = expected_operation,
+            "Wallet funding replacement authorized; the original operation is archived and a fresh quote and refund receiver will be obtained"
+        );
         Ok(())
     }
     pub fn refresh_unprepared_quote(&mut self, job: &str) -> Result<()> {
@@ -1611,7 +1640,7 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
     read_jobs_matching(db, None, true)
 }
 fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Result<Vec<FundingJob>> {
-    let query = "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,j.phase,j.operation_id,j.attempts,j.next_poll,j.last_error,j.provider_observed_at,j.quote_target,j.accepted_output FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id";
+    let query = "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,j.phase,j.operation_id,j.attempts,j.next_poll,j.last_error,j.provider_observed_at,j.quote_target,j.accepted_output,j.provider_success,j.provider_failed,j.provider_refunded FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id";
     let query = if job.is_some() {
         format!("{query} WHERE f.id=?1")
     } else {
@@ -1650,6 +1679,15 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
                 .and_then(|n| u64::try_from(n).ok()),
             r.get::<_, Option<String>>(12).unwrap_or(None),
             r.get::<_, Option<String>>(13).unwrap_or(None),
+            if provider_flag(r, 14).unwrap_or(false) {
+                Some("SUCCESS".to_owned())
+            } else if provider_flag(r, 16).unwrap_or(false) {
+                Some("REFUNDED".to_owned())
+            } else if provider_flag(r, 15).unwrap_or(false) {
+                Some("FAILED".to_owned())
+            } else {
+                None
+            },
         ))
     })?;
     rows.map(|r| {
@@ -1668,6 +1706,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             provider_observed_at,
             selected_output,
             accepted_output,
+            provider_outcome,
         ) = r.context("missing or invalid funding operation journal")?;
         // Keep execution/stepping failures outside the diagnostic-value fallback.
         let (started_at, error_streak, timed_out): (Option<i64>, u32, bool) = db
@@ -1715,6 +1754,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             })
         });
         Ok(FundingJob {
+            provider_outcome,
             provider_observed_at,
             started_at: started_at
                 .map(u64::try_from)
@@ -3360,11 +3400,13 @@ mod completion_tests {
             store
                 .record_provider_outcome(&job.id, &job.operation_id, &terminal, 4)
                 .unwrap();
-            assert!(
-                !store
+            assert_eq!(
+                store
                     .funding_facts(&job.id, &job.operation_id)
                     .unwrap()
-                    .status_needed()
+                    .status_needed(),
+                terminal != SwapStatus::Success,
+                "negative provider reports retain checks until local refund observation"
             );
             assert_eq!(
                 store.funding_job(&job.id).unwrap().unwrap().phase,
@@ -4324,11 +4366,13 @@ mod completion_tests {
             store
                 .record_provider_outcome(&job.id, &job.operation_id, &terminal, 3)
                 .unwrap();
-            assert!(
-                !store
+            assert_eq!(
+                store
                     .funding_facts(&job.id, &job.operation_id)
                     .unwrap()
-                    .status_needed()
+                    .status_needed(),
+                terminal != SwapStatus::Success,
+                "negative outcomes retain current-operation polling until refund receipt"
             );
             assert!(
                 !destination_obligation_pending(&store.db, &job.wallet_id).unwrap(),
@@ -4599,6 +4643,147 @@ mod completion_tests {
                 store.operation(&job.operation_id).unwrap().submission,
                 "BROADCAST_REQUESTED"
             );
+        }
+    }
+
+    #[test]
+    fn unsigned_negative_and_proven_undisclosed_quotes_do_not_watch_for_refunds() {
+        use crate::rotation::near::SwapStatus;
+        for outcome in [SwapStatus::Failed, SwapStatus::Refunded] {
+            let (_dir, mut store, job) = fixture();
+            let quote = serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
+            )
+            .unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, &outcome, 1)
+                .unwrap();
+            assert!(!store.treasury_observation_needed(&[]).unwrap());
+            assert!(store.funding_refund_page("").unwrap().is_empty());
+            store.close_unprepared_funding(&job.id).unwrap();
+            assert!(!store.treasury_observation_needed(&[]).unwrap());
+            assert!(store.funding_refund_page("").unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn refunded_source_replacement_requires_receipt_current_snapshot_and_unused_claim() {
+        use crate::rotation::near::SwapStatus;
+        for veto in [
+            "none",
+            "credit",
+            "success",
+            "disabled",
+            "failed",
+            "pending_source",
+        ] {
+            let (_dir, mut store, job) = fixture();
+            let quote = serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
+            )
+            .unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            submit_source_for_status(&mut store, &job);
+            if veto != "pending_source" {
+                store.confirm_spend(&job.operation_id).unwrap();
+            }
+            let raw = store.prepared_bytes(&job.operation_id).unwrap();
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Failed, 1)
+                .unwrap();
+            assert!(store.treasury_observation_needed(&[]).unwrap());
+            assert!(
+                store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .status_needed()
+            );
+            let revision = store.snapshot().unwrap().0;
+            assert!(
+                !store
+                    .observe_funding_refund(&job.id, "wrong-operation", revision, true)
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .observe_funding_refund(&job.id, &job.operation_id, revision - 1, true)
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .funding_retry_allowed(&job.id, &job.operation_id)
+                    .unwrap()
+            );
+            store
+                .observe_funding_refund(&job.id, &job.operation_id, revision, false)
+                .unwrap();
+            assert!(
+                store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .refund_observation_needed()
+            );
+            // Receipt alone cannot settle a FAILED provider outcome.
+            store
+                .observe_funding_refund(&job.id, &job.operation_id, revision, true)
+                .unwrap();
+            assert!(
+                !store
+                    .funding_retry_allowed(&job.id, &job.operation_id)
+                    .unwrap()
+            );
+            assert!(
+                store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .status_needed()
+            );
+            if veto != "failed" {
+                store
+                    .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Refunded, 2)
+                    .unwrap();
+            }
+            if veto == "credit" {
+                store
+                    .record_destination_readiness(&job.id, "1", "block", 1)
+                    .unwrap();
+            }
+            if veto == "success" {
+                store
+                    .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 3)
+                    .unwrap();
+            }
+            if veto == "disabled" {
+                store.disable_pool("pool").unwrap();
+            }
+            let result = store.reauthorize_closed_funding_for_operation(&job.id, &job.operation_id);
+            assert_eq!(result.is_ok(), veto == "none", "{veto}");
+            assert_eq!(store.prepared_bytes(&job.operation_id).unwrap(), raw);
+            assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+            if veto == "none" {
+                let current = store.funding_job(&job.id).unwrap().unwrap();
+                assert_ne!(current.operation_id, job.operation_id);
+                assert_eq!(current.phase, FundingPhase::Allocated);
+                assert!(store.funding_quote(&job.id).is_err());
+                assert!(
+                    !store
+                        .observe_funding_refund(&job.id, &job.operation_id, revision, true)
+                        .unwrap()
+                );
+                let original: Vec<u8> = store
+                    .db
+                    .query_row(
+                        "SELECT quote FROM funding_recovery WHERE operation_id=?1",
+                        [&job.operation_id],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert!(
+                    !original.is_empty(),
+                    "original encrypted quote remains archived"
+                );
+            }
         }
     }
 

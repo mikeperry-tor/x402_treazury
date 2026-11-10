@@ -96,7 +96,7 @@ impl Store {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::FundingPage)?;
         let mut query=self.db.prepare("WITH requests AS (
-            SELECT j.job_id,j.operation_id FROM funding_progress j WHERE j.quote IS NOT NULL AND NOT(typeof(j.provider_success)='integer' AND j.provider_success!=0) AND NOT(typeof(j.provider_failed)='integer' AND j.provider_failed!=0) AND NOT(typeof(j.provider_refunded)='integer' AND j.provider_refunded!=0)
+            SELECT j.job_id,j.operation_id FROM funding_progress j WHERE j.quote IS NOT NULL AND NOT(typeof(j.provider_success)='integer' AND j.provider_success!=0)
             UNION ALL SELECT r.job_id,r.operation_id FROM funding_recovery r WHERE r.quote IS NOT NULL AND (EXISTS(SELECT 1 FROM outgoing x WHERE x.id=r.operation_id) OR EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=r.operation_id)) AND NOT(typeof(r.provider_success)='integer' AND r.provider_success!=0) AND NOT(typeof(r.provider_failed)='integer' AND r.provider_failed!=0) AND NOT(typeof(r.provider_refunded)='integer' AND r.provider_refunded!=0) AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.job_id=r.job_id AND j.operation_id=r.operation_id))
             SELECT x.job_id,x.operation_id FROM requests x JOIN funding_jobs f ON f.id=x.job_id WHERE f.rowid<=?3 AND (x.job_id>?1 OR (x.job_id=?1 AND x.operation_id>?2)) ORDER BY x.job_id,x.operation_id LIMIT ?4")?;
         let ids = query

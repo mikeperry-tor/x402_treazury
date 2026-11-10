@@ -84,7 +84,7 @@ pub(crate) fn inspect_notes(
 #[derive(Serialize)]
 pub(crate) struct NativeReceipt {
     received_zatoshis: u64,
-    confirmed_zatoshis: u64,
+    pub(crate) confirmed_zatoshis: u64,
     spendable_zatoshis: Option<u64>,
     snapshot_revision: i64,
     sdk_scanned_height: Option<u32>,

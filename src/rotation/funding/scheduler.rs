@@ -39,6 +39,7 @@ enum RetrySchedule {
 }
 struct Record {
     reported_phase: Option<FundingPhase>,
+    reported_status: Option<(SwapStatus, super::super::near::StatusDetails)>,
     due: u64,
     streak: u32,
     error: Option<String>,
@@ -86,7 +87,7 @@ enum Completed<Q> {
     Work(Box<Completion<Q>>),
     Status {
         request: FundingStatusRequest,
-        result: Result<SwapStatus>,
+        result: Result<super::super::near::StatusObservation>,
     },
 }
 impl<Q> Completed<Q> {
@@ -729,7 +730,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                                         job_id=%request.id,operation=%request.operation_id,
                                         "Checking an earlier funding request that still awaits a final provider outcome; possible late credit keeps wallet retirement deferred");
                                 }
-                                reader.status(quote)
+                                reader.status_observation(quote)
                                     .instrument(tracing::debug_span!("funding_status", wallet=%request.pool_name,
                                         job_id=%request.id, operation=%request.operation_id))
                                     .await
@@ -865,18 +866,24 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         &self,
         lease: &Lease,
         request: FundingStatusRequest,
-        result: Result<SwapStatus>,
+        result: Result<super::super::near::StatusObservation>,
         clock: &TickClock,
     ) -> Result<()> {
         let instant = clock.now();
-        let observed = result.as_ref().ok().copied();
+        let observed = result.as_ref().ok().map(|observation| observation.status);
+        let details = result
+            .as_ref()
+            .ok()
+            .map(|observation| observation.details.clone())
+            .unwrap_or_default();
         if let Some(status) = observed {
             tracing::debug!(wallet=%request.pool_name,job_id=%request.id,
                 operation=%request.operation_id,near_status=?status,
                 "NEAR swap status response validated");
         }
         let result = match result {
-            Ok(status) => {
+            Ok(observation) => {
+                let status = observation.status;
                 let (id, operation) = (request.id.clone(), request.operation_id.clone());
                 self.store
                     .call(move |s| s.record_provider_outcome(&id, &operation, &status, instant))
@@ -894,7 +901,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 "Wallet funding request observation unavailable; the accepted request is retained and checks will retry");
             category
         });
-        let previously_unavailable = {
+        let (previously_unavailable, status_changed) = {
             let mut state = lease.state.lock().expect("funding schedule lock");
             let previous = state
                 .records
@@ -911,9 +918,30 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 error.clone(),
                 condition,
             );
-            previous
+            let record = state.records.get_mut(&Key {
+                operation: request.operation_id.clone(),
+                kind: Kind::Status,
+            });
+            let changed = if let Some(record) = record {
+                let reported = observed.map(|status| (status, details.clone()));
+                let changed = reported.is_some() && record.reported_status != reported;
+                if error.is_none() {
+                    record.reported_status = reported;
+                }
+                changed
+            } else {
+                false
+            };
+            (previous, changed)
         };
-        report_status_result(&request, observed, error.as_deref(), previously_unavailable);
+        report_status_result(
+            &request,
+            observed,
+            error.as_deref(),
+            previously_unavailable,
+            status_changed,
+            &details,
+        );
         let (id, operation) = (request.id.clone(), request.operation_id.clone());
         let current = self
             .store
@@ -1162,6 +1190,8 @@ fn report_status_result(
     observed: Option<SwapStatus>,
     error: Option<&str>,
     previously_unavailable: bool,
+    status_changed: bool,
+    details: &super::super::near::StatusDetails,
 ) {
     if let Some(category) = error {
         if !previously_unavailable {
@@ -1179,17 +1209,25 @@ fn report_status_result(
         tracing::info!(wallet=%request.pool_name,operation=%request.operation_id,
             "NEAR swap status checks resumed successfully");
     }
+    if !status_changed {
+        return;
+    }
     let message = match observed {
         Some(SwapStatus::Success) => {
             "NEAR reported swap success; destination credit is verified separately"
         }
-        Some(SwapStatus::Refunded) => "NEAR reported a refund; wallet scans reconcile returned ZEC",
+        Some(SwapStatus::Refunded) => {
+            "NEAR reports REFUNDED; local refund receipt is checked separately and unresolved refunds retain status checks and Zcash scans"
+        }
         Some(SwapStatus::Failed) => {
-            "NEAR reported swap failure; source and refund reconciliation continues"
+            "NEAR reports FAILED; status checks and Zcash refund discovery continue without authorizing a replacement"
         }
         _ => return,
     };
-    tracing::info!(wallet=%request.pool_name,operation=%request.operation_id,"{message}");
+    tracing::info!(wallet=%request.pool_name,operation=%request.operation_id,
+        near_status=observed.map(SwapStatus::provider_name), refund_reason=details.refund_reason,
+        deposited_zatoshi=details.deposited_zatoshi, refunded_zatoshi=details.refunded_zatoshi,
+        "{message}");
 }
 
 impl State {
@@ -1279,6 +1317,7 @@ impl State {
             key.clone(),
             Record {
                 reported_phase: None,
+                reported_status: None,
                 due,
                 streak: 0,
                 error: None,
