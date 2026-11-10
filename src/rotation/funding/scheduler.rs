@@ -886,7 +886,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         };
         // Every accepted request completes its cadence before any current-job
         // reporting. A rollover during publication cannot lose this request's floor.
-        let condition = result.as_ref().err().and_then(funding_condition);
+        let condition = result.as_ref().err().and_then(startup_funding_condition);
         let error = result.as_ref().err().map(|error| {
             let category = safe_error(error, &FundingPhase::Swapping);
             tracing::debug!(wallet=%request.pool_name,wallet_id=%request.wallet_id,
@@ -1046,7 +1046,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         if let Some(reason) = wait {
             tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,phase=?phase,reason,"funding awaiting chain confirmation; polling automatically");
         }
-        let condition = failure.as_ref().and_then(funding_condition);
+        let condition = failure.as_ref().and_then(startup_funding_condition);
         let error = match failure.filter(|_| wait.is_none()) {
             Some(error) => {
                 let id = job.id.clone();

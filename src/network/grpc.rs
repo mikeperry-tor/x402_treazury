@@ -178,7 +178,7 @@ impl Service<http::Request<Body>> for ProgressChannel {
 }
 
 fn inactivity_failure(stage: &'static str, inactivity: Duration) -> tonic::Status {
-    tracing::warn!(
+    tracing::debug!(
         stage,
         limit_ms = inactivity.as_millis(),
         setting = "network.read_timeout_seconds",
@@ -366,12 +366,13 @@ fn connection_diagnostic_omits_upstream_secrets() {
 
 #[cfg(test)]
 #[tokio::test]
-async fn stalled_response_body_warns_once_without_private_content() {
+async fn stalled_response_body_reports_debug_without_warning() {
     use tracing::instrument::WithSubscriber;
     let logs = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(logs.reopen().unwrap())
         .finish();
     let inactivity = Duration::from_millis(10);
@@ -401,10 +402,11 @@ async fn stalled_response_body_warns_once_without_private_content() {
     .await;
     let text = std::fs::read_to_string(logs.path()).unwrap();
     assert_eq!(
-        text.lines().filter(|line| line.contains("WARN")).count(),
+        text.lines().filter(|line| line.contains("DEBUG")).count(),
         1,
         "{text}"
     );
+    assert!(!text.contains("WARN") && !text.contains("ERROR"), "{text}");
     for expected in [
         "grpc_body_inactivity",
         "limit_ms=10",

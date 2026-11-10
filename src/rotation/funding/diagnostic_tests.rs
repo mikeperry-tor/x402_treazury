@@ -239,6 +239,13 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             "Treasury funds could not be assessed",
         ),
         (
+            anyhow::Error::new(FundingCondition::InsufficientFunds)
+                .context(TreasuryFunds::Unavailable)
+                .context(PreparationDeferred),
+            "INFO",
+            "Treasury funds could not be assessed",
+        ),
+        (
             anyhow::anyhow!("indexer connection failed")
                 .context(PreparationDeferred)
                 .context("private dependency"),
@@ -298,6 +305,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             .unwrap();
         let job = raw.funding_job(&job.id).unwrap().unwrap();
         let condition = funding_condition(&error);
+        let startup_condition = startup_funding_condition(&error);
         let assessment = TreasuryFunds::from_error(&error);
         let category = safe_error(&error, &job.phase);
 
@@ -472,7 +480,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             let state = lease.state.lock().unwrap();
             let record = &state.records[&key];
             assert_eq!(record.error.as_deref(), Some(category.as_str()));
-            assert_eq!(record.condition, condition);
+            assert_eq!(record.condition, startup_condition);
             assert_eq!(record.streak, 1);
             assert!(
                 (1060..=1065).contains(&record.due),
@@ -486,6 +494,41 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 assert_eq!(current.error_streak, 1);
                 assert!(s.status()?.treasury_operations.is_empty());
                 assert_eq!(current.operation_id, job.operation_id);
+                assert_eq!(current.attempts, job.attempts);
+                if condition == Some(FundingCondition::InsufficientFunds) {
+                    use crate::rotation::store::bootstrap::StartupDisposition;
+                    let group = s.startup_groups(&["pool".into()])?.remove(0);
+                    let path = s
+                        .startup_claim_paths(&group.pool, &group.claims)?
+                        .into_iter()
+                        .find(|path| path.job.id == job.id)
+                        .unwrap();
+                    assert_eq!(
+                        matches!(path.disposition(false), StartupDisposition::Obstructed(_)),
+                        assessment == TreasuryFunds::Shortfall,
+                        "unknown or pending funds must not stop bootstrap"
+                    );
+                    assert_eq!(
+                        startup_condition,
+                        (assessment == TreasuryFunds::Shortfall)
+                            .then_some(FundingCondition::InsufficientFunds)
+                    );
+                    // Normal discovery can finish the original claim after the
+                    // failure, without allocating or preparing another deposit.
+                    s.record_credit(&job.wallet_id, &job.target, "fixture", 100)?;
+                    let path = s
+                        .startup_claim_paths(&group.pool, &group.claims)?
+                        .into_iter()
+                        .find(|path| path.job.id == job.id)
+                        .unwrap();
+                    assert_eq!(
+                        path.disposition(false),
+                        StartupDisposition::DestinationReady
+                    );
+                    assert_eq!(s.funding_jobs()?.len(), 2);
+                    assert!(s.status()?.treasury_operations.is_empty());
+                    assert!(!s.status()?.outgoing_pending);
+                }
                 Ok(())
             })
             .await

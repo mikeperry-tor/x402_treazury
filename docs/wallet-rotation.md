@@ -398,13 +398,15 @@ SDK-observed confirmed funds, including dust and unreserved transparent funds
 amount. Sufficient observed funds produce a DEBUG
 spendability wait; an observed shortage produces an INFO message with the existing
 shielded receive address, asking the operator to add ZEC and allow confirmations.
-Both INFO conditions describe automatic synchronization and funding retries while
-demand remains; repeated identical reports are DEBUG. A new preparation deferred
-by unresolved source work also logs at DEBUG. These classifications only explain
+Bootstrap keeps waiting when the assessment is unavailable or existing funds
+await spendability; only an assessed capital shortage can obstruct bootstrap for
+insufficient funds. Both INFO conditions describe automatic synchronization and
+funding retries while demand remains; repeated identical reports are DEBUG. A new
+preparation deferred by unresolved source work also logs at DEBUG. These classifications only explain
 the existing SDK rejection or source deferral; they add no spending gate, balance
 authority or polling work.
 
-Recurring `treasury sync unavailable` warnings include a broad `category` and,
+Treasury synchronization interruption reports include a broad `category` and,
 for Zingolib scan/launch failures, a fixed `reason`. Indexer request failures also
 include numeric `grpc_code` and a fixed `grpc_status`, for example
 `reason="indexer_request_failed" grpc_code=14 grpc_status="Unavailable"`.

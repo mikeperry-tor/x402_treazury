@@ -78,7 +78,8 @@ impl std::fmt::Display for TreasuryDepositAddress {
 }
 impl std::error::Error for TreasuryDepositAddress {}
 
-/// Presentation of an SDK rejection, never funding or retry authority.
+/// Explains an SDK rejection and distinguishes a bootstrap capital obstruction
+/// from recoverable waiting. Never spending or retry authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TreasuryFunds {
     Waiting,

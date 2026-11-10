@@ -344,8 +344,10 @@ observed. A late bound SUCCESS stops a replacement not yet disclosed.
 Unpublished calculations recover automatically after exclusive offline SDK
 reconstruction. Corrupt or missing immutable records needed to resolve disclosed
 work still require scoped operator review; cancellation drains accepted financial
-work and preserves journals. Treasury ZEC funding and Base
-confirmation can take time. The command introduces no new spending limits.
+work and preserves journals. An incomplete treasury scan or existing ZEC awaiting spendability keeps bootstrap
+waiting under the existing synchronization and funding retry schedules. Only a
+capital shortfall assessed from a completed current-owner scan can stop bootstrap
+for insufficient funds. Treasury ZEC funding and Base confirmation can take time. The command introduces no new spending limits.
 While waiting, it logs unfinished jobs and their sync/submission state once a
 minute. The first positive USDC observation satisfies the captured destination
 claim even when retained timeout diagnostics remain; exact pending source work

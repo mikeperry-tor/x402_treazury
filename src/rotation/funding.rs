@@ -938,6 +938,16 @@ fn funding_condition(error: &anyhow::Error) -> Option<super::error::FundingCondi
     None
 }
 
+/// Only an assessed capital shortfall can obstruct bootstrap. SDK selection can
+/// also reject funds before a scan completes or while owned funds are pending.
+fn startup_funding_condition(error: &anyhow::Error) -> Option<super::error::FundingCondition> {
+    use super::error::{FundingCondition, TreasuryFunds};
+    funding_condition(error).filter(|condition| {
+        *condition != FundingCondition::InsufficientFunds
+            || TreasuryFunds::from_error(error) == TreasuryFunds::Shortfall
+    })
+}
+
 fn waiting_reason(error: &anyhow::Error, phase: &FundingPhase) -> Option<&'static str> {
     if matches!(
         phase,
