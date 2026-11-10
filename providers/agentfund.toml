@@ -8,6 +8,11 @@ spec = "https://x402.agentfund.net/openapi.json"
 name = "AgentFund US Economic, SEC & On-Chain Data"
 prefix = "agentfund"
 include = ["/x402", ""]
-pricing_key = "x-payment-info"
 additional_properties = false
 instructions_text = "US economic indicators, SEC filings, on-chain data and text utilities. Preserve source publication lags and revision policies. Vendor does not bill failed upstream requests."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

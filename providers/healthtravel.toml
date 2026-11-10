@@ -4,7 +4,6 @@ name = "SiteCheck Health & Travel"
 base_url = "https://api.healthtravel-api.workers.dev"
 prefix = "healthtravel"
 include = ["/api", ""]
-pricing_key = "x-payment-info"
 help_url = "https://api.healthtravel-api.workers.dev/llms.txt"
 instructions_text = "Preserve source dates, identifiers, currencies and coverage. Displayed travel prices are observations, not booking quotes; health datasets retain their source populations, units and publication lags."
 
@@ -22,3 +21,9 @@ pricing_description = "Cost: ~$0.002/call [spec]."
 [overrides.healthtravel_travel_numbeo]
 description = "Read crowd-sourced cost-of-living item prices for city. Preserve priceText and its currency symbol when normalized currency is unavailable. These are user-submitted observations, not official prices or booking quotes."
 pricing_description = "Cost: ~$0.002/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

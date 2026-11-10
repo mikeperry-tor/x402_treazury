@@ -1961,7 +1961,10 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
         .unwrap()
         .settings;
     assert_eq!(cfg.prefix.as_deref(), Some("relayshield"));
-    assert_eq!(cfg.pricing_key.as_deref(), Some("x-payment-info"));
+    assert_eq!(
+        cfg.effective_pricing().unwrap().unwrap().catalog_key(),
+        Some("x-payment-info")
+    );
     assert_eq!(cfg.read_timeout_seconds, Some(90.0));
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/relayshield_openapi.json")).unwrap();
@@ -2044,7 +2047,10 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
         .settings;
     assert_eq!(companion.prefix, cfg.prefix);
     assert_eq!(companion.base_url, cfg.base_url);
-    assert_eq!(companion.pricing_key, cfg.pricing_key);
+    assert_eq!(
+        companion.effective_pricing().unwrap(),
+        cfg.effective_pricing().unwrap()
+    );
     assert_eq!(companion.read_timeout_seconds, cfg.read_timeout_seconds);
     assert!(companion.help_url.is_none());
     // Read the resolved relative local path, with no catalog HTTP request.

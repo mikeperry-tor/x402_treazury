@@ -4,7 +4,6 @@ spec = "https://google-trends.use.x402atlas.com/openapi.json"
 name = "Google Trends SEO Keyword Data (x402 Atlas)"
 base_url = "https://google-trends.use.x402atlas.com"
 prefix = "google_trends"
-pricing_key = "x-payment-info"
 instructions_text = "Use a concise seed keyword. Country and time-window defaults vary by tool; set them explicitly when they matter. Values measure relative search interest, not search counts."
 help_url = "https://google-trends.use.x402atlas.com/llms.txt"
 
@@ -27,3 +26,9 @@ pricing_description = "Cost: ~$0.03/call [spec]."
 [overrides.google_trends_related_topics]
 description = "Find subjects/entities related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0–100) and rising percentage growth. Check data_source, notice and returned timeframe: fallback data may cover only past_12_months. Use google_trends_related_queries for search phrases."
 pricing_description = "Cost: ~$0.03/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

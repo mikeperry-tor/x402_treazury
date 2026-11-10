@@ -3,7 +3,6 @@ spec = "https://biomedical-grants.use.x402atlas.com/openapi.json"
 name = "US Biomedical Grants (NIH, x402 Atlas)"
 base_url = "https://biomedical-grants.use.x402atlas.com"
 prefix = "biomedical_grants"
-pricing_key = "x-payment-info"
 help_url = "https://biomedical-grants.use.x402atlas.com/llms.txt"
 instructions_text = "Use supported grant-style project numbers from search to retrieve funding history or linked publications. Preserve fiscal years, source dates, partial and completeness markers; one search record represents one project's fiscal year, not its lifetime funding."
 
@@ -43,3 +42,9 @@ query = "Nonempty topic words; all must match title, abstract or research terms.
 
 [overrides.biomedical_grants_help]
 description = "Read the NIH bridge's request guide, examples, funding interpretation and coverage limits."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

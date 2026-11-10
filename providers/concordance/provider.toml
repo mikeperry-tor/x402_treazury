@@ -9,7 +9,6 @@ include = ["/tools", ""]
 additional_properties = false
 instructions_text = "Use concordance_catalog to discover current sources and series IDs. Company briefs may contain partial sections; corroboration counts distinct sources, not independently verified truth."
 help_url = "https://concordancehq.duckdns.org/llms.txt"
-pricing_key = "x-payment-info"
 
 [overrides]
 
@@ -39,3 +38,9 @@ description = "Find matches for a claim grouped by source. Source counts help tr
 
 [overrides.concordance_timeline]
 description = "Track topic coverage chronologically across aggregated sources, oldest first. Use concordance_search for relevance-ranked results and concordance_digest for category groups."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

@@ -10,7 +10,6 @@ prefix = "locus"
 include = ["/api", "/tools", ""]
 help_url = "https://api.locus.report/llms.txt"
 instructions_text = "For US public-record research, start with locus_list(compact=true), then obtain category schemas with compact=false before locus_call(name=..., arguments={...}). Use free coverage/lane checks before paid reports; many paid atoms duplicate free calls. Preserve dates, provenance and unknowns. The gateway supports public reads; feedback and coverage-demand writes are unsupported. Omit delivery webhook options; report headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
-pricing_key = "x-payment-info"
 
 [overrides.locus_list]
 description = "Discover the vendor's free Locus catalog. Start with compact=true for names/categories; use category with compact=false for input schemas before locus_call. Vendor-listed feedback and coverage-demand writes are not supported by locus_call."
@@ -110,3 +109,9 @@ pricing_description = "Cost: ~$0.89/call [spec]."
 [overrides.locus_locus_seller_readiness_packet]
 description = "Collect cited pre-listing records for a US address: published permits and inspection states, permit closeout, assessor baseline, disclosure pointers, code/flood notices and special-district levies. Returns JSON and printable HTML/PDF; fewer than two resolved lanes is uncharged."
 pricing_description = "Cost: ~$0.85/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

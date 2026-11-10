@@ -22,3 +22,7 @@ pricing_description = "Cost: ~$0.004/call [spec]."
 [overrides.halowerk_injection_scan]
 description = "Inspect supplied text for prompt-injection patterns. Returns findings and risk indicators; a clean scan does not prove content safe."
 pricing_description = "Cost: ~$0.002/call [spec]."
+
+[pricing]
+source = "https://tools.halowerk.com/.well-known/x402"
+format = "x402-resources"

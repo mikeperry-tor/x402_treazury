@@ -6,7 +6,6 @@ prefix = "otto"
 recommended_tools = ["otto_crypto_news", "otto_equity_news", "otto_financial_statements", "otto_web_search", "otto_help"]
 exclude_tags = ["Execution"]
 exclude = ["/full-auto"]
-pricing_key = "x-payment-info"
 additional_properties = false
 instructions_text = "Portfolio/account reads refer to the paying wallet. Hosted creative assets remain links. Feedback requires the original payment transaction hash; do not assume receipt headers are exposed as tool results."
 
@@ -14,3 +13,9 @@ help_url = "https://x402.ottoai.services/llms-full.txt"
 
 [overrides.otto_help]
 description = "Read Otto's consolidated API guide, fetched on demand and cached for this process. Execution and SIWX re-access workflows in the guide are unsupported; hosted media URLs remain links."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

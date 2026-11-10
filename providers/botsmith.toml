@@ -11,3 +11,9 @@ help_url = "https://x402.botsmith.dev/catalog"
 
 [overrides.botsmith_help]
 description = "Read botsmith's free service catalog, usage schemas, prices and response contracts. Fetched on demand and cached for this process."
+
+[pricing]
+source = "catalog"
+format = "x402"
+unit = "call"
+usd_as_usdc = true

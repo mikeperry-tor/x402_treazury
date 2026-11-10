@@ -25,7 +25,6 @@ prefix = "relayshield"
 
 include = ["/v1/payg", ""]
 
-pricing_key = "x-payment-info"
 # Local catalog and no help URL; the API's catalog/llms.txt also ignore byte ranges.
 # Disable cover because no resource supports the required unsigned HTTP 206 reads.
 cover_traffic_enabled = false
@@ -35,3 +34,9 @@ read_timeout_seconds = 90
 [overrides.relayshield_phone_reputation]
 description = "Screen phone (E.164) for threat-corpus reputation, attack-graph pivots and carrier line type. SIM/eSIM swap signals are cached 24h, not a fresh carrier check. Preserve checked/unknown markers, reason timestamps and coverage."
 pricing_description = "Cost: ~$0.05/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

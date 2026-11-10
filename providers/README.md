@@ -254,10 +254,13 @@ overrides without inferring tariff ownership from their text. See
 [pricing metadata](../docs/configuration.md#pricing-metadata-and-runtime-hints).
 Declare reusable advertised pricing in `[pricing]` when the catalog supports a
 known format. Prefer `source = "catalog"`; external resource documents require an
-explicit public URL and their matching format. Keep compatible `pricing_key`
+explicit HTTPS URL under the catalog's destination policy and their matching
+format. Dynamic source management retains public-destination enforcement.
+Keep compatible `pricing_key`
 shorthand when no extra interpretation is needed. Set `unit = "call"` only after
 reviewing the provider's per-call billing contract, and `usd_as_usdc = true` only
-for a documented USD-denominated USDC tariff. Vendor units and explicit unsupported
+for an explicitly reviewed nominal USD-to-USDC ranking interpretation. This does
+not qualify settlement or override the actual supported challenge. Vendor units and explicit unsupported
 rails override these defaults. Dynamic, credit and metered prices can remain
 useful display-only metadata; do not manufacture a fixed amount. See
 [pricing configuration](../docs/configuration.md#pricing-metadata-and-runtime-hints).

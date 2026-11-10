@@ -4,7 +4,6 @@ name = "FindMyDirectDoctor"
 base_url = "https://api.findmydirectdoctor.com"
 prefix = "findmydirectdoctor"
 include = ["/v1", ""]
-pricing_key = "x-payment-info"
 help_url = "https://api.findmydirectdoctor.com/llms.txt"
 instructions_text = "Preserve source dates, coverage and evidence grades. Missing prices or practice statements do not mean free care or unavailable services. Confirm prices and availability with the practice; hospital facility prices, Medicare benchmarks and drug acquisition costs describe different costs."
 
@@ -14,3 +13,9 @@ pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.findmydirectdoctor_help]
 description = "Read the directory's endpoint guide, examples and coverage notes. Use exposed schemas for exact inputs."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

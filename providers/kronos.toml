@@ -18,3 +18,8 @@ pricing_description = "Free."
 
 [overrides.kronos_help]
 description = "Read Kronos's API guide, asset coverage, signal interpretation and pricing. Guide examples may cover more tools; follow exposed schemas. Fetched on demand and cached for this process."
+
+[pricing]
+source = "catalog"
+format = "x402"
+unit = "call"

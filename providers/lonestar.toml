@@ -9,7 +9,12 @@ base_url = "https://lonestaroracle.xyz/api"
 operation_url_extension = "x-direct-url"
 prefix = "lonestar"
 recommended_tools = ["lonestar_macro_macro", "lonestar_rates_rates", "lonestar_read_read", "lonestar_token_report", "lonestar_help"]
-pricing_key = "x-payment-info"
 additional_properties = false
 help_url = "https://lonestaroracle.xyz/llms.txt"
 instructions_text = "The vendor quota is 30 requests per 60 seconds across all routes. Contract audits can take minutes."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

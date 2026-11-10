@@ -104,7 +104,7 @@ reusable provider; no account session or local background owner is required.
 | Arkham | Three discovery routes demand SIWX; ordinary paid routes remain usable. |
 | Datakoot, IPIntel | Supported catalogs are open to new routes; request guidance and output interpretation remain provider-specific. |
 | GenuineGood | Bearer-token pass purchase unusable here; ordinary grant reads include expensive calls subject to payment caps. |
-| Kronos | Path name anchor; vendor prices remain prose, not a tool gate. |
+| Kronos | Path name anchor; structured `x-x402` prices remain advisory. |
 | LoneStarOracle, x402stock | Public previews, feeds and overlapping data remain available; compact research advice requires explicit opt-in. |
 | Agent402 | Preserve wallet-owned and actual execution boundaries. JSON/base64 media, PNG/JPEG modes, planning and human onramp links are usable; raw speech and multipart transcription are unsupported. Compact tags/inventory are editorial. |
 | BlockRun | Restrict async jobs, hybrid/async result retrieval, wallet-owned lifecycle and fund submission. Valid fixed-symbol paths are usable literally; zero placeholders retain an unverified intended-target limitation. |
@@ -207,6 +207,35 @@ and Otto GET meta-intelligence; their POST forms remain supported. Do not create
 HTTP methods.
 
 
+## Advertised tariff interpretation
+
+Ordinary reusable definitions prefer operation `x-payment-info` already acquired
+with their catalog. Configured per-call defaults apply only when the operation
+omits its unit; explicit vendor units and dynamic modes remain authoritative.
+Dollar-denominated tariffs use an explicit nominal `usd_as_usdc` opt-in, without
+changing supported payment rails or signing authority. Unknown operations stay
+usable under best-effort wallet selection. Local authored price annotations remain
+authored evidence, including Banking Compliance and Concordance; their unavailable
+or unpriced live schemas are not substituted for the maintained projections.
+
+Botsmith and Kronos publish dollar-string `x-x402` operation prices, so their
+reusable definitions select `format = "x402"`. Botsmith's 402 response documentation
+identifies USDC on Base; Kronos names USDC directly. Operations without these
+annotations remain unknown. Exa and AGProxy retain `pricing_key` display behavior:
+their published ranges depend on request options/traffic and do not establish a
+fixed per-call estimate. Their existing tools and relay bindings remain available.
+Curl's own tool has a documented fixed per-call USDC tariff; this does not assign
+that price to relayed target operations.
+
+[StableEnrich payment documentation](https://stableenrich.dev/docs) explicitly
+names USDC settlement on Base, and [GLIM documentation](https://glim.sh/docs)
+identifies per-call USDC wallet payments on Base. GLIM's operation metadata also
+contains a separate MPP currency/amount: advisory normalization reads its nested
+USD price and compatible x402 alternative, without treating MPP atomic units as
+the API's dollar price. Multi-network ShopSocial, CompanyRecords and HealthTravel
+metadata likewise keeps USD decimal tariffs separate from network-specific atomic
+amounts; Stellar's seven-decimal amount is not a six-decimal Base amount.
+
 ## Reliability annotations
 
 Provider definitions can carry `reliability_tags` and `reliability_note`
@@ -284,6 +313,13 @@ make run CARGO_ARGS='--example snapshot_spec -- https://www.socialfetch.dev/open
 
 ## deepline.toml — Deepline GTM (stable-deepline.dev)
 
+`[pricing]` interprets fixed dollar amounts as nominal per-call USDC estimates.
+The vendor's [root](https://stable-deepline.dev/) documents per-request prices;
+its captured operation metadata names USD and x402 but omits token-specific
+settlement details. This is an explicit advisory interpretation of the configured
+provider rail, not a verified current token quote. Actual payment still requires
+a supported fresh challenge.
+
 GTM contact lookup: POST tools mirroring the vendor's OpenAPI spec —
 prices via `x-payment-info`, requireds, the ads `platform`/`media_type`
 enums, waterfall-provider detail in summaries. Tool schemas are closed via
@@ -295,6 +331,13 @@ x402_treazury serve --provider providers/deepline.toml --read-timeout-seconds 12
 ```
 
 ## pdl.toml — People Data Labs (stablepeopledata.dev)
+
+The [root](https://stablepeopledata.dev/) describes a single successful person or
+company enrichment match at a fixed dollar price, free on a miss. These two
+operations supply nominal per-call USDC ranking estimates; search remains dynamic
+and size-scaled. The captured operation metadata omits token-specific settlement
+details, so `usd_as_usdc` is an explicit advisory interpretation of the configured
+provider rail, not verified current settlement.
 
 Person/company enrich and search. The spec carries prices
 (dynamic `min`/`max` for the size-scaled search endpoints) and full param
@@ -319,8 +362,9 @@ Profile and three-post dossier lookups for `elonmusk` returned usable data with
 observed offers of $0.015 and $0.05 respectively. Historical post-authorization
 404s remain unexplained without their original handles and error detail; these
 successful samples do not establish delivery for every account.
-No `pricing_key` is configured, so structured display prices remain unknown.
-Actual calls obtain the current x402 challenge; no startup endpoint requests are sent.
+`[pricing]` selects the structured `x-x402` dollar-string tariffs for descriptions
+and initial advisory estimates. Actual calls obtain the current x402 challenge;
+no startup endpoint requests are sent.
 
 ## x402stock.toml — x402stock.xyz
 
@@ -361,12 +405,14 @@ requirement remains visible even when endpoint instructions replace provider pro
 
 Blockchain-intelligence API (address/entity intelligence, balances, flows,
 HyperCore): paid POST requests put parameters in the JSON body.
-Every paid operation carries an `x-payment-info` block, which `pricing_key`
-surfaces into tool descriptions — prices mirror the classic credit weights at
-**$0.20 per credit**. Most operation descriptions already
-state the price in prose (`… $0.20 per call.`), so the rendered extension
-line is dropped there and the price appears exactly once; the three
-dynamic-priced routes keep both texts because their prose lacks the max.
+Every paid operation carries an `x-payment-info` block. Each fixed-price
+operation explicitly states its dollar charge per call; `[pricing]` supplies that
+missing unit and interprets the advertised dollars nominally as USDC for advisory
+wallet ranking. The credit weights explain the amount, not an extra multiplier.
+The row-priced transfers/swaps retain their dynamic ranges and supply no fixed
+initial estimate. This interpretation does not prove current settlement; the
+actual supported challenge remains authoritative. The earlier paid transaction
+comparison above establishes the existing supported payment path.
 Guidance: `help_url` points at the vendor `llms.txt` (rate limits, error
 handling, per-row pricing) served as `arkham_help()`; `instructions_text`
 summarizes body-params + credit pricing + rate limits.
@@ -408,8 +454,8 @@ assets + HYPE derivatives-only), market-wide overview/scan/funding extremes,
 BTC/ETH options (GEX, IV surface, implied probabilities), ML forecasts
 ($0.05) with a **free** `kronos_track_record` accuracy audit, macro context,
 and the $0.10 all-in-one `briefing`. The `/api/v1` anchor keeps existing tool names short. Prices
-live in vendor prose (the spec's `x-x402` extension has the wrong shape for
-`pricing_key`). No startup endpoint pricing requests are made. Vendor prose
+come from the spec's `x-x402` dollar-string extension through `format = "x402"`.
+No startup endpoint pricing requests are made. Vendor prose
 remains; `kronos_track_record` stores its own free tariff in `pricing_description`
 and keeps the paid forecast-ledger alternative in its description. Hit rate uses
 cache-source rows only, matching the vendor stats methodology; the Brier score
@@ -515,6 +561,13 @@ long integridade description drops and completes two `nome` param descriptions
 the vendor spec truncates with malformed keys. The selected reviewed request and
 its shared reference closure are retained in `tests/fixtures/brazilayer_openapi.json`;
 that scoped fixture is not the full catalog.
+
+Advertised prices come from explicit `/.well-known/x402` `items[].accepts`:
+atomic amounts use the supported Base USDC option. Records omit methods and use
+example CNPJ values, so mapping requires one unique configured method/template
+match at the same origin. Ambiguous records remain unknown; no method is inferred
+from GET/POST preference. Free-operation prose does not seed a monetary estimate.
+
 
 ## genuinegood.toml — Genuine Good Grants (genuinegood.online)
 
@@ -2105,6 +2158,12 @@ Route matrices can fall back to straight-line distance with a detour factor;
 preserve that method. HS classification returns candidate codes and caveats,
 not a binding customs determination. Prompt-injection scans are advisory patterns,
 not proof that remote instructions are safe to follow.
+
+Advertised amounts use explicit `https://tools.halowerk.com/.well-known/x402`
+`resources[].accepts`, whose Base USDC atomic amount has six decimals. Its explicit
+method and resolved resource URL must match the configured operation. Catalog
+method repairs remain authoritative; an incompatible metadata record does not
+change a tool's method or assign it another operation's amount.
 
 ## Daedalus (`daedalus/provider.toml`)
 

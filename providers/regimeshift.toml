@@ -7,7 +7,6 @@ base_url = "https://regimeshift.xyz/api"
 prefix = "regimeshift"
 exclude = ["/auto/provision"]
 include = ["/v1", ""]
-pricing_key = "x-payment-info"
 instructions_text = "Read rate and max-LTV benchmarks, submit a lend/borrow intent, then poll for matches. Matched quotes contain EIP-712 payloads for separate on-chain origination; submitting an intent does not transfer collateral."
 
 help_url = "https://regimeshift.xyz/api/quickstart.txt"
@@ -76,3 +75,9 @@ pricing_description = "Free."
 [overrides.regimeshift_stats]
 description = "Aggregate request counts for the public dashboard.\n\nBuckets per endpoint:\n  - .402   unpaid probe (also includes wallet-less curl checks)\n  - .200   successful paid call (CDP verify+settle landed)\n  - .other 4xx/5xx for that path\n  - .total all responses."
 pricing_description = "Free."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

@@ -3,7 +3,6 @@ spec = "https://legal-entities.use.x402atlas.com/openapi.json"
 name = "Global Legal Entities (x402 Atlas)"
 base_url = "https://legal-entities.use.x402atlas.com"
 prefix = "legal_entities"
-pricing_key = "x-payment-info"
 help_url = "https://legal-entities.use.x402atlas.com/llms.txt"
 instructions_text = "Search company names to obtain LEIs for entity and parent lookups. Preserve entity status separately from LEI registration status; accounting-consolidation parents do not establish natural-person beneficial ownership."
 
@@ -21,3 +20,9 @@ pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.legal_entities_help]
 description = "Read the legal-entity bridge's request examples, search pagination and registration/parent response guide."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

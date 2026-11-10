@@ -7,7 +7,12 @@ prefix = "genuinegood"
 recommended_tools = ["genuinegood_search", "genuinegood_detail", "genuinegood_help"]
 include = ["/v1/grants", ""]
 exclude = ["/v1/grants/pass"]
-pricing_key = "x-payment-info"
 additional_properties = false
 help_url = "https://genuinegood.online/llms.txt"
 instructions_text = "Search opportunities, then fetch detail by opportunityId for the official notice. Fit, brief and preflight are research aids; verify decisions against the linked Grants.gov notice. Preflight is advertised at $5 and may exceed the configured payment cap."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

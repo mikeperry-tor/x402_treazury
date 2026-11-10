@@ -8,7 +8,6 @@ include = ["/api/premium", "/api/v1", "/api", ""]
 additional_properties = false
 instructions_text = "Free JSON routes allow 60 requests/minute and 1,000/day per IP; respect other published format quotas. Prefer status or snapshot for polling. hormuz-snapshot and cape-snapshot are historical feeds frozen on 2026-08-28. With both tiers selected, vessels_get is the paid manifest and vessels_get_2 the free count summary; either alone is named vessels. CSV, RSS and HTML return text."
 help_url = "https://straits.live/llms.txt"
-pricing_key = "x-payment-info"
 
 [overrides]
 
@@ -120,3 +119,9 @@ pricing_description = "Cost: ~$0.25/call [spec]."
 [overrides.straits_risk_premium]
 description = "Read a modeled war-risk transit insurance multiple with drivers, confidence and a separately labeled static insurance reference. Recomputed every ten minutes, but its weekly IMF throughput input can lag by more than a week. Preserve input dates and model/source distinctions."
 pricing_description = "Cost: ~$0.05/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

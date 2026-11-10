@@ -8,7 +8,6 @@ prefix = "apexfaucet"
 include = ["/api/x402", ""]
 # Identity assets, persistent purchases and prepaid bearer credits need retained ownership.
 exclude_operations = ["POST /api/x402/arc-passport", "POST /api/x402/x1-passport", "GET /api/x402/market-feature", "GET /api/x402/room-meal", "GET /api/x402/room-upgrade", "GET /api/x402/pay-safe-credits"]
-pricing_key = "x-payment-info"
 help_url = "https://apexfaucet.xyz/llms.txt"
 recommended_tools = ["apexfaucet_page_extract", "apexfaucet_page_markdown", "apexfaucet_web_read", "apexfaucet_pdf_text", "apexfaucet_site_extract", "apexfaucet_site_map", "apexfaucet_research_search", "apexfaucet_company_check", "apexfaucet_help"]
 instructions_text = "Preserve final URLs, truncation, source errors and observation times. Successful extraction does not establish that the requested document was retrieved. Some purchases can deliver a promotional NFT to the paying address on Arc; no extra action is required."
@@ -144,3 +143,9 @@ pricing_description = "Cost: ~$0.003/call [spec]."
 [overrides.apexfaucet_x1_search]
 description = "Search the X1 screener index by token name, symbol or mint. Returns up to ten matches with mint, XNT price and 24-hour change; unindexed mints can return no matches."
 pricing_description = "Cost: ~$0.002/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

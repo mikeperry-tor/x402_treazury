@@ -4,7 +4,6 @@ name = "SmartPerps by AgentGate"
 base_url = "https://smartperps.agentgate.workers.dev"
 prefix = "smartperps"
 include = ["/v1", ""]
-pricing_key = "x-payment-info"
 # The documented API root publishes route prices, source coverage and methodology.
 help_url = "https://smartperps.agentgate.workers.dev/"
 instructions_text = "Preserve snapshot age, cohort coverage, confidence and sources_failed. Cohort bias describes sampled public Hyperliquid perp positions; it is not a prediction and omits spot hedges and other venues."
@@ -38,3 +37,9 @@ pricing_description = "Free."
 
 [overrides.smartperps_help]
 description = "Read SmartPerps route prices, public data sources, cohort methodology, freshness rules and coverage limits."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

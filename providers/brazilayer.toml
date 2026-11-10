@@ -91,3 +91,7 @@ pricing_description = "Price: $0.01 per call (vendor summary)."
 
 [overrides.brazilayer_help]
 description = "Read Brazilayer's API guide, response conventions, coverage and pricing. Fetched on demand and cached for this process."
+
+[pricing]
+source = "https://api.brazilayer.com/.well-known/x402"
+format = "x402-discovery"

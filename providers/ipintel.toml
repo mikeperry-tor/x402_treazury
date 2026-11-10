@@ -8,7 +8,6 @@ name = "IPIntel.ai"
 base_url = "https://tools.ipintel.ai"
 prefix = "ipintel"
 recommended_tools = ["ipintel_dns_lookup", "ipintel_ip_lookup", "ipintel_domain_health", "ipintel_whois_lookup", "ipintel_help"]
-pricing_key = "x-payment-info"
 help_url = "https://tools.ipintel.ai/llms.txt"
 instructions_text = "Domain availability is probabilistic; health scores summarize configuration, not legitimacy. Email validation does not prove reachability. Infrastructure signals do not prove ownership or location."
 
@@ -23,3 +22,9 @@ pricing_description = "Cost: ~$0.001/call [spec]."
 [overrides.ipintel_http_latency]
 description = "Measure HTTP latency and status for url from the handling Cloudflare Worker edge. Defaults to HEAD; GET is also supported. Returns response time and redirect details. This is not ICMP ping or the caller’s network latency."
 pricing_description = "Cost: ~$0.001/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

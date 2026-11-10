@@ -14,7 +14,6 @@ exclude_operations = [
   # No working encoding for the documented penalty object was established.
   "GET /api/gov/osha-violations",
 ]
-pricing_key = "x-payment-info"
 help_url = "https://2s.io/llms.txt"
 instructions_text = "Preserve original sources, observation dates and per-feed availability. Trial responses are marked; missing records and unavailable feeds do not establish absence."
 
@@ -66,3 +65,9 @@ pricing_description = "Cost: ~$0.012/call [spec]."
 [overrides.twos_finance_company_facts]
 description = "Retrieve SEC XBRL annual and interim financial metrics for ticker, with source form, filed date, fiscal period and each fact's start/end dates. Inspect those dates before comparing periods: interim flow values can be fiscal-year-to-date rather than standalone quarters; balance-sheet facts are point-in-time."
 pricing_description = "Cost: ~$0.012/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

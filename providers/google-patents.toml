@@ -5,7 +5,6 @@ spec = "https://google-patents.use.x402atlas.com/openapi.json"
 name = "Google Patents Search & Data (x402 Atlas)"
 base_url = "https://google-patents.use.x402atlas.com"
 prefix = "google_patents"
-pricing_key = "x-payment-info"
 help_url = "https://google-patents.use.x402atlas.com/llms.txt"
 instructions_text = "Prefer precise quoted phrases joined with AND and assignee, office, date or verified classification restrictions; broad free text can rank noisily. Check a small result page before broadening. Pass a patent_id from search into details. Preserve source dates, family coverage and missing fields. Snippets do not replace original claims or establish legal status."
 
@@ -27,3 +26,9 @@ pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_help]
 description = "Read this Atlas bridge's request and pricing guide."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

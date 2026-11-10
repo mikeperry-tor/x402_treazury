@@ -5,7 +5,12 @@ spec = "https://api.arkm.com/x402/openapi.json"
 name = "Arkham Intel (x402)"
 base_url = "https://api.arkm.com/x402"
 prefix = "arkham"
-pricing_key = "x-payment-info"
 exclude = ["/chains", "/networks/status", "/arkm/circulating"]
 instructions_text = "EVM addresses are lowercased. Pricing is $0.20 per credit; transfers and swaps scale with limit, so request the smallest useful count. Vendor quotas are 100 requests/second per wallet, or 5 for transfers, swaps, token/top, counterparties, flow and search. Vendor does not bill failed upstream requests."
 help_url = "https://api.arkm.com/x402/llms.txt"
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

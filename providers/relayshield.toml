@@ -12,7 +12,6 @@ exclude_operations = ["POST /v1/tap/intent-bind", "POST /v1/tap/settle-check"]
 
 include = ["/v1/payg", ""]
 
-pricing_key = "x-payment-info"
 # Catalog and llms.txt ignore unsigned byte ranges (HTTP 200); cover requires 206.
 cover_traffic_enabled = false
 
@@ -142,3 +141,9 @@ pricing_description = "Cost: ~$0.50/call [spec]."
 [overrides.relayshield_campaign_scan]
 description = "Scan up to 25 campaign indicators; supply at least one indicator array. Returns correlated findings, per-indicator results, citations and per-endpoint errors. Preserve degraded=true and truncated_subcalls when upstream results are incomplete. Vendor bills successful calls."
 pricing_description = "Cost: ~$5.50/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

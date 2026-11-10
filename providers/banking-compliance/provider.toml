@@ -10,7 +10,6 @@ include = ["/api", ""]
 # Discovery advertises this paid route, but publishes no full request contract.
 # The free MCP preview schema does not establish the paid campaign body.
 exclude_operations = ["POST /api/campaign"]
-pricing_key = "x-payment-info"
 instructions_text = "Results reflect a limited US banking rules database. Verify cited requirements and current applicability before publishing financial promotions."
 
 [overrides.banking_compliance_check]
@@ -27,3 +26,9 @@ regulation = "Optional regulation filter. Advertised short name Reg DD yielded n
 [overrides.banking_compliance_generate]
 description = "Draft bank or credit-union product posts for review. A sample invented a website and claimed Member FDIC despite fdic_insured=false. Verify every claim, disclosure and placeholder before use; provider validation is not legal approval."
 pricing_description = "Cost: ~$0.10/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

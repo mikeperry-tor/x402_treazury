@@ -7,7 +7,6 @@ prefix = "stableenrich"
 recommended_tools = ["stableenrich_exa_search", "stableenrich_exa_contents", "stableenrich_firecrawl_scrape", "stableenrich_companyenrich_org_enrich", "stableenrich_help"]
 exclude = ["/api/cloudflare/crawl", "/api/cloudflare/jobs", "/api/hunter/email-verifier", "/api/google-maps/aerial-view/render-video", "/api/google-maps/aerial-view/lookup-video"]
 include = ["/api", ""]
-pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://stableenrich.dev/llms.txt"
 instructions_text = "Interpret actual HTTP bodies without assuming AgentCash’s success/data wrapper. Hosted assets remain links. Use small batches; do not repeat a paid submission to retrieve a pending result. FullEnrich requires filters and search_after pagination; verify company identity."
@@ -73,3 +72,9 @@ max_ms = 250
 distribution = "uniform"
 min_ms = 1000
 max_ms = 3000
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

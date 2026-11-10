@@ -9,7 +9,6 @@ name = "NetIntel"
 base_url = "https://netintel.dev"
 prefix = "netintel"
 recommended_tools = ["netintel_dns_lookup", "netintel_whois_rdap_lookup", "netintel_ip_report_full", "netintel_domain_report_full", "netintel_web_search", "netintel_web_extract", "netintel_help"]
-pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://netintel.dev/llms.txt"
 instructions_text = "Network and infrastructure intelligence. Preserve section availability, source timestamps and partial results. Unavailable signals are not clean results."
@@ -63,3 +62,9 @@ pricing_description = "Cost: ~$0.03/call [spec]."
 [overrides.netintel_dns_propagation_check]
 description = "Compare domain record_type across ten public DNS resolvers. Returns per-resolver answers, failures and consistency; this sample does not prove global propagation."
 pricing_description = "Cost: ~$0.03/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

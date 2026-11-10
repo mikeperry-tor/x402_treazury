@@ -4,7 +4,6 @@ name = "SiteCheck Shop & Social"
 base_url = "https://api.shopsocial-api.workers.dev"
 prefix = "shopsocial"
 include = ["/api", ""]
-pricing_key = "x-payment-info"
 help_url = "https://api.shopsocial-api.workers.dev/llms.txt"
 instructions_text = "Preserve source URLs, observation dates, public-view coverage, unavailable fields and per-item failures. Public feeds and page previews do not establish complete history, hidden contacts or private content."
 
@@ -38,3 +37,9 @@ pricing_description = "Cost: ~$0.02/call [spec]. Failed fetches returning 503 ar
 [overrides.shopsocial_social_youtube_transcript]
 description = "Read YouTube caption languages and a chosen track as timed segments plus joined text, title/channel and duration. Human captions are preferred; videos without captions return empty segments, private/removed videos 404 and bot checks 503."
 pricing_description = "Cost: ~$0.002/call [spec]. Failed or blocked fetches returning 503 are not charged."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

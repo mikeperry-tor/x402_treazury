@@ -5,5 +5,10 @@ relay_format = "curl"
 name = "Curl HTTP Request"
 base_url = "https://curl-http-request.underscoredone.com"
 prefix = "curl"
-pricing_key = "x-payment-info"
 cover_traffic_enabled = false
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

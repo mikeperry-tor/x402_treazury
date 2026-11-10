@@ -4,7 +4,6 @@ name = "medRxiv Preprint Details (x402 mint)"
 base_url = "https://x402-v2-mint-medrxiv-details.vercel.app"
 prefix = "medrxiv"
 include = ["/v1", ""]
-pricing_key = "x-payment-info"
 help_url = "https://x402-v2-mint-medrxiv-details.vercel.app/llms.txt"
 instructions_text = "Lists preprints posted in a date window rather than searching by keyword. Preprints are not peer-reviewed. Use science for broader paper search."
 
@@ -20,3 +19,9 @@ cursor = "Continuation value from a previous response, when one is returned."
 
 [overrides.medrxiv_help]
 description = "Read the medRxiv preprint listing guide."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

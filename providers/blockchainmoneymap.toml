@@ -4,7 +4,6 @@ name = "Blockchain Money Map"
 base_url = "https://api.blockchainmoneymap.com"
 prefix = "bmm"
 include = ["/api/x402", "/api/devagentpal", "/api/agents", ""]
-pricing_key = "x-payment-info"
 help_url = "https://api.blockchainmoneymap.com/llms.txt"
 instructions_text = "Preserve confidence, dataSourceStatus, missing components and timestamps. Evidence diagnostics analyze supplied facts; they do not independently establish settlement, identity, authorization or safety. Reports can persist at unlisted URLs. Hash notary/ledger callers must save returned identifiers and one-time lookup secrets. Revocation propagation requires separate authority and opted-in targets; payment alone grants none."
 
@@ -59,3 +58,8 @@ pricing_description = "Cost: ~$0.01/call [spec]."
 [overrides.bmm_x402_paid_tool_latency_sla_evidence_notary]
 description = "Create or verify persistent hash-only latency evidence supplied by the caller. Save returned record IDs and one-time lookup secrets; idempotency does not guarantee secret recovery. Does not measure live latency."
 pricing_description = "Cost: ~$0.01/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"

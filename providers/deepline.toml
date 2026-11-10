@@ -5,5 +5,10 @@ name = "Deepline GTM"
 base_url = "https://stable-deepline.dev"
 prefix = "deepline"
 include = ["/api", ""]
-pricing_key = "x-payment-info"
 additional_properties = false
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

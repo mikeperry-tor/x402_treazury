@@ -19,7 +19,6 @@ exclude_operations = [
   "POST /v1/transactions/{id}/audit-token",
   "POST /v1/transactions/{id}/dispute",
 ]
-pricing_key = "x-payment-info"
 help_url = "https://api.strale.io/llms-full.txt"
 instructions_text = "Registry fields and coverage vary by country and source. Preserve source dates and unavailable fields; ownership and screening results are scoped evidence."
 
@@ -29,3 +28,9 @@ pricing_description = "Cost: ~$0.054/call [spec]."
 
 [overrides.strale_polish_company_data.params]
 krs_number = "10-digit KRS registration number, including leading zeros; company names are unsupported."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

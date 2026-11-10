@@ -10,7 +10,6 @@ base_url = "https://agosint.shveik.dev"
 prefix = "agosint"
 include = ["/x402", ""]
 exclude = ["/mpp"]
-pricing_key = "x-payment-info"
 read_timeout_seconds = 120
 help_url = "https://agosint.shveik.dev/llms.txt"
 instructions_text = "Registry and sanctions research. Validate lookup keys before calling: invalid bodies can receive a quote and fail validation after payment."
@@ -61,3 +60,9 @@ pricing_description = "Cost: ~$0.015/call [spec]."
 [overrides.agosint_sanctions]
 description = "Screen official OFAC, EU and UK lists with match scores and publication dates. Pass exactly one of name or wallet; birth_date, country, kind and threshold apply only to name. A screening aid, not a compliance determination."
 pricing_description = "Cost: ~$0.015/call [spec]."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

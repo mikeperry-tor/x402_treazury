@@ -5,7 +5,6 @@ name = "StableTravel"
 base_url = "https://stabletravel.dev"
 prefix = "stabletravel"
 include = ["/api", ""]
-pricing_key = "x-payment-info"
 help_url = "https://stabletravel.dev/llms.txt"
 instructions_text = "Use Google Flights search then booking for cash fares and booking links; Seats.aero search then trips for cached mileage awards. FlightAware covers operations: resolve a flight ident first, then use its fa_flight_id for position, track and map. Preserve source timestamps and availability limits. Booking links do not issue tickets or hold reservations."
 
@@ -25,3 +24,9 @@ pricing_description = "Cost: ~$0.001/call [spec]."
 ident = "Flight identifier in the URL. Use the same identifier in body.ident."
 # Legacy metadata alias targets the existing nested body.ident schema.
 ident_body = "Flight identifier inside the body object; use the same value as the path ident."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true
