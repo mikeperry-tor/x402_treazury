@@ -1198,7 +1198,16 @@ mod external_pricing_refresh_tests {
 
     #[tokio::test]
     async fn unchanged_openapi_304_still_refreshes_expired_external_prices() {
+        use crate::payment::{PaidClient, SpendPolicy};
+        use crate::rotation::{
+            base::BaseRpc,
+            manager::ManagedPool,
+            store::{Store, StoreHandle},
+        };
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
         let root = tempfile::tempdir().unwrap();
+        let unsigned = Arc::new(AtomicUsize::new(0));
+        let signed = Arc::new(AtomicUsize::new(0));
         let price = Arc::new(AtomicUsize::new(1000));
         let catalogs = Arc::new(AtomicUsize::new(0));
         let metadata = Arc::new(AtomicUsize::new(0));
@@ -1208,7 +1217,21 @@ mod external_pricing_refresh_tests {
         let listener = crate::test_tls::listener().await;
         use axum::serve::Listener as _;
         let base = format!("https://{}", listener.local_addr().unwrap());
-        let app=axum::Router::new().fallback({
+        let app=axum::Router::new().route("/read", axum::routing::get({
+            let unsigned=unsigned.clone();let signed=signed.clone();
+            move |headers: axum::http::HeaderMap| {
+                let unsigned=unsigned.clone();let signed=signed.clone();
+                async move {
+                    if headers.contains_key("payment-signature") {
+                        signed.fetch_add(1, Ordering::SeqCst);
+                        return "paid".into_response();
+                    }
+                    unsigned.fetch_add(1, Ordering::SeqCst);
+                    let offer=json!({"x402Version":2,"resource":{"url":"https://fixture.example/read","description":"fixture","mimeType":"text/plain"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"100","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+                    (axum::http::StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(offer.to_string()))]).into_response()
+                }
+            }
+        })).fallback({
             let price=price.clone();let catalogs=catalogs.clone();let metadata=metadata.clone();let metadata_validations=metadata_validations.clone();let arrived=arrived.clone();let release=release.clone();let base=base.clone();
             move |request:axum::extract::Request| {
                 let price=price.clone();let catalogs=catalogs.clone();let metadata=metadata.clone();let metadata_validations=metadata_validations.clone();let arrived=arrived.clone();let release=release.clone();let base=base.clone();
@@ -1288,6 +1311,84 @@ mod external_pricing_refresh_tests {
                 .route(&second.base_url, &Default::default())
                 .is_ok()
         );
+        let mut state = Store::create(
+            &root.path().join("wallet-state"),
+            &root.path().join("wallet-key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            state,
+            "external_prices",
+            crate::rotation::test_capacity::two_reserves("0.01"),
+            Some(U256::from(10000)),
+            0
+        )
+        .unwrap();
+        let jobs = state.funding_jobs().unwrap();
+        for job in &jobs {
+            state
+                .record_credit(&job.wallet_id, "10000", "fixture", 100)
+                .unwrap();
+        }
+        let db = rusqlite::Connection::open(root.path().join("wallet-state/state.sqlite")).unwrap();
+        db.execute(
+            "UPDATE wallets SET role='RETAINED' WHERE id=?1",
+            [&jobs[0].wallet_id],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE wallets SET role='ACTIVE' WHERE id=?1",
+            [&jobs[1].wallet_id],
+        )
+        .unwrap();
+        // Model consumed reserve generations as well as the resulting roles.
+        db.execute(
+            "UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1",
+            [],
+        )
+        .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let client = PaidClient::managed(Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool,
+                BaseRpc::new(&format!("{base}/rpc-must-not-run")).unwrap(),
+                SpendPolicy::dollars("0.01").unwrap(),
+            )
+            .unwrap(),
+        ));
+        let bound = crate::catalog_state::bind(vec![(
+            second.tools[0].clone(),
+            client.clone(),
+            second.base_url.clone(),
+        )])
+        .remove(0);
+        let observed = bound
+            .tool
+            .catalog_hints
+            .as_ref()
+            .unwrap()
+            .operation("GET", "/read");
+        // Optional metadata is still in flight. The first ordinary challenge is
+        // fetched and signed by healthy ACTIVE, without waiting for publication.
+        assert_eq!(
+            bound.invoke_output(&Default::default()).await.unwrap().text,
+            "paid"
+        );
+        assert_eq!(
+            db.query_row("SELECT wallet_id FROM payment_attempts", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            jobs[1].wallet_id
+        );
+        assert_eq!(unsigned.load(Ordering::SeqCst), 1);
+        assert_eq!(signed.load(Ordering::SeqCst), 1);
+        assert_eq!(observed.get(), Some(U256::from(100)));
+        // Remove this call's learned offer so the next call proves that later
+        // advertised publication itself changes selection.
+        observed.catalog.state.lock().unwrap().prices.clear();
         release.notify_one();
         tokio::time::timeout(Duration::from_secs(5), async {
             while second.tools[0].advertised_pricing.amount() != Some(U256::from(2000)) {
@@ -1300,9 +1401,53 @@ mod external_pricing_refresh_tests {
             first.tools[0].advertised_pricing.amount(),
             Some(U256::from(1000))
         );
+        assert_eq!(
+            bound.invoke_output(&Default::default()).await.unwrap().text,
+            "paid"
+        );
+        observed.catalog.state.lock().unwrap().prices.clear();
+        // Expired advertisements must restore unknown-price ACTIVE selection.
+        bound.tool.advertised_pricing.set_expires(0);
+        assert!(bound.tool.advertised_pricing.amount().is_none());
+        assert_eq!(
+            bound.invoke_output(&Default::default()).await.unwrap().text,
+            "paid"
+        );
+        let payers: Vec<String> = db
+            .prepare("SELECT wallet_id FROM payment_attempts ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            payers,
+            [
+                jobs[1].wallet_id.clone(),
+                jobs[0].wallet_id.clone(),
+                jobs[1].wallet_id.clone()
+            ]
+        );
+        assert_eq!(
+            unsigned.load(Ordering::SeqCst),
+            3,
+            "one own unsigned challenge per call; no selection probes"
+        );
+        assert_eq!(signed.load(Ordering::SeqCst), 3);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM funding_jobs", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
         assert_eq!(catalogs.load(Ordering::SeqCst), 2);
         assert_eq!(metadata.load(Ordering::SeqCst), 2);
         assert_eq!(metadata_validations.load(Ordering::SeqCst), 1);
+        client.drain().await;
+        drop(bound);
+        drop(client);
+        drop(store);
+        worker.await.unwrap();
         server.abort();
     }
 }

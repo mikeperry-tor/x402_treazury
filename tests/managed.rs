@@ -1961,11 +1961,11 @@ fn tor_managed_child() {
     managed_extensions_are_stripped_logged_and_do_not_change_authorization();
     rejected_payment_stays_journaled_across_restart_without_automatic_replay();
     free_calls_do_not_touch_admission_and_funded_active_serves_independently();
-    post_handoff_gets_one_new_challenge_and_signs_once();
+    post_without_price_skips_depleted_active_and_signs_ready_once();
 }
 
 #[tokio::test]
-async fn post_handoff_gets_one_new_challenge_and_signs_once() {
+async fn post_without_price_skips_depleted_active_and_signs_ready_once() {
     install_network(Default::default());
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
@@ -1997,7 +1997,11 @@ async fn post_handoff_gets_one_new_challenge_and_signs_once() {
             .iter()
             .filter(|(_, kind, _)| kind == "unsigned")
             .count();
-    assert_eq!(after - before, 2);
+    assert_eq!(
+        after - before,
+        1,
+        "healthy READY serves the first unsigned POST"
+    );
     h.close().await;
 }
 #[tokio::test]
@@ -2061,12 +2065,12 @@ async fn promotion_identity_child() {
             .collect::<Vec<_>>();
         assert_eq!(
             payment.len(),
-            5,
-            "unsigned active, signed active, unsigned depleted, unsigned standby, signed standby"
+            4,
+            "unsigned active, signed active, unsigned standby, signed standby"
         );
         for ((peer, phase, signer), expected) in payment
             .into_iter()
-            .zip([&active, &active, &active, &standby, &standby])
+            .zip([&active, &active, &standby, &standby])
         {
             let connection = records
                 .iter()

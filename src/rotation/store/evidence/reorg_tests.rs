@@ -266,7 +266,13 @@ async fn retired_authorizations_reopen_and_finish_in_existing_pages_across_resta
     );
     assert!(
         f.store
-            .advisory_candidate(&f.pool, U256::from(1), Some(&auth.wallet), i64::MAX, &[])
+            .advisory_candidate(
+                &f.pool,
+                Some(U256::from(1)),
+                Some(&auth.wallet),
+                i64::MAX,
+                &[]
+            )
             .unwrap()
             .is_none()
     );

@@ -456,15 +456,15 @@ async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
         .with_document_relay(Some(relay));
     let mut relay_signatures = 0;
     for (kind, target_offer, body, target_requests, relay_requests) in [
-        ("handoff-relay", Some(17u64), "relay result", 2, 2),
-        ("handoff-free", Some(17), "target free", 2, 0),
-        ("status403", None, "relay result", 1, 3),
+        ("handoff-free", Some(17u64), "target free", 2, 0),
+        ("handoff-relay", Some(17), "relay result", 2, 2),
+        ("status403", None, "relay result", 1, 2),
     ] {
-        // Zero-price initial selection chooses the first eligible wallet. The
-        // actual offer makes the second estimate preferable before any signature.
-        // Relay bootstrap catalogs have no shared price entry. After the first
-        // relay fee consumes wallet one's unit, the final relay call needs its
-        // actual challenge before handing off to the sibling.
+        // With no price hint the first positive READY estimate is discovered
+        // first; the actual price requires its healthy sibling's own challenge.
+        // Test the free handoff before the relay fee consumes that first unit.
+        // The final call then skips known-zero ACTIVE upfront, including for the
+        // relay fee, without adding an unsigned request through that payer.
         let progress = SubmissionProgress::default();
         let output = client
             .execute_response_observed(route("GET", kind), &progress)

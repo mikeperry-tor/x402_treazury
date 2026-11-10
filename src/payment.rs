@@ -614,8 +614,7 @@ impl PaidClient {
                     operation
                         .as_ref()
                         .and_then(|key| key.get())
-                        .or(self.initial_price)
-                        .unwrap_or_default(),
+                        .or(self.initial_price),
                     through,
                     &[],
                 )
@@ -752,7 +751,7 @@ impl PaidClient {
                                     anyhow::Error::new(PrivatePayerHandoff).context(rejected)
                                 );
                                 attempted.push(failed);
-                                candidate=Some(pool.next_candidate(cost,through,&attempted).await
+                                candidate=Some(pool.next_candidate(Some(cost),through,&attempted).await
                                     .context(rejected)?
                                     .context("insufficient_funds: captured eligible wallets exhausted; earlier authorizations may still charge or execute")
                                     .context(rejected)?);

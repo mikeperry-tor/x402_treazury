@@ -615,10 +615,13 @@ reconciles existing work rather than inferring non-payment from a missing respon
 ## Wallet selection and network isolation
 
 Runtime price hints guide selection while wallet-scoped HTTP pooling, cover
-ownership and Tor isolation bind each attempt to its payer. Prefer a suitable bound
-payer, then existing eligible wallets whose estimates suggest affordability; unknown
-or low estimates remain fallbacks. Actual challenge terms and pool/payer authority
-govern admission. See the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
+ownership and Tor isolation bind each attempt to its payer. With a price hint,
+initial selection prefers estimated-affordable RETAINED, then ACTIVE, then READY,
+in creation order within each role. Without a hint, healthy positive ACTIVE
+precedes healthy RETAINED, then READY; low, zero and unknown estimates remain
+fallbacks. Once a challenge is obtained, a suitable eligible bound payer stays
+bound even when a retained sibling could cover the offer. Actual challenge terms
+and pool/payer authority govern admission. See the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
 Before the first unsigned request, selection uses a fresh observed offer when
 available, otherwise a usable advertised per-call estimate, otherwise unknown

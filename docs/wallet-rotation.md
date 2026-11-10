@@ -527,9 +527,15 @@ Selection uses the saved wallet estimate as described in the
 nonce scan, historical readiness validation or certificate publication. Price hints
 can choose an existing identity before its own unsigned challenge is fetched.
 Initial selection prefers a fresh observed offer, then a usable advertised
-per-call estimate from the configured pricing source, then the existing unknown
-price ranking. Advertised estimates work on the first call, including local
-authored catalogs, disabled HTTP caching and failed cache persistence; an observed
+per-call estimate from the configured pricing source, then unknown pricing.
+With a hint, estimated-affordable RETAINED wallets precede ACTIVE, then READY;
+creation sequence orders each role. Present zero is a hint. Without a hint,
+known-positive, non-low ACTIVE precedes healthy RETAINED, then READY. A low,
+zero or unknown ACTIVE estimate does not outrank a healthy sibling. Unknown,
+zero and low estimates remain eligible fallbacks. After fetching a challenge,
+an eligible bound payer whose estimate covers its actual offer stays bound;
+retained-first preference alone does not cause another unsigned request.
+Advertised estimates work on the first call, including local authored catalogs, disabled HTTP caching and failed cache persistence; an observed
 price row is not required. The invocation snapshots its advertised estimate before
 transport acquisition. Advertised prices remain distinct from observed offers
 and never appear as observed-offer evidence in the call result. Missing or expired
@@ -1468,8 +1474,11 @@ Read the [wallet observation policy](#wallet-observation-policy) when changing
 balance estimation, refresh scheduling, funding or recovery, and apply the
 [reconciliation policy](#recovery-and-reconciliation-policy).
 
-Managed USDC balances are advisory estimates. Payment selection prefers an affordable
-bound payer, then other eligible affordable identities, then unknown or low estimates.
+Managed USDC balances are advisory estimates. Before challenge discovery, a price
+hint prefers estimated-affordable RETAINED wallets, then ACTIVE, then READY.
+Without a hint, selection prefers healthy positive ACTIVE, then RETAINED, then
+READY; low, zero and unknown estimates remain fallbacks. After discovery,
+selection preserves an affordable eligible bound payer before considering siblings.
 Old or unavailable RPC observations and missing historical funding readiness do not
 prevent a permitted signature. Actual pool ownership, role, configured amount cap,
 asset/domain and caller authority still apply.

@@ -756,3 +756,52 @@ async fn manual_authorization_keeps_captured_managed_payer_after_active_rotation
     drop(db);
     f.close().await;
 }
+
+#[tokio::test]
+async fn unknown_price_keeps_healthy_active_after_offer_without_retained_probe() {
+    let f = fixture().await;
+    let db = rusqlite::Connection::open(f._dir.path().join("state/state.sqlite")).unwrap();
+    let wallets: Vec<String> = db
+        .prepare("SELECT id FROM wallets ORDER BY sequence")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    db.execute(
+        "UPDATE wallets SET role='RETAINED',balance='10000',low_balance=0 WHERE id=?1",
+        [&wallets[0]],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE wallets SET role='ACTIVE',balance='10000',low_balance=0 WHERE id=?1",
+        [&wallets[1]],
+    )
+    .unwrap();
+    // Model consumed reserve generations as well as the resulting roles.
+    db.execute(
+        "UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1",
+        [],
+    )
+    .unwrap();
+    let key = f.key("/first-call");
+    assert!(key.get().is_none());
+    assert!(
+        f.call(key.clone(), Reply::Challenge(challenge(&[100])))
+            .await
+            .is_err()
+    );
+    assert_eq!(key.get(), Some(U256::from(100)));
+    let payer: String = db
+        .query_row("SELECT wallet_id FROM payment_attempts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        payer, wallets[1],
+        "actual offer cannot hand off an affordable bound ACTIVE solely to consume retained funds"
+    );
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
+    drop(db);
+    f.close().await;
+}

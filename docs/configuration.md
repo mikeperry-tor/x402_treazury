@@ -1881,6 +1881,14 @@ estimates. Missing structured prices remain unknown. Startup, inspection and war
 never send endpoint requests to discover prices. Actual calls still acquire a fresh
 unsigned x402 challenge and enforce the selected payer's payment authority.
 
+Managed initial selection uses a fresh observed offer before a usable advertised
+per-call amount, including on the first call. Either hint prefers affordable
+RETAINED wallets oldest first, then ACTIVE, then READY. With neither hint,
+selection prefers healthy positive ACTIVE, then RETAINED, then READY; low,
+zero and unknown estimates remain eligible fallbacks. Present zero remains a
+hint. The actual challenge preserves a suitable bound payer rather than handing
+off solely to spend retained funds.
+
 Validated challenges from actual managed calls update estimates attached to the
 remote catalog cache entry. Compatible aliases, listeners and wallet groups share
 these estimates. Hints advise existing wallet selection and fresh MCP descriptions;

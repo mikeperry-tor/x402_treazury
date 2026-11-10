@@ -4,7 +4,7 @@ impl ManagedPool {
     pub(super) async fn acquire_candidate(
         &self,
         bound: &PaymentCandidateHandle,
-        selection_amount: U256,
+        selection_amount: Option<U256>,
         through: i64,
         attempted: &[String],
     ) -> Result<Option<PaymentCandidateHandle>> {

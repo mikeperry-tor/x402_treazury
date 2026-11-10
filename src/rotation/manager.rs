@@ -183,7 +183,7 @@ impl ManagedPool {
     }
     pub(crate) async fn next_candidate(
         &self,
-        selection_amount: U256,
+        selection_amount: Option<U256>,
         through: i64,
         attempted: &[String],
     ) -> Result<Option<PaymentCandidateHandle>> {
@@ -343,7 +343,7 @@ impl ManagedPool {
         diagnostics::stage("wallet_admission");
         {
             let selected = self
-                .acquire_candidate(&expected, offer.amount, through, attempted)
+                .acquire_candidate(&expected, Some(offer.amount), through, attempted)
                 .await
                 .context(facts)?
                 .context(AdmissionError::WalletNotReady(

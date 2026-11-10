@@ -355,7 +355,7 @@ async fn malformed_text_address_hands_off_without_signing_to_a_healthy_sibling()
             .unwrap();
         let initial = f
             .pool
-            .next_candidate(U256::ZERO, i64::MAX, &[])
+            .next_candidate(None, i64::MAX, &[])
             .await
             .unwrap()
             .unwrap();

@@ -70,11 +70,32 @@ async fn initial_price_child() {
     .unwrap();
     let jobs = state.funding_jobs().unwrap();
     assert_eq!(jobs.len(), 2);
-    for (job, balance) in jobs.iter().zip(["10", "1000"]) {
+    for (job, balance) in jobs.iter().zip(["100", "1000"]) {
         state
             .record_credit(&job.wallet_id, balance, "fixture", 100)
             .unwrap();
     }
+    // Model an early-rotated retained balance and its healthy active successor.
+    // Both can afford the advertised first-call price; unknown-price discovery
+    // should instead use ACTIVE. Selection must perform neither promotion nor I/O.
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute(
+        "UPDATE wallets SET role='RETAINED' WHERE id=?1",
+        [&jobs[0].wallet_id],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE wallets SET role='ACTIVE' WHERE id=?1",
+        [&jobs[1].wallet_id],
+    )
+    .unwrap();
+    // Model consumed reserve generations as well as the resulting roles.
+    db.execute(
+        "UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1",
+        [],
+    )
+    .unwrap();
+    drop(db);
     let wallets = state.status().unwrap().pools.remove(0).addresses;
     let credentials: Vec<_> = wallets
         .iter()
@@ -121,18 +142,18 @@ async fn initial_price_child() {
     let hints = crate::pricing::runtime::fixture(dir.path()).await;
     let key = hints.operation("GET", "/items");
     for (case, expected) in [
-        ("local", 1),
-        ("observed", 0),
-        ("expired-observed", 1),
+        ("local", 0),
+        ("observed", 1),
+        ("expired-observed", 0),
         ("above-cap", 0),
-        ("unknown", 0),
-        ("explicit-url", 1),
+        ("unknown", 1),
+        ("explicit-url", 0),
         ("zero", 0),
     ] {
         match case {
             "observed" => {
                 bound.tool.catalog_hints = Some(hints.clone());
-                key.learn(U256::from(5), received().unwrap());
+                key.learn(U256::from(500), received().unwrap());
             }
             "expired-observed" => hints.invalidate(),
             "above-cap" => {
@@ -191,7 +212,7 @@ async fn initial_price_child() {
     assert_eq!(selected.lock().unwrap().len(), before + 1);
     assert_eq!(
         selected.lock().unwrap()[before],
-        credentials[0],
+        credentials[1],
         "relay fee selection cannot inherit a target API price"
     );
     drop(relay);
