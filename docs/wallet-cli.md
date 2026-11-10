@@ -366,6 +366,8 @@ wait for bootstrap completeness. `auto_fund=false` pauses new funding and makes
 explicit bootstrap fail, while accepted operations remain observed; qualification
 funding restrictions retain their existing lifecycle. `catalog warm` never starts
 funding: use `wallet bootstrap` first when warming needs a managed paid relay wallet.
+Its relay-wallet owner temporarily denies new funding for this command only; it
+uses existing funded wallets without changing the deployment's `auto_fund` setting.
 
 ## Treasury and managed pools
 

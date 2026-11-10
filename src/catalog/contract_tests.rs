@@ -234,7 +234,8 @@ fn rich_partial_and_strict_vec_preserve_healthy_get_before_post_preference() {
             ..Default::default()
         },
         Config {
-            exclude_tools: vec!["api_missing".into()],
+            recommended_tools: vec!["api_missing".into()],
+            use_recommended_tools: true,
             ..Default::default()
         },
     ] {
@@ -276,6 +277,32 @@ fn rich_partial_and_strict_vec_preserve_healthy_get_before_post_preference() {
         );
     }
 }
+#[test]
+fn unmatched_exclusions_preserve_compatibility_failures_without_selector_errors() {
+    let cfg = Config {
+        exclude_tools: vec!["api_missing".into()],
+        ..Default::default()
+    };
+    let document = partial();
+    let built = build_catalog(&cfg, &document, "api").unwrap();
+    assert_eq!(built.tools.len(), 2);
+    assert_eq!(built.issues.len(), 1);
+    assert!(built.complete().unwrap_err().is::<IncompleteCatalog>());
+    let mut unsupported = document;
+    unsupported["paths"]
+        .as_object_mut()
+        .unwrap()
+        .remove("/healthy");
+    unsupported["paths"]["/same"]
+        .as_object_mut()
+        .unwrap()
+        .remove("get");
+    let built = build_catalog(&cfg, &unsupported, "api").unwrap();
+    assert!(built.tools.is_empty());
+    assert_eq!(built.issues.len(), 1);
+    assert!(built.complete().unwrap_err().is::<IncompleteCatalog>());
+}
+
 #[test]
 fn whole_body_absent_empty_null_and_required_empty_have_distinct_requests() {
     let document = json!({"paths":{

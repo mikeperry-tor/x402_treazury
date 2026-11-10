@@ -619,12 +619,13 @@ impl Store {
         }
         Ok(())
     }
-    /// Monotonic for this store owner. A supervised launch must install it again on reopen.
+    /// Monotonic owner-local restriction for qualification and catalog warming.
+    /// A supervised launch must install it again on reopen.
     /// No setter can restore ordinary funding on an already restricted owner.
     pub fn deny_new_funding(&mut self) {
         self.funding_restriction = super::restriction::FundingRestriction::DenyNewFunding;
-        tracing::warn!(
-            "qualification funding restriction installed: zero new jobs and zero new ZEC spending; existing reconciliation remains available"
+        tracing::debug!(
+            "New wallet funding disabled for this owner; existing payments and reconciliation remain available"
         );
     }
     /// Ordinary pause cannot weaken a previously installed qualification restriction.

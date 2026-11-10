@@ -846,7 +846,8 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
         ("include_tools=['offline_read']", true),
         ("exclude_tools=['offline_read']", true),
         ("include_tools=['s00_typo']", false),
-        ("exclude_tools=['s00_typo']", false),
+        ("exclude_tools=['s00_typo']", true),
+        ("exclude_tools=['unknown_read']", true),
         ("include_tools=['unknown_read']", false),
         ("include_tools=['s01_read']", false),
     ] {

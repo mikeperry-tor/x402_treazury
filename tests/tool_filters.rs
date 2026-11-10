@@ -172,8 +172,9 @@ fn unmatched_wildcards_warn_while_other_matches_remain_usable() {
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
     let cfg = Config {
+        discovery_source: Some("filter-fixture".into()),
         include_tools: vec!["api_person".into(), "missing_*".into()],
-        exclude_tools: vec!["absent_*".into()],
+        exclude_tools: vec!["absent_*".into(), "api_missing".into()],
         ..Default::default()
     };
     assert_eq!(
@@ -184,4 +185,24 @@ fn unmatched_wildcards_warn_while_other_matches_remain_usable() {
     assert!(evidence.contains("Provider tool selector matches nothing"));
     assert!(evidence.contains("missing_*"));
     assert!(evidence.contains("absent_*"));
+    for selector in ["absent_*", "api_missing"] {
+        let lines: Vec<_> = evidence
+            .lines()
+            .filter(|line| line.contains(selector))
+            .collect();
+        assert_eq!(lines.len(), 1, "{evidence}");
+        assert!(
+            lines[0].contains("source=\"filter-fixture\"") && lines[0].contains("prefix=\"api\""),
+            "{evidence}"
+        );
+        assert!(
+            lines[0].contains("INFO") && !lines[0].contains("WARN"),
+            "{evidence}"
+        );
+    }
+    assert!(
+        evidence
+            .lines()
+            .any(|line| line.contains("missing_*") && line.contains("WARN"))
+    );
 }

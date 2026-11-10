@@ -162,6 +162,75 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
     let compiled = CompiledRules::new(rules, "glim").unwrap();
     assert!(compiled.decision("glim_amazon_search").excluded);
 }
+#[test]
+fn research_desk_maxwell_loads_without_removed_court_search() {
+    let config: MetaConfig = toml::from_str(include_str!(
+        "../../examples/deployments/research_desk.toml"
+    ))
+    .unwrap();
+    let mut rules = config.sources["maxwell"].send_tools.clone().unwrap();
+    // Existing local copies can retain the old exclusion without breaking loading.
+    rules[0]
+        .tools
+        .as_mut()
+        .unwrap()
+        .push("courts_search".into());
+    // Witness only the removed-court failure: synthesize the other exact
+    // selectors rather than freeze Maxwell's unrelated changing inventory.
+    let mut names: BTreeSet<_> = rules
+        .iter()
+        .flat_map(|r| r.tools.iter().flatten())
+        .filter(|name| !name.contains(['*', '?']) && name.as_str() != "courts_search")
+        .cloned()
+        .collect();
+    names.extend([
+        "gov_pl_companies".into(),
+        "future_unused".into(),
+        "doctor_buy".into(),
+    ]);
+    let operations: Vec<_> = names
+        .into_iter()
+        .map(|name| {
+            json!({
+                "method":"GET", "path":format!("/v1/{}",name.replace('_',"/"))
+            })
+        })
+        .collect();
+    let provider = toml::from_str(include_str!("../../providers/maxwell.toml")).unwrap();
+    let source = Source::from_document(
+        "maxwell",
+        provider,
+        std::sync::Arc::new(json!({"operations":operations})),
+    )
+    .unwrap()
+    .with_send_tools("maxwell", Some(rules.clone()))
+    .unwrap();
+    assert!(
+        source
+            .tools
+            .iter()
+            .all(|tool| tool.name != "maxwell_courts_search")
+    );
+    let compiled = CompiledRules::new(&rules, "maxwell").unwrap();
+    for (name, target) in [
+        ("ski_prices", "travel"),
+        ("gov_pl_companies", "business"),
+        ("openfda_drug_label", "health"),
+    ] {
+        let name = format!("maxwell_{name}");
+        assert!(source.tools.iter().any(|tool| tool.name == name));
+        assert_eq!(compiled.decision(&name).targets, [target]);
+    }
+    for name in [
+        "gov_br_companies",
+        "future_unused",
+        "doctor_buy",
+        "courts_search",
+    ] {
+        assert!(compiled.decision(&format!("maxwell_{name}")).excluded);
+    }
+}
+
 fn rules(value: Value) -> Vec<SendToolsRule> {
     serde_json::from_value(value).unwrap()
 }
@@ -334,10 +403,8 @@ fn source_filters_precede_distribution_even_for_exclusion_only_sources() {
         {"to":"exclude","tools":["hidden"]},{"to":"exclude"}
     ]));
     assert!(source(send_tools.clone(), "").is_ok());
-    let error = source(send_tools, "exclude_tools=['vendor_hidden']")
-        .err()
-        .unwrap();
-    assert!(format!("{error:#}").contains("unknown tool selector hidden"));
+    let loaded = source(send_tools, "exclude_tools=['vendor_hidden']").unwrap();
+    assert!(loaded.tools.iter().all(|tool| tool.name != "vendor_hidden"));
 }
 
 #[test]

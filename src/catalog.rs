@@ -1662,13 +1662,10 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
         issues,
     } = selected_operations(cfg, root, prefix)?;
     // A help document cannot disguise the absence of every selected API contract.
-    // Active tool-name selectors still require an actual compatible inventory.
+    // Active inclusion/recommendation selectors require a compatible inventory.
     if selected.is_empty() && !issues.is_empty() {
-        if !cfg.include_tools.is_empty()
-            || !cfg.exclude_tools.is_empty()
-            || cfg.use_recommended_tools
-        {
-            filter_tool_names(cfg, &mut Vec::new(), true).map_err(|error| ToolConfigurationError {
+        if !cfg.include_tools.is_empty() || cfg.use_recommended_tools {
+            filter_tool_names(cfg, &mut Vec::new(), prefix, true).map_err(|error| ToolConfigurationError {
                 error: error.context(IncompleteCatalog(issues.clone())),
                 reason: "Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections",
             })?;
@@ -1702,7 +1699,7 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
-    filter_tool_names(cfg, &mut tools, !issues.is_empty()).map_err(|error| ToolConfigurationError {
+    filter_tool_names(cfg, &mut tools, prefix, !issues.is_empty()).map_err(|error| ToolConfigurationError {
         error: if issues.is_empty() {error} else {error.context(IncompleteCatalog(issues.clone()))},
         reason: if issues.is_empty() {"Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings"} else {"Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections"},
     })?;
@@ -1712,14 +1709,25 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
     Ok(CatalogBuild { tools, issues })
 }
 
-fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>, partial: bool) -> Result<()> {
+fn filter_tool_names(
+    cfg: &Config,
+    tools: &mut Vec<ToolSpec>,
+    prefix: &str,
+    partial: bool,
+) -> Result<()> {
     // Every selector sees the same compatible named inventory, including help.
-    let compile = |selectors: &[String], advisory: bool| -> Result<Vec<regex::Regex>> {
+    let compile = |selectors: &[String],
+                   advisory: bool,
+                   exclusion: bool|
+     -> Result<Vec<regex::Regex>> {
         selectors.iter().map(|selector| {
             let pattern = crate::deployment::pattern(selector)?;
             if !tools.iter().any(|tool| pattern.is_match(&tool.name)) {
-                if advisory || selector.contains(['*', '?']) {
-                    tracing::warn!(selector, advisory, "Provider tool selector matches nothing");
+                if exclusion {
+                    tracing::info!(source=cfg.discovery_source.as_deref(), prefix, selector, setting="exclude_tools",
+                        "Provider exclusion selector matches no compatible tools; exclusion has no current effect");
+                } else if advisory || selector.contains(['*', '?']) {
+                    tracing::warn!(source=cfg.discovery_source.as_deref(), prefix, selector, advisory, "Provider tool selector matches nothing");
                 } else {
                     if partial {bail!("provider tool selector {selector} matches no compatible tools; inspect omitted operations and operation selections");}
                     bail!("unknown provider tool selector {selector}; check path, operation and tag filters");
@@ -1728,9 +1736,9 @@ fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>, partial: bool) -> 
             Ok(pattern)
         }).collect()
     };
-    let include = compile(&cfg.include_tools, false)?;
-    let exclude = compile(&cfg.exclude_tools, false)?;
-    let recommended = compile(&cfg.recommended_tools, !cfg.use_recommended_tools)?;
+    let include = compile(&cfg.include_tools, false, false)?;
+    let exclude = compile(&cfg.exclude_tools, false, true)?;
+    let recommended = compile(&cfg.recommended_tools, !cfg.use_recommended_tools, false)?;
     if cfg.use_recommended_tools {
         ensure!(
             tools

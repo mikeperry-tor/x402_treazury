@@ -271,8 +271,9 @@ Names are assigned after path, operation and tag selection, before tool-name
 filtering, so removing a tool by name does not rename its remaining siblings.
 Tool-name filters intersect the earlier filters; exclusions win. Help tools also
 participate: include their name or a matching pattern to keep them in an allowlist.
-Unknown exact names fail catalog loading; unmatched wildcard patterns emit a
-warning, and an empty final toolset fails. Server filters further narrow each
+Unknown exact inclusion names fail catalog loading; unmatched inclusion wildcards
+emit a warning. Unmatched exclusion selectors, exact or wildcard, report INFO and
+have no current effect. An empty final toolset still fails. Server filters further narrow each
 listener's inventory and cannot restore excluded source tools.
 
 Provider/source `recommended_tools` is advisory metadata using the same generated-name
@@ -774,15 +775,17 @@ filters its assigned generated tools by tags and tool names. Source `send_tools`
 when present, assign tools before this final listener narrowing. Tag inclusion matches any
 listed tag, exclusions win, and matching is case-sensitive; untagged tools
 (including help) do not match a positive tag filter. Tool-name patterns support
-`*` and `?`; unmatched exact selectors are errors and unmatched wildcards produce
-advisory diagnostics. Listener pattern diagnostics are DEBUG and identify
-`include_tools` or `exclude_tools`. When a generated name proves that a source
+`*` and `?`. Unmatched exact inclusions are errors; unmatched inclusion wildcards
+produce DEBUG diagnostics. Unmatched exclusions, exact or wildcard, report INFO
+without failing catalog loading or endpoint readiness. Listener diagnostics identify
+`include_tools` or `exclude_tools` after that listener's source loads settle. When a generated name proves that a source
 tool-name filter removed a matching tool, the diagnostic names the resolved `sources.NAME` setting and a matching tool as
 evidence. This includes source allowlists, exclusions and explicitly enabled
 recommendations. For bound sources, diagnostics identify the winning
 `sources.NAME.send_tools[index]` rule when distribution removes matching tools, stating
-whether it excluded the tool or assigned it to other endpoints. Missing exact listener selectors include this evidence in the
-inspection error; wildcard diagnostics use the same assignment/tag candidate view
+whether it excluded the tool or assigned it to other endpoints. Missing exact
+listener inclusions include this evidence in the inspection error; advisory
+exclusion and wildcard diagnostics use the same assignment/tag candidate view
 as publication. Listener filters cannot restore tools removed by source filters;
 an exclusion for an already removed tool can simply be redundant. Other unmatched
 patterns report source availability and suggest checking source/listener filters,
@@ -827,9 +830,12 @@ first. The first matching rule consumes each surviving tool: assignment sends it
 to every named endpoint, while exclusion publishes it nowhere. Later rules cannot
 restore or redistribute it. Explicit destination arrays express sharing. Exact
 selectors validate against the full surviving source inventory before consumption;
-a known tool consumed earlier is still known. Missing exact selectors fail;
-unmatched wildcards and fully shadowed rules emit DEBUG diagnostics because future
-families and explicit fallback rules can legitimately have no current matches.
+a known tool consumed earlier is still known. Missing exact assignment selectors
+fail. Unmatched selectors in `to = "exclude"` rules, exact or wildcard, report INFO
+and have no current effect. Unmatched assignment wildcards and fully shadowed rules
+emit DEBUG because future families and explicit fallback rules can legitimately
+have no current matches. These rules apply to serving, bootstrap, strict catalog
+inspection and warming alike; malformed selectors remain errors.
 Inventory-dependent diagnostics
 wait while their source is pending or unavailable. Listener filters can only
 narrow assignments. Existing duplicate-name handling still applies across sources.

@@ -175,8 +175,10 @@ OpenAPI plus overrides, full pinned relays and multi-source authored catalogs:
 5. Reconcile every affected `examples/deployments/` consumer in the same coherent
    update. Compare actual original method/path identities, generated names and
    current `send_tools` decisions, including new APIs reaching catch-all rules.
-   Review all examples, not only the running deployment. Retire missing exact
-   selectors instead of weakening validation or disguising them as wildcards.
+   Review all examples, not only the running deployment. Retire obsolete exact
+   selectors after confirming removal instead of disguising them as wildcards.
+   Unmatched exclusions are informational at runtime; positive exact selections
+   retain strict validation.
    Search the bundled catalog for alternatives to deleted selected APIs and consider
    useful new APIs as replacements or backups. Compare purpose, request controls,
    returned fields, freshness, upstream diversity, billing and useful result quality;

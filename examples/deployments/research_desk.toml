@@ -1035,7 +1035,6 @@ send_tools = [
     "gov_cz_companies", # AgOSINT already supplies ARES registry lookups.
     "gov_fr_companies", # AgOSINT already supplies French company lookups.
     "gov_gb_companies", # AgOSINT already supplies Companies House lookups.
-    "courts_search", # CompanyRecords gov_justia_case_law adds sampled snippets and matched 2s records at a lower advertised price; Maxwell rejected payment. Retain as a backup in the reusable provider.
   ] },
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
   { to = "health", tools = ["openfda_drug_label", "openfda_drug_event"] },

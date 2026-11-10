@@ -228,16 +228,25 @@ impl<'a> CompiledRules<'a> {
         for (index, rule) in self.rules.iter().enumerate() {
             for (selector, regex) in rule.tools.iter().flatten().zip(&self.patterns[index]) {
                 if !suffixes.iter().any(|suffix| regex.is_match(suffix)) {
-                    ensure!(
-                        selector.contains(['*', '?']),
-                        "source {id}: send_tools[{index}] unknown tool selector {selector}"
-                    );
-                    tracing::debug!(
-                        source = id,
-                        rule = index,
-                        selector,
-                        "Source distribution pattern matches no available tools"
-                    );
+                    if rule.to.excluded() {
+                        tracing::info!(
+                            source = id,
+                            rule = index,
+                            selector,
+                            "Source exclusion selector matches no available tools; exclusion has no current effect"
+                        );
+                    } else {
+                        ensure!(
+                            selector.contains(['*', '?']),
+                            "source {id}: send_tools[{index}] unknown tool selector {selector}"
+                        );
+                        tracing::debug!(
+                            source = id,
+                            rule = index,
+                            selector,
+                            "Source distribution pattern matches no available tools"
+                        );
+                    }
                 }
             }
             if wins[index] == 0 {

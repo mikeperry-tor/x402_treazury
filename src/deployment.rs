@@ -1913,12 +1913,12 @@ fn listener_tool_inventory(
             }
         }
     }
-    let compile = |selectors: &[String]| -> Result<Vec<Regex>> {
+    let compile = |selectors: &[String], require_match: bool| -> Result<Vec<Regex>> {
         selectors
             .iter()
             .map(|text| {
                 let re = pattern(text)?;
-                if !available.keys().any(|n| re.is_match(n))
+                if require_match && !available.keys().any(|n| re.is_match(n))
                     && !text.contains(['*', '?'])
                     && !selector_has_unavailable_owner(text, server, sources, unavailable)
                 {
@@ -1940,8 +1940,8 @@ fn listener_tool_inventory(
             })
             .collect()
     };
-    let include = compile(&server.include_tools)?;
-    let exclude = compile(&server.exclude_tools)?;
+    let include = compile(&server.include_tools, true)?;
+    let exclude = compile(&server.exclude_tools, false)?;
     let conflicts: Vec<_> = available
         .iter()
         .filter(|(_, binding)| binding.is_none())

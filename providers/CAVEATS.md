@@ -2057,9 +2057,12 @@ The advertised Base offer was $0.005 with a 60-second authorization window; the
 SDK sets expiry at signing, so a firewall delay before signing does not consume
 that window. No signer, extension or generic relay workaround is established.
 Earlier failed authorizations remain potentially chargeable and were not replayed.
-Research desk prefers CompanyRecords court search while retaining Maxwell's
-additional government, travel and research contracts for separate evaluation. It
-now enables the audited close/partial alternatives alongside those Maxwell tools;
+The current Maxwell schema no longer generates `courts_search`; the research
+deployment removes its stale exclusion. Existing local copies can retain that
+exclusion: unmatched exclusions report INFO without failing catalog loading.
+The final exclusion rule still omits any unselected or returning court route. CompanyRecords court search and the remaining Maxwell government,
+travel and research selections retain their existing routing. The deployment
+also enables the audited close/partial alternatives alongside those Maxwell tools;
 Maxwell may need removal if its facilitator failures persist. General place/weather
 components do not replace ski prices, lift status or resort-specific relationships.
 

@@ -40,6 +40,34 @@ fn denied<T>(r: Result<T>) {
     );
 }
 #[test]
+fn restriction_installation_is_debug_and_not_qualification_specific() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::store::funding_restriction_tests::restriction_installation_is_debug_and_not_qualification_specific",
+    ) {
+        return;
+    }
+    let (_dir, mut store, _) = fixture();
+    let logs = Logs::default();
+    let sink = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(move || sink.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || store.deny_new_funding());
+    let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(
+        logs.contains("DEBUG") && logs.contains("New wallet funding disabled for this owner"),
+        "{logs}"
+    );
+    assert!(
+        !logs.contains("WARN") && !logs.contains("qualification"),
+        "{logs}"
+    );
+}
+
+#[test]
 fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
     if crate::test_log_capture::run_in_child(
         "rotation::store::funding_restriction_tests::restriction_allows_declaration_but_denies_allocation_and_source_work",
@@ -114,7 +142,7 @@ fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
         );
     }
     assert!(logs.contains("qualification_funding_denied"));
-    assert!(logs.contains("limit is zero"));
+    assert!(logs.contains("current owner restriction"));
 }
 #[test]
 fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {

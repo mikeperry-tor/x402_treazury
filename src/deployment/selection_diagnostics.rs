@@ -17,13 +17,23 @@ pub(super) fn report_completed(
         match warnings(name, server, sources) {
             Ok(warnings) => {
                 for warning in warnings {
-                    tracing::debug!(
-                        server = name,
-                        setting = warning.setting,
-                        selector = warning.selector,
-                        "{}",
-                        warning.explanation
-                    );
+                    if warning.setting == "exclude_tools" {
+                        tracing::info!(
+                            server = name,
+                            setting = warning.setting,
+                            selector = warning.selector,
+                            "{}",
+                            warning.explanation
+                        );
+                    } else {
+                        tracing::debug!(
+                            server = name,
+                            setting = warning.setting,
+                            selector = warning.selector,
+                            "{}",
+                            warning.explanation
+                        );
+                    }
                 }
             }
             Err(_) => tracing::debug!(
@@ -65,7 +75,10 @@ fn warnings(
         ("include_tools", &server.include_tools),
         ("exclude_tools", &server.exclude_tools),
     ] {
-        for selector in selectors.iter().filter(|s| s.contains(['*', '?'])) {
+        for selector in selectors
+            .iter()
+            .filter(|s| setting == "exclude_tools" || s.contains(['*', '?']))
+        {
             let pattern = pattern(selector)?;
             if !available.iter().any(|name| pattern.is_match(name)) {
                 unmatched.push((setting, selector, pattern));
@@ -80,10 +93,15 @@ fn warnings(
     let removals = selection_removals(name, server, sources)?;
     Ok(unmatched.into_iter().map(|(setting, selector, pattern)| {
         let causes = removal_causes(&removals, &pattern);
-        let explanation = if causes.is_empty() {
-            format!("Listener tool pattern matches no available tools; check the pattern, source availability and source/listener filters. Unavailable sources: {unavailable:?}")
+        let subject = if setting == "exclude_tools" {
+            "Listener exclusion selector matches no available tools; exclusion has no current effect"
         } else {
-            format!("Listener tool pattern matches no available tools; matching tools were already removed before listener name filtering: {}. Listener filters cannot restore source tools", causes.join("; "))
+            "Listener tool pattern matches no available tools"
+        };
+        let explanation = if causes.is_empty() {
+            format!("{subject}; check the selector, source availability and source/listener filters. Unavailable sources: {unavailable:?}")
+        } else {
+            format!("{subject}; matching tools were already removed before listener name filtering: {}. Listener filters cannot restore source tools", causes.join("; "))
         };
         Warning { setting, selector: selector.clone(), explanation }
     }).collect())
@@ -382,6 +400,56 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn unmatched_exclusions_are_info_and_do_not_block_valid_tools() {
+        if crate::test_log_capture::run_in_child(
+            "deployment::selection_diagnostics::tests::unmatched_exclusions_are_info_and_do_not_block_valid_tools",
+        ) {
+            return;
+        }
+        let (_, logs) = crate::limits::tests::capture(async {
+            let send_tools = serde_json::from_value(json!([
+                {"to":"exclude","tools":["obsolete","obsolete_*","hidden"]},
+                {"to":"main"}
+            ]))
+            .unwrap();
+            let routed = source("exclude_tools=['vendor_absent','vendor_future*']")
+                .with_send_tools("alias", Some(send_tools))
+                .unwrap();
+            let sources = BTreeMap::from([("alias".into(), routed)]);
+            let mut server = listener();
+            server.include_tools.clear();
+            server.exclude_tools = vec![
+                "vendor_absent".into(),
+                "vendor_future*".into(),
+                "vendor_hidden".into(),
+                "vendor_hidden_extra".into(),
+            ];
+            let inventory =
+                listener_tool_inventory("main", &server, &sources, &BTreeMap::new(), false)
+                    .unwrap();
+            assert_eq!(inventory.tools.len(), 1);
+            assert_eq!(inventory.tools[0].1.name, "vendor_read");
+            let listeners = BTreeMap::from([("main".into(), server)]);
+            // Unrelated completions must not repeat a listener's diagnostics.
+            report_completed(&listeners, &sources, &BTreeMap::new(), Some("unrelated"));
+            report_completed(&listeners, &sources, &BTreeMap::new(), Some("alias"));
+            report_completed(&listeners, &sources, &BTreeMap::new(), Some("unrelated"));
+        })
+        .await;
+        for (message, count) in [
+            ("Provider exclusion selector", 2),
+            ("Source exclusion selector", 2),
+            ("Listener exclusion selector", 3),
+        ] {
+            let lines: Vec<_> = logs.lines().filter(|line| line.contains(message)).collect();
+            assert_eq!(lines.len(), count, "{logs}");
+            assert!(lines.iter().all(|line| line.contains("INFO")), "{logs}");
+        }
+        assert!(logs.contains("sources.alias.send_tools[0]"), "{logs}");
+        assert!(!logs.contains("WARN") && !logs.contains("ERROR"), "{logs}");
+    }
+
     #[test]
     fn routing_removals_explain_exact_and_wildcard_listener_selectors() {
         for (target, expected) in [
@@ -417,19 +485,26 @@ mod tests {
                 } else {
                     Vec::new()
                 };
-                let error =
-                    listener_tool_inventory("main", &server, &sources, &BTreeMap::new(), false)
-                        .err()
-                        .unwrap();
-                let detail = format!("{error:#}");
-                assert!(
-                    detail.contains("unknown tool selector vendor_hidden"),
-                    "{detail}"
-                );
-                assert!(
-                    detail.contains("sources.alias.send_tools[0]") && detail.contains(expected),
-                    "{detail}"
-                );
+                let selected =
+                    listener_tool_inventory("main", &server, &sources, &BTreeMap::new(), false);
+                if exclude {
+                    let selected = selected.unwrap();
+                    assert_eq!(selected.tools.len(), 1);
+                    let diagnostic = warnings("main", &server, &sources).unwrap();
+                    assert_eq!(diagnostic[0].setting, "exclude_tools");
+                    assert!(diagnostic[0].explanation.contains(expected));
+                } else {
+                    let error = selected.err().unwrap();
+                    let detail = format!("{error:#}");
+                    assert!(
+                        detail.contains("unknown tool selector vendor_hidden"),
+                        "{detail}"
+                    );
+                    assert!(
+                        detail.contains("sources.alias.send_tools[0]") && detail.contains(expected),
+                        "{detail}"
+                    );
+                }
             }
             server.include_tools.clear();
             server.exclude_tools.clear();

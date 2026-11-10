@@ -17,7 +17,7 @@ impl FundingRestriction {
             tracing::warn!(
                 action,
                 code = "qualification_funding_denied",
-                "qualification funding limit is zero; new funding denied; existing active-wallet calls and reconciliation remain available"
+                "New wallet funding denied by the current owner restriction; existing active-wallet calls and reconciliation remain available"
             );
             anyhow::bail!(AdmissionError::FundingRestricted);
         }
