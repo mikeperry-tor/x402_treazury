@@ -621,7 +621,12 @@ mod tests {
                     .recover_funding_job(job.id.clone(), true, &mut NoNetwork, &stop)
                     .await
                     .unwrap();
-                assert_eq!(outcome, RecoveryOutcome::Waiting("swap_outcome_pending"));
+                let reason = if terminal == Some(SwapStatus::Refunded) {
+                    "waiting_for_confirmed_refund"
+                } else {
+                    "swap_outcome_pending"
+                };
+                assert_eq!(outcome, RecoveryOutcome::Waiting(reason));
                 let (id, original) = (job.id.clone(), original.clone());
                 owner
                     .store

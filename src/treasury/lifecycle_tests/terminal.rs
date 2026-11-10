@@ -168,7 +168,13 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
                         .recover_funding_job(job.id.clone(), allowed, &mut NoDisclosure, &stop)
                         .await
                         .unwrap(),
-                    RecoveryOutcome::Waiting("swap_outcome_pending")
+                    RecoveryOutcome::Waiting(
+                        if terminal == crate::rotation::near::SwapStatus::Refunded {
+                            "waiting_for_confirmed_refund"
+                        } else {
+                            "swap_outcome_pending"
+                        }
+                    )
                 );
             }
             let original = job.clone();
