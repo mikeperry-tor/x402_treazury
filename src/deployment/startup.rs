@@ -587,6 +587,9 @@ impl Source {
         let issues = built.issues;
         for tool in &mut tools {
             tool.catalog_hints = document.hints.clone();
+            if let Some(expires) = document.advertised_expires {
+                tool.advertised_pricing.set_expires(expires);
+            }
         }
         tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(), omitted_operations=issues.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");
@@ -682,6 +685,46 @@ mod warm_tests;
 #[cfg(test)]
 mod deferred_tests {
     use super::*;
+
+    #[test]
+    fn acquired_advertised_expiry_reaches_static_tools_without_observed_cache() {
+        let cfg: catalog::Config = toml::from_str(
+            r#"
+            spec = "https://api.example.com/openapi.json"
+            base_url = "https://api.example.com"
+            prefix = "priced"
+            [pricing]
+            source = "catalog"
+            format = "payment-info"
+            unit = "call"
+            usd_as_usdc = true
+        "#,
+        )
+        .unwrap();
+        let document = Arc::new(serde_json::json!({"paths":{"/read":{"get":{
+            "x-payment-info":{"price":{"currency":"USD","amount":"0.01"}}
+        }}}}));
+        for (expires, expected) in [
+            (
+                crate::http_cache::now() + 604800,
+                Some(alloy_primitives::U256::from(10000)),
+            ),
+            (0, None),
+        ] {
+            let source = Source::from_document(
+                "priced",
+                cfg.clone(),
+                catalog::LoadedCatalog {
+                    document: document.clone(),
+                    hints: None,
+                    advertised_expires: Some(expires),
+                },
+            )
+            .unwrap();
+            assert_eq!(source.tools[0].advertised_pricing.amount(), expected);
+            assert!(source.tools[0].catalog_hints.is_none());
+        }
+    }
 
     #[tokio::test]
     async fn cached_json_can_fail_generation_with_a_safe_specific_reason() {

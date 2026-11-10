@@ -67,10 +67,29 @@ impl Record {
     // Candidate/document setters invalidate this process-local result before reuse.
     fn prepare(&mut self) -> Result<()> {
         if self.built.is_none() {
-            self.built = Some(Arc::new(import::build(
-                &self.candidate,
-                self.document.as_bytes(),
-            )?));
+            let built = import::build(&self.candidate, self.document.as_bytes())?;
+            // Accepted remote bytes keep their acquisition age across restart.
+            // Rebuilding a saved source is not a metadata revalidation.
+            if self.candidate.remote_spec().is_some() {
+                let ttl = self.candidate.provider.as_ref().map_or(
+                    crate::limits::API_CACHE_TTL_SECONDS,
+                    |provider| {
+                        crate::http_cache::advertised_ttl(
+                            provider.settings.catalog_cache_ttl_seconds,
+                        )
+                    },
+                );
+                let expires = self.updated_at.saturating_add(ttl);
+                let until = std::time::Instant::now()
+                    .checked_add(Duration::from_secs(
+                        expires.saturating_sub(crate::http_cache::now()),
+                    ))
+                    .unwrap_or_else(std::time::Instant::now);
+                for tool in &built.tools {
+                    tool.advertised_pricing.set_fresh_until(Some(until));
+                }
+            }
+            self.built = Some(Arc::new(built));
         }
         Ok(())
     }

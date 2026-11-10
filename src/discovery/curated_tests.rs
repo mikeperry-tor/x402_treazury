@@ -35,6 +35,70 @@ fn curated_candidate(name: &str) -> Candidate {
         .unwrap()
 }
 
+#[test]
+fn accepted_remote_advertisements_keep_acquisition_age_after_restore() {
+    let mut candidate = curated_candidate("priced");
+    let settings = &mut candidate.provider.as_mut().unwrap().settings;
+    settings.spec = "https://api.example.com/openapi.json".into();
+    settings.pricing = toml::from_str::<Config>(
+        r#"
+        [pricing]
+        source = "catalog"
+        format = "payment-info"
+        unit = "call"
+        usd_as_usdc = true
+    "#,
+    )
+    .unwrap()
+    .pricing;
+    let mut root = document();
+    root["paths"]["/v1/read"]["post"]["x-payment-info"] =
+        json!({"price":{"currency":"USD","amount":"0.01"}});
+    let document = root.to_string();
+    for (acquired, expected) in [
+        (epoch(), Some(alloy_primitives::U256::from(10_000))),
+        (0, None),
+    ] {
+        let mut record = Record {
+            id: Uuid::new_v4().to_string(),
+            owner: "writer".into(),
+            candidate: candidate.clone(),
+            targets: vec![],
+            revision: 1,
+            document: document.clone(),
+            hash: hash(document.as_bytes()),
+            format: FORMAT,
+            accepted_at: acquired,
+            updated_at: acquired,
+            removed: false,
+            disabled: None,
+            built: None,
+        };
+        record.prepare().unwrap();
+        let amount = |record: &Record| {
+            record
+                .built
+                .as_ref()
+                .unwrap()
+                .tools
+                .iter()
+                .find(|t| t.path == "/v1/read")
+                .unwrap()
+                .advertised_pricing
+                .amount()
+        };
+        assert_eq!(amount(&record), expected);
+        let mut restored: Record =
+            serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
+        restored.prepare().unwrap();
+        assert_eq!(
+            amount(&restored),
+            expected,
+            "restart cannot renew acquired pricing"
+        );
+    }
+}
+
 pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
     let document = document().to_string();
     let mut candidate = curated_candidate(name);

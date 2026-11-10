@@ -167,8 +167,15 @@ pub struct PaidClient {
     max_help_bytes: usize,
     payer: Option<Arc<RwLock<Arc<Payer>>>>,
     managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
+    /// Invocation-local advertised amount; never payment authority or learned data.
+    initial_price: Option<U256>,
 }
 impl PaidClient {
+    pub(crate) fn with_initial_price(mut self, amount: Option<U256>) -> Self {
+        self.initial_price = amount;
+        self
+    }
+
     pub(crate) fn startup_funding_pool(
         &self,
     ) -> Option<Arc<crate::rotation::manager::ManagedPool>> {
@@ -198,6 +205,7 @@ impl PaidClient {
             timeout: None,
             payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
             managed: None,
+            initial_price: None,
         }
     }
     pub fn managed(pool: Arc<crate::rotation::manager::ManagedPool>) -> Self {
@@ -219,6 +227,7 @@ impl PaidClient {
             timeout: None,
             payer: None,
             managed: Some(pool),
+            initial_price: None,
         }
     }
     /// Keyless qualification client. Challenges are never parsed for signing or retried.
@@ -241,6 +250,7 @@ impl PaidClient {
             timeout: None,
             payer: None,
             managed: None,
+            initial_price: None,
         }
     }
     /// Preserve the configured tool binding without any transport or signing
@@ -297,6 +307,7 @@ impl PaidClient {
         self
     }
     pub(crate) fn for_relay(mut self) -> Self {
+        self.initial_price = None;
         self.relay_call = true;
         self.document_relay = None;
         self.selection = crate::network::SelectionPolicy::Participating;
@@ -603,6 +614,7 @@ impl PaidClient {
                     operation
                         .as_ref()
                         .and_then(|key| key.get())
+                        .or(self.initial_price)
                         .unwrap_or_default(),
                     through,
                     &[],

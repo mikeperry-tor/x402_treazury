@@ -2,6 +2,8 @@
 #[cfg(test)]
 mod description_tests;
 #[cfg(test)]
+mod initial_price_tests;
+#[cfg(test)]
 mod operation_url_tests;
 
 use crate::discovery_relay::document::{self, SharedFailure};
@@ -189,7 +191,10 @@ impl BoundTool {
         } else {
             client
         };
-        (client, self.operation_key())
+        (
+            client.with_initial_price(self.tool.advertised_pricing.amount()),
+            self.operation_key(),
+        )
     }
 
     fn operation_key(&self) -> Option<crate::pricing::runtime::OperationKey> {

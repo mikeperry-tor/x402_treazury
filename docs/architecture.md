@@ -610,6 +610,15 @@ payer, then existing eligible wallets whose estimates suggest affordability; unk
 or low estimates remain fallbacks. Actual challenge terms and pool/payer authority
 govern admission. See the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
+Before the first unsigned request, selection uses a fresh observed offer when
+available, otherwise a usable advertised per-call estimate, otherwise unknown
+pricing. Advertisements are normalized from provider metadata and stay separate
+from observed-offer cache entries and result evidence. Local catalogs supply them
+on the first build; remote advertisements follow the configured catalog lifetime
+(seven days by default), retaining their acquisition expiry even when persistence
+fails. An invocation snapshots its advertised amount without balance or funding
+I/O. Advertised prices rank existing identities and do not add admission checks.
+
 `src/payment.rs` binds each unsigned request, signed request and cover owner to the
 same EVM address, pinning the acquired `HttpTransport` record and its effective
 isolation scope (`cover::registry::Owner::from_transport`) from unsigned challenge

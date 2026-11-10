@@ -526,6 +526,14 @@ Selection uses the saved wallet estimate as described in the
 [best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,
 nonce scan, historical readiness validation or certificate publication. Price hints
 can choose an existing identity before its own unsigned challenge is fetched.
+Initial selection prefers a fresh observed offer, then a usable advertised
+per-call estimate from the configured pricing source, then the existing unknown
+price ranking. Advertised estimates work on the first call, including local
+authored catalogs, disabled HTTP caching and failed cache persistence; an observed
+price row is not required. The invocation snapshots its advertised estimate before
+transport acquisition. Advertised prices remain distinct from observed offers
+and never appear as observed-offer evidence in the call result. Missing or expired
+metadata does not block selection or trigger funding or balance observations.
 Wallets with malformed stored EVM addresses are skipped before transport construction;
 healthy sibling identities remain eligible. Unsigned selection is read-only: it
 neither promotes a retained wallet nor consumes
@@ -1465,7 +1473,7 @@ bound payer, then other eligible affordable identities, then unknown or low esti
 Old or unavailable RPC observations and missing historical funding readiness do not
 prevent a permitted signature. Actual pool ownership, role, configured amount cap,
 asset/domain and caller authority still apply.
-Historical price hints rank estimates without excluding an otherwise authorized
+Observed and advertised price hints rank estimates without excluding an otherwise authorized
 payer, including after a cap change. The current challenge and serialized journal
 enforce the actual payment amount against current authority.
 

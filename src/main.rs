@@ -367,6 +367,9 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     catalog::append_omissions(&mut cfg.instructions_text, "standalone", &issues);
     for tool in &mut tools {
         tool.catalog_hints = root.hints.clone();
+        if let Some(expires) = root.advertised_expires {
+            tool.advertised_pricing.set_expires(expires);
+        }
     }
     tracing::info!(target: "x402_treazury::startup", tools = tools.len(), "Catalog ready");
     if inspect_standalone(&args, &cfg, &base, &tools).await? {

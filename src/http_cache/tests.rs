@@ -780,6 +780,61 @@ fn lists_extensions_private_variants_and_304_refresh_are_supported() {
 }
 
 #[tokio::test]
+async fn advertised_catalog_lifetime_does_not_require_or_renew_disk_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let (url, origin, task) = fixture().await;
+    origin.lock().unwrap().mode = 2; // no-store still follows configured snapshot retention.
+    let mut cfg = config(dir.path());
+    cfg.spec = url;
+    cfg.catalog_cache_ttl_seconds = 120;
+    cfg.http_cache_enabled = false;
+    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert!(loaded.hints.is_none());
+    assert!(loaded.advertised_expires.unwrap() > now());
+    assert!(loaded.advertised_expires.unwrap() <= now() + 120);
+
+    cfg.catalog_cache_ttl_seconds = 0;
+    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert!(loaded.advertised_expires.unwrap() > now());
+    assert!(loaded.advertised_expires.unwrap() <= now() + crate::limits::API_CACHE_TTL_SECONDS);
+
+    cfg.http_cache_enabled = true;
+    cfg.catalog_cache_ttl_seconds = 120;
+    let file = dir.path().join("cache-is-a-file");
+    std::fs::write(&file, b"not a directory").unwrap();
+    cfg.http_cache_directory = Some(file);
+    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert!(
+        loaded.hints.is_none(),
+        "failed disk writes do not create observed ownership"
+    );
+    assert!(loaded.advertised_expires.unwrap() > now());
+
+    cfg.http_cache_directory = config(dir.path()).http_cache_directory;
+    catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+    let mut entry = slot.read().await.unwrap();
+    entry.metadata.expires -= 10;
+    let expires = entry.metadata.expires;
+    slot.write(Some(entry)).await;
+    let before = origin.lock().unwrap().calls.len();
+    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert_eq!(loaded.advertised_expires, Some(expires));
+    assert_eq!(origin.lock().unwrap().calls.len(), before);
+    task.abort();
+}
+
+#[tokio::test]
 async fn catalog_ttl_changes_partition_cache_and_zero_disables_it() {
     let dir = tempfile::tempdir().unwrap();
     let (url, origin, task) = fixture().await;
