@@ -1368,7 +1368,7 @@ discovery_search_tool_instructions_text = "Security keywords: wallet audit, EVM 
 # Native ZEC needs [treasury]; foreign asset swaps additionally need [funding].
 # Provider registration and the general Base wallet do not grant payout authority.
 # [servers.toolbox.swap_control]
-# receive = false
-# send = false
-# max_send_zec = "0.05" # Optional per-send principal plus actual network fee.
+# receive = true
+# send = true
+# max_send_zec = "0.5" # Optional per-send principal plus actual network fee.
 # Omit max_send_zec or use "none" for no toolset total-debit preference.
