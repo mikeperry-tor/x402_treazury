@@ -43,14 +43,14 @@ impl Store {
     }
 
     /// Current configuration selects participation; durable facts only determine
-    /// eligibility and the initial opportunity cadence. Disabled groups retain work.
-    pub(crate) fn bootstrap_allocation_intervals(
+    /// eligibility for the uniform opportunity cadence. Disabled groups retain work.
+    pub(crate) fn bootstrap_allocation_groups(
         &self,
         participants: &[String],
-    ) -> Result<std::collections::BTreeMap<String, bool>> {
+    ) -> Result<std::collections::BTreeSet<String>> {
         #[cfg(test)]
         self.inventory_read_fault(inventory::Read::BootstrapEligibility)?;
-        let mut eligible = std::collections::BTreeMap::new();
+        let mut eligible = std::collections::BTreeSet::new();
         for name in participants {
             let pool: Option<String> = self
                 .db
@@ -61,9 +61,8 @@ impl Store {
                 )
                 .optional()?;
             let Some(pool) = pool else { continue };
-            let initial = !self.has_initial_credit(&pool)?;
-            if !initial || self.has_bootstrap_demand(&pool)? {
-                eligible.insert(name.clone(), initial);
+            if self.has_initial_credit(&pool)? || self.has_bootstrap_demand(&pool)? {
+                eligible.insert(name.clone());
             }
         }
         Ok(eligible)
@@ -182,14 +181,14 @@ mod tests {
         let names = vec!["participant".to_owned()];
         assert!(
             store
-                .bootstrap_allocation_intervals(&names)
+                .bootstrap_allocation_groups(&names)
                 .unwrap()
                 .is_empty()
         );
         assert!(store.activate_bootstrap_demand(&pool).unwrap());
         assert_eq!(
-            store.bootstrap_allocation_intervals(&names).unwrap(),
-            [("participant".into(), true)].into()
+            store.bootstrap_allocation_groups(&names).unwrap(),
+            ["participant".into()].into()
         );
         assert!(!store.activate_bootstrap_demand(&pool).unwrap());
         assert!(store.activate_bootstrap_demand("missing").is_err());
@@ -221,9 +220,9 @@ mod tests {
         assert!(store.has_initial_credit(&pool).unwrap());
         assert_eq!(
             store
-                .bootstrap_allocation_intervals(&["renamed".into()])
+                .bootstrap_allocation_groups(&["renamed".into()])
                 .unwrap(),
-            [("renamed".into(), false)].into()
+            ["renamed".into()].into()
         );
         store
             .db
@@ -266,5 +265,12 @@ mod tests {
         assert_eq!(store.funding_jobs().unwrap().len(), 2);
         assert!(!store.has_bootstrap_demand(&pool).unwrap());
         assert!(store.has_initial_credit(&pool).unwrap());
+        assert_eq!(
+            store
+                .bootstrap_allocation_groups(&["existing".into()])
+                .unwrap(),
+            ["existing".into()].into(),
+            "historical credit admits a participant without first-use demand"
+        );
     }
 }

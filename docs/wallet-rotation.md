@@ -606,17 +606,18 @@ A trusted invocation captures the effective group once before unsigned dispatch.
 All signing, caps, inventory traversal, cover and transport ownership stay within
 that group for the call, including through handoff or cancellation.
 
-Uncredited dormant participants receive no new serving allocations. Activation
-arms one independently drawn uniform integer 60–240-second opportunity; later
-initial opportunities use the same window until credit. Both enabled slots keep
-small-first independent commits. Already armed instants survive arbitrary wakes
-and credit; only subsequent rearming after credit uses the ordinary 30–120-second
-window. The existing retained owner checks eligibility at startup, when demand or
-new credit is recorded, and when a participant is due. Credit on work that was
-already in flight can arm ordinary opportunities even without first-use demand.
-New opportunities and busy
-read retries start from read completion. Ordinary groups and accepted work keep
-their independent schedules. Restart redraws volatile opportunities.
+Uncredited dormant participants receive no new serving allocations. Durable first-use
+demand or historical positive credit admits a participant to the same independent
+uniform integer 30–120-second opportunity cadence as ordinary groups. Both enabled
+slots keep small-first independent commits. One shared schedule retains every armed
+instant through arbitrary wakes and credit; admission never redraws an existing
+instant. The retained owner discovers unarmed participants at startup, on demand or
+credit notices, and on the existing retry cadence after a busy eligibility read.
+Once every participant is armed, no eligibility discovery remains. Current group
+enablement and financial authority are still checked at each allocation commit.
+New opportunities and busy read retries start from read completion. An unavailable
+eligibility read cannot mask ordinary or already armed participant opportunities;
+accepted work keeps its independent schedules. Restart redraws volatile opportunities.
 Disabling automatic funding prevents allocations without deleting demand or
 recovery ownership. Removing policy restores ordinary behavior; UUID-preserving
 renames and re-addition retain history. No top-up or bootstrap fallback follows

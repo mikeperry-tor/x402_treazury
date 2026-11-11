@@ -226,13 +226,13 @@ async fn exercise(paused: bool) {
         assert!(
             s.funding_jobs()?
                 .iter()
-                .all(|job| !matches!(job.pool_name.as_str(), "dormant" | "demanded"))
+                .all(|job| job.pool_name != "dormant")
         );
         Ok(())
     }))
     .await
     .unwrap();
-    // Independent ordinary groups have opportunities within 30–120 seconds
+    // Every admitted group has an opportunity within 30–120 seconds
     // after the failed eligibility read is retried by t=22.
     tokio::time::advance(Duration::from_secs(84)).await;
     if !paused {
@@ -241,7 +241,7 @@ async fn exercise(paused: bool) {
                 if store
                     .call(|s| {
                         let jobs = s.funding_jobs()?;
-                        Ok(["bootstrap", "ordinary"]
+                        Ok(["bootstrap", "ordinary", "demanded"]
                             .iter()
                             .all(|name| jobs.iter().any(|job| job.pool_name == *name)))
                     })
@@ -395,6 +395,119 @@ async fn credit_of_existing_undemanded_work_arms_ordinary_refill() {
     }))
     .await
     .unwrap();
+    stop.cancel();
+    local(task).await.unwrap().unwrap();
+    drop(store);
+    local(actor).await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn busy_dormant_discovery_does_not_gate_armed_allocations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let mut existing = String::new();
+    for name in ["ordinary", "existing", "dormant"] {
+        let pool = state
+            .ensure_capacity_group(
+                name,
+                &crate::rotation::test_capacity::two_reserves("4"),
+                None,
+                0,
+            )
+            .unwrap();
+        if name == "existing" {
+            existing = pool;
+        }
+    }
+    let id = state
+        .allocate_capacity_kind(
+            &existing,
+            crate::rotation::store::AllocationKind::Small,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+    let original = state.funding_job(&id).unwrap().unwrap();
+    submitted(&mut state, &original);
+    state
+        .record_credit(&original.wallet_id, "1", "saved", 2)
+        .unwrap();
+    assert!(!state.has_bootstrap_demand(&existing).unwrap());
+    let (store, actor) = StoreHandle::spawn(state);
+    let (source, mut sources) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Backend {
+            source,
+            groups: ["ordinary", "existing", "dormant"]
+                .map(str::to_owned)
+                .into(),
+        },
+        // Keep the existing discovery retry beyond both armed opportunities.
+        300,
+    )
+    .with_bootstrap_participants(["existing".into(), "dormant".into()].into());
+    let stop = CancellationToken::new();
+    let task = tokio::spawn({
+        let stop = stop.clone();
+        async move { worker.schedule(1000, stop, false).await }
+    });
+    // Dispatch follows startup discovery, so historical credit is now armed.
+    local(sources.recv()).await.unwrap();
+    published_after(&store, &original.id, 1000).await;
+    local(store.call(|s| {
+        s.fail_next_inventory_read(
+            crate::rotation::store::inventory::Read::BootstrapEligibility,
+            rusqlite::ffi::SQLITE_BUSY,
+        );
+        Ok(())
+    }))
+    .await
+    .unwrap();
+    store.funding_changes().notify_one();
+    local(async {
+        while store
+            .call(|s| Ok(s.inventory_fault_pending()))
+            .await
+            .unwrap()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    tokio::time::advance(Duration::from_secs(120)).await;
+    local(async {
+        loop {
+            if store
+                .call(|s| {
+                    let jobs = s.funding_jobs()?;
+                    assert!(jobs.iter().all(|job| job.pool_name != "dormant"));
+                    Ok(jobs
+                        .iter()
+                        .filter(|job| job.pool_name == "ordinary")
+                        .count()
+                        == 2
+                        && jobs
+                            .iter()
+                            .filter(|job| job.pool_name == "existing")
+                            .count()
+                            == 2)
+                })
+                .await
+                .unwrap()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
     stop.cancel();
     local(task).await.unwrap().unwrap();
     drop(store);

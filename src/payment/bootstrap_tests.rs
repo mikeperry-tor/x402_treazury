@@ -568,8 +568,8 @@ async fn signed_retry_stays_in_bootstrap_inventory_and_later_payment_opens_desti
         .call(move |s| {
             assert_eq!(s.funding_jobs()?.len(), 3, "API admission does not refill");
             assert_eq!(
-                s.bootstrap_allocation_intervals(&["destination".into()])?,
-                [("destination".into(), false)].into()
+                s.bootstrap_allocation_groups(&["destination".into()])?,
+                ["destination".into()].into()
             );
             s.fill_funding_vacancies("destination")?;
             let jobs = s.funding_jobs()?;

@@ -30,13 +30,8 @@ pub(super) enum Mode {
 }
 
 fn draw_interval() -> std::time::Duration {
-    draw_allocation_interval(false)
-}
-
-fn draw_allocation_interval(initial: bool) -> std::time::Duration {
     use rand::RngExt;
-    let range = if initial { 60..=240 } else { 30..=120 };
-    std::time::Duration::from_secs(rand::rng().random_range(range))
+    std::time::Duration::from_secs(rand::rng().random_range(30..=120))
 }
 
 struct Opportunities(BTreeMap<String, tokio::time::Instant>);
@@ -54,46 +49,41 @@ impl Opportunities {
         )
     }
 
-    /// Discover newly demanded groups without renewing already armed opportunities.
-    fn reconcile(
+    /// Durable demand or historical credit admits a group for this owner's lifetime.
+    fn admit(
         &mut self,
-        groups: &BTreeMap<String, bool>,
+        groups: &BTreeSet<String>,
         now: tokio::time::Instant,
-        mut draw: impl FnMut(bool) -> std::time::Duration,
+        mut draw: impl FnMut() -> std::time::Duration,
     ) {
-        self.0.retain(|name, _| groups.contains_key(name));
-        for (name, initial) in groups {
-            self.0
-                .entry(name.clone())
-                .or_insert_with(|| now + draw(*initial));
+        for name in groups {
+            self.0.entry(name.clone()).or_insert_with(|| now + draw());
         }
     }
 
-    /// Read contention can defer eligibility acquisition without moving a group.
-    fn next_due(&self, retry: Option<tokio::time::Instant>) -> Option<tokio::time::Instant> {
-        retry.or_else(|| self.0.values().copied().min())
+    fn next_due(&self) -> Option<tokio::time::Instant> {
+        self.0.values().copied().min()
     }
 
-    async fn refresh(
+    async fn discover(
         &mut self,
-        read: impl Future<Output = Result<BTreeMap<String, bool>>>,
+        read: impl Future<Output = Result<BTreeSet<String>>>,
         retry_interval: std::time::Duration,
         first_error: &mut Option<anyhow::Error>,
-    ) -> Result<(Vec<String>, Option<tokio::time::Instant>)> {
-        let intervals = read_result(read.await, first_error)?;
+    ) -> Result<Option<tokio::time::Instant>> {
+        let eligible = read_result(read.await, first_error)?;
         let observed = tokio::time::Instant::now();
-        let Some(intervals) = intervals else {
-            return Ok((Vec::new(), Some(observed + retry_interval)));
+        let Some(eligible) = eligible else {
+            return Ok(Some(observed + retry_interval));
         };
-        self.reconcile(&intervals, observed, draw_allocation_interval);
-        let groups = self.take_due_for(observed, |name| draw_allocation_interval(intervals[name]));
-        Ok((groups, None))
+        self.admit(&eligible, observed, draw_interval);
+        Ok(None)
     }
 
-    fn take_due_for(
+    fn take_due(
         &mut self,
         now: tokio::time::Instant,
-        mut draw: impl FnMut(&str) -> std::time::Duration,
+        mut draw: impl FnMut() -> std::time::Duration,
     ) -> Vec<String> {
         self.0
             .iter_mut()
@@ -101,19 +91,10 @@ impl Opportunities {
                 if *due > now {
                     return None;
                 }
-                *due = now + draw(name);
+                *due = now + draw();
                 Some(name.clone())
             })
             .collect()
-    }
-
-    #[cfg(test)]
-    fn take_due(
-        &mut self,
-        now: tokio::time::Instant,
-        mut draw: impl FnMut() -> std::time::Duration,
-    ) -> Vec<String> {
-        self.take_due_for(now, |_| draw())
     }
 }
 
@@ -511,7 +492,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         if let Some(selected) = &self.allocation_selection {
             allocation_groups.retain(|name| selected.contains(name));
         }
-        let (deferred_groups, ordinary_groups): (Vec<_>, Vec<_>) = if mode == Mode::Serving {
+        let (mut deferred_groups, ordinary_groups): (Vec<_>, Vec<_>) = if mode == Mode::Serving {
             allocation_groups
                 .iter()
                 .cloned()
@@ -521,7 +502,6 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         };
         let mut opportunities =
             Opportunities::new(ordinary_groups, tokio::time::Instant::now(), draw_interval);
-        let mut deferred = Opportunities(BTreeMap::new());
         let poll_interval = std::time::Duration::from_secs(self.poll_seconds.max(1));
         let mut explicit_due = matches!(mode, Mode::Bootstrap | Mode::Explicit)
             .then(|| tokio::time::Instant::now() + poll_interval);
@@ -579,37 +559,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 // Rearm all due groups before any Store/source work. Completion
                 // traffic and payment wakes cannot advance or redraw this schedule.
                 let now = tokio::time::Instant::now();
-                let mut groups = if explicit_due.is_some_and(|due| due <= now) {
+                let groups = if explicit_due.is_some_and(|due| due <= now) {
                     explicit_due = Some(now + poll_interval);
                     allocation_groups.clone()
                 } else {
-                    opportunities.take_due_for(now, |_| draw_interval())
+                    opportunities.take_due(now, draw_interval)
                 };
-                if !deferred_groups.is_empty() {
-                    refresh_eligibility |= allocation_changes.notified().now_or_never().is_some();
-                }
-                let eligibility_due = allocation_retry.map_or_else(
-                    || refresh_eligibility || deferred.next_due(None).is_some_and(|due| due <= now),
-                    |due| due <= now,
-                );
-                if eligibility_due {
-                    let names = deferred_groups.clone();
-                    let (due, retry) = deferred
-                        .refresh(
-                            async {
-                                // The scheduler owns retries and reports read contention.
-                                self.store
-                                    .call(move |s| Ok(s.bootstrap_allocation_intervals(&names)))
-                                    .await?
-                            },
-                            poll_interval,
-                            &mut first_error,
-                        )
-                        .await?;
-                    groups.extend(due);
-                    allocation_retry = retry;
-                    refresh_eligibility = false;
-                }
                 for name in groups {
                     if self
                         .store
@@ -635,6 +590,29 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                             "funding opportunity could not complete; existing work remains owned"
                         );
                     }
+                }
+            }
+            if !stopping && !deferred_groups.is_empty() {
+                refresh_eligibility |= allocation_changes.notified().now_or_never().is_some();
+                let eligibility_due = allocation_retry.map_or(refresh_eligibility, |due| {
+                    due <= tokio::time::Instant::now()
+                });
+                if eligibility_due {
+                    let names = deferred_groups.clone();
+                    allocation_retry = opportunities
+                        .discover(
+                            async {
+                                // Discovery only admits unarmed groups; due work ran first.
+                                self.store
+                                    .call(move |s| Ok(s.bootstrap_allocation_groups(&names)))
+                                    .await?
+                            },
+                            poll_interval,
+                            &mut first_error,
+                        )
+                        .await?;
+                    deferred_groups.retain(|name| !opportunities.0.contains_key(name));
+                    refresh_eligibility = false;
                 }
             }
             if !stopping {
@@ -693,9 +671,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 retry_due,
                 &clock,
                 opportunities
-                    .next_due(None)
+                    .next_due()
                     .into_iter()
-                    .chain(deferred.next_due(allocation_retry))
+                    .chain(allocation_retry)
                     .min(),
                 once,
                 explicit_due,

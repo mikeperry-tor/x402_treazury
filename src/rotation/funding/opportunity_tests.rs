@@ -526,51 +526,37 @@ async fn bootstrap_and_qualification_retry_failed_allocation_without_random_dela
 async fn first_use_opportunities_keep_due_times_through_wakes_and_credit() {
     let start = tokio::time::Instant::now();
     let mut schedule = Opportunities(BTreeMap::new());
-    let mut draws = Vec::new();
-    let mut draw = |initial| {
-        draws.push(initial);
-        Duration::from_secs(if initial { 240 } else { 30 })
+    let mut draws = 0;
+    let mut draw = || {
+        draws += 1;
+        Duration::from_secs(120)
     };
-    schedule.reconcile(&BTreeMap::new(), start, &mut draw);
+    schedule.admit(&BTreeSet::new(), start, &mut draw);
     assert!(schedule.0.is_empty(), "dormant groups have no opportunity");
-    let initial = BTreeMap::from([("participant".into(), true)]);
-    schedule.reconcile(&initial, start, &mut draw);
+    let eligible = BTreeSet::from(["participant".into()]);
+    schedule.admit(&eligible, start, &mut draw);
     let first = schedule.0["participant"];
-    for elapsed in [1, 60, 120, 239] {
-        schedule.reconcile(&initial, start + Duration::from_secs(elapsed), &mut draw);
+    for elapsed in [1, 30, 60, 119] {
+        // Repeated demand/credit notices carry the same monotonic eligibility.
+        schedule.admit(&eligible, start + Duration::from_secs(elapsed), &mut draw);
         assert_eq!(schedule.0["participant"], first);
     }
-    // First credit changes future rearming; it cannot advance this armed instant.
-    schedule.reconcile(
-        &[("participant".into(), false)].into(),
-        start + Duration::from_secs(120),
-        &mut draw,
-    );
+    // Discovery omits armed names; their opportunities remain owned regardless.
+    schedule.admit(&BTreeSet::new(), start, &mut draw);
     assert_eq!(schedule.0["participant"], first);
-    assert_eq!(draws, [true]);
+    assert_eq!(draws, 1);
     assert!(
         schedule
-            .take_due_for(first - Duration::from_secs(1), |_| panic!("not due"))
+            .take_due(first - Duration::from_secs(1), || panic!("not due"))
             .is_empty()
     );
     assert_eq!(
-        schedule.take_due_for(first, |_| Duration::from_secs(30)),
+        schedule.take_due(first, || Duration::from_secs(30)),
         ["participant"]
     );
     assert_eq!(schedule.0["participant"], first + Duration::from_secs(30));
-    // Removing participation is ordinary policy, while removing an enabled group
-    // drops its volatile schedule. Reopen reconstructs from durable facts.
-    schedule.reconcile(&BTreeMap::new(), first, |_| panic!("no group"));
-    assert!(schedule.0.is_empty());
-    for initial in [true, false] {
-        for _ in 0..32 {
-            let delay = draw_allocation_interval(initial).as_secs();
-            assert!(if initial {
-                (60..=240).contains(&delay)
-            } else {
-                (30..=120).contains(&delay)
-            });
-        }
+    for _ in 0..64 {
+        assert!((30..=120).contains(&draw_interval().as_secs()));
     }
 }
 
@@ -579,11 +565,11 @@ async fn delayed_eligibility_read_preserves_first_use_and_retry_intervals() {
     let mut schedule = Opportunities(BTreeMap::new());
     let mut error = None;
     let poll = Duration::from_secs(5);
-    let (due, retry) = schedule
-        .refresh(
+    let retry = schedule
+        .discover(
             async {
                 tokio::time::sleep(Duration::from_secs(241)).await;
-                Ok([("participant".into(), true)].into())
+                Ok(["participant".into()].into())
             },
             poll,
             &mut error,
@@ -592,11 +578,11 @@ async fn delayed_eligibility_read_preserves_first_use_and_retry_intervals() {
         .unwrap();
     let first = schedule.0["participant"];
     let elapsed = first - tokio::time::Instant::now();
-    assert!((Duration::from_secs(60)..=Duration::from_secs(240)).contains(&elapsed));
-    assert!(due.is_empty() && retry.is_none());
+    assert!((Duration::from_secs(30)..=Duration::from_secs(120)).contains(&elapsed));
+    assert!(retry.is_none());
 
-    let (due, retry) = schedule
-        .refresh(
+    let retry = schedule
+        .discover(
             async {
                 tokio::time::sleep(Duration::from_secs(12)).await;
                 Err(rusqlite::Error::SqliteFailure(
@@ -610,13 +596,12 @@ async fn delayed_eligibility_read_preserves_first_use_and_retry_intervals() {
         )
         .await
         .unwrap();
-    assert!(due.is_empty());
     assert_eq!(retry.unwrap() - tokio::time::Instant::now(), poll);
     assert_eq!(schedule.0["participant"], first);
 }
 
 #[tokio::test(start_paused = true)]
-async fn eligibility_retry_masks_overdue_opportunity_without_changing_it() {
+async fn eligibility_failure_keeps_ordinary_and_armed_participant_opportunities_runnable() {
     let start = tokio::time::Instant::now();
     let clock = TickClock {
         epoch: 1000,
@@ -627,31 +612,54 @@ async fn eligibility_retry_masks_overdue_opportunity_without_changing_it() {
     for lane in &mut inventory {
         lane.exhausted = true;
     }
-    let schedule = Opportunities(BTreeMap::from([("demanded".into(), start)]));
-    let retry = start + Duration::from_secs(5);
+    let mut schedule =
+        Opportunities::new(vec!["ordinary".into()], start, || Duration::from_secs(30));
+    schedule.admit(&["participant".into()].into(), start, || {
+        Duration::from_secs(30)
+    });
+    let original = schedule.0.clone();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    let mut error = None;
+    let retry = schedule
+        .discover(
+            async {
+                Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    None,
+                )
+                .into())
+            },
+            Duration::from_secs(5),
+            &mut error,
+        )
+        .await
+        .unwrap();
+    assert!(error.is_some());
+    assert_eq!(schedule.0, original);
     assert_eq!(
         next_wake(
             &inventory,
             &VecDeque::new(),
             None,
             &clock,
-            schedule.next_due(Some(retry)),
+            schedule.next_due().into_iter().chain(retry).min(),
             false,
             None
         ),
-        Some(retry)
+        Some(tokio::time::Instant::now()),
+        "a discovery retry cannot mask either armed opportunity"
     );
-    assert_eq!(schedule.0["demanded"], start);
     assert_eq!(
-        next_wake(
-            &inventory,
-            &VecDeque::new(),
-            None,
-            &clock,
-            schedule.next_due(None),
-            false,
-            None
-        ),
-        Some(start)
+        schedule.take_due(tokio::time::Instant::now(), || Duration::from_secs(120)),
+        ["ordinary", "participant"]
+    );
+    assert_eq!(
+        schedule.0.len(),
+        2,
+        "failed discovery cannot admit dormant groups"
+    );
+    assert_eq!(
+        schedule.next_due(),
+        Some(tokio::time::Instant::now() + Duration::from_secs(120))
     );
 }
