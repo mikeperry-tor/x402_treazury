@@ -919,6 +919,7 @@ async fn bundled_method_lists_bootstrap_all_actual_formats_from_local_assets() {
             (
                 "GET".into(),
                 vec![
+                    root.join("providers/readfetch.toml"),
                     root.join("providers/curl/provider.toml"),
                     root.join("providers/agproxy.toml"),
                 ],
@@ -934,9 +935,10 @@ async fn bundled_method_lists_bootstrap_all_actual_formats_from_local_assets() {
     let sequence = SearchRelay::load(&policy, &root.join("deployment.toml"))
         .await
         .unwrap();
-    assert_eq!(sequence.entries["GET"].len(), 2);
-    assert_eq!(sequence.entries["GET"][0].format, Format::Curl);
-    assert_eq!(sequence.entries["GET"][1].format, Format::Agproxy);
+    assert_eq!(sequence.entries["GET"].len(), 3);
+    assert_eq!(sequence.entries["GET"][0].format, Format::Readfetch);
+    assert_eq!(sequence.entries["GET"][1].format, Format::Curl);
+    assert_eq!(sequence.entries["GET"][2].format, Format::Agproxy);
     assert_eq!(sequence.entries["POST"][0].format, Format::Agproxy);
     assert_eq!(sequence.entries["HEAD"][0].format, Format::Horizonpulse);
 }

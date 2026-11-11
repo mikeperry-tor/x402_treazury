@@ -1749,8 +1749,9 @@ not qualify funded delivery or current payment compatibility.
 
 ## Pinned relay contracts
 
-`agproxy-openapi.json` and `horizonpulse-openapi.json` are complete, unmodified
-primary vendor OpenAPI downloads, embedded through `src/providers/assets.rs`.
+`agproxy-openapi.json`, `horizonpulse-openapi.json` and `readfetch-openapi.json`
+are complete, unmodified primary vendor OpenAPI downloads, embedded through
+`src/providers/assets.rs`.
 Their runtime consumer is offline relay bootstrap, and ordinary provider imports
 reuse the same complete catalogs. They are not reduced test fixtures. Curl's
 complete vendor schema remains in `curl/openapi.json`.
@@ -1763,7 +1764,7 @@ serialization-only differences do not require replacing the committed asset.
 Capture complete primary sources through the shared maintenance network path:
 
 ```sh
-make run CARGO_ARGS='--example provider_updates -- capture --provider agproxy --provider horizonpulse'
+make run CARGO_ARGS='--example provider_updates -- capture --provider agproxy --provider horizonpulse --provider readfetch'
 make run CARGO_ARGS='--example provider_updates -- replay target/provider-updates/RUN'
 ```
 
@@ -1772,7 +1773,8 @@ Review the staged full-copy candidates and preimage hashes using the
 The sweep never overwrites the tracked assets or dispatches a provider-specific updater.
 
 Review the corresponding primary guides at
-<https://agproxy.shveik.dev/llms.txt> and <https://horizonpulse.dev/llms.txt> alongside
+<https://agproxy.shveik.dev/llms.txt>, <https://horizonpulse.dev/llms.txt> and
+<https://readfetch.com/llms.txt> alongside
 schema changes. Preserve the full documents, all supported reusable operations,
 filters, response contracts and pricing prose. Check every `$ref` resolves within
 its own document; external references require an explicit local reference closure
@@ -1780,6 +1782,55 @@ before bootstrap can remain offline. Run the focused `relay_policy` asset tests
 and affected provider/adapter regressions, and review any request limits, encoding,
 redirect, header or billing changes before accepting the new contracts. Merely
 downloading a new schema does not qualify paid delivery, refunds or Tor.
+
+## readfetch.toml — readFetch
+
+Primary contracts: [agent guide](https://readfetch.com/llms.txt),
+[OpenAPI](https://readfetch.com/openapi.json), pinned in full as
+`readfetch-openapi.json`, and
+[x402 discovery](https://readfetch.com/.well-known/x402). The public OpenAPI has
+no `x-payment-info`, and its x402 discovery document is not a supported
+`x402-resources` pricing document; per-tool `pricing_description` overrides
+therefore carry the published prices. Batch and crawl are page-metered (both
+quote a minimum of ten pages), so their fixed discovery samples are not their
+final tariffs. `/v1/probe` and crawl-status polling are free.
+
+`/v1/fetch` supports GET, HEAD, POST, PUT, PATCH and DELETE with custom headers,
+a string or JSON body, redirect following, binary base64 output and a stored-body
+cap. Its adapter requests `binary: true`, returns target status, headers and exact
+bytes, validates the final URL, and treats a relayed target 402 as terminal. It
+forwards required business headers, including explicit API-key headers. Generated
+OpenAPI `Authorization` declarations remain ignored, and nonempty manual raw header
+sets disable paid relays. x402 payment headers are runtime-owned and are not
+relayed; transport-managed service headers are skipped. The provider read timeout
+is 100 s so the vendor's 95 s ceiling can complete. Binary bodies are base64-
+expanded, so the adapter reserves JSON/header overhead and caps the target body at
+about three quarters of the caller's relay response budget (and 10 MB); budgets
+too small to represent are skipped. `billed` describes readfetch's charge, not
+whether the target produced an HTTP result; `provenance.extraction.truncated`
+marks an incomplete stored body. Missing optional provenance falls back to the
+top-level final URL and untruncated state. The service manifest caps stored fetch
+bodies at 10 MB; the adapter's base64 budget stays below that cap and below the
+caller's outer relay response limit. The vendor documents a 95-second ceiling and
+a 2083-character URL limit. Redirects expose only the final URL, so intermediate hops are unknown,
+as with AGProxy and Horizon Pulse.
+
+Observed paid calls on 2026-11-11: GET returned a 5288-byte JSON body with status,
+headers and final URL; a redirect resolved to the final target; a relayed target
+402 was delivered and billed; HEAD returned an empty body with provenance; and
+`binary: true` returned `content_base64`. These samples do not qualify current
+availability, every response shape, refunds or Tor reachability. readfetch is a
+commercial API; its schema is pinned for local bootstrap, not redistributed as a
+data licence. Other reading routes (text, map, crawl, batch, PDF, section, diff, screenshot,
+search) remain available in the reusable provider but are not selected in the
+research deployment: APEX Faucet and Exa already cover most selected reading/search
+paths at lower advertised prices. `POST /v1/claims` and `POST /v1/feedback` are
+excluded as support workflows rather than research reads; feedback is an
+unprotected persistent write. `POST /v1/scrape` and `POST /v1/scrape/residential`
+are excluded because their vendor request schemas use local `$defs` references that
+the offline tool input builder cannot represent; the complete pinned schema retains
+both routes, and a future authored input repair could expose them. Residential
+scraping is extraction, not a raw relay.
 
 ## AgData, Degenscan and Market Intelligence API
 

@@ -1,0 +1,70 @@
+description = "Pay-per-call web reading and raw HTTP fetch: article text, screenshots, PDFs, site maps, crawls, diff, section extraction, search and batches."
+# Complete pinned vendor schema; pricing is documented per tool because the schema
+# has no x-payment-info and the discovery document is not a supported pricing format.
+spec = "readfetch-openapi.json"
+relay_format = "readfetch"
+name = "readFetch"
+base_url = "https://readfetch.com"
+prefix = "readfetch"
+include = ["/v1"]
+read_timeout_seconds = 100.0
+exclude_operations = [
+  # Support workflows, not research reads: claims issues credit and feedback is
+  # an unprotected persistent write.
+  "POST /v1/claims",
+  "POST /v1/feedback",
+  # The vendor request schema uses local $defs references that the offline
+  # tool input builder cannot represent; the pinned spec retains both routes.
+  "POST /v1/scrape",
+  "POST /v1/scrape/residential",
+]
+help_url = "https://readfetch.com/llms.txt"
+instructions_text = "Use fetch for raw status, headers and bytes; text for readable articles; probe before paying. Scrape and residential scrape are omitted because the vendor request schema uses local references the offline builder cannot represent. Crawl is asynchronous: start it, then poll its status. Batch and crawl prices scale with requested pages; undelivered pages are credited, not billed. Check billed and provenance truncation before treating content as complete."
+
+[overrides.readfetch_fetch]
+description = "Raw HTTP through readfetch egress: returns target status, headers and body as text or base64. Use for JSON APIs, GraphQL, PDFs and byte ranges; the direct tool supports GET, POST, PUT, PATCH, DELETE or HEAD with headers and a string or JSON body. Relay fallback uses GET, HEAD or POST. Follows redirects but reports only the final URL."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.readfetch_text]
+description = "Read a public URL's main readable content with boilerplate removed: Markdown or plain text plus title, author, published date and site name. Uses plain HTTP first and one Chromium fallback when the page blocks it."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.readfetch_map]
+description = "Discover a site's crawlable surface without fetching page bodies: robots.txt rules, sitemaps, RSS/Atom/JSON feeds and homepage link counts. Use the result to plan batch or crawl."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.readfetch_crawl]
+description = "Start a bounded asynchronous crawl from one seed URL and return a job id, quoted page count and price. Poll readfetch_crawl_id for status and per-page Markdown. Cap scope with max_pages and max_depth."
+pricing_description = "Cost: ~$0.003/page, minimum 10 pages; the quote scales with max_pages [spec]."
+
+[overrides.readfetch_crawl_id]
+description = "Poll a readfetch crawl job by id: returns status, completed page count and per-page Markdown as it lands."
+pricing_description = "Free polling [spec]."
+
+[overrides.readfetch_batch]
+description = "Read up to 50 public HTML pages in one payment using the same article extraction as text. Results stay in input order; undelivered pages are credited rather than billed."
+pricing_description = "Cost: ~$0.0015/page, minimum 10 pages; undelivered pages are not billed [spec]."
+
+[overrides.readfetch_pdf]
+description = "Extract per-page text plus one Markdown body from a public PDF URL or a base64 upload. Scanned or image-only PDFs may return empty text without billing."
+pricing_description = "Cost: ~$0.005/document, not per page [spec]."
+
+[overrides.readfetch_section]
+description = "Extract one heading or CSS selector instead of the whole page, returning matched Markdown or text. Missing headings return empty text with available_headings."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.readfetch_diff]
+description = "Stateless change detection against a caller-held hash or previous content: returns changed/unchanged and an optional bounded line diff. A no-change answer is still billable when text was delivered."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.readfetch_screenshot]
+description = "Render a page and return a PNG or JPEG in JSON as image_base64: viewport, full page or one CSS-selected element, with optional delay, width and height."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.readfetch_search]
+description = "Web search returning titles, URLs and snippets only, with optional language and recency filters. Follow a chosen result with text or probe for page content."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.readfetch_probe]
+description = "Free preflight for a URL: metadata and an optional short preview before paying for the full read."
+pricing_description = "Free; no wallet or payment [spec]."

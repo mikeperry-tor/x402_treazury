@@ -9,6 +9,7 @@ pub(crate) enum Format {
     Curl,
     Agproxy,
     Horizonpulse,
+    Readfetch,
 }
 
 impl std::str::FromStr for Format {
@@ -18,6 +19,7 @@ impl std::str::FromStr for Format {
             "curl" => Ok(Self::Curl),
             "agproxy" => Ok(Self::Agproxy),
             "horizonpulse" => Ok(Self::Horizonpulse),
+            "readfetch" => Ok(Self::Readfetch),
             _ => anyhow::bail!("unsupported relay_format"),
         }
     }
@@ -36,7 +38,7 @@ pub(crate) struct TargetRequest {
 pub(crate) struct PolicyViolation;
 impl std::fmt::Display for PolicyViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("relay target destination or credential policy rejected")
+        f.write_str("relay target destination policy rejected")
     }
 }
 impl std::error::Error for PolicyViolation {}
@@ -75,29 +77,14 @@ impl TargetRequest {
     }
 
     fn validate(&self) -> Result<()> {
-        self.destination(self.url.as_str())?;
-        ensure!(
-            !self.headers.keys().any(|name| credential(name.as_str())),
-            PolicyViolation
-        );
-        Ok(())
+        self.destination(self.url.as_str()).map(|_| ())
     }
 }
 
-fn credential(name: &str) -> bool {
-    matches!(
-        name,
-        "authorization"
-            | "proxy-authorization"
-            | "cookie"
-            | "cookie2"
-            | "payment-signature"
-            | "x-payment"
-            | "x-api-key"
-            | "api-key"
-            | "x-auth-token"
-            | "x-access-token"
-    )
+/// Runtime-owned x402 payment headers authorize a charge and are never replayed
+/// through a paid relay, even when the caller did not mark the request as secret.
+fn payment_header(name: &str) -> bool {
+    matches!(name, "payment-signature" | "x-payment")
 }
 
 fn service_header(name: &str) -> bool {
@@ -120,7 +107,12 @@ impl Format {
     /// None means the vendor cannot represent the complete request, before paid I/O.
     pub(crate) fn encode(&self, target: &TargetRequest, limit: usize) -> Result<Option<Value>> {
         target.validate()?;
-        if !matches!(target.method.as_str(), "GET" | "HEAD" | "POST") {
+        if target
+            .headers
+            .keys()
+            .any(|name| payment_header(name.as_str()))
+            || !matches!(target.method.as_str(), "GET" | "HEAD" | "POST")
+        {
             return Ok(None);
         }
         let body = match target.body.as_deref() {
@@ -189,6 +181,31 @@ impl Format {
                     value["body"] = json!(body);
                 }
             }
+            Self::Readfetch => {
+                if target.url.as_str().chars().count() > 2083 {
+                    return Ok(None);
+                }
+                value["headers"] = Value::Object(headers);
+                if let Some(body) = body {
+                    value["body"] = json!(body);
+                }
+                // Base64 preserves arbitrary target bytes, but expands the
+                // response by about 4/3. Reserve JSON/header overhead and keep
+                // the encoded body inside the caller's relay response budget.
+                let budget = limit.saturating_sub(4_096);
+                if budget < 1_024 {
+                    return Ok(None);
+                }
+                let max_bytes = (budget.saturating_mul(3) / 4).clamp(1_024, 10_000_000);
+                value["binary"] = json!(true);
+                value["max_bytes"] = json!(max_bytes);
+                // The vendor documents a 1 MiB JSON request body. Check the
+                // complete serialized envelope, including headers and escaping,
+                // before paid I/O.
+                if serde_json::to_vec(&value)?.len() > 1_048_576 {
+                    return Ok(None);
+                }
+            }
         }
         Ok(Some(value))
     }
@@ -210,6 +227,14 @@ impl Format {
             &envelope
         };
         ensure!(value.is_object(), "invalid relay envelope");
+        let headers = if *self == Self::Readfetch {
+            match value.get("headers") {
+                Some(headers) if !headers.is_null() => response_headers(value)?,
+                _ => HeaderMap::new(),
+            }
+        } else {
+            response_headers(value)?
+        };
         let (status, final_url, truncated, body, delivery_failed) = match self {
             Self::Curl => decode_curl(value, target)?,
             Self::Agproxy => {
@@ -249,8 +274,8 @@ impl Format {
                     false,
                 )
             }
+            Self::Readfetch => decode_readfetch(value, target)?,
         };
-        let headers = response_headers(value)?;
         ensure!(
             target.method != Method::HEAD || body.is_empty(),
             "nonempty relay HEAD body"
@@ -312,6 +337,60 @@ fn response_headers(value: &Value) -> Result<HeaderMap> {
     }
     Ok(headers)
 }
+fn decode_readfetch(
+    value: &Value,
+    target: &TargetRequest,
+) -> Result<(u16, Url, bool, Vec<u8>, bool)> {
+    let status = status(value, "status_code")?;
+    let final_url = value
+        .get("provenance")
+        .and_then(|provenance| provenance.get("final_url"))
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+        .or_else(|| {
+            value
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty())
+        })
+        .unwrap_or(target.url.as_str());
+    let final_url = target.destination(final_url)?;
+    let truncated = value
+        .get("provenance")
+        .and_then(|provenance| provenance.get("extraction"))
+        .and_then(|extraction| extraction.get("truncated"))
+        .filter(|truncated| !truncated.is_null())
+        .or_else(|| {
+            value
+                .get("truncated")
+                .filter(|truncated| !truncated.is_null())
+        });
+    let truncated = match truncated {
+        Some(truncated) => truncated
+            .as_bool()
+            .context("invalid relay truncation field")?,
+        None => false,
+    };
+    let body = match (
+        value.get("content_base64").filter(|body| !body.is_null()),
+        value.get("text").filter(|body| !body.is_null()),
+    ) {
+        (Some(body), None) => STANDARD
+            .decode(body.as_str().context("invalid relay base64 body")?)
+            .context("invalid relay base64")?,
+        (None, Some(body)) => body
+            .as_str()
+            .context("invalid relay text body")?
+            .as_bytes()
+            .to_vec(),
+        (None, None) => Vec::new(),
+        (Some(_), Some(_)) => anyhow::bail!("ambiguous relay body encoding"),
+    };
+    // `billed` describes the readfetch charge, not whether the target produced
+    // an HTTP result. Delivery failure must follow the target status/body.
+    Ok((status, final_url, truncated, body, false))
+}
+
 fn decode_curl(value: &Value, target: &TargetRequest) -> Result<(u16, Url, bool, Vec<u8>, bool)> {
     ensure!(
         text(value, "url")? == target.url.as_str(),
@@ -383,6 +462,19 @@ mod tests {
         }
     }
 
+    fn readfetch_envelope(
+        target: &TargetRequest,
+        status: u16,
+        body: &[u8],
+        truncated: bool,
+    ) -> Value {
+        json!({"status":"success","billed":true,"status_code":status,
+            "headers":{},"content_base64":STANDARD.encode(body),
+            "url":target.url.as_str(),
+            "provenance":{"final_url":target.url.as_str(),
+                "extraction":{"truncated":truncated}}})
+    }
+
     fn envelope(format: Format, target: &TargetRequest) -> Value {
         match format {
             Format::Curl => json!({"url":target.url.as_str(),"method":target.method.as_str(),
@@ -391,6 +483,7 @@ mod tests {
                 "headers":{},"body":"complete","truncated":false}]),
             Format::Horizonpulse => json!({"ok":true,"status":200,"finalUrl":target.url.as_str(),
                 "headers":{},"body":"complete","bodyEncoding":"text","truncated":false}),
+            Format::Readfetch => readfetch_envelope(target, 200, b"complete", false),
         }
     }
     fn decode(format: Format, value: Value, target: &TargetRequest) -> Result<Decoded> {
@@ -405,7 +498,12 @@ mod tests {
     #[test]
     fn request_encoding_preserves_exact_url_and_post_text() {
         let mut target = target();
-        for format in [Format::Curl, Format::Agproxy, Format::Horizonpulse] {
+        for format in [
+            Format::Curl,
+            Format::Agproxy,
+            Format::Horizonpulse,
+            Format::Readfetch,
+        ] {
             let encoded = format.encode(&target, usize::MAX).unwrap().unwrap();
             assert_eq!(encoded["url"], target.url.as_str());
             assert_eq!(encoded["method"], "GET");
@@ -421,13 +519,31 @@ mod tests {
             Format::Agproxy.encode(&target, 0).unwrap().unwrap()["max_mb"],
             1
         );
+        assert!(
+            Format::Readfetch.encode(&target, 0).unwrap().is_none(),
+            "base64 and JSON cannot fit a zero-byte response budget"
+        );
+        let readfetch = Format::Readfetch
+            .encode(&target, 1_000_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(readfetch["binary"], true);
+        let max_bytes = readfetch["max_bytes"].as_u64().unwrap();
+        assert!((1_024..=746_928).contains(&max_bytes));
+        assert_eq!(
+            Format::Readfetch
+                .encode(&target, 20_000_000)
+                .unwrap()
+                .unwrap()["max_bytes"],
+            10_000_000
+        );
         target.method = Method::POST;
         let exact = "{\n \"key\":  [1,2] }\n";
         target.body = Some(exact.as_bytes().to_vec());
         assert!(Format::Curl.encode(&target, 1024).unwrap().is_none());
-        for format in [Format::Agproxy, Format::Horizonpulse] {
+        for format in [Format::Agproxy, Format::Horizonpulse, Format::Readfetch] {
             assert_eq!(
-                format.encode(&target, 1024).unwrap().unwrap()["body"],
+                format.encode(&target, 1_000_000).unwrap().unwrap()["body"],
                 exact
             );
         }
@@ -454,12 +570,14 @@ mod tests {
             "idempotency-key",
             "24a08964-2c6e-43c5-a127-3765185dbcea".parse().unwrap(),
         );
-        let encoded = Format::Agproxy.encode(&target, 1024).unwrap().unwrap();
-        assert_eq!(encoded["headers"]["x-quote-id"], "quote-123");
-        assert_eq!(
-            encoded["headers"]["idempotency-key"],
-            "24a08964-2c6e-43c5-a127-3765185dbcea"
-        );
+        for format in [Format::Agproxy, Format::Readfetch] {
+            let encoded = format.encode(&target, 1_000_000).unwrap().unwrap();
+            assert_eq!(encoded["headers"]["x-quote-id"], "quote-123");
+            assert_eq!(
+                encoded["headers"]["idempotency-key"],
+                "24a08964-2c6e-43c5-a127-3765185dbcea"
+            );
+        }
         assert!(Format::Curl.encode(&target, 1024).unwrap().is_none());
         assert!(
             Format::Horizonpulse
@@ -483,6 +601,12 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_some()
+        );
         target
             .headers
             .insert("content-type", "application/json".parse().unwrap());
@@ -493,10 +617,22 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_some()
+        );
         target
             .headers
             .insert("accept-encoding", "identity".parse().unwrap());
         assert!(Format::Agproxy.encode(&target, 1024).unwrap().is_none());
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_none()
+        );
         target.headers.clear();
         target
             .headers
@@ -505,6 +641,12 @@ mod tests {
             .headers
             .append("accept", "text/plain".parse().unwrap());
         assert!(Format::Agproxy.encode(&target, 1024).unwrap().is_none());
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_none()
+        );
         target.headers.clear();
         target.method = Method::POST;
         target.body = Some(vec![b'x'; 65_536]);
@@ -518,12 +660,24 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_some()
+        );
         target.body.as_mut().unwrap().push(b'x');
         assert!(
             Format::Horizonpulse
                 .encode(&target, 1024)
                 .unwrap()
                 .is_none()
+        );
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_some()
         );
         target.body = Some(vec![0xff]);
         assert!(Format::Agproxy.encode(&target, 1024).unwrap().is_none());
@@ -533,54 +687,134 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_none()
+        );
+        target.body = None;
+        target.method = Method::PUT;
+        for format in [Format::Curl, Format::Agproxy, Format::Readfetch] {
+            assert!(format.encode(&target, 1024).unwrap().is_none());
+        }
+        target.method = Method::POST;
+        target.url = format!("https://api.example.com/{}", "x".repeat(2060))
+            .parse()
+            .unwrap();
+        assert_eq!(target.url.as_str().chars().count(), 2084);
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_none()
+        );
+        target.url = format!("https://api.example.com/{}", "x".repeat(2059))
+            .parse()
+            .unwrap();
+        assert_eq!(target.url.as_str().chars().count(), 2083);
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
-    fn credentials_and_destination_policy_are_terminal_across_adapters() {
+    fn business_headers_forward_when_representable_and_payment_headers_skip() {
         let mut target = target();
-        for header in [
-            "authorization",
-            "cookie",
-            "payment-signature",
-            "x-payment",
-            "x-api-key",
-        ] {
+        for header in ["x-api-key", "api-key", "x-auth-token", "x-access-token"] {
             target.headers.clear();
             target.headers.insert(
                 reqwest::header::HeaderName::from_bytes(header.as_bytes()).unwrap(),
                 "secret".parse().unwrap(),
             );
-            for format in [Format::Curl, Format::Agproxy, Format::Horizonpulse] {
-                assert!(
-                    format
-                        .encode(&target, 1024)
-                        .unwrap_err()
-                        .is::<PolicyViolation>()
-                );
+            for format in [Format::Agproxy, Format::Readfetch] {
+                let encoded = format.encode(&target, 1_000_000).unwrap().unwrap();
+                assert_eq!(encoded["headers"][header], "secret");
+            }
+            for format in [Format::Curl, Format::Horizonpulse] {
+                assert!(format.encode(&target, 1024).unwrap().is_none());
+            }
+        }
+        for (header, value) in [
+            ("authorization", "Bearer business"),
+            ("cookie", "session=value"),
+            ("cookie2", "session=value"),
+        ] {
+            target.headers.clear();
+            target.headers.insert(
+                reqwest::header::HeaderName::from_bytes(header.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+            for format in [Format::Agproxy, Format::Readfetch] {
+                let encoded = format.encode(&target, 1_000_000).unwrap().unwrap();
+                assert_eq!(encoded["headers"][header], value);
+            }
+            for format in [Format::Curl, Format::Horizonpulse] {
+                assert!(format.encode(&target, 1024).unwrap().is_none());
+            }
+        }
+        for header in ["payment-signature", "x-payment"] {
+            target.headers.clear();
+            target.headers.insert(
+                reqwest::header::HeaderName::from_bytes(header.as_bytes()).unwrap(),
+                "secret".parse().unwrap(),
+            );
+            for format in [
+                Format::Curl,
+                Format::Agproxy,
+                Format::Horizonpulse,
+                Format::Readfetch,
+            ] {
+                assert!(format.encode(&target, 1024).unwrap().is_none());
             }
         }
         target.headers.clear();
-        target.allowed_origins = vec!["https://other.example.com".into()];
-        assert!(
-            Format::Agproxy
-                .encode(&target, 1024)
-                .unwrap_err()
-                .is::<PolicyViolation>()
+        target.headers.insert(
+            reqwest::header::HeaderName::from_bytes(b"proxy-authorization").unwrap(),
+            "secret".parse().unwrap(),
         );
+        for format in [
+            Format::Curl,
+            Format::Agproxy,
+            Format::Horizonpulse,
+            Format::Readfetch,
+        ] {
+            assert!(format.encode(&target, 1024).unwrap().is_none());
+        }
+        target.headers.clear();
+        target.allowed_origins = vec!["https://other.example.com".into()];
+        for format in [Format::Agproxy, Format::Readfetch] {
+            assert!(
+                format
+                    .encode(&target, 1024)
+                    .unwrap_err()
+                    .is::<PolicyViolation>()
+            );
+        }
         target.allowed_origins.clear();
         target.url = Url::parse("https://127.0.0.1/").unwrap();
-        assert!(
-            Format::Agproxy
-                .encode(&target, 1024)
-                .unwrap_err()
-                .is::<PolicyViolation>()
-        );
+        for format in [Format::Agproxy, Format::Readfetch] {
+            assert!(
+                format
+                    .encode(&target, 1024)
+                    .unwrap_err()
+                    .is::<PolicyViolation>()
+            );
+        }
     }
 
     #[test]
     fn decoding_preserves_target_status_body_and_unpaid_challenge_headers() {
         let target = target();
-        for format in [Format::Curl, Format::Agproxy, Format::Horizonpulse] {
+        for format in [
+            Format::Curl,
+            Format::Agproxy,
+            Format::Horizonpulse,
+            Format::Readfetch,
+        ] {
             let mut value = envelope(format, &target);
             let row = if format == Format::Agproxy {
                 &mut value[0]
@@ -589,6 +823,8 @@ mod tests {
             };
             row[if format == Format::Curl {
                 "statusCode"
+            } else if format == Format::Readfetch {
+                "status_code"
             } else {
                 "status"
             }] = json!(402);
@@ -622,6 +858,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded.body, [0, 255]);
+        let decoded = decode(
+            Format::Readfetch,
+            readfetch_envelope(&target, 206, &[0, 255], true),
+            &target,
+        )
+        .unwrap();
+        assert_eq!(decoded.body, [0, 255]);
+        assert!(decoded.truncated);
         for value in [
             json!([{"status":200,"final_url":target.url.as_str(),"headers":{},"body":"","body_base64":"","truncated":false}]),
             json!([{"status":200,"final_url":target.url.as_str(),"headers":{},"body_base64":"!","truncated":false}]),
@@ -630,13 +874,150 @@ mod tests {
         ] {
             assert!(decode(Format::Agproxy, value, &target).is_err());
         }
+        for value in [
+            json!({"status_code":200,"headers":{},"content_base64":"!",
+                "provenance":{"final_url":target.url.as_str()}}),
+            json!({"status_code":200,"headers":{},"content_base64":"",
+                "text":"","provenance":{"final_url":target.url.as_str()}}),
+            json!({"headers":{},"content_base64":"","provenance":{"final_url":target.url.as_str()}}),
+            json!({"status_code":200,"headers":{},"content_base64":"",
+                "provenance":{"final_url":target.url.as_str(),"extraction":{"truncated":"false"}}}),
+        ] {
+            assert!(decode(Format::Readfetch, value, &target).is_err());
+        }
+    }
+
+    #[test]
+    fn readfetch_billing_and_optional_fields_do_not_define_delivery() {
+        let target = target();
+        let mut value = readfetch_envelope(&target, 200, b"complete", false);
+        value["billed"] = json!(false);
+        let decoded = decode(Format::Readfetch, value, &target).unwrap();
+        assert_eq!(decoded.body, b"complete");
+        assert!(!decoded.delivery_failed);
+
+        let decoded = decode(
+            Format::Readfetch,
+            json!({"status_code":200,"headers":{},"text":"complete"}),
+            &target,
+        )
+        .unwrap();
+        assert_eq!(decoded.final_url, target.url);
+        assert_eq!(decoded.body, b"complete");
+        assert!(!decoded.truncated);
+
+        let decoded = decode(
+            Format::Readfetch,
+            json!({"status_code":204,"headers":{}}),
+            &target,
+        )
+        .unwrap();
+        assert!(decoded.body.is_empty());
+
+        let decoded = decode(
+            Format::Readfetch,
+            json!({"status_code":402,"headers":{"payment-required":"challenge"},
+                "content_base64":STANDARD.encode("challenge"),
+                "provenance":{"final_url":target.url.as_str(),
+                    "extraction":{"truncated":false}}}),
+            &target,
+        )
+        .unwrap();
+        assert_eq!(decoded.status, 402);
+        assert_eq!(decoded.headers["payment-required"], "challenge");
+        assert_eq!(decoded.body, b"challenge");
+    }
+
+    #[test]
+    fn readfetch_request_envelope_and_base64_budget_fit_vendor_and_outer_limits() {
+        let mut target = target();
+        assert!(Format::Readfetch.encode(&target, 1_024).unwrap().is_none());
+        let encoded = Format::Readfetch
+            .encode(&target, 1_000_000)
+            .unwrap()
+            .unwrap();
+        let max_bytes = encoded["max_bytes"].as_u64().unwrap();
+        assert!((1_024..=746_928).contains(&max_bytes));
+        assert_eq!(
+            Format::Readfetch
+                .encode(&target, 20_000_000)
+                .unwrap()
+                .unwrap()["max_bytes"],
+            10_000_000
+        );
+        target.method = Method::POST;
+        target.body = Some(vec![b'x'; 1_100_000]);
+        assert!(
+            Format::Readfetch
+                .encode(&target, 20_000_000)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn readfetch_request_size_checks_the_complete_serialized_envelope() {
+        let mut target = target();
+        target.method = Method::POST;
+        target
+            .headers
+            .insert("x-quote-id", "quote-\"123".parse().unwrap());
+        target.body = Some("\"\n💰".as_bytes().to_vec());
+        let encoded = Format::Readfetch
+            .encode(&target, 1_000_000)
+            .unwrap()
+            .unwrap();
+        let padding = 1_048_576 - serde_json::to_vec(&encoded).unwrap().len();
+        target.body.as_mut().unwrap().extend(vec![b'x'; padding]);
+
+        let encoded = Format::Readfetch
+            .encode(&target, 1_000_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(serde_json::to_vec(&encoded).unwrap().len(), 1_048_576);
+        target.body.as_mut().unwrap().push(b'x');
+        assert!(
+            Format::Readfetch
+                .encode(&target, 1_000_000)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn readfetch_null_optional_fields_and_missing_headers_are_tolerated() {
+        let target = target();
+        let decoded = decode(
+            Format::Readfetch,
+            json!({"status_code":200,"headers":null,
+                "content_base64":null,"text":"complete",
+                "provenance":{"final_url":"","extraction":{"truncated":null}},
+                "url":target.url.as_str()}),
+            &target,
+        )
+        .unwrap();
+        assert!(decoded.headers.is_empty());
+        assert_eq!(decoded.body, b"complete");
+        assert!(!decoded.truncated);
+        assert_eq!(decoded.final_url, target.url);
+
+        let decoded = decode(
+            Format::Readfetch,
+            json!({"status_code":200,"headers":{},
+                "content_base64":STANDARD.encode("complete"),"text":null,
+                "truncated":null}),
+            &target,
+        )
+        .unwrap();
+        assert_eq!(decoded.body, b"complete");
+        assert!(!decoded.truncated);
     }
 
     #[test]
     fn redirects_validate_reported_hops_without_inventing_missing_evidence() {
         let mut target = target();
         target.allowed_origins = vec![target.url.origin().ascii_serialization()];
-        for format in [Format::Agproxy, Format::Horizonpulse] {
+        for format in [Format::Agproxy, Format::Horizonpulse, Format::Readfetch] {
             assert!(
                 decode(format, envelope(format, &target), &target).is_ok(),
                 "missing intermediate-hop evidence does not exclude an adapter"
@@ -665,12 +1046,13 @@ mod tests {
                 .unwrap_err()
                 .is::<PolicyViolation>()
         );
-        for format in [Format::Agproxy, Format::Horizonpulse] {
+        for format in [Format::Agproxy, Format::Horizonpulse, Format::Readfetch] {
             let mut value = envelope(format, &target);
-            if format == Format::Agproxy {
-                value[0]["final_url"] = json!("https://127.0.0.1/");
-            } else {
-                value["finalUrl"] = json!("https://127.0.0.1/");
+            match format {
+                Format::Agproxy => value[0]["final_url"] = json!("https://127.0.0.1/"),
+                Format::Horizonpulse => value["finalUrl"] = json!("https://127.0.0.1/"),
+                Format::Readfetch => value["provenance"]["final_url"] = json!("https://127.0.0.1/"),
+                Format::Curl => unreachable!(),
             }
             assert!(
                 decode(format, value, &target)
@@ -702,12 +1084,15 @@ mod tests {
             (Format::Curl, "max_spec_bytes"),
             (Format::Agproxy, "max_response_bytes"),
             (Format::Horizonpulse, "max_response_bytes"),
+            (Format::Readfetch, "max_response_bytes"),
         ] {
             let mut value = envelope(format, &target);
-            if format == Format::Agproxy {
-                value[0]["body"] = json!("PRIVATE_BODY");
-            } else {
-                value["body"] = json!("PRIVATE_BODY");
+            match format {
+                Format::Agproxy => value[0]["body"] = json!("PRIVATE_BODY"),
+                Format::Readfetch => {
+                    value["content_base64"] = json!(STANDARD.encode("PRIVATE_BODY"))
+                }
+                _ => value["body"] = json!("PRIVATE_BODY"),
             }
             let error = format
                 .decode(&serde_json::to_vec(&value).unwrap(), &target, 1, setting)

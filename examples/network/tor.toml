@@ -23,6 +23,6 @@ provider_metadata = true # schemas/help, startup and explicit non-direct warming
 
 # Select by original target method; absent/empty lists mean origin-only.
 [relay_fallback.relays]
-GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
-POST = ["../../providers/agproxy.toml"]
-HEAD = ["../../providers/agproxy.toml"]
+GET = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]

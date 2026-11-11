@@ -81,6 +81,7 @@ fn operation(format: Format) -> &'static str {
         Format::Curl => "/curl",
         Format::Agproxy => "/x402/fetch",
         Format::Horizonpulse => "/api/http",
+        Format::Readfetch => "/v1/fetch",
     }
 }
 pub(super) fn label(format: Format) -> &'static str {
@@ -88,6 +89,7 @@ pub(super) fn label(format: Format) -> &'static str {
         Format::Curl => "curl",
         Format::Agproxy => "agproxy",
         Format::Horizonpulse => "horizonpulse",
+        Format::Readfetch => "readfetch",
     }
 }
 

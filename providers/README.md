@@ -62,6 +62,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | AgData | `agdata.toml` | Web/social data; both x402-capable aliases; screenshot/PDF JSON |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | AGProxy | `agproxy.toml` | Complete pinned `agproxy-openapi.json`; residential fetch and proxy packs |
+| readFetch | `readfetch.toml` | Complete pinned `readfetch-openapi.json`; raw HTTP relay, article extraction, crawl, PDF, map, diff, screenshot and batch |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
 | Horizon Pulse | `horizonpulse.toml` | Complete pinned `horizonpulse-openapi.json`; SEC/macro/security reads and atomic-price caveat |
@@ -166,7 +167,7 @@ No separate data installation, filesystem scan or writable index is required.
 Private local overrides are neither bundled nor compilation identity inputs.
 
 Providers selected in a relay method list declare `relay_format = "curl"`,
-`"agproxy"` or `"horizonpulse"` once in their TOML. This selects the documented
+`"agproxy"`, `"horizonpulse"` or `"readfetch"` once in their TOML. This selects the documented
 request/response envelope; provider names, hosts and schema shapes do not infer it.
 The field is optional for ordinary API providers. Listed providers require a
 supported format and compatible operation/filter selection before paid dispatch.

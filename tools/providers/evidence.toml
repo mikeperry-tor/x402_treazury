@@ -34,6 +34,11 @@ intent = "vendor-copy"
 guidance = "providers/CAVEATS.md#curl-http-request"
 sources = [{ url = "https://curl-http-request.underscoredone.com/openapi.json", purpose = "schema" }]
 
+[readfetch]
+intent = "vendor-copy"
+guidance = "providers/CAVEATS.md#readfetchtoml--readfetch"
+sources = [{ url = "https://readfetch.com/openapi.json", purpose = "schema" }]
+
 [agentutility]
 intent = "authored"
 guidance = "providers/CAVEATS.md#refreshing-the-catalog"

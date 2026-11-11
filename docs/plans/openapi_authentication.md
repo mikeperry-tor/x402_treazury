@@ -198,11 +198,12 @@ contract and cannot be combined with host-managed auth in one call. Reject mixed
 modes before credential lookup or I/O. Do not add a process-wide automatic bearer
 cookie jar; raw authority alone grants no host credential access.
 
-Do not forward secrets to discovery/help/spec URLs, other resources, redirects or
-paid relays. Preserve current redirect policy and relay credential exclusions;
-mark auth separately so a pre-injection relay check cannot miss it. Declared API-key
-headers must use the same exclusion. Reject caller-auth conflicts and protected
-slot collisions before dispatch. Every request still requires ordinary public
+Do not forward secrets to discovery/help/spec URLs, other resources or redirects.
+Paid API relays remain opt-in through `api_requests`; nonempty manual raw header sets
+disable relays. Generated business headers follow the adapter's preservation checks.
+If managed authentication credentials must not reach a relay, mark them explicitly
+before dispatch rather than inferring from header names. Reject caller-auth conflicts
+and protected slot collisions before dispatch. Every request still requires ordinary public
 destination checks and applicable endpoint/source authority.
 
 Capture and redact declared response credentials inside retained accepted-work

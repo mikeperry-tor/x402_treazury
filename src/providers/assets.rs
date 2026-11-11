@@ -55,6 +55,7 @@ macro_rules! provider_manifest {
             ("oneshot", "providers/oneshot.toml", None),
             ("otto", "providers/otto.toml", None),
             ("pdl", "providers/pdl.toml", None),
+            ("readfetch", "providers/readfetch.toml", Some("providers/readfetch-openapi.json")),
             ("regimeshift", "providers/regimeshift.toml", None),
             ("relayshield", "providers/relayshield.toml", None),
             ("relayshield-phone-reputation", "providers/relayshield/phone-reputation.toml", Some("providers/relayshield/phone-reputation.openapi.json")),

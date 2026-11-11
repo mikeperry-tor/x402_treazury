@@ -1476,9 +1476,10 @@ Generated and manual raw requests share fallible HTTP header construction and
 runtime-header headroom checks before inventory or network activity. Sets that
 exceed the HTTP library's representation capacity fail visibly rather than panic;
 there is no additional local header-count quota.
-Explicit custom API-key headers are ordinary declared arguments; existing
-relay policy still forbids credential forwarding and skips adapters unable to
-preserve all business headers.
+Explicit custom API-key headers are ordinary declared arguments. Paid relay for
+actual API requests remains opt-in (`api_requests=false` by default); when enabled,
+adapters forward required business headers they can preserve and skip the entry
+otherwise. x402 payment headers are runtime-owned and are not relayed.
 
 A header named `Idempotency-Key` is managed automatically, even when optional in
 the schema. It is omitted from tool arguments. Each invocation generates a random
@@ -2141,9 +2142,9 @@ provider_metadata = true # catalogs/help/imports/probes; default true
 # sources = ["social"] # optional static source selection; empty selects all
 
 [relay_fallback.relays]
-GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
-POST = ["../../providers/agproxy.toml"]
-HEAD = ["../../providers/agproxy.toml"]
+GET = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
 ```
 
 Method keys are exactly `GET`, `HEAD` and `POST`, selected by the original target
@@ -2152,11 +2153,13 @@ inherit from GET. Supported consumers are static discovery, Coinbase searches,
 source imports, help, explicit usage documents, URL-discovery probes and
 representable unsigned API, directory and raw GET/HEAD/POST requests. Ordering is
 operator-authored, with no implicit vendor ranking or extra provider. Each listed
-provider declares `relay_format = "curl"`, `"agproxy"` or `"horizonpulse"` in its
-own TOML. Ordinary providers need no format field. Unsupported request bodies,
+provider declares `relay_format = "curl"`, `"agproxy"`, `"horizonpulse"` or
+`"readfetch"` in its own TOML. Ordinary providers need no format field. Unsupported request bodies,
 bytes or required headers skip the entry before paid I/O; headers and bodies are
-never silently discarded to fit another adapter. Target payment signatures and
-other credentials are not forwarded.
+never silently discarded to fit another adapter. Paid API relays are opt-in, and
+their adapters forward ordinary business headers, including explicit API-key
+headers, when they can preserve them. x402 payment headers remain runtime-owned and
+are not relayed.
 
 The section is named `relay_fallback`, with provider lists under `relays`.
 The old `discovery_relay` section, `fallbacks` lists and single `provider` shorthand
@@ -2166,8 +2169,8 @@ provider files. Paths in lists resolve relative to the declaring deployment/netw
 file; schemas/help paths inside providers resolve relative to their TOML.
 
 Runtime bootstrap validates every configured adapter, operation and filter using
-local schemas before payment. The bundled Curl schema, `agproxy-openapi.json` and
-`horizonpulse-openapi.json` are complete pinned runtime assets; bootstrap fetches
+local schemas before payment. The bundled Curl schema, `agproxy-openapi.json`,
+`horizonpulse-openapi.json` and `readfetch-openapi.json` are complete pinned runtime assets; bootstrap fetches
 no schema or help document and rejects nonlocal schema references.
 [Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
 

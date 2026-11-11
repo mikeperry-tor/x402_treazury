@@ -292,7 +292,9 @@ applicable public-destination checks. AGProxy/Horizon intermediate hops remain
 unknown; missing evidence does not exclude an adapter.
 The operator accepts the relay's remote redirect/public-destination enforcement
 and plaintext integrity. Relay TLS does not establish target TLS or content
-authenticity. Target credentials and payment signatures remain excluded.
+authenticity. Target payment signatures remain excluded. Required business headers
+are forwarded by adapters that can preserve them; nonempty manual raw header sets
+disable paid relays.
 
 Document relay calls retain their acquisition owner and use `provider_metadata`
 permission. Their fixed bootstrap payer is independent of API cutover; deployments

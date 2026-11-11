@@ -239,8 +239,8 @@ empty/partial search-result metadata finishes without fallback.
 
 `[relay_fallback.relays]` declares independent ordered `GET`, `HEAD` and `POST`
 provider-path lists; a missing/empty list is origin-only. Selection uses the original
-target method. Provider-owned `relay_format` identifies Curl, AGProxy or Horizon
-Pulse translation, with no host/name inference. Bootstrap validates local pinned
+target method. Provider-owned `relay_format` identifies Curl, AGProxy, Horizon
+Pulse or readfetch translation, with no host/name inference. Bootstrap validates local pinned
 schemas, operations and filters without remote schema/help acquisition.
 See [configuration](configuration.md#relay-fallback) for paths and inspection.
 
@@ -321,7 +321,9 @@ visibility. Missing chain evidence does not exclude
 them. Remote redirect/public-destination policy and content integrity remain
 trusted to the relay; TLS to the relay cannot establish target TLS or plaintext
 authenticity. Unsupported required headers/body bytes skip an entry before
-payment; target signatures and credentials are never forwarded.
+payment; target payment signatures are never forwarded. Required business headers
+are forwarded by adapters that can preserve them, and nonempty manual raw header
+sets disable paid relays.
 
 ## Explicit direct discovery warming
 

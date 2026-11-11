@@ -371,6 +371,7 @@ async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wa
         ("", "local.json", ""),
         ("relay_format='unsupported'", "local.json", ""),
         ("relay_format='agproxy'", "local.json", ""),
+        ("relay_format='readfetch'", "local.json", ""),
         (
             "relay_format='curl'",
             "local.json",

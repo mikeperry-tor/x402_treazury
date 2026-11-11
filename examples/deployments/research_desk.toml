@@ -59,18 +59,20 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 240
 
-# Paid fallback for blocked catalog/help GETs follows effective group routing.
+# Paid fallback for blocked catalog/help reads follows effective group routing.
 # Existing general inventory can pay for uncredited groups' discovery without
-# activating funding. An explicit relay wallet override keeps its selected group.
+# activating funding. With wallet_bootstrap enabled, metadata and discovery
+# relays use the bootstrap group, overriding relay_fallback.wallet and source
+# bindings; without bootstrap policy, an explicit relay wallet keeps its group.
 [relay_fallback]
 source_discovery = true
 api_requests = false
 provider_metadata = true
 
 [relay_fallback.relays]
-GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
-POST = ["../../providers/agproxy.toml"]
-HEAD = ["../../providers/agproxy.toml"]
+GET = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
 
 [treasury]
 state_dir = "../../state/research_desk"

@@ -1,5 +1,6 @@
 //! Offline relay-list composition and pinned bootstrap assets; no wallets or network.
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use x402_treazury::discovery_relay::Policy;
 
@@ -102,9 +103,9 @@ fn shipped_examples_use_explicit_relay_lists() {
     let tor = x402_treazury::network::NetworkConfig::load(&root.join("examples/network/tor.toml"))
         .unwrap();
     let relay = tor.relay_fallback.unwrap();
-    assert_eq!(relay.relays()["GET"].len(), 2);
-    assert_eq!(relay.relays()["POST"].len(), 1);
-    assert_eq!(relay.relays()["HEAD"].len(), 1);
+    for method in ["GET", "POST", "HEAD"] {
+        assert_eq!(relay.relays()[method].len(), 2);
+    }
     assert!(
         relay
             .provider_paths()
@@ -113,18 +114,14 @@ fn shipped_examples_use_explicit_relay_lists() {
     let comprehensive: x402_treazury::deployment::MetaConfig =
         toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
     let relay = comprehensive.relay_fallback.unwrap();
-    assert_eq!(
-        relay.relays()["GET"],
-        [
-            "../../providers/curl/provider.toml",
-            "../../providers/agproxy.toml"
-        ]
-        .map(PathBuf::from)
-    );
-    for method in ["POST", "HEAD"] {
+    for method in ["GET", "POST", "HEAD"] {
         assert_eq!(
             relay.relays()[method],
-            [PathBuf::from("../../providers/agproxy.toml")]
+            [
+                "../../providers/readfetch.toml",
+                "../../providers/agproxy.toml"
+            ]
+            .map(PathBuf::from)
         );
     }
 }
@@ -176,28 +173,29 @@ fn method_paths_resolve_at_declaration_without_reading_missing_providers() {
 }
 
 fn check_refs(document: &Value, node: &Value) {
-    match node {
-        Value::Object(fields) => {
-            if let Some(reference) = fields.get("$ref") {
-                let reference = reference.as_str().unwrap();
-                let pointer = reference
-                    .strip_prefix('#')
-                    .expect("bootstrap references must stay in the pinned document");
-                assert!(
-                    document.pointer(pointer).is_some(),
-                    "unresolved pinned reference {reference}"
-                );
+    let mut pending = vec![(node, None::<&Value>)];
+    while let Some((node, defs)) = pending.pop() {
+        match node {
+            Value::Object(fields) => {
+                let nearest_defs = fields.get("$defs").or(defs);
+                if let Some(reference) = fields.get("$ref") {
+                    let reference = reference.as_str().unwrap();
+                    let pointer = reference
+                        .strip_prefix('#')
+                        .expect("bootstrap references must stay in the pinned document");
+                    let local = reference
+                        .strip_prefix("#/$defs/")
+                        .and_then(|name| nearest_defs.and_then(|defs| defs.get(name)));
+                    assert!(
+                        document.pointer(pointer).is_some() || local.is_some(),
+                        "unresolved pinned reference {reference}"
+                    );
+                }
+                pending.extend(fields.values().map(|value| (value, nearest_defs)));
             }
-            for value in fields.values() {
-                check_refs(document, value);
-            }
+            Value::Array(items) => pending.extend(items.iter().map(|item| (item, defs))),
+            _ => {}
         }
-        Value::Array(items) => {
-            for item in items {
-                check_refs(document, item);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -221,6 +219,12 @@ fn relay_bootstrap_assets_preserve_complete_primary_catalogs_and_internal_refs()
             "curl",
             "openapi.json",
             include_str!("../providers/curl/openapi.json"),
+        ),
+        (
+            "readfetch",
+            "readfetch",
+            "readfetch-openapi.json",
+            include_str!("../providers/readfetch-openapi.json"),
         ),
     ] {
         let provider = x402_treazury::providers::get(id).unwrap();
@@ -252,6 +256,46 @@ fn relay_bootstrap_assets_preserve_complete_primary_catalogs_and_internal_refs()
             .get("ScreenshotResponse")
             .is_none()
     );
+    let readfetch: Value =
+        serde_json::from_str(include_str!("../providers/readfetch-openapi.json")).unwrap();
+    assert!(readfetch["paths"]["/v1/fetch"]["post"].is_object());
+    assert!(readfetch["paths"]["/v1/text"]["post"].is_object());
+    assert!(readfetch["paths"].get("/v1/claims").is_some());
+}
+
+#[test]
+fn readfetch_provider_exposes_research_surface_without_support_writes() {
+    let provider = x402_treazury::providers::get("readfetch").unwrap();
+    assert_eq!(provider.config.relay_format.as_deref(), Some("readfetch"));
+    let document: Value = serde_json::from_str(provider.local_schema.unwrap()).unwrap();
+    let tools =
+        x402_treazury::catalog::build_tools(&provider.config, &document, "readfetch").unwrap();
+    let names: BTreeSet<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
+    for expected in [
+        "readfetch_fetch",
+        "readfetch_text",
+        "readfetch_map",
+        "readfetch_crawl",
+        "readfetch_crawl_id",
+        "readfetch_batch",
+        "readfetch_pdf",
+        "readfetch_section",
+        "readfetch_diff",
+        "readfetch_screenshot",
+        "readfetch_search",
+        "readfetch_probe",
+    ] {
+        assert!(names.contains(expected), "missing {expected}");
+    }
+    for excluded in [
+        "readfetch_healthz",
+        "readfetch_claims",
+        "readfetch_feedback",
+        "readfetch_scrape",
+        "readfetch_scrape_residential",
+    ] {
+        assert!(!names.contains(excluded), "unexpected {excluded}");
+    }
 }
 
 #[test]
