@@ -309,7 +309,7 @@ async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences
     );
     assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
     assert_eq!(
-        shown["wallet_bindings"]["social"]["social"]["wallet"],
+        shown["wallet_bindings"]["social"]["social_shopsocial"]["wallet"],
         "company"
     );
     assert_eq!(

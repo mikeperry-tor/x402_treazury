@@ -504,47 +504,57 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
     assert_eq!(shown["relay_fallback"]["source_discovery"], true);
     assert!(shown["relay_fallback"]["wallet"].is_null());
     assert_eq!(shown["discovery_wallets"]["exa"], "web");
-    assert_eq!(shown["discovery_wallets"]["social"], "company");
-    assert_eq!(
-        shown["wallet_bindings"]["social"]["social"]["wallet"],
-        "company"
-    );
-    assert_eq!(shown["discovery_wallets"]["webinfo"], "web");
+    // The deferred company group has no discovery payer until first credit, so all
+    // source discovery uses web's bootstrap wallet while paid bindings remain company.
+    for source in [
+        "social_botsmith",
+        "social_glim",
+        "social_twos",
+        "social_shopsocial",
+        "social_companyrecords",
+    ] {
+        assert_eq!(shown["discovery_wallets"][source], "web");
+        assert_eq!(
+            shown["wallet_bindings"]["social"][source]["wallet"],
+            "company"
+        );
+    }
+    assert!(shown["discovery_wallets"].get("socialfetch").is_none());
+    assert!(shown["discovery_wallets"].get("webinfo").is_none());
     assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
-    assert!(shown["wallet_bindings"]["company"]["exa"].is_null());
+    assert!(
+        shown["wallet_bindings"]
+            .get("company")
+            .and_then(|bindings| bindings.get("exa"))
+            .is_none()
+    );
     let social = &shown["servers"]["social"];
     assert_eq!(social["discover_on_demand"], true);
     let instructions = social["instructions_text"].as_str().unwrap();
     let search = social["discovery_search_tool_instructions_text"]
         .as_str()
         .unwrap();
-    for platform in shown["sources"]["social"]["settings"]["tags"]
-        .as_array()
-        .unwrap()
-    {
-        let platform = platform.as_str().unwrap();
-        assert!(
-            search.contains(platform),
-            "missing discovery coverage: {platform}"
-        );
-        assert!(
-            !instructions.contains(platform),
-            "duplicated initialization coverage: {platform}"
-        );
-    }
+    assert_eq!(instructions, "Social and people research.");
     assert!(search.starts_with("Social tool keywords to search for:"));
     for keyword in [
-        "truthsocial",
-        "pdl_person",
-        "stableenrich_reddit",
-        "stableenrich_minerva",
-        "stableenrich_serper_people_image_search",
+        "Twitter",
+        "GitHub",
+        "Reddit",
+        "Hacker News",
+        "Instagram",
+        "TikTok",
+        "YouTube",
+        "person enrichment",
+        "LinkedIn",
+        "Telegram",
     ] {
         assert!(
             search.contains(keyword),
             "missing social search keyword: {keyword}"
         );
     }
+    assert!(!search.contains("SocialFetch"));
+    assert!(shown["sources"].get("social").is_none());
     assert!(social["providers_search_remote_tool_instructions_text"].is_null());
 }
 

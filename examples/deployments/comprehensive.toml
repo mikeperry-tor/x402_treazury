@@ -1,6 +1,6 @@
 # Comprehensive showcase: curated research, shared pools, Tor and agent-added APIs.
 # Listener -> sources -> intended group (company initially uses web):
-# web     -> Exa, SocialFetch web/community, Google Trends -> web
+# web     -> Exa, Google Trends and shared social search -> web
 # social  -> social platforms, Telegram and people research -> company
 # company -> selected company, grants and security research -> company
 # toolbox -> endpoint-local agent-added sources -> company
@@ -108,24 +108,86 @@ max_api_payment_usdc = "0.50"
 # Source-local instructions_text replaces inherited provider guidance; tool
 # descriptions are configured separately through source overrides.
 
-# SocialFetch appears in two contexts with overlapping Reddit coverage,
-# demonstrating that even the same provider/tool can use different payers.
-# After company receives initial credit, these contexts stop reusing one payer.
-# Shared bootstrap payments remain visibly linked. Separate initial addresses
-# avoid direct payer reuse, but closely spaced funding swaps still reveal timing
-# correlation. First-use activation and randomized later opportunities can weaken
-# that timing signal; provider, amount, content and settlement correlations remain.
+# Social sources mirror the research desk selections after SocialFetch was
+# removed for reliability and an oversized OpenAPI document. Multiple providers
+# share the social payer, so first-use activation demonstrates that the same
+# platform families can move from web to company without a provider identity.
 # Delayed funding cannot erase earlier links and is not an unlinkability guarantee.
 
-[sources.social]
-extends = "../../providers/socialfetch.toml"
-tags = ["Bluesky", "Facebook", "GitHub", "Hacker News", "Instagram", "LinkedIn", "Reddit", "Rumble", "Snapchat", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Twitch", "Yelp", "YouTube"]
-exclude_tools = ["socialfetch_help"]
+[sources.social_botsmith]
+extends = "../../providers/botsmith.toml"
+send_tools = [
+  { to = "exclude", tools = ["help", "jev", "polymarket_*"] },
+  { to = "exclude", tools = [
+    "x_search", "x_tweet", "x_user", "x_mentions", "x_timeline",
+    "x_thread", "x_trends", "x_users_search",
+  ] },
+  { to = "social" },
+]
 
-[sources.webinfo]
-extends = "../../providers/socialfetch.toml"
-tags = ["Web", "Reddit"]
-exclude_tools = ["socialfetch_help"]
+[sources.social_glim]
+extends = "../../providers/glim.toml"
+send_tools = [
+  { to = "exclude", tools = ["twitter_get", "web_search", "web_fetch", "telegram_*", "youtube_*"] },
+  { to = "exclude", tools = ["twitter_tweets_search"] },
+  { to = ["web", "social"], tools = ["twitter_trends"] },
+  { to = "social", tools = ["twitter_*", "github_*", "reddit_*"] },
+  { to = "exclude" },
+]
+
+[sources.social_twos]
+extends = "../../providers/2s.toml"
+send_tools = [
+  { to = "social", tools = ["news_hn_search", "news_hn_item", "news_hn_top", "news_hn_user"] },
+  { to = "exclude" },
+]
+
+[sources.social_apexfaucet]
+extends = "../../providers/apexfaucet.toml"
+send_tools = [
+  { to = "social", tools = ["research_search"] },
+  { to = "exclude" },
+]
+
+[sources.social_agdata]
+extends = "../../providers/agdata.toml"
+send_tools = [
+  { to = ["company", "social"], tools = ["linkedin_company"] },
+  { to = "social", tools = ["instagram", "tiktok", "youtube", "facebook_page"] },
+  { to = "exclude" },
+]
+
+[sources.social_shopsocial]
+extends = "../../providers/shopsocial.toml"
+send_tools = [
+  { to = "social", tools = [
+    "social_instagram_profile", "social_tiktok_profile", "social_youtube",
+    "social_facebook_pages", "social_youtube_transcript", "social_youtube_comments",
+    "social_threads_profile", "social_pinterest", "social_telegram_channel",
+  ] },
+  { to = "exclude" },
+]
+
+[sources.social_companyrecords]
+extends = "../../providers/companyrecords.toml"
+send_tools = [
+  { to = ["company", "social"], tools = ["b2b_linkedin_company_profiles"] },
+  { to = "exclude" },
+]
+
+[sources.social_deepline]
+extends = "../../providers/deepline.toml"
+send_tools = [
+  { to = "social", tools = ["email_*", "phone_find"] },
+  { to = "exclude" },
+]
+
+[sources.social_otto]
+extends = "../../providers/otto.toml"
+send_tools = [
+  { to = "social", tools = ["kol_sentiment", "twitter_summary"] },
+  { to = "exclude" },
+]
 
 # Exa supplies the web listener. Its supported payable island includes help;
 # subset providers below omit broad vendor guides.
@@ -147,8 +209,10 @@ include_tools = ["pdl_company_search"]
 
 # StableEnrich purpose selections narrow the supported catalog and omit broad
 # help. Each source inherits its listener's wallet.
-# Social estimates are $0.01-$0.05 per call. FullEnrich ($0.15), StableEnrich
-# PDL ($0.28), Whitepages ($0.22) and Lens ($0.20) remain outside this subset.
+# Social estimates are $0.01-$0.28 per call. FullEnrich ($0.15) and Whitepages
+# ($0.22) can exceed web's initial $0.10 cap but remain within company's $0.50 cap
+# after first credit; permitted signatures do not require an estimate match.
+# StableEnrich PDL ($0.28) and Lens ($0.20) remain outside this subset.
 [sources.social_stableenrich]
 extends = "../../providers/stableenrich.toml"
 include_tools = [
@@ -158,6 +222,8 @@ include_tools = [
   "stableenrich_minerva_enrich",
   "stableenrich_minerva_validate_emails",
   "stableenrich_serper_people_image_search",
+  "stableenrich_fullenrich_people_search",
+  "stableenrich_whitepages_person_search",
 ]
 
 # Company estimates are $0.0126-$0.08 per call, within both effective caps.
@@ -338,7 +404,7 @@ instructions_text = "Web research and aggregate keyword trends. Preserve source 
 listen = "127.0.0.1:6337"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-sources = ["exa", "webinfo", "googletrends"]
+sources = ["exa", "googletrends"]
 
 [servers.social]
 # Keep platform coverage in search help, including for clients that omit server instructions.
@@ -346,19 +412,20 @@ discover_on_demand = true
 instructions_text = "Social and people research."
 discovery_search_tool_instructions_text = """
 Social tool keywords to search for:
-- SocialFetch: `Bluesky`, `Facebook`, `GitHub`, `Hacker News`, `Instagram`,
-  `LinkedIn`, `Reddit`, `Rumble`, `Snapchat`, `Telegram`,
-  `Threads`, `TikTok`, `truthsocial` (Truth Social), `Twitter` (X), `Twitch`,
-  `Yelp`, `YouTube`.
-- People Data Labs: `pdl_person` (person enrichment and search).
-- StableEnrich: `stableenrich_reddit` (Reddit searches and comments),
-  `stableenrich_minerva` (person resolution, enrichment, and email checks),
-  `stableenrich_serper_people_image_search` (people images).
+- Botsmith and Otto: social posts, profiles, timelines, watchlists, sentiment and
+  curated summaries.
+- Glim and 2s: X/Twitter trends, GitHub repository/code search, Reddit search and
+  reads, and Hacker News stories, comments and users.
+- ShopSocial and AgData: Instagram, TikTok, YouTube, Facebook, Threads, Pinterest
+  and Telegram profiles, transcripts and comments.
+- People Data Labs, StableEnrich and Deepline: person enrichment, email validation,
+  employer/title data and contact lookup.
+- CompanyRecords and AgData: LinkedIn company profiles.
 """
 listen = "127.0.0.1:6338"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["social", "pdl_people", "social_stableenrich"]
+sources = ["pdl_people", "social_stableenrich"]
 
 [servers.company]
 instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Compare SEC fact periods explicitly: latest quarterly flows differ from fiscal-year-to-date and annual totals; Horizon supplies US-GAAP facts, not IFRS. Missing findings do not prove absence."

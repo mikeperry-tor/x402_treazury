@@ -268,6 +268,14 @@ The observations below describe captured contracts, not live settlement.
 
 ## socialfetch.toml — SocialFetch
 
+The vendor `https://www.socialfetch.dev/openapi.json` document exceeds the default
+32 MiB `max_spec_bytes`; catalog acquisition rejects it as an incomplete inventory.
+Do not raise the global spec limit or accept a partial catalog solely for this
+provider. It also showed intermittent paid lookup/settlement failures, and both
+demo deployments now use the research-desk social source set instead. The provider
+remains bundled for provenance and possible future review; it is not selected by
+`comprehensive.toml` or `research_desk.toml`.
+
 TikTok transcript pricing includes `billableDomainErrors`: the
 `transcript_target_not_video` response (HTTP 400) costs one credit even though
 service failures are free. Credit conversion preserves this separate error charge

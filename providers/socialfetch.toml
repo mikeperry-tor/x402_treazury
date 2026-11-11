@@ -1,5 +1,12 @@
 description = "Social-platform and web data search, profiles, posts and content retrieval."
 # Reusable Rust provider settings. Paths are relative to this file.
+#
+# NOT SELECTED by the examples. The vendor document exceeds the default 32 MiB
+# max_spec_bytes, so acquisition rejects it as incomplete; intermittent paid
+# lookup/settlement failures were also observed. Do not raise the global limit or
+# accept a partial catalog solely for this provider. Use the research-desk social
+# source set (botsmith, glim, 2s, ShopSocial, AgData, CompanyRecords, Deepline,
+# Otto, StableEnrich and PDL) instead. See providers/CAVEATS.md.
 spec = "https://www.socialfetch.dev/openapi.json"
 name = "SocialFetch"
 base_url = "https://api.socialfetch.dev"
