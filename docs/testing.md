@@ -786,6 +786,10 @@ current generations advance, recovery after retained historical attempts and ass
 without writes. Store-level tests cover claim history and obstruction dispositions;
 owner tests cover cancellation and drain. These are complementary checks, not an
 exhaustive enumeration of concurrency schedules.
+The retired-participant restart regression reopens saved empty, retired inventory,
+retains destination routing, and schedules a new small reserve from historical
+credit alone, without first-use demand or source preparation. Its saved retirement
+fixture does not exercise retirement proof acquisition or live settlement.
 Recovery eligibility and startup actionability remain separate: an accepted quote
 can keep startup waiting while the worker may recover its original operation.
 Bootstrap also distinguishes treasury-wide pending source work from the captured

@@ -273,4 +273,229 @@ mod tests {
             "historical credit admits a participant without first-use demand"
         );
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn retired_participant_restart_keeps_destination_and_schedules_replacement() {
+        use crate::{
+            payment::{PaidClient, SpendPolicy},
+            rotation::{
+                base::BaseRpc,
+                funding::{FundingBackend, FundingObservations, FundingWorker},
+                manager::ManagedPool,
+                near::{Quote, SwapStatus},
+                store::funding::FundingJob,
+            },
+        };
+        use std::{sync::Arc, time::Duration};
+        use tokio::sync::mpsc;
+        use tokio_util::sync::CancellationToken;
+
+        // Keep the paused clock fixed while the blocking Store owner progresses.
+        async fn local<T>(future: impl std::future::Future<Output = T>) -> T {
+            tokio::pin!(future);
+            loop {
+                tokio::select! {
+                    biased;
+                    value = &mut future => return value,
+                    _ = tokio::task::yield_now() => {},
+                }
+            }
+        }
+
+        #[derive(Clone)]
+        struct Unfunded(mpsc::UnboundedSender<FundingJob>);
+        impl FundingObservations for Unfunded {
+            type QuoteRequest = ();
+            async fn quote(&self, _: ()) -> Result<Quote> {
+                panic!("unfunded fixture must not request quotes")
+            }
+            async fn status(&self, _: Quote) -> Result<SwapStatus> {
+                panic!("unfunded fixture has no swaps to observe")
+            }
+            async fn credit(&self, _: FundingJob) -> Result<()> {
+                Ok(())
+            }
+        }
+        impl FundingBackend for Unfunded {
+            type Observations = Self;
+            fn observations(&self) -> Self {
+                self.clone()
+            }
+            fn allocation_groups(&self) -> Vec<String> {
+                ["bootstrap", "participant", "dormant"]
+                    .map(str::to_owned)
+                    .into()
+            }
+            async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<()> {
+                self.0.send(job.clone()).unwrap();
+                anyhow::bail!("fixture treasury is unfunded")
+            }
+            async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
+                panic!("unfunded fixture must not prepare transactions")
+            }
+            async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+                panic!("unfunded fixture must not submit transactions")
+            }
+            async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+                panic!("fixture has no accepted source transactions")
+            }
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("wallet");
+        let key = temp.path().join("key");
+        let mut state = Store::create(&dir, &key, 1, b"fixture").unwrap();
+        let treasury = state.id().to_owned();
+        let mut pools = Vec::new();
+        for name in ["bootstrap", "participant", "dormant"] {
+            pools.push(
+                state
+                    .ensure_capacity_group(
+                        name,
+                        &test_support::reserves("2"),
+                        Some(U256::from(1_000_000)),
+                        0,
+                    )
+                    .unwrap(),
+            );
+        }
+        let bootstrap = pools[0].clone();
+        let participant = pools[1].clone();
+        state
+            .allocate_capacity_kind(&bootstrap, AllocationKind::Small, true)
+            .unwrap();
+        let id = state
+            .allocate_capacity_kind(&participant, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let historical = state.funding_job(&id).unwrap().unwrap();
+        state
+            .record_credit(&historical.wallet_id, "1", "saved", 2)
+            .unwrap();
+        assert!(
+            state
+                .finish_funding_if_proven(&id, &historical.operation_id)
+                .unwrap()
+        );
+        // Saved post-retirement inventory, not a test of retirement eligibility:
+        // the consumed reserve is vacant and the only old signer is retired.
+        let tx = state.db.transaction().unwrap();
+        tx.execute(
+            "UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1 WHERE wallet_id=?1",
+            [&historical.wallet_id],
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE wallets SET role='RETIRED',balance='0' WHERE id=?1",
+            [&historical.wallet_id],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        drop(state);
+
+        let state = Store::open(&dir, &key, &treasury).unwrap();
+        assert!(state.has_initial_credit(&participant).unwrap());
+        assert!(!state.has_bootstrap_demand(&participant).unwrap());
+        assert!(
+            state
+                .payment_identity_requires_creation(&participant)
+                .unwrap()
+        );
+        assert_eq!(state.funding_jobs().unwrap().len(), 2);
+        let (store, actor) = StoreHandle::spawn(state);
+        let manager = |pool| {
+            Arc::new(
+                ManagedPool::new(
+                    store.clone(),
+                    pool,
+                    BaseRpc::new("http://127.0.0.1:1").unwrap(),
+                    SpendPolicy::dollars("1").unwrap(),
+                )
+                .unwrap(),
+            )
+        };
+        let destination = manager(participant.clone());
+        let client = PaidClient::managed(destination.clone()).with_bootstrap(manager(bootstrap));
+        // A nonactivating capture cannot mask broken historical-credit discovery
+        // by creating fresh first-use demand before the owner starts.
+        let selected = local(client.capture_effective(false)).await.unwrap();
+        assert!(Arc::ptr_eq(&selected.managed_pool().unwrap(), &destination));
+        drop(selected);
+        let (requested, mut requests) = mpsc::unbounded_channel();
+        let worker = FundingWorker::new(store.clone(), Unfunded(requested), 5)
+            .with_bootstrap_participants(["participant".into(), "dormant".into()].into());
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(worker.run(stop.clone()));
+        // Existing bootstrap work dispatches after startup eligibility discovery,
+        // so the participant's opportunity is armed before advancing the clock.
+        let bootstrap_job = local(requests.recv()).await.unwrap();
+        assert_eq!(bootstrap_job.pool_name, "bootstrap");
+        // Finish publishing that attempt before advancing time, so its ordinary
+        // retry can independently witness a later scheduler iteration.
+        local(async {
+            loop {
+                let id = bootstrap_job.id.clone();
+                if store
+                    .call(move |s| Ok(s.funding_job(&id)?.unwrap().next_poll > 0))
+                    .await
+                    .unwrap()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        local(store.call(|s| {
+            assert_eq!(s.funding_jobs()?.len(), 2, "no eager replacement");
+            Ok(())
+        }))
+        .await
+        .unwrap();
+        tokio::time::advance(Duration::from_secs(120)).await;
+        // Either new work or the independent bootstrap retry follows due
+        // opportunities. Assert inventory directly so broken participant
+        // eligibility fails here instead of waiting forever for its callback.
+        let progressed = local(requests.recv()).await.unwrap();
+        assert!(matches!(
+            progressed.pool_name.as_str(),
+            "bootstrap" | "participant"
+        ));
+        let participant_id = participant.clone();
+        let old_job = historical.id.clone();
+        let replacement = local(store.call(move |s| {
+            Ok(s.funding_jobs()?
+                .into_iter()
+                .find(|job| job.pool_id == participant_id && job.id != old_job))
+        }))
+        .await
+        .unwrap()
+        .expect("historically credited participant must receive a replacement");
+        assert_ne!(replacement.id, historical.id);
+        assert_ne!(replacement.wallet_id, historical.wallet_id);
+        assert_eq!(replacement.pool_id, participant);
+        let selected = local(client.capture_effective(false)).await.unwrap();
+        assert!(Arc::ptr_eq(&selected.managed_pool().unwrap(), &destination));
+        drop(selected);
+        stop.cancel();
+        local(task).await.unwrap().unwrap();
+        local(store.call(move |s| {
+            assert!(s.has_initial_credit(&participant)?);
+            assert!(!s.has_bootstrap_demand(&participant)?);
+            assert_eq!(s.funding_jobs()?.len(), 3, "dormant group stays unallocated");
+            assert_eq!(s.funding_wallet_type(&replacement.id)?, "small");
+            let old: (String, String, String) = s.db.query_row(
+                "SELECT w.role,w.balance,f.readiness_requirement FROM wallets w JOIN funding_jobs f ON f.wallet_id=w.id WHERE w.id=?1", [&historical.wallet_id],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+            )?;
+            assert_eq!(old, ("RETIRED".into(), "0".into(), "1".into()));
+            assert_eq!(s.db.query_row("SELECT count(*) FROM outgoing", [], |r| r.get::<_, i64>(0))?, 0);
+            assert_eq!(s.db.query_row("SELECT count(*) FROM payment_attempts", [], |r| r.get::<_, i64>(0))?, 0);
+            Ok(())
+        })).await.unwrap();
+        drop(client);
+        drop(destination);
+        drop(store);
+        local(actor).await.unwrap();
+    }
 }

@@ -43,15 +43,16 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 60
 
-# Paid fallback for blocked catalog GETs. Shared sources choose an intended group
-# deterministically; uncredited company discovery can use web without activating
-# company funding. config show reports discovery_wallets. An explicit wallet below
-# keeps that selected group; bootstrap routing grants no new relay permission.
+# Paid fallback for blocked catalog GETs. Bootstrap policy keeps metadata and
+# directory relay fees on web, overriding relay_fallback.wallet without activating
+# company funding. config show reports discovery_wallets. Without bootstrap policy,
+# an explicit wallet selects the static discovery payer; otherwise shared sources
+# choose an intended group deterministically. Relay permissions remain separate.
 [relay_fallback]
 source_discovery = true # directory search and service metadata
 api_requests = false # opt in to disclose actual API requests
 provider_metadata = true # schemas/help, startup and explicit non-direct warming
-# wallet = "web" # optional override: share this wallet for all discovery
+# wallet = "web" # static discovery override when bootstrap policy is absent
 
 # Select by original target method; absent/empty lists mean origin-only.
 [relay_fallback.relays]

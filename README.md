@@ -338,9 +338,10 @@ for the discovery scopes and unavailable-treasury exception.
 The comprehensive example uses a [paid discovery relay](docs/configuration.md#relay-fallback)
 over Tor when catalog requests are blocked, rate limited or time out.
 Relay fees depend on the configured provider and request; relay-dependent catalogs
-appear when their effective payer becomes usable. Implicit company discovery can
-use web inventory without activating company funding; an explicit relay-wallet
-override keeps its selected group.
+appear when their effective payer becomes usable. With bootstrap policy enabled,
+metadata and directory relay fees always use web without activating company
+funding, overriding `relay_fallback.wallet`. Without bootstrap policy, an explicit
+relay wallet selects the payer for static discovery.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
