@@ -770,7 +770,8 @@ impl NetworkContext {
             .retry(reqwest::retry::never())
             .read_timeout(key.read_timeout)
             .connect_timeout(self.policy.connect_timeout())
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("x402_treazury/", env!("CARGO_PKG_VERSION")));
         if key.origin.starts_with("https://") {
             if !key.transport.allow_http1 {
                 builder = builder.http2_prior_knowledge();

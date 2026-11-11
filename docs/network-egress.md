@@ -4,7 +4,10 @@ The development-only `tools/providers/provider_updates.rs` captures public evide
 through `NetworkContext::http_policy` with discovery isolation, public-only
 destinations and provider HTTP compatibility settings. It accepts an explicit
 network policy and uses the existing inactivity timeout without an overall
-deadline. No cache, wallet, payment, relay or direct-fallback path is invoked.
+deadline. All runtime and capture HTTP clients send an identifying
+`x402_treazury/<version>` (or `x402_treazury-provider_updates/<version>`) User-Agent;
+origins such as CoinMarketCap's documentation reject requests without one. Redirects
+remain disabled, so a redirecting authority must be declared at its final public URL. No cache, wallet, payment, relay or direct-fallback path is invoked.
 Offline replay performs no network reads.
 
 Explicit pricing documents use the same acquisition policy as their source

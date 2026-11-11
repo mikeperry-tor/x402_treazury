@@ -444,8 +444,12 @@ fn compare_provider(
         "source unavailable"
     } else if provider.asset.is_some() && provider.evidence.is_none() {
         "missing maintenance metadata; authored review needed"
+    } else if provider.asset.is_some() && previous.is_null() {
+        "authored baseline established; manual consistency review needed"
+    } else if provider.asset.is_some() && !changed {
+        "authored no upstream evidence change"
     } else if provider.asset.is_some() {
-        "authored review needed"
+        "authored comparison ready; human review pending"
     } else if previous.is_null() {
         "baseline established; current consistency review needed"
     } else if !changed {

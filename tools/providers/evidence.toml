@@ -74,8 +74,9 @@ sources = [{ url = "https://apexfaucet.xyz/openapi.json", purpose = "schema" }]
 intent = "authored"
 guidance = "providers/CAVEATS.md#ax1-verdict"
 sources = [
-    { url = "https://www.ax1.vc/openapi.json", purpose = "schema" },
-    { url = "https://www.ax1.vc/agents.md", purpose = "guide" },
+    # www redirects these documents to console; capture never follows redirects.
+    { url = "https://console.ax1.vc/openapi.json", purpose = "schema" },
+    { url = "https://console.ax1.vc/agents.md", purpose = "guide" },
 ]
 
 [banking-compliance]

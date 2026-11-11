@@ -8,7 +8,7 @@ include = ["/api/dashboard/q-verdict", "/api/q-verdict", ""]
 # Console run ownership requires a Privy session; external receipts are public.
 exclude = ["/api/dashboard/q-verdict/runs"]
 pricing_key = "x-payment-info"
-help_url = "https://www.ax1.vc/agents.md"
+help_url = "https://console.ax1.vc/agents.md"
 instructions_text = "Verdicts are entertainment, not trading advice. Show result.disclaimer beside the verdict and link page_url. Save operation_id from submission; use the operation status tool for free status/result reads. HTTP 202 is pending or unknown; HTTP 200 still requires checking status. Missing results never authorize another purchase. External calls earn no Console rewards."
 
 [overrides.ax1_resource]

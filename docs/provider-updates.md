@@ -16,7 +16,10 @@ Commands write a compact JSON result to stdout (`run` for capture; `run`,
 
 Capture accepts `--network-config FILE` and uses the shared network factory,
 public destinations, discovery identities and the provider's HTTP compatibility
-settings. Tor retains remote DNS and no direct fallback. Local inputs are frozen first; independent public reads then run concurrently.
+settings. Tor retains remote DNS and no direct fallback. Public reads send an
+identifying `x402_treazury-provider_updates/<version>` User-Agent and never follow
+redirects; declare a redirecting authority at its final public URL. Local inputs are
+frozen first; independent public reads then run concurrently.
 Reads with identical URLs and compatibility settings share a capture, including
 failed reads. No whole-sweep
 deadline, retry framework or new resource limit is introduced; the existing
@@ -271,6 +274,59 @@ need reviewed custom adapters are tracked in the
 [custom pricing adapters plan](plans/custom-pricing-adapters.md), including the
 affected providers and the distinction between display-only and selection-capable
 metadata. Do not add provider-ID dispatch or a per-provider pricing recipe.
+
+### Review outcomes and manual review
+
+Read the packet outcome as a workflow state, not a drift verdict:
+
+- `source unavailable`: at least one required public read failed. For `ax1`, the
+  canonical `www` host returned a 307 redirect to `console.ax1.vc`; capture never
+  follows redirects, so the declared source was updated to the final public URL.
+  For `coinmarketcap`, the documentation origins returned 403 to requests without a
+  `User-Agent`; capture now sends an identifying
+  `x402_treazury-provider_updates/<version>` header and the same origins return 200.
+  A wallet receiving payments does not prove documentation acquisition works, and a
+  documentation 403 does not establish payment or API failure. Retry once for
+  transient failures, then treat the authority as unresolved rather than guessing a
+  source.
+- `baseline established` / `authored baseline established`: no prior capture of the
+  authoritative source exists. Review the current remote evidence against the
+  authored asset once; this is not evidence of a change.
+- `no upstream evidence change` / `authored no upstream evidence change`: prior
+  source, pricing and committed-asset evidence is unchanged. Local TOML, override
+  and maintenance-guidance edits may still appear in `runtime_changes` or
+  `tool_changes`.
+- `authored comparison ready; human review pending`: an upstream source, pricing or
+  committed-asset difference exists, but the provider uses a locally authored
+  `spec`. The tool cannot stage an authored replacement; reconcile the evidence and
+  apply ordinary reviewed edits.
+- `candidate ready; human review pending`: a vendor-copy asset with complete
+  supporting reads is staged for review.
+- `committed asset unchanged; no candidate`: the current vendor document matches the
+  committed asset. Prior-capture differences may still appear in the packet.
+
+Authored providers are routed to manual review because `provider.asset.is_some()`
+means their catalog is a local authored projection, not because a change was
+detected. Use the projection/tool changes, source diffs, registry/guide evidence and
+pricing relocation fields to decide whether edits are needed. A first authored
+capture or a source that lacks a schema projection remains a baseline review; do not
+infer drift from the label alone.
+
+For an authored baseline or comparison, reconcile the actual captured authorities:
+
+1. Confirm every declared schema, registry, discovery and guide read completed. A
+   missing read is unresolved evidence, not a clean baseline.
+2. Compare operation identities and declared prices in each authority with the local
+   asset. For a multi-authority union, review each source separately; do not merge
+   alternatives by convenience.
+3. When the vendor publishes no schema, identify which authority completes the
+   request contract and follow the manual public MCP procedure if applicable.
+4. Update the local asset, provider TOML and caveats only for a concrete difference.
+   A timestamp, live statistic, guide-page re-render or array reorder alone needs no
+   asset edit; record the no-change conclusion.
+5. Revalidate affected deployment consumers offline with `config show`, then run
+   `config check` for selected catalogs when the environment permits. A provider
+   file is not verified merely because its own catalog compiles.
 
 ## Stage and accept changes
 

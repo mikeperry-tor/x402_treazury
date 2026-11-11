@@ -46,14 +46,17 @@ change or an explicit provider error code. A generic HTTP status, age alone, a
 pricing signal or a validator change is insufficient. Never replay a call, allocate
 wallets, add probes or start a periodic scheduler to obtain corroboration.
 
-A second capture the same day compared all 70 providers against the first. Fifty
-reported no upstream evidence change; 14 authored providers still require manual
-review, three vendor-copy assets were unchanged, and two sources were unavailable.
-Among the reviewed differences, the only movement was local documentation edits,
-timestamp-only churn (`2s` registry `generatedAt` and `brazilayer` per-record
-`lastUpdated`) and a `strale` capability-array reorder with no slug or field change.
-These are concrete examples of indicators that must not be promoted to
-schema-change authority without structural corroboration.
+A subsequent full capture the same day compared all 70 providers against the prior
+one. Forty-nine reported no upstream evidence change, seven authored providers also
+had no upstream change, three vendor-copy assets were unchanged, five authored
+providers needed a first baseline review, one source was unavailable, and three
+authored providers plus two external-pricing providers had reviewable differences.
+Those differences were local documentation edits, timestamp-only churn (`2s`
+registry `generatedAt`, `brazilayer` per-record `lastUpdated`), live directory
+statistics (`x402-list` help), a dynamic Straits guide-page re-render, and a
+`strale` capability-array reorder with no slug or field change. These are concrete
+examples of indicators that must not be promoted to schema-change authority without
+structural corroboration.
 
 Provider-update packets now expose `response` metadata and distinguish a
 semantically unchanged committed vendor asset from a real candidate. They also

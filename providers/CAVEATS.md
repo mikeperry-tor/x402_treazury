@@ -1960,9 +1960,10 @@ paid delivery or historical-data completeness is established by catalog inspecti
 ## AX1 Verdict
 
 `ax1/provider.toml` uses an authored external request projection of
-[the vendor schema](https://www.ax1.vc/openapi.json), with
-[external usage guidance](https://www.ax1.vc/agents.md). Use the canonical `www`
-origin directly; paid requests do not follow redirects. The resource is POST;
+[the vendor schema](https://console.ax1.vc/openapi.json), with
+[external usage guidance](https://console.ax1.vc/agents.md). The `www` origin
+redirects these documents to `console.ax1.vc`; use the final public URLs because
+neither the capture tool nor paid requests follow redirects. The resource is POST;
 GET returns 405. Only Verdict is currently advertised for external callers.
 
 The upstream request body combines external and Privy Console schemas in a

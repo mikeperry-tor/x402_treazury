@@ -193,7 +193,14 @@ async fn download(source: &str, cfg: &Config) -> Result<(Vec<u8>, ResponseMeta)>
         true,
         cfg.transport(),
     )?;
-    let response = http.get(source).send().await?;
+    let response = http
+        .get(source)
+        .header(
+            reqwest::header::USER_AGENT,
+            concat!("x402_treazury-provider_updates/", env!("CARGO_PKG_VERSION")),
+        )
+        .send()
+        .await?;
     complete_response(
         response.status().as_u16(),
         response
