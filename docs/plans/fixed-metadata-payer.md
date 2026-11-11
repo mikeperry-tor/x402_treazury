@@ -40,3 +40,43 @@ The owning contracts are in `docs/configuration.md`, `docs/architecture.md`,
 `docs/agent-sources.md`, `docs/wallet-cli.md`, `docs/wallet-rotation.md`,
 `docs/local-resource-limits.md`, `docs/network-egress.md`, `docs/testing.md` and
 `tests/COMPLEXITY.md`.
+
+## Implementation and acceptance evidence
+
+Independent metadata and scheduler design reviews approved the scoped policies
+before implementation. M2 was committed before M1 because its Store projection
+rename is consumed by the payment regression, while the two implementation areas
+remained independently owned.
+
+- M2 is `b6f6d62b`. It removes the cadence phase, the second opportunity map and
+  due-time eligibility rereads. Independent exact and combined review verified
+  monotonic admission, retained due instants and Store commit guards.
+- M1 is `e17a9e91`, with non-bootstrap compatibility coverage in `c3f09dc1`.
+  Metadata relay authority is fixed across static, runtime and offline consumers.
+  API/raw fallback retains captured API authority. Catalog funding waits retain
+  their preexisting non-bootstrap initialization and notification behavior.
+- Initial independent review found late static clients missing the metadata
+  binding and contradictory Coinbase/refresh documentation. `60a225c6` applies
+  one shared binding step at both initialization boundaries and adds an actual
+  signed-payer regression. `63992c69` updates the owning guides. Both exact
+  fixups and combined affected consumers passed independent review.
+- Final production compiler, all-target Clippy, format and diff checks pass.
+  `target/fixed-metadata-focused.log` records 413 library and two CLI passes,
+  with nine ignored named subprocess helpers. `target/fixed-metadata-compat.log`
+  records 31 compatibility passes. `target/fixed-metadata-config.log` records
+  18 managed configuration passes. Sources and executables stayed frozen during
+  these runtime checks. The existing macOS test-linker compact-unwind warning
+  remains a diagnostic limitation. Live-funded qualification was outside scope.
+- The complete source-matched complexity report at `63992c69` covers 504 files
+  with zero exclusions. The actual shared binding step restores initializer CogC
+  to 61. Resolver CogC rises from 21 to 23 for bootstrap precedence within the
+  retained legacy selection contract. Independent review retained that decision.
+  Scheduler CogC/CycC falls from 66/76 to 65/74, with one opportunity map and no
+  credit cadence phase. `Prepared::acquire` falls from 39/38 to 34/32 and the
+  catalog activation/proof responsibilities are deleted. High-risk ownership
+  call chains were independently examined beyond metric warnings.
+
+The final independent combined review of `63992c69` found no material issue or
+compelling further simplification. All M1–M3 acceptance gates are complete.
+Enduring rules are in the maintained guides and examples. M4 plan deletion and
+independent exact cleanup review remain.
