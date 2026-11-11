@@ -1989,6 +1989,10 @@ these estimates. Hints advise existing wallet selection and fresh MCP descriptio
 they never authorize signing or initiate HTTP. Cache identity and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
 and [resource limits](local-resource-limits.md).
 
+Advertised pricing evidence can be refreshed and reviewed with the
+[provider maintenance sweep](provider-updates.md#pricing-evidence-and-variation-review);
+its key-pointer signals are discovery aids, not price authority.
+
 Managed API results also carry their own latest validated offer in a separate MCP
 JSON text block, including errors after validation. `x402_pricing.amount` is an
 exact decimal string, `currency` is `USDC` and `basis` is `observed_offer`. It is

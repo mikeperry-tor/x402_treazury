@@ -49,7 +49,9 @@ fn tool_view(cfg: &Config, items: &Result<Vec<catalog::ToolSpec>>) -> Result<Val
     }
 }
 fn projection(cfg: &Config, root: &Value) -> Result<Value> {
-    let operations = catalog::operations(root, cfg.pricing_key.as_deref())?
+    let pricing = cfg.effective_pricing()?;
+    let catalog_key = pricing.as_ref().and_then(|pricing| pricing.catalog_key());
+    let operations: serde_json::Map<String, Value> = catalog::operations(root, catalog_key)?
         .into_iter()
         .map(|op| {
             (
@@ -61,7 +63,12 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
                 op,
             )
         })
-        .collect::<serde_json::Map<String, Value>>();
+        .collect();
+    let total_operations = operations.len();
+    let priced_operations = operations
+        .values()
+        .filter(|operation| !operation["pricing"].is_null())
+        .count();
     let prefix = cfg.prefix.clone().map(Ok).unwrap_or_else(|| {
         catalog::default_prefix(cfg.base_url.as_deref().context("missing base_url/prefix")?)
     })?;
@@ -86,7 +93,7 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
         json!({"name":name,"authored_override":patch,"missing_tool":missing,"missing_parameter_notes":missing_params,"unoverridden":tool,"effective":effective.as_ref().ok().and_then(|items|items.iter().find(|t|&t.name==name))})
     }).collect::<Vec<_>>();
     Ok(
-        json!({"operations":operations,"effective":tool_view(cfg,&effective)?,"unoverridden":tool_view(cfg,&plain)?,"override_diagnostic_inventory":tool_view(cfg,&diagnostic)?,"overrides":diagnostics,"config":cfg}),
+        json!({"operations":operations,"pricing":{"catalog_key":catalog_key,"priced_operations":priced_operations,"total_operations":total_operations},"effective":tool_view(cfg,&effective)?,"unoverridden":tool_view(cfg,&plain)?,"override_diagnostic_inventory":tool_view(cfg,&diagnostic)?,"overrides":diagnostics,"config":cfg}),
     )
 }
 fn projected(cfg: &Config, raw: &[u8]) -> Value {
@@ -130,6 +137,186 @@ fn projection_changes(before: &Value, after: &Value) -> Value {
     } else {
         json!(diff(before, after))
     }
+}
+const PRICING_SIGNAL_LIMIT: usize = 100;
+fn pricing_key_name(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("price")
+        || key.contains("pricing")
+        || key.contains("payment")
+        || key.contains("tariff")
+        || key.contains("billing")
+        || key.contains("cost")
+        || key.contains("credit")
+        || (key.contains("x402") && key != "x402version")
+}
+fn signal_pointers(root: &Value) -> (Vec<String>, bool) {
+    let mut pointers = BTreeSet::new();
+    let mut stack = vec![(String::new(), root)];
+    let mut truncated = false;
+    while let Some((path, value)) = stack.pop() {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let pointer = format!("{path}/{}", key.replace('~', "~0").replace('/', "~1"));
+                    if pricing_key_name(key) {
+                        if pointers.len() >= PRICING_SIGNAL_LIMIT {
+                            truncated = true;
+                            break;
+                        }
+                        pointers.insert(pointer.clone());
+                    }
+                    stack.push((pointer, child));
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    stack.push((format!("{path}/{index}"), child));
+                }
+            }
+            _ => {}
+        }
+        if truncated {
+            break;
+        }
+    }
+    (pointers.into_iter().collect(), truncated)
+}
+fn remote_purpose(purpose: &str) -> bool {
+    matches!(
+        purpose,
+        "schema" | "registry" | "discovery" | "guide" | "help" | "pricing" | "source"
+    )
+}
+// Advisory key-name discovery only: pointers identify where pricing-like fields
+// exist, never what they mean or whether an adapter supports the shape.
+fn pricing_signals(run: &Path, provider: &Provider) -> Vec<Value> {
+    let mut sources = vec![];
+    for read in provider.inputs.iter().chain(provider.pricing.iter()) {
+        if !remote_purpose(&read.purpose) || read.hash.is_none() {
+            continue;
+        }
+        let Ok(raw) = bytes(run, read) else {
+            continue;
+        };
+        let Ok(root) = serde_json::from_slice::<Value>(&raw) else {
+            continue;
+        };
+        let (pointers, truncated) = signal_pointers(&root);
+        if pointers.is_empty() && !truncated {
+            continue;
+        }
+        sources.push(json!({"source":read.source,"purpose":read.purpose,"pointers":pointers,"truncated":truncated}));
+    }
+    sources.sort_by(|a, b| {
+        (a["source"].as_str(), a["purpose"].as_str())
+            .cmp(&(b["source"].as_str(), b["purpose"].as_str()))
+    });
+    sources
+}
+fn pricing_sources(run: &Path, provider: &Provider, prior: Option<(&Path, &Provider)>) -> Value {
+    let mut sources = vec![];
+    for read in &provider.pricing {
+        let raw = read.hash.as_ref().and_then(|_| bytes(run, read).ok());
+        let (outcome, captured) = match (&read.hash, raw.as_ref()) {
+            (Some(_), Some(_)) => ("captured", true),
+            (Some(_), None) => ("captured bytes unavailable", false),
+            (None, _) => (read.outcome.as_str(), false),
+        };
+        let shape = raw.as_ref().and_then(|raw| {
+            serde_json::from_slice::<Value>(raw).ok().map(|root| {
+                root.as_object()
+                    .map(|root| root.keys().cloned().collect::<Vec<_>>())
+            })
+        });
+        let comparison = prior
+            .and_then(|(path, provider)| {
+                provider
+                    .pricing
+                    .iter()
+                    .find(|old| old.source == read.source && old.purpose == read.purpose)
+                    .map(|old| (path, old))
+            })
+            .map(|(path, old)| {
+                let previous = old.hash.as_ref().and_then(|_| bytes(path, old).ok());
+                match (raw.as_ref(), previous.as_ref()) {
+                    (Some(current), Some(previous)) => json!({
+                        "basis":"prior capture",
+                        "changes":diff(&document(previous), &document(current)),
+                    }),
+                    _ => json!({"basis":"comparison unavailable: current or previous pricing bytes unavailable"}),
+                }
+            })
+            .unwrap_or_else(|| {
+                json!({"basis":if captured {"baseline established; no historical pricing capture"} else {"source unavailable"}})
+            });
+        sources.push(json!({
+            "source":read.source,
+            "purpose":read.purpose,
+            "captured":captured,
+            "outcome":outcome,
+            "shape":shape,
+            "comparison":comparison,
+        }));
+    }
+    let removed: Vec<_> = prior
+        .into_iter()
+        .flat_map(|(_, provider)| provider.pricing.iter())
+        .filter(|old| {
+            !provider
+                .pricing
+                .iter()
+                .any(|new| new.source == old.source && new.purpose == old.purpose)
+        })
+        .map(|old| {
+            json!({"source":old.source,"purpose":old.purpose,"outcome":"pricing source declaration removed; review relocation"})
+        })
+        .collect();
+    json!({"sources":sources,"removed_sources":removed})
+}
+fn pricing_section(
+    run: &Path,
+    provider: &Provider,
+    prior: Option<(&Path, &Provider)>,
+    runtime: &Value,
+) -> Value {
+    let current = provider
+        .config
+        .as_ref()
+        .and_then(|cfg| cfg.effective_pricing().ok().flatten());
+    let previous = prior
+        .and_then(|(_, provider)| provider.config.as_ref())
+        .and_then(|cfg| cfg.effective_pricing().ok().flatten());
+    let catalog_key = current.as_ref().and_then(|pricing| pricing.catalog_key());
+    let external_source = current
+        .as_ref()
+        .filter(|pricing| pricing.source != "catalog")
+        .map(|pricing| pricing.source.clone());
+    let previous_external = previous
+        .as_ref()
+        .filter(|pricing| pricing.source != "catalog")
+        .map(|pricing| pricing.source.clone());
+    let priced = runtime["pricing"]["priced_operations"]
+        .as_u64()
+        .unwrap_or(0);
+    let total = runtime["pricing"]["total_operations"].as_u64().unwrap_or(0);
+    let evidence = pricing_sources(run, provider, prior);
+    json!({
+        "catalog_key": catalog_key,
+        "external_source": external_source,
+        "evidence": evidence["sources"],
+        "relocation": {
+            "catalog_key_absent": catalog_key.is_some() && total > 0 && priced == 0,
+            "source_changed": prior.is_some() && previous_external != external_source,
+            "previous_external_source": previous_external,
+            "removed_sources": evidence["removed_sources"],
+        },
+        "signals": {
+            "sources": pricing_signals(run, provider),
+            "limit_per_source": PRICING_SIGNAL_LIMIT,
+            "advisory": "key-name discovery only; not price authority",
+        },
+    })
 }
 fn compare_provider(
     run: &Path,
@@ -183,7 +370,7 @@ fn compare_provider(
         sources.push(json!({"source":read.source,"purpose":read.purpose,"comparison":comparison,"projection":projection}));
     }
 
-    let removed_sources:Vec<_>=prior.into_iter().flat_map(|(_,p)|p.inputs.iter()).filter(|old|!provider.inputs.iter().any(|new|new.source==old.source && new.purpose==old.purpose)).map(|read|json!({"source":read.source,"purpose":read.purpose,"outcome":"source declaration removed; review authority change"})).collect();
+    let removed_sources:Vec<_>=prior.into_iter().flat_map(|(_,p)|p.inputs.iter()).filter(|old|old.purpose!="pricing"&&!provider.inputs.iter().any(|new|new.source==old.source && new.purpose==old.purpose)).map(|read|json!({"source":read.source,"purpose":read.purpose,"outcome":"source declaration removed; review authority change"})).collect();
     // Runtime history and authority history answer different questions. An authored
     // asset is runtime evidence, never a substitute for historical upstream input.
     let runtime = projected_input(run, provider, runtime_input(provider))?;
@@ -218,6 +405,7 @@ fn compare_provider(
             ))
         })
         .transpose()?;
+    let pricing = pricing_section(run, provider, prior, &runtime);
     let outcome = if provider.config.is_none() {
         provider.outcome.as_str()
     } else if provider.inputs.iter().any(|r| r.hash.is_none()) {
@@ -232,7 +420,7 @@ fn compare_provider(
         "comparison ready; human review pending"
     };
     Ok(
-        json!({"provider":provider.id,"outcome":outcome,"accepted":false,"sources":sources,"removed_sources":removed_sources,"runtime":runtime,"previous_runtime":previous_runtime,"runtime_changes":runtime_changes,"asset_changes":asset_changes,"upstream":upstream,"previous_upstream":previous,"tool_changes":tool_changes,"tool_basis":tool_basis,"guidance":provider.evidence.as_ref().map(|e| &e.guidance)}),
+        json!({"provider":provider.id,"outcome":outcome,"accepted":false,"sources":sources,"removed_sources":removed_sources,"runtime":runtime,"previous_runtime":previous_runtime,"runtime_changes":runtime_changes,"asset_changes":asset_changes,"pricing":pricing,"upstream":upstream,"previous_upstream":previous,"tool_changes":tool_changes,"tool_basis":tool_basis,"guidance":provider.evidence.as_ref().map(|e| &e.guidance)}),
     )
 }
 pub(super) fn review(run: &Path, prior: Option<&Path>) -> Result<()> {
@@ -423,6 +611,7 @@ mod tests {
                 raw,
             )],
             asset: None,
+            pricing: vec![],
             evidence: None,
             outcome: "captured".into(),
         }
@@ -559,7 +748,13 @@ mod tests {
     fn replay_packets_keep_failed_siblings_and_are_deterministic() {
         let dir = tempfile::tempdir().unwrap();
         let run = dir.path();
-        let valid = provider(run, &serde_json::to_vec(&spec()).unwrap());
+        let mut valid = provider(run, &serde_json::to_vec(&spec()).unwrap());
+        valid.pricing = vec![captured(
+            run,
+            "https://example.com/pricing",
+            "pricing",
+            b"{\"resources\":[{\"maxAmountRequired\":\"10000\"}]}",
+        )];
         let mut failed = valid.clone();
         failed.id = "failed".into();
         failed.inputs[0].hash = None;
@@ -575,6 +770,17 @@ mod tests {
             selected: BTreeMap::new(),
             providers: vec![failed, valid],
         };
+        let mut legacy = serde_json::to_value(&report).unwrap();
+        for provider in legacy["providers"].as_array_mut().unwrap() {
+            provider.as_object_mut().unwrap().remove("pricing");
+        }
+        let decoded: Run = serde_json::from_value(legacy).unwrap();
+        assert!(
+            decoded
+                .providers
+                .iter()
+                .all(|provider| provider.pricing.is_empty())
+        );
         std::fs::write(
             run.join("capture.json"),
             serde_json::to_vec(&report).unwrap(),
@@ -638,6 +844,152 @@ mod tests {
         new.inputs[0].hash = None;
         assert!(compare_provider(run, &new, Some((run, &old))).unwrap()["tool_changes"].is_null());
     }
+    #[test]
+    fn catalog_pricing_coverage_and_signals_are_advisory() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let mut schema = spec();
+        schema["paths"]["/one"]["get"]["x-payment-info"] =
+            json!({"amount":"0.01","currency":"USD"});
+        let raw = serde_json::to_vec(&schema).unwrap();
+        let mut cfg = cfg();
+        cfg.pricing_key = Some("x-payment-info".into());
+        let mut new = provider(run, &raw);
+        new.config = Some(cfg.clone());
+        let packet = compare_provider(run, &new, None).unwrap();
+        assert_eq!(packet["pricing"]["catalog_key"], "x-payment-info");
+        assert_eq!(packet["runtime"]["pricing"]["priced_operations"], 1);
+        assert_eq!(packet["runtime"]["pricing"]["total_operations"], 1);
+        assert_eq!(packet["pricing"]["relocation"]["catalog_key_absent"], false);
+        assert_eq!(
+            packet["pricing"]["signals"]["sources"][0]["pointers"],
+            json!(["/paths/~1one/get/x-payment-info"])
+        );
+        // A configured key that no longer appears is a relocation candidate, not
+        // proof that the operation is free.
+        let mut moved = cfg;
+        moved.pricing_key = Some("x-new-price".into());
+        new.config = Some(moved);
+        let relocated = compare_provider(run, &new, None).unwrap();
+        assert_eq!(relocated["runtime"]["pricing"]["priced_operations"], 0);
+        assert_eq!(
+            relocated["pricing"]["relocation"]["catalog_key_absent"],
+            true
+        );
+        assert!(
+            relocated["pricing"]["signals"]["sources"][0]["pointers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|pointer| pointer.as_str().unwrap().contains("x-payment-info"))
+        );
+    }
+
+    #[tokio::test]
+    async fn external_pricing_source_relocation_diff_and_corrupt_bytes_stay_advisory() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let resolve = |source: &str| {
+            let toml = format!(
+                "spec='https://example.com/openapi.json'\nprefix='demo'\n[pricing]\nsource='{source}'\nformat='x402-resources'\n"
+            );
+            x402_treazury::config::resolve(toml::from_str(&toml).unwrap(), Path::new("demo.toml"))
+        };
+        let prior_cfg = resolve("https://example.com/pricing")
+            .await
+            .unwrap()
+            .settings;
+        let cfg = resolve("https://example.com/pricing-new")
+            .await
+            .unwrap()
+            .settings;
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        let mut prior = provider(run, &raw);
+        prior.config = Some(prior_cfg);
+        prior.pricing = vec![captured(
+            run,
+            "https://example.com/pricing",
+            "pricing",
+            b"{\"x402Version\":2,\"resources\":[{\"maxAmountRequired\":\"10000\"}]}",
+        )];
+        let mut new = provider(run, &raw);
+        new.config = Some(cfg);
+        new.pricing = vec![captured(
+            run,
+            "https://example.com/pricing-new",
+            "pricing",
+            b"{\"x402Version\":2,\"resources\":[{\"maxAmountRequired\":\"20000\"}]}",
+        )];
+        let packet = compare_provider(run, &new, Some((run, &prior))).unwrap();
+        assert_eq!(
+            packet["pricing"]["relocation"]["previous_external_source"],
+            "https://example.com/pricing"
+        );
+        assert_eq!(packet["pricing"]["relocation"]["source_changed"], true);
+        assert_eq!(
+            packet["pricing"]["relocation"]["removed_sources"][0]["source"],
+            "https://example.com/pricing"
+        );
+        assert_eq!(packet["pricing"]["evidence"][0]["captured"], true);
+        assert_eq!(
+            packet["pricing"]["evidence"][0]["shape"],
+            json!(["resources", "x402Version"])
+        );
+        // The configured document's own bytes are compared when its URL is stable.
+        let mut same = new.clone();
+        same.config = Some(
+            resolve("https://example.com/pricing")
+                .await
+                .unwrap()
+                .settings,
+        );
+        same.pricing[0].source = "https://example.com/pricing".into();
+        same.pricing[0].hash = Some(
+            store(
+                run,
+                b"{\"x402Version\":2,\"resources\":[{\"maxAmountRequired\":\"30000\"}]}",
+            )
+            .unwrap(),
+        );
+        let packet = compare_provider(run, &same, Some((run, &prior))).unwrap();
+        assert_eq!(packet["pricing"]["relocation"]["source_changed"], false);
+        assert!(
+            !packet["pricing"]["evidence"][0]["comparison"]["changes"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        // A missing or corrupt pricing blob must not hide the rest of the packet.
+        for corrupt in [false, true] {
+            let digest = store(run, b"{\"x402Version\":2,\"resources\":[]}").unwrap();
+            if corrupt {
+                std::fs::write(run.join(&digest), "corrupt").unwrap();
+            } else {
+                std::fs::remove_file(run.join(&digest)).unwrap();
+            }
+            same.pricing[0].hash = Some(digest);
+            let packet = compare_provider(run, &same, Some((run, &prior))).unwrap();
+            assert_eq!(
+                packet["pricing"]["evidence"][0]["outcome"],
+                "captured bytes unavailable"
+            );
+            assert!(packet["runtime"]["effective"].is_object());
+        }
+    }
+    #[test]
+    fn pricing_signal_pointers_escape_and_bound() {
+        let (pointers, truncated) = signal_pointers(&json!({"a/~price":{"cost":1}}));
+        assert!(pointers.contains(&"/a~1~0price".to_string()));
+        assert!(!truncated);
+        let mut keys = serde_json::Map::new();
+        for index in 0..PRICING_SIGNAL_LIMIT + 5 {
+            keys.insert(format!("cost{index}"), json!(1));
+        }
+        let (pointers, truncated) = signal_pointers(&Value::Object(keys));
+        assert_eq!(pointers.len(), PRICING_SIGNAL_LIMIT);
+        assert!(truncated);
+    }
+
     #[test]
     fn failed_prior_capture_uses_complete_pinned_raw_basis() {
         let dir = tempfile::tempdir().unwrap();

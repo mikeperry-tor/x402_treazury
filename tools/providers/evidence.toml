@@ -1,6 +1,9 @@
 # Development evidence only. Runtime membership and URLs come from the bundle/TOML.
 # Sources are public evidence, never executable update recipes. Missing entries
 # are explicit unfinished authority research, never guessed URLs.
+# Purposes: schema, registry, guide, discovery and source are general authority;
+# pricing marks an additional public pricing document. A configured external
+# [pricing] source is captured from provider TOML and needs no entry here.
 [2s]
 intent = "authored"
 guidance = "providers/CAVEATS.md#2s-2stoml"

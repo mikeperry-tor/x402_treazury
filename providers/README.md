@@ -256,7 +256,9 @@ overrides without inferring tariff ownership from their text. See
 Declare reusable advertised pricing in `[pricing]` when the catalog supports a
 known format. Prefer `source = "catalog"`; external resource documents require an
 explicit HTTPS URL under the catalog's destination policy and their matching
-format. Dynamic source management retains public-destination enforcement.
+format. Refresh pricing evidence and review new shapes or relocated fields with the
+[provider maintenance sweep](../docs/provider-updates.md#pricing-evidence-and-variation-review).
+Dynamic source management retains public-destination enforcement.
 Keep compatible `pricing_key`
 shorthand when no extra interpretation is needed. Set `unit = "call"` only after
 reviewing the provider's per-call billing contract, and `usd_as_usdc = true` only

@@ -75,6 +75,8 @@ struct Provider {
     config: Option<Config>,
     inputs: Vec<Read>,
     asset: Option<Read>,
+    #[serde(default)]
+    pricing: Vec<Read>,
     evidence: Option<Evidence>,
     outcome: String,
 }
@@ -244,6 +246,17 @@ async fn capture_provider(
             purpose: "help".into(),
         }));
     }
+    // The configured external pricing document is the provider's own authority.
+    // Pricing evidence is advisory, so it stays out of the schema-affecting inputs.
+    let mut pricing = vec![];
+    if let Ok(Some(configured)) = cfg.effective_pricing()
+        && configured.source != "catalog"
+    {
+        pricing.push(pending_read(&Source {
+            url: configured.source,
+            purpose: "pricing".into(),
+        }));
+    }
     if let Some(metadata) = &evidence {
         let guidance = metadata
             .guidance
@@ -252,7 +265,11 @@ async fn capture_provider(
             .context("missing guidance path")?;
         inputs.push(local(run, guidance, "maintenance guidance")?);
         for source in &metadata.sources {
-            inputs.push(pending_read(source));
+            if source.purpose == "pricing" {
+                pricing.push(pending_read(source));
+            } else {
+                inputs.push(pending_read(source));
+            }
         }
     }
     let outcome = if inputs.iter().any(|r| r.hash.is_none()) {
@@ -269,6 +286,7 @@ async fn capture_provider(
         config: Some(cfg),
         inputs,
         asset,
+        pricing,
         evidence,
         outcome,
     })
@@ -335,6 +353,7 @@ async fn capture_entries(
                 config: None,
                 inputs: vec![],
                 asset: None,
+                pricing: vec![],
                 evidence,
                 outcome: "capture unavailable: configuration or local input invalid".into(),
             },
@@ -358,6 +377,7 @@ fn pending_reads(providers: &[Provider]) -> BTreeMap<(String, bool, bool), (Sour
             for read in provider
                 .inputs
                 .iter()
+                .chain(provider.pricing.iter())
                 .filter(|r| r.hash.is_none() && public_source(&r.source).is_ok())
             {
                 pending
@@ -402,6 +422,12 @@ async fn capture_completions(
                 continue;
             }
             for read in &mut provider.inputs {
+                if read.hash.is_none() && read.source == url {
+                    read.hash = captured.hash.clone();
+                    read.outcome = captured.outcome.clone();
+                }
+            }
+            for read in &mut provider.pricing {
                 if read.hash.is_none() && read.source == url {
                     read.hash = captured.hash.clone();
                     read.outcome = captured.outcome.clone();
@@ -523,6 +549,109 @@ mod tests {
                 .is_err()
         );
     }
+    #[tokio::test]
+    async fn pricing_evidence_is_advisory_and_not_a_schema_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path().join("run");
+        std::fs::create_dir(&run).unwrap();
+        std::fs::write(dir.path().join("spec.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("guide.md"), "guide").unwrap();
+        let path = dir.path().join("provider.toml");
+        std::fs::write(
+            &path,
+            "spec='spec.json'\nprefix='demo'\n[pricing]\nsource='https://example.com/pricing'\nformat='x402-resources'\n",
+        )
+        .unwrap();
+        let evidence = Evidence {
+            intent: Intent::VendorCopy,
+            guidance: dir.path().join("guide.md").to_string_lossy().into_owned(),
+            sources: vec![Source {
+                url: "https://example.com/pricing-guide".into(),
+                purpose: "pricing".into(),
+            }],
+        };
+        let provider = capture_provider(&run, "demo", path.to_str().unwrap(), Some(evidence))
+            .await
+            .unwrap();
+        assert!(provider.inputs.iter().all(|read| read.purpose != "pricing"));
+        assert_eq!(provider.pricing.len(), 2);
+        assert!(
+            provider
+                .pricing
+                .iter()
+                .all(|read| read.hash.is_none() && read.purpose == "pricing")
+        );
+        assert_eq!(provider.outcome, "captured; review pending");
+        let mut report = Run {
+            format: 1,
+            version: "test".into(),
+            tool_hash: "test".into(),
+            baseline: "test".into(),
+            dirty: String::new(),
+            network: serde_json::json!({}),
+            metadata: local(&run, dir.path().join("guide.md").to_str().unwrap(), "test").unwrap(),
+            selected: BTreeMap::new(),
+            providers: vec![provider],
+        };
+        assert_eq!(pending_reads(&report.providers).len(), 2);
+        let reads = [
+            "https://example.com/pricing",
+            "https://example.com/pricing-guide",
+        ]
+        .into_iter()
+        .map(|url| {
+            Ok((
+                (url.to_owned(), false, false),
+                Read {
+                    source: url.into(),
+                    purpose: "pricing".into(),
+                    hash: Some(store(&run, b"{\"x402Version\":2,\"resources\":[]}").unwrap()),
+                    outcome: "captured".into(),
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+        capture_completions(&run, &mut report, futures_util::stream::iter(reads))
+            .await
+            .unwrap();
+        assert!(
+            report.providers[0]
+                .pricing
+                .iter()
+                .all(|read| read.hash.is_some())
+        );
+        assert_eq!(report.providers[0].outcome, "captured; review pending");
+        assert_eq!(report.providers[0].inputs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn query_bearing_pricing_source_is_unavailable_but_does_not_fail_the_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("spec.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("guide.md"), "guide").unwrap();
+        let path = dir.path().join("provider.toml");
+        std::fs::write(
+            &path,
+            "spec='spec.json'\nprefix='demo'\n[pricing]\nsource='https://example.com/pricing?token=x'\nformat='x402-resources'\n",
+        )
+        .unwrap();
+        let evidence = Evidence {
+            intent: Intent::VendorCopy,
+            guidance: dir.path().join("guide.md").to_string_lossy().into_owned(),
+            sources: vec![],
+        };
+        let provider = capture_provider(dir.path(), "demo", path.to_str().unwrap(), Some(evidence))
+            .await
+            .unwrap();
+        assert_eq!(provider.outcome, "captured; review pending");
+        assert_eq!(provider.pricing.len(), 1);
+        assert_eq!(
+            provider.pricing[0].outcome,
+            "source unavailable: invalid public evidence URL"
+        );
+        assert!(provider.pricing[0].hash.is_none());
+    }
+
     #[test]
     fn public_evidence_rejects_private_and_credential_urls() {
         for url in [
@@ -557,6 +686,7 @@ mod tests {
                 outcome: "offline: not attempted".into(),
             }],
             asset: None,
+            pricing: vec![],
             evidence: None,
             outcome: "source unavailable".into(),
         };

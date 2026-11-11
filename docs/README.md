@@ -5,7 +5,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 | Guide | Subject |
 | --- | --- |
-| [Provider updates](provider-updates.md) | Public evidence capture, comparison and reviewed provider maintenance |
+| [Provider updates](provider-updates.md) | Public evidence and pricing capture, comparison and reviewed provider maintenance |
 | [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
 | [Development](development.md) | Local checks, coverage and complexity tooling |

@@ -292,6 +292,7 @@ mod tests {
             }),
             inputs: vec![read.clone()],
             asset: Some(read),
+            pricing: vec![],
             evidence: Some(Evidence {
                 intent: Intent::VendorCopy,
                 guidance: "guide".into(),

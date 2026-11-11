@@ -127,6 +127,106 @@ compiler-dependent targets are `null`, not falsely reported absent. A full-copy
 first update includes effective-tool differences against its committed asset;
 ordinary remote first captures never claim historical tool changes.
 
+## Pricing evidence and variation review
+
+Pricing hints are advisory advertisements for display and wallet selection; observed
+offers and actual challenges remain authoritative. See
+[pricing metadata and runtime hints](configuration.md#pricing-metadata-and-runtime-hints)
+for normalization, units, credit conversion and selection semantics. A sweep never
+pays to discover a price and never treats a hint as payment authority.
+
+Pricing metadata is less standardized than OpenAPI structure. Known authorities
+include operation or root extensions such as `x-payment-info`, `x-x402`,
+`x-price-usd` and provider-specific keys; separate public x402 v2 discovery
+documents with `resources` or `items` arrays; registry/catalog documents; help or
+guide prose; and public MCP tool metadata. These are discovery leads, not a closed
+inventory. A field that moves, disappears, is renamed or appears in a new place is
+evidence to review, not permission to infer a price. Unknown or absent pricing does
+not mean free.
+
+### Pricing capture
+
+- The configured `[pricing]` block and any legacy `pricing_key` are frozen with the
+  provider TOML and resolved Config. External `[pricing] source` URLs come from that
+  TOML, not from a second URL inventory.
+- A configured external pricing URL is captured as a separate `pricing` read. It is
+  advisory evidence: it never counts as a schema authority, never blocks schema
+  candidates, and never changes the provider's schema-capture outcome when it is
+  unavailable.
+- Additional public pricing authorities may be declared in
+  `tools/providers/evidence.toml` with `purpose = "pricing"`. They join the
+  configured external source in the advisory pricing collection and never become
+  schema-supporting inputs. Never guess a URL; missing authority is unresolved
+  work. A pricing shape that is not publicly documented stays authored in
+  `pricing_description` or provider caveats.
+- Capture uses the existing public, credential-free, query- and fragment-free URL
+  rule and accepts only complete successful responses. Runtime pricing validation
+  accepts HTTPS provider URLs and runtime acquisition applies the public-destination
+  rule, so a query-bearing URL can work at runtime while capture records it as
+  pricing evidence unavailable. That is not provider failure, and its committed
+  TOML is not rewritten.
+- Payment, partial and unsolicited range responses are unavailable evidence. No
+  paid raw call is made. Captured bytes stay in the ignored
+  `target/provider-updates/RUN`; they are never committed. Offline capture records
+  pricing as not attempted.
+
+### Pricing in packets
+
+- The production projection reports the effective `catalog_key` plus
+  `priced_operations` and `total_operations` counts. Generated `Cost:` text remains
+  visible in the effective and unoverridden tools. This shows coverage without
+  treating catalog-derived text as an upstream price.
+- The packet's `pricing` object reports the configured external source, each
+  pricing source's observed root shape, capture status and prior-capture diff,
+  relocation flags, and an advisory signal inventory. Configured and resolved
+  Config changes also remain visible in the normal runtime/config differences.
+- `pricing.relocation` flags a configured catalog key with no priced operations and
+  a changed, added or removed external source. These are review prompts, not
+  errors; many operations legitimately omit pricing.
+- `pricing.signals` lists sorted JSON key pointers whose names look pricing-related
+  (`price`, `pricing`, `payment`, `tariff`, `billing`, `cost`, `credit`, `x402`
+  other than `x402Version`) across remote schema, registry, discovery, guide, help,
+  pricing and source documents. It is bounded per source, records no values or
+  prose, and never infers an amount, adapter or support. Local provider TOML,
+  maintenance guidance and committed assets are excluded.
+- Raw source diffs compare external pricing documents and guide/registry changes.
+  Mapping an external `resources`/`items` document to operations is runtime-only
+  and intentionally ambiguous; an offline sweep does not prove that mapping.
+- Pricing evidence never stages a schema candidate. Candidate readiness remains
+  governed by the schema authority and its complete supporting reads.
+
+### Pricing review steps
+
+For each packet, in addition to the normal steps below:
+
+1. Identify the current authority and adapter: catalog `payment-info`/`x402`, or an
+   external `x402-resources`/`x402-discovery` document. Verify the adapter matches
+   the observed shape rather than assuming the previous format still applies.
+2. Review provider-specific values: configured key or catalog key, `unit`,
+   `usd_as_usdc`, network/asset, fixed versus dynamic/range/metered/credit
+   semantics, and the vendor's per-call billing contract. Do not promote prose
+   options, defaults or example values into constraints.
+3. Look for relocation and variation: a previously used key absent from every
+   operation, a renamed custom field, pricing moved to a root extension, a new
+   well-known/catalog/guide document, or a new resource record shape. Inspect the
+   signal pointers and raw diffs, then confirm the actual document.
+4. Reconcile per-operation mapping where an external document is used. Ambiguous,
+   conflicting or unmatched resources leave the hint unknown; do not invent a
+   mapping or sum alternatives.
+5. Confirm the hint remains advisory: no signing, challenge, spending-cap or
+   reconciliation change follows from pricing metadata. Unknown is not free, and a
+   stale hint must not block an otherwise authorized call.
+6. Update `[pricing]`, `evidence.toml` purposes, authored `pricing_description`
+   fragments and [provider caveats](../providers/CAVEATS.md) as one coherent
+   change. A new format adapter is a shared code and documentation change with
+   independent uses and independent design review, never a per-provider recipe or
+   provider-ID dispatch.
+7. For an all-provider sweep, omit `--provider` to attempt the full manifest and
+   record per-provider pricing outcomes: confirmed unchanged, variation updated,
+   relocation unresolved, no pricing authority captured, or missing maintenance
+   metadata. Report attempted coverage and unresolved authorities separately from
+   accepted changes. Process success is not universal price verification.
+
 ## Stage and accept changes
 
 Replay stages exact complete bytes as `candidate-N.json` only for declared
@@ -257,9 +357,12 @@ boundaries before implementation; avoid provider dispatch or per-provider recipe
 
 `make test CARGO_ARGS='--example provider_updates'` exercises shared synthetic
 contracts: frozen inputs, unavailable sibling evidence, baseline distinctions,
-masked overrides, method/name changes, filtered additions and full-copy closure.
-Provider fixtures require a named authored transformation or compatibility quirk;
-maintenance reports are ignored artifacts, never universal vendor inventory goldens.
+masked overrides, method/name changes, filtered additions, full-copy closure,
+external and declared pricing evidence isolation, external-document shape and diff
+reporting, pricing relocation/absent-key reporting, advisory key-pointer signals,
+legacy captures without pricing metadata, and missing or corrupt pricing blobs. Provider fixtures require
+a named authored transformation or compatibility quirk; maintenance reports are
+ignored artifacts, never universal vendor inventory goldens.
 Follow [application validation order](testing.md#validation-order-and-continuation),
 including compiler/all-target Clippy and compatibility stages before broad suites.
 At architecture gates compare CogC/CycC against the agreed branch baseline and
