@@ -63,3 +63,13 @@ pricing_description = "Free."
 [overrides.oneshot_v1_status]
 description = "Dependency health, separate from process liveness."
 pricing_description = "Free."
+
+# x402 USDC settlement; USD operation tariffs use the explicit nominal USDC
+# interpretation. The authored search pricing_description remains authoritative
+# for display; challenges and configured caps still govern payment.
+[pricing]
+source = "catalog"
+format = "payment-info"
+key = "x-payment-info"
+unit = "call"
+usd_as_usdc = true

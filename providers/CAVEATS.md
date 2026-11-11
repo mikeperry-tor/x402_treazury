@@ -884,10 +884,14 @@ payment request envelope; Treazury uses the standard header. No legacy header
 translation is added. This verifies challenge compatibility, not funded settlement;
 no wallet credentials or payment were sent.
 
-`x-payment-info` here contains authentication flags, not a price object. The
-provider therefore uses an authored $0.001 description from the vendor operation
-text, with the live challenge and configured payment cap authoritative. The schema's query-length
-and result-count bounds and original JSON field names are preserved without repairs.
+Most `x-payment-info` records also carry authentication flags; the paid search
+operation now publishes a USD fixed price, and the provider opts into the nominal
+USDC interpretation through `[pricing]`. The authored search description keeps its
+vendor-listed $0.001 display, while the live challenge and configured payment cap
+remain authoritative. Included free operations keep their authored `Free.`
+descriptions; included paid operations without a price retain unknown estimates.
+The schema's query-length and result-count bounds and original JSON field names are
+preserved without repairs.
 
 The lazy help tool fetches the single search API guide, not the full service index.
 Provider/tool guidance explains that its legacy payment-header instructions are
@@ -1675,9 +1679,17 @@ though the vendor's hosted MCP exposes only its quote. The definition omits
 `pricing_key`: ordinary `x-payment-info.amount` values are atomic units (10000
 for the advertised $0.01 HTTP route), while the current generic display parser
 treats `amount` as major units. Premium routes use a separate
-`x-premium-payment-info` field. Preserve full vendor price prose with an explicit
-unknown structured estimate instead of displaying atomic amounts as call prices;
-live challenges and ordinary caps still govern payment. The seller report includes the vendor's own capped test
+`x-premium-payment-info` field. Newer records also publish `priceUsd` beside the
+atomic `amount`/`decimals` fields and, for some operations, Base/Polygon network
+alternatives; the generic payment-info adapter does not consume `priceUsd`,
+atomic amounts, or those alternatives. Preserve full vendor price prose with an
+explicit unknown structured estimate instead of displaying atomic amounts as call
+prices; live challenges and ordinary caps still govern payment. The refreshed
+schema also adds site audit/agent-readiness, US banking-calendar, vulnerability
+lockfile and weather forecast/storm-event routes. The vendor's
+`.well-known/x402` named-route catalog is advisory pricing evidence only; it is not
+an accepted `x402-resources`/`x402-discovery` document and no runtime adapter
+consumes it. The seller report includes the vendor's own capped test
 payment and retains checked URLs/addresses for 90 days under its published terms.
 It does not receive or forward a Treazury target-payment signature. Its verdict
 is an evidence report, not an endorsement; price alone is not an exclusion.

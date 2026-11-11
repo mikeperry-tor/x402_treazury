@@ -67,6 +67,32 @@ struct Read {
     purpose: String,
     hash: Option<String>,
     outcome: String,
+    /// Safe response metadata for cache/validator comparison; never upstream prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    response: Option<ResponseMeta>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct ResponseMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    etag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_modified: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    date: Option<String>,
+}
+fn response_meta(response: &reqwest::Response) -> ResponseMeta {
+    let header = |name: reqwest::header::HeaderName| {
+        response
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    ResponseMeta {
+        etag: header(reqwest::header::ETAG),
+        last_modified: header(reqwest::header::LAST_MODIFIED),
+        date: header(reqwest::header::DATE),
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Provider {
@@ -137,6 +163,7 @@ fn local(run: &Path, source: &str, purpose: &str) -> Result<Read> {
         purpose: purpose.into(),
         hash: Some(store(run, &bytes)?),
         outcome: "captured".into(),
+        response: None,
     })
 }
 fn public_source(source: &str) -> Result<()> {
@@ -157,7 +184,7 @@ fn complete_response(status: u16, content_range: bool) -> Result<()> {
     );
     Ok(())
 }
-async fn download(source: &str, cfg: &Config) -> Result<Vec<u8>> {
+async fn download(source: &str, cfg: &Config) -> Result<(Vec<u8>, ResponseMeta)> {
     public_source(source)?;
     let http = network::global().http_policy(
         &network::IsolationId::discovery(source)?,
@@ -173,7 +200,8 @@ async fn download(source: &str, cfg: &Config) -> Result<Vec<u8>> {
             .headers()
             .contains_key(reqwest::header::CONTENT_RANGE),
     )?;
-    Ok(response.bytes().await?.to_vec())
+    let meta = response_meta(&response);
+    Ok((response.bytes().await?.to_vec(), meta))
 }
 fn pending_read(source: &Source) -> Read {
     let valid = public_source(&source.url).is_ok();
@@ -191,15 +219,17 @@ fn pending_read(source: &Source) -> Read {
             "source unavailable: invalid public evidence URL"
         }
         .into(),
+        response: None,
     }
 }
 // Only fixed diagnostic categories are persisted; reqwest errors may contain URLs/prose.
 async fn remote(run: &Path, source: &Source, cfg: &Config) -> Result<Read> {
-    let (digest, outcome) = match download(&source.url, cfg).await {
-        Ok(raw) => (Some(store(run, &raw)?), "captured"),
+    let (digest, outcome, response) = match download(&source.url, cfg).await {
+        Ok((raw, response)) => (Some(store(run, &raw)?), "captured", Some(response)),
         Err(_) => (
             None,
             "source unavailable: public read failed (no payment attempted)",
+            None,
         ),
     };
     Ok(Read {
@@ -207,6 +237,7 @@ async fn remote(run: &Path, source: &Source, cfg: &Config) -> Result<Read> {
         purpose: source.purpose.clone(),
         hash: digest,
         outcome: outcome.into(),
+        response,
     })
 }
 async fn capture_provider(
@@ -230,6 +261,7 @@ async fn capture_provider(
         purpose: "provider TOML".into(),
         hash: Some(store(run, &raw)?),
         outcome: "captured".into(),
+        response: None,
     }];
     let asset = if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
         inputs.push(pending_read(&Source {
@@ -319,6 +351,7 @@ async fn capture(ids: Vec<String>, offline: bool) -> Result<PathBuf> {
             purpose: "maintenance metadata".into(),
             hash: Some(store(&run, &metadata_raw)?),
             outcome: "captured".into(),
+            response: None,
         },
         selected: BTreeMap::new(),
         providers: vec![],
@@ -425,12 +458,14 @@ async fn capture_completions(
                 if read.hash.is_none() && read.source == url {
                     read.hash = captured.hash.clone();
                     read.outcome = captured.outcome.clone();
+                    read.response = captured.response.clone();
                 }
             }
             for read in &mut provider.pricing {
                 if read.hash.is_none() && read.source == url {
                     read.hash = captured.hash.clone();
                     read.outcome = captured.outcome.clone();
+                    read.response = captured.response.clone();
                 }
             }
             provider.outcome = if provider.inputs.iter().any(|r| r.hash.is_none()) {
@@ -607,6 +642,7 @@ mod tests {
                     purpose: "pricing".into(),
                     hash: Some(store(&run, b"{\"x402Version\":2,\"resources\":[]}").unwrap()),
                     outcome: "captured".into(),
+                    response: None,
                 },
             ))
         })
@@ -684,6 +720,7 @@ mod tests {
                 purpose: "schema".into(),
                 hash: None,
                 outcome: "offline: not attempted".into(),
+                response: None,
             }],
             asset: None,
             pricing: vec![],
@@ -702,6 +739,7 @@ mod tests {
                 purpose: "test".into(),
                 hash: Some(store(run, b"metadata").unwrap()),
                 outcome: "captured".into(),
+                response: None,
             },
             selected: [
                 ("first".into(), "first.toml".into()),
@@ -731,6 +769,7 @@ mod tests {
                 purpose: "schema".into(),
                 hash: Some(store(run, raw).unwrap()),
                 outcome: "captured".into(),
+                response: None,
             },
         )));
         let (polled, pending) = tokio::sync::oneshot::channel();
@@ -788,7 +827,11 @@ mod tests {
         let raw=serde_json::to_vec(&json!({"openapi":"3.0.0","paths":{"/one":{"get":{"description":"upstream","responses":{"200":{"description":"full response"}}}}}})).unwrap();
         let guidance = dir.path().join("guide.md");
         std::fs::write(&guidance, "Authored maintenance evidence").unwrap();
-        std::fs::write(dir.path().join("asset.json"), &raw).unwrap();
+        std::fs::write(
+            dir.path().join("asset.json"),
+            br#"{"openapi":"3.0.0","paths":{"/old":{"get":{"responses":{"200":{"description":"old"}}}}}}"#,
+        )
+        .unwrap();
         let remote_path = dir.path().join("remote.toml");
         let pinned_path = dir.path().join("pinned.toml");
         let authored_path = dir.path().join("authored.toml");
@@ -858,6 +901,7 @@ mod tests {
                     purpose: source.purpose,
                     hash: Some(store(&run, data).unwrap()),
                     outcome: "captured".into(),
+                    response: None,
                 },
             ))
         })

@@ -5,12 +5,13 @@
     "version": "1.1.0",
     "termsOfService": "https://horizonpulse.dev/terms/buyer",
     "summary": "Pay-per-call APIs for AI agents, settled in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger, with x402.",
-    "description": "Pay-per-call APIs for AI agents, paid in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger, with x402: web search, page fetch and extract, PDF to text, an HTTP proxy, and crypto market data. No signup or API key.\n\nOn Base, you only pay for a successful response; errors are not charged except where an operation says so (for /api/tx-status, a not_found status is a charged answer; poll again after pollAgainSeconds). These no-charge statements are made for USDC on Base. On USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. charged: false means Horizon Pulse did not settle the payment; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, this is not a guarantee that no funds moved. Every paid operation carries `x-payment-info` with the exact price, asset, network and payTo of its Base entry; these match the 402 challenge and https://horizonpulse.dev/.well-known/x402. The 402 challenge also offers the same price in USDC on Solana mainnet (`exact`, network solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp, USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, payTo BjY98A6dS3GGLZdz2zHy8wK7XAwnQgNhCc66mfmBTRPz, PayAI facilitator https://facilitator.payai.network), and in native USDC on Polygon PoS mainnet (`exact`, network eip155:137, USDC 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359, payTo 0x5b32c973596078a967562ca652761404f19be0e9, facilitator: Coinbase CDP), and in RLUSD on the XRP Ledger mainnet (`exact`, network xrpl:0, currency RLUSD = 524C555344000000000000000000000000000000, issuer rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De, payTo r3FbirL83RAB2CwnUdxE5pCohMkuo6LQcf, verified on the validated ledger). Recorded example responses (fixed input, dated, informational; not paid operations): GET /api/demo/{route}.\n\nAgent integration: step-by-step skill at https://horizonpulse.dev/skill.md; guide with MCP setup at https://horizonpulse.dev/agents (hosted MCP at https://horizonpulse.dev/mcp for x402-aware clients, plus a local stdio MCP server in the repo's mcp/ folder that pays from your own wallet with spend caps).\n\nServices for API owners (web pages, not API operations; not paid via x402): Bazaar listing fix at https://horizonpulse.dev/listing-fix; agent promotion at https://horizonpulse.dev/agent-promotion.",
+    "description": "Pay-per-call APIs for AI agents, paid in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger, with x402: web search, page fetch and extract, PDF to text, an HTTP proxy, and crypto market data. No signup or API key.\n\nOn Base, you only pay for a successful response; errors are not charged except where an operation says so (for /api/tx-status, a not_found status is a charged answer; poll again after pollAgainSeconds). These no-charge statements are made for USDC on Base. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. charged: false means Horizon Pulse did not settle the payment; on USDC on Solana, and RLUSD on the XRP Ledger, this is not a guarantee that no funds moved. Every paid operation carries `x-payment-info` with the exact price, asset, network and payTo of its Base entry; these match the 402 challenge and https://horizonpulse.dev/.well-known/x402. The 402 challenge also offers the same price in USDC on Solana mainnet (`exact`, network solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp, USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, payTo BjY98A6dS3GGLZdz2zHy8wK7XAwnQgNhCc66mfmBTRPz, PayAI facilitator https://facilitator.payai.network), and in native USDC on Polygon PoS mainnet (`exact`, network eip155:137, USDC 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359, payTo 0x5b32c973596078a967562ca652761404f19be0e9, facilitator: Coinbase CDP), and in RLUSD on the XRP Ledger mainnet (`exact`, network xrpl:0, currency RLUSD = 524C555344000000000000000000000000000000, issuer rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De, payTo r3FbirL83RAB2CwnUdxE5pCohMkuo6LQcf, verified on the validated ledger). Recorded example responses (fixed input, dated, informational; not paid operations): GET /api/demo/{route}.\n\nAgent integration: step-by-step skill at https://horizonpulse.dev/skill.md; guide with MCP setup at https://horizonpulse.dev/agents (hosted MCP at https://horizonpulse.dev/mcp for x402-aware clients, plus a local stdio MCP server in the repo's mcp/ folder that pays from your own wallet with spend caps).\n\nServices for API owners (web pages, not API operations; not paid via x402): Bazaar listing fix at https://horizonpulse.dev/listing-fix; agent promotion at https://horizonpulse.dev/agent-promotion.",
     "contact": {
       "name": "Horizon Pulse",
       "email": "horizonpulse.co@proton.me",
       "url": "https://horizonpulse.dev"
-    }
+    },
+    "x-guidance": "Read PAYMENT-REQUIRED (base64 JSON). Pay exact USDC on Base (CDP), Solana (PayAI feePayer), Polygon, or RLUSD on XRPL at the listed payTo. Unpaid samples: /api/demo/{route}. Skill: /skill.md. Hosted MCP: /mcp (Base USDC only)."
   },
   "externalDocs": {
     "description": "Agent guide: discovery, the x402 pay flow, skill file and MCP setup",
@@ -64,7 +65,7 @@
           "Crypto market data"
         ],
         "summary": "BTC, ETH and SOL spot prices with 24h momentum (Coinbase Exchange, CoinGecko fallback)",
-        "description": "Crypto market data: a current USD price snapshot for BTC, ETH and SOL, or one coin via symbol= (bad symbol: 400), for quick market context. JSON per asset: priceUsd, change24hPct, momentum; plus overall momentum, sentiment, direction, avgChange24hPct, asOf. Prices from Coinbase Exchange, CoinGecko fallback (source field). Labels are fixed rules on 24h change, not a forecast and not financial advice. Errors are not charged on Base (other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Crypto market data: a current USD price snapshot for BTC, ETH and SOL, or one coin via symbol= (bad symbol: 400), for quick market context. JSON per asset: priceUsd, change24hPct, momentum; plus overall momentum, sentiment, direction, avgChange24hPct, asOf. Prices from Coinbase Exchange, CoinGecko fallback (source field). Labels are fixed rules on 24h change, not a forecast and not financial advice. Errors are not charged on Base or Polygon (other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -168,7 +169,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -195,7 +196,7 @@
           "Crypto market data"
         ],
         "summary": "RSI, MACD and Bollinger bands plus perpetual funding (CoinGecko, OKX)",
-        "description": "Crypto market data: precomputed RSI-14, MACD and Bollinger Bands plus latest OKX perp funding for BTC, ETH and SOL, or one coin via symbol= (bad symbol: 400), with no candle fetching needed. JSON per asset: rsi14, macd {macd, signal, histogram} (null if too few candles), bollinger, lastClose, funding. From CoinGecko OHLC closes (Coinbase fallback); methodology included. Descriptive only, not a forecast and not financial advice. Errors are not charged on Base (other rails may charge).\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Crypto market data: precomputed RSI-14, MACD and Bollinger Bands plus latest OKX perp funding for BTC, ETH and SOL, or one coin via symbol= (bad symbol: 400), with no candle fetching needed. JSON per asset: rsi14, macd {macd, signal, histogram} (null if too few candles), bollinger, lastClose, funding. From CoinGecko OHLC closes (Coinbase fallback); methodology included. Descriptive only, not a forecast and not financial advice. Errors are not charged on Base or Polygon (other rails may charge).\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -301,7 +302,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -328,7 +329,7 @@
           "Crypto market data"
         ],
         "summary": "Ranked DeFi yields, pools with TVL of $10M or more (DefiLlama)",
-        "description": "DeFi yield API: current APY for stablecoin and DeFi pools in one GET, no parameters. Returns JSON: up to 25 pools ordered by a fixed filter tier then APY, each with project, chain, symbol, tvlUsd, apy, apyBase, apyReward, apyMean30d, stablecoin, exposure, ilRisk and poolId. Filters: TVL >= $10M, non-outlier APY. Figures passed through from DefiLlama at fetch time, not advice. Errors are not charged on Base (other rails may charge).\n\nPrice: $0.02 USDC per call (20000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "DeFi yield API: current APY for stablecoin and DeFi pools in one GET, no parameters. Returns JSON: up to 25 pools ordered by a fixed filter tier then APY, each with project, chain, symbol, tvlUsd, apy, apyBase, apyReward, apyMean30d, stablecoin, exposure, ilRisk and poolId. Filters: TVL >= $10M, non-outlier APY. Figures passed through from DefiLlama at fetch time, not advice. Errors are not charged on Base or Polygon (other rails may charge).\n\nPrice: $0.02 USDC per call (20000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -410,7 +411,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -437,7 +438,7 @@
           "Crypto market data"
         ],
         "summary": "Base and Ethereum balances, concentration score and rule findings vs fixed thresholds (not financial advice)",
-        "description": "Wallet balance and portfolio API for one EVM address on Base and Ethereum: ETH, USDC, WETH, WBTC/cbBTC and DAI holdings with USD value. GET address=0x... (40 hex). Returns JSON: holdings (balance, priceUsd, valueUsd, weight), totals (valueUsd, stablecoinShare, max asset/chain weight), concentration score {0-100, band} and rule findings (asset, stablecoin and chain weights vs fixed thresholds). Read-only; not advice. Invalid addresses return 400, not charged on Base (other rails may charge).\n\nPrice: $0.04 USDC per call (40000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Wallet balance and portfolio API for one EVM address on Base and Ethereum: ETH, USDC, WETH, WBTC/cbBTC and DAI holdings with USD value. GET address=0x... (40 hex). Returns JSON: holdings (balance, priceUsd, valueUsd, weight), totals (valueUsd, stablecoinShare, max asset/chain weight), concentration score {0-100, band} and rule findings (asset, stablecoin and chain weights vs fixed thresholds). Read-only; not advice. Invalid addresses return 400, not charged on Base (other rails may charge).\n\nPrice: $0.04 USDC per call (40000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -701,7 +702,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -728,7 +729,7 @@
           "Crypto market data"
         ],
         "summary": "Base and Ethereum fees with a suggested max fee (public RPC)",
-        "description": "Gas price API for Base and Ethereum: base fee, priority fee and a max-fee suggestion in one GET, no parameters. Returns JSON per network: baseFeeGwei, priorityFeeGwei (p50, with p10/p90), suggestedMaxFeeGwei (2x base + priority), timingHint (cheap/normal/expensive vs the last 20 blocks) and simpleTransfer cost in ETH and USD, plus ethUsd. From eth_feeHistory with eth_gasPrice fallback. Descriptive, not a forecast. Errors are not charged on Base (other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Gas price API for Base and Ethereum: base fee, priority fee and a max-fee suggestion in one GET, no parameters. Returns JSON per network: baseFeeGwei, priorityFeeGwei (p50, with p10/p90), suggestedMaxFeeGwei (2x base + priority), timingHint (cheap/normal/expensive vs the last 20 blocks) and simpleTransfer cost in ETH and USD, plus ethUsd. From eth_feeHistory with eth_gasPrice fallback. Descriptive, not a forecast. Errors are not charged on Base or Polygon (other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -808,7 +809,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -835,7 +836,7 @@
           "Crypto market data"
         ],
         "summary": "BTC, ETH and SOL perpetual funding with a crowding hint (OKX)",
-        "description": "Crypto market data: current OKX USDT-swap perp funding rates for BTC, ETH and SOL, or one coin via symbol= (bad symbol: 400), showing whether longs or shorts are paying. JSON per asset: instId, fundingRate, fundingTime and a rule-based crowding hint {side: longs/shorts/neutral, level: quiet/mild/elevated/extreme} with thresholds. OKX public data only. The hint is not a forecast and not financial advice. Errors are not charged on Base (other rails may charge).\n\nPrice: $0.003 USDC per call (3000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Crypto market data: current OKX USDT-swap perp funding rates for BTC, ETH and SOL, or one coin via symbol= (bad symbol: 400), showing whether longs or shorts are paying. JSON per asset: instId, fundingRate, fundingTime and a rule-based crowding hint {side: longs/shorts/neutral, level: quiet/mild/elevated/extreme} with thresholds. OKX public data only. The hint is not a forecast and not financial advice. Errors are not charged on Base or Polygon (other rails may charge).\n\nPrice: $0.003 USDC per call (3000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -954,7 +955,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -981,7 +982,7 @@
           "Web and documents"
         ],
         "summary": "Any public URL as clean text or markdown",
-        "description": "URL to markdown API: a public web page as clean text or markdown for an LLM. GET url (absolute http/https). Returns JSON: content (markdown with scripts, styles and nav removed), format, finalUrl after redirects, upstreamStatus, contentType, bytesRead and truncated. Caps: 200KB, 8s, 3 redirects; private and localhost targets are blocked. Errors are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.02 USDC per call (20000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "URL to markdown API: a public web page as clean text or markdown for an LLM. GET url (absolute http/https). Returns JSON: content (markdown with scripts, styles and nav removed), format, finalUrl after redirects, upstreamStatus, contentType, bytesRead and truncated. Caps: 200KB, 8s, 3 redirects; private and localhost targets are blocked. Errors are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.02 USDC per call (20000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -1053,7 +1054,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -1110,7 +1111,7 @@
           "Web and documents"
         ],
         "summary": "Universal HTTP proxy: your method, headers and body",
-        "description": "HTTP request proxy API for public URLs: GET url (optional method GET/POST/HEAD/PUT/PATCH/DELETE; headers JSON), or POST JSON {url, method, headers, body}. Returns JSON: status, filtered headers, body (text/base64), contentType, finalUrl, elapsedMs. Caps: 384KB response, 64KB body, 12s, 3 redirects; private hosts blocked; no cookies sent. Upstream 4xx/5xx come back as data (charged); proxy errors are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "HTTP request proxy API for public URLs: GET url (optional method GET/POST/HEAD/PUT/PATCH/DELETE; headers JSON), or POST JSON {url, method, headers, body}. Returns JSON: status, filtered headers, body (text/base64), contentType, finalUrl, elapsedMs. Caps: 384KB response, 64KB body, 12s, 3 redirects; private hosts blocked; no cookies sent. Upstream 4xx/5xx come back as data (charged); proxy errors are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -1215,7 +1216,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -1260,7 +1261,7 @@
           "Web and documents"
         ],
         "summary": "Universal HTTP proxy: your method, headers and body",
-        "description": "HTTP request proxy API for public URLs: GET url (optional method GET/POST/HEAD/PUT/PATCH/DELETE; headers JSON), or POST JSON {url, method, headers, body}. Returns JSON: status, filtered headers, body (text/base64), contentType, finalUrl, elapsedMs. Caps: 384KB response, 64KB body, 12s, 3 redirects; private hosts blocked; no cookies sent. Upstream 4xx/5xx come back as data (charged); proxy errors are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "HTTP request proxy API for public URLs: GET url (optional method GET/POST/HEAD/PUT/PATCH/DELETE; headers JSON), or POST JSON {url, method, headers, body}. Returns JSON: status, filtered headers, body (text/base64), contentType, finalUrl, elapsedMs. Caps: 384KB response, 64KB body, 12s, 3 redirects; private hosts blocked; no cookies sent. Upstream 4xx/5xx come back as data (charged); proxy errors are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -1370,7 +1371,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -1417,7 +1418,7 @@
           "Web and documents"
         ],
         "summary": "Page to structured fields, or your own CSS selectors",
-        "description": "Web scraping API: a public page or supplied HTML to JSON fields. GET url, or POST JSON {url or html, fields}. Returns JSON: title, description, canonical, language, links, images, headings, jsonLd, textSample, and with fields (name to CSS selector, max 20) the matched values with fieldErrors. Caps: 200KB HTML, 8s; private targets blocked. No match (422) and errors are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.015 USDC per call (15000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Web scraping API: a public page or supplied HTML to JSON fields. GET url, or POST JSON {url or html, fields}. Returns JSON: title, description, canonical, language, links, images, headings, jsonLd, textSample, and with fields (name to CSS selector, max 20) the matched values with fieldErrors. Caps: 200KB HTML, 8s; private targets blocked. No match (422) and errors are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.015 USDC per call (15000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -1532,7 +1533,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -1597,7 +1598,7 @@
           "Web and documents"
         ],
         "summary": "Page to structured fields, or your own CSS selectors",
-        "description": "Web scraping API: a public page or supplied HTML to JSON fields. GET url, or POST JSON {url or html, fields}. Returns JSON: title, description, canonical, language, links, images, headings, jsonLd, textSample, and with fields (name to CSS selector, max 20) the matched values with fieldErrors. Caps: 200KB HTML, 8s; private targets blocked. No match (422) and errors are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.015 USDC per call (15000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Web scraping API: a public page or supplied HTML to JSON fields. GET url, or POST JSON {url or html, fields}. Returns JSON: title, description, canonical, language, links, images, headings, jsonLd, textSample, and with fields (name to CSS selector, max 20) the matched values with fieldErrors. Caps: 200KB HTML, 8s; private targets blocked. No match (422) and errors are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.015 USDC per call (15000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -1756,7 +1757,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -1813,7 +1814,7 @@
           "Agent utilities"
         ],
         "summary": "Audit any x402 endpoint without paying it",
-        "description": "x402 endpoint checker: decodes an x402 endpoint's 402 payment terms without paying. GET url (optional method GET/POST, JSON body for POST). Sends one unpaid request; never pays or signs. Returns JSON: httpStatus, isX402, x402Version, decoded accepts (network, asset, USD amount, payTo, EOA or contract), discovery metadata presence, and pass/warn/fail checks. Any HTTP answer from the target, even 4xx/5xx, is billed; bad input, blocked hosts, connection failures and timeouts are not.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "x402 endpoint checker: decodes an x402 endpoint's 402 payment terms without paying. GET url (optional method GET/POST, JSON body for POST). Sends one unpaid request; never pays or signs. Returns JSON: httpStatus, isX402, x402Version, decoded accepts (network, asset, USD amount, payTo, EOA or contract), discovery metadata presence, and pass/warn/fail checks. Any HTTP answer from the target, even 4xx/5xx, is billed; bad input, blocked hosts, connection failures and timeouts are not.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -1899,7 +1900,7 @@
                   "challengeSource": "header",
                   "resource": {
                     "url": "https://horizonpulse.dev/api/pulse",
-                    "description": "Crypto price API: BTC, ETH and SOL spot prices in USD in one GET, no parameters. Returns JSON: assets.BTC/ETH/SOL with priceUsd, change24hPct and momentum (bullish/bearish/neutral), plus overall momentum, sentiment (risk-on/risk-off/neutral), direction (up/down/flat), avgChange24hPct and asOf. Prices from Coinbase Exchange with CoinGecko fallback (source field). Labels are fixed rules on 24h change, not advice. Errors are not charged on Base (other rails may charge).",
+                    "description": "Crypto price API: BTC, ETH and SOL spot prices in USD in one GET, no parameters. Returns JSON: assets.BTC/ETH/SOL with priceUsd, change24hPct and momentum (bullish/bearish/neutral), plus overall momentum, sentiment (risk-on/risk-off/neutral), direction (up/down/flat), avgChange24hPct and asOf. Prices from Coinbase Exchange with CoinGecko fallback (source field). Labels are fixed rules on 24h change, not advice. Errors are not charged on Base or Polygon (other rails may charge).",
                     "mimeType": "application/json"
                   },
                   "accepts": [
@@ -2011,7 +2012,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -2048,7 +2049,7 @@
           "Agent utilities"
         ],
         "summary": "Live deep check of an x402 endpoint and its payTo",
-        "description": "x402 endpoint deep check, never pays or signs: the full /api/x402-check report plus live checks. GET url (optional method, body). Adds TLS, security headers, CORS, payTo vs the payee's own published addresses (/.well-known/x402, openapi.json, llms.txt), lookalike payTo detection, and drift between the live 402 and well-known, openapi and CDP Bazaar listings. Any HTTP answer from the target is billed; bad input, blocked hosts and timeouts are not.\n\nPrice: $0.03 USDC per call (30000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "x402 endpoint deep check, never pays or signs: the full /api/x402-check report plus live checks. GET url (optional method, body). Adds TLS, security headers, CORS, payTo vs the payee's own published addresses (/.well-known/x402, openapi.json, llms.txt), lookalike payTo detection, and drift between the live 402 and well-known, openapi and CDP Bazaar listings. Any HTTP answer from the target is billed; bad input, blocked hosts and timeouts are not.\n\nPrice: $0.03 USDC per call (30000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -2134,7 +2135,7 @@
                   "challengeSource": "header",
                   "resource": {
                     "url": "https://horizonpulse.dev/api/pulse",
-                    "description": "Crypto price API: BTC, ETH and SOL spot prices in USD in one GET, no parameters. Returns JSON: assets.BTC/ETH/SOL with priceUsd, change24hPct and momentum (bullish/bearish/neutral), plus overall momentum, sentiment (risk-on/risk-off/neutral), direction (up/down/flat), avgChange24hPct and asOf. Prices from Coinbase Exchange with CoinGecko fallback (source field). Labels are fixed rules on 24h change, not advice. Errors are not charged on Base (other rails may charge).",
+                    "description": "Crypto price API: BTC, ETH and SOL spot prices in USD in one GET, no parameters. Returns JSON: assets.BTC/ETH/SOL with priceUsd, change24hPct and momentum (bullish/bearish/neutral), plus overall momentum, sentiment (risk-on/risk-off/neutral), direction (up/down/flat), avgChange24hPct and asOf. Prices from Coinbase Exchange with CoinGecko fallback (source field). Labels are fixed rules on 24h change, not advice. Errors are not charged on Base or Polygon (other rails may charge).",
                     "mimeType": "application/json"
                   },
                   "accepts": [
@@ -2424,7 +2425,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -2461,7 +2462,7 @@
           "Agent utilities"
         ],
         "summary": "Check whether an x402 seller is listed in CDP Bazaar, and why not",
-        "description": "x402 Bazaar listing checker: is an x402 seller listed in Coinbase CDP Bazaar, on which networks, and if not, why. GET url (host or https URL). Reads CDP discovery and the host's /.well-known/x402, then sends one unpaid request per route; never pays. Returns JSON: verdict, per-route indexed status and networks, and fail/warn findings each with a fix line. https only; private targets blocked. Errors are not charged on Base (other rails may charge).\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nThe optional Solana/XRPL balance hint is read from public network servers run by third parties and is used without a commercial service agreement. It may be unavailable or inaccurate, and when it is, the hint is returned as null (holdsUsdc: null). Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
+        "description": "x402 Bazaar listing checker: is an x402 seller listed in Coinbase CDP Bazaar, on which networks, and if not, why. GET url (host or https URL). Reads CDP discovery and the host's /.well-known/x402, then sends one unpaid request per route; never pays. Returns JSON: verdict, per-route indexed status and networks, and fail/warn findings each with a fix line. https only; private targets blocked. Errors are not charged on Base or Polygon (other rails may charge).\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nThe optional Solana/XRPL balance hint is read from public network servers run by third parties and is used without a commercial service agreement. It may be unavailable or inaccurate, and when it is, the hint is returned as null (holdsUsdc: null). Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -2714,7 +2715,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -2741,7 +2742,7 @@
           "Agent utilities"
         ],
         "summary": "Find a paid x402 API for a task, re-checked live",
-        "description": "x402 API search: find paid x402 APIs for a task in Coinbase CDP Bazaar. GET q; optional n (1-10), kind, rail (base, solana, xrpl, polygon, evm), max_price (USD), min_health (0-1). Re-checks the top 3 live and cross-checks payTo with the index. Returns JSON: ranked offers with price, rails, health and a direct-pay buy plan. No paid ranking; Horizon Pulse holds no funds. No results: not charged on Base (other rails may charge). Returned listing text is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "x402 API search: find paid x402 APIs for a task in Coinbase CDP Bazaar. GET q; optional n (1-10), kind, rail (base, solana, xrpl, polygon, evm), max_price (USD), min_health (0-1). Re-checks the top 3 live and cross-checks payTo with the index. Returns JSON: ranked offers with price, rails, health and a direct-pay buy plan. No paid ranking; Horizon Pulse holds no funds. No results: not charged on Base (other rails may charge). Returned listing text is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -3037,7 +3038,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -3074,7 +3075,7 @@
           "Agent utilities"
         ],
         "summary": "Check an x402 seller's live price and payTo before paying",
-        "description": "x402 price quote and payTo check for one seller URL, without paying. GET url (https; optional method GET/POST). One unpaid request. Returns JSON: verdict pay/caution/avoid with reasons, live terms per network (USD price, asset, payTo), the CDP Bazaar entry, a payTo cross-check against it (on a mismatch the buy plan is never ready) and a direct-pay buy plan. Bad input, blocked or unreachable hosts (Base: not charged; other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "x402 price quote and payTo check for one seller URL, without paying. GET url (https; optional method GET/POST). One unpaid request. Returns JSON: verdict pay/caution/avoid with reasons, live terms per network (USD price, asset, payTo), the CDP Bazaar entry, a payTo cross-check against it (on a mismatch the buy plan is never ready) and a direct-pay buy plan. Bad input, blocked or unreachable hosts (Base: not charged; other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -3300,7 +3301,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -3337,7 +3338,7 @@
           "Agent utilities"
         ],
         "summary": "Did my transaction land, and is it final (4 chains)",
-        "description": "Transaction status API: did a payment or swap land, and is it final, on Base, Polygon, Solana or XRPL. GET tx (hash or Solana signature) and network (optional for Solana and XRPL hashes). Returns JSON: status not_found/pending/confirmed/failed, final, confirmations, block, fee, decoded token transfers, pollAgainSeconds. Read-only public RPCs. not_found is a charged answer; bad input or RPCs down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
+        "description": "Transaction status API: did a payment or swap land, and is it final, on Base, Polygon, Solana or XRPL. GET tx (hash or Solana signature) and network (optional for Solana and XRPL hashes). Returns JSON: status not_found/pending/confirmed/failed, final, confirmations, block, fee, decoded token transfers, pollAgainSeconds. Read-only public RPCs. not_found is a charged answer; bad input or RPCs down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -3458,7 +3459,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -3485,7 +3486,7 @@
           "Crypto market data"
         ],
         "summary": "Tokenized stock status check on Base (on-chain, no price)",
-        "description": "Tokenized stock status API for Coinbase tokenized stocks on Base (AAPLc, NVDAc, TSLAc...). GET with optional symbol (AAPL, AAPLc or token address; omit for all 12). On-chain token state only, no price: paused flags, supply, supply cap, multiplier, issuer, token address. Not investment advice. Unknown symbol, bad input or RPCs down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Tokenized stock status API for Coinbase tokenized stocks on Base (AAPLc, NVDAc, TSLAc...). GET with optional symbol (AAPL, AAPLc or token address; omit for all 12). On-chain token state only, no price: paused flags, supply, supply cap, multiplier, issuer, token address. Not investment advice. Unknown symbol, bad input or RPCs down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -3599,7 +3600,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -3636,7 +3637,7 @@
           "Agent utilities"
         ],
         "summary": "Did this page or endpoint change since my last check",
-        "description": "Web page change detection API: has a public page or endpoint changed since the last check. GET url; optional since (state token from the previous answer). Returns changed true/false; when changed, only added lines (up to 20) and added/removed counts. Stateless, nothing stored. SSRF-guarded like /api/fetch. changed:false is a charged answer; bad input, blocked or upstream errors: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Web page change detection API: has a public page or endpoint changed since the last check. GET url; optional since (state token from the previous answer). Returns changed true/false; when changed, only added lines (up to 20) and added/removed counts. Stateless, nothing stored. SSRF-guarded like /api/fetch. changed:false is a charged answer; bad input, blocked or upstream errors: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -3729,7 +3730,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -3786,7 +3787,7 @@
           "Agent utilities"
         ],
         "summary": "Can my wallet pay x402 calls right now (4 rails)",
-        "description": "Wallet balance API for x402 payers: USDC on Base, Polygon and Solana, RLUSD on XRPL. GET at least one of evm (Base+Polygon), solana, xrpl. Per rail: balance, gas/fees (XRPL reserve, fee, RLUSD trust line), canPay yes/no, calls left at Horizon Pulse's live prices (XRPL network fee not reserved). No risk score, no USD valuation. Public RPCs, read-only, nothing stored. Bad input or RPCs down (Base: not charged; other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
+        "description": "Wallet balance API for x402 payers: USDC on Base, Polygon and Solana, RLUSD on XRPL. GET at least one of evm (Base+Polygon), solana, xrpl. Per rail: balance, gas/fees (XRPL reserve, fee, RLUSD trust line), canPay yes/no, calls left at Horizon Pulse's live prices (XRPL network fee not reserved). No risk score, no USD valuation. Public RPCs, read-only, nothing stored. Bad input or RPCs down (Base: not charged; other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -4046,7 +4047,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -4073,7 +4074,7 @@
           "Agent utilities"
         ],
         "summary": "Check a recipient address before sending: allow / warn / block from four mechanical checks; allow is not a guarantee",
-        "description": "Address poisoning and OFAC SDN snapshot match before a crypto transfer, mechanical. GET chain (base/polygon/solana/xrpl), to; opt. expected, token. Checks: lookalike, OFAC SDN snapshot (dated), account age, ScamSniffer list (GPL-3.0). allow, warn or block per check. allow means no check flagged the address; it is not a guarantee that the address is safe, correct or not sanctioned. Not advice. Bad input (Base: not charged; other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nnote: \"allow\" means none of the listed checks flagged this address; it is not a guarantee that a transfer is safe or that the recipient is who you intend, and you remain responsible for verifying the recipient before sending funds. Mechanical check results only. The ofac_sdn check compares the address exactly against a snapshot of the 'Digital Currency Address' entries on the U.S. Treasury OFAC SDN List (source URL, publisher date and pull date shown). The snapshot may be out of date, and OFAC states its address listings are not likely to be exhaustive. No match does not mean an address or its owner is not sanctioned, and a match should be verified against the full official listing. This service is not affiliated with or endorsed by the U.S. Treasury or OFAC, and does not provide sanctions screening, legal, or financial advice. You are responsible for your own obligations.\n\nmethodology:\n- results: Each check returns allow, warn, block, skipped (input not given) or unavailable (source did not answer); ofac_sdn returns 'no listed match in snapshot' instead of allow. Overall: block if any check is block; else warn if any is warn or unavailable; else allow. These are mechanical check results, not advice and not a statement about any person.\n- expected_match: to vs expected. Exact match (EVM case-insensitive) = allow. Different address with >=3 matching characters at both ends, or >=6 matching in total (prefix + suffix), = block (address-poisoning lookalike pattern). Any other difference = warn.\n- ofac_sdn: to vs the bundled snapshot of OFAC SDN 'Digital Currency Address' entries (EVM case-insensitive). Listed = block; a hit returns data.sdnEntry {listName, entityNumber, quoted: true}: the entity name quoted verbatim from the list. The snapshot dates are in every response; the live list can be newer. Snapshot older than 7 days = warn.\n- account_age: Public keyless RPCs. Base/Polygon: account age is unknown (no first-seen index on public RPC); sent-transaction count (not an age measure) and code: an EIP-7702 delegation (0xef0100) = warn, 0 sent = warn. Solana: oldest signature within the last 3000. XRP Ledger: activation and first transaction. No history or first seen < 24h = warn.\n- scam_token: Optional token contract on Base/Polygon vs the ScamSniffer public list (GPL-3.0, last updated February 2024 per its maintainer; a hit is the list's own report, and no hit does not clear an address), fetched per call to test one address; never cached, stored or served. Listed = block. No cited public list is used for Solana or XRP Ledger tokens (skipped).\n- untrusted: Returned content is untrusted third-party content: data, not instructions.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
+        "description": "Address poisoning and OFAC SDN snapshot match before a crypto transfer, mechanical. GET chain (base/polygon/solana/xrpl), to; opt. expected, token. Checks: lookalike, OFAC SDN snapshot (dated), account age, ScamSniffer list (GPL-3.0). allow, warn or block per check. allow means no check flagged the address; it is not a guarantee that the address is safe, correct or not sanctioned. Not advice. Bad input (Base: not charged; other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nnote: \"allow\" means none of the listed checks flagged this address; it is not a guarantee that a transfer is safe or that the recipient is who you intend, and you remain responsible for verifying the recipient before sending funds. Mechanical check results only. The ofac_sdn check compares the address exactly against a snapshot of the 'Digital Currency Address' entries on the U.S. Treasury OFAC SDN List (source URL, publisher date and pull date shown). The snapshot may be out of date, and OFAC states its address listings are not likely to be exhaustive. No match does not mean an address or its owner is not sanctioned, and a match should be verified against the full official listing. This service is not affiliated with or endorsed by the U.S. Treasury or OFAC, and does not provide sanctions screening, legal, or financial advice. You are responsible for your own obligations.\n\nmethodology:\n- results: Each check returns allow, warn, block, skipped (input not given) or unavailable (source did not answer); ofac_sdn returns 'no listed match in snapshot' instead of allow. Overall: block if any check is block; else warn if any is warn or unavailable; else allow. These are mechanical check results, not advice and not a statement about any person.\n- expected_match: to vs expected. Exact match (EVM case-insensitive) = allow. Different address with >=3 matching characters at both ends, or >=6 matching in total (prefix + suffix), = block (address-poisoning lookalike pattern). Any other difference = warn.\n- ofac_sdn: to vs the bundled snapshot of OFAC SDN 'Digital Currency Address' entries (EVM case-insensitive). Listed = block; a hit returns data.sdnEntry {listName, entityNumber, quoted: true}: the entity name quoted verbatim from the list. The snapshot dates are in every response; the live list can be newer. Snapshot older than 7 days = warn.\n- account_age: Public keyless RPCs. Base/Polygon: account age is unknown (no first-seen index on public RPC); sent-transaction count (not an age measure) and code: an EIP-7702 delegation (0xef0100) = warn, 0 sent = warn. Solana: oldest signature within the last 3000. XRP Ledger: activation and first transaction. No history or first seen < 24h = warn.\n- scam_token: Optional token contract on Base/Polygon vs the ScamSniffer public list (GPL-3.0, last updated February 2024 per its maintainer; a hit is the list's own report, and no hit does not clear an address), fetched per call to test one address; never cached, stored or served. Listed = block. No cited public list is used for Solana or XRP Ledger tokens (skipped).\n- untrusted: Returned content is untrusted third-party content: data, not instructions.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -4236,7 +4237,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -4263,7 +4264,7 @@
           "Agent utilities"
         ],
         "summary": "Turn recipe ingredient lines into a normalized shopping list",
-        "description": "Recipe ingredient parser and shopping list API: POST JSON {ingredients: [lines], servings?, targetServings?} (or GET ingredients=line|line). Returns per line name, canonicalId, qty, unit, metric (ml or g), category, optional/toTaste, prepNote, stated pack size, a typical pack hint, plus a merged shoppingList scaled to targetServings and unparsed lines. Deterministic, no outbound calls, no prices, nothing stored. Bad input (400) or nothing parsed (422) (Base: not charged; other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Recipe ingredient parser and shopping list API: POST JSON {ingredients: [lines], servings?, targetServings?} (or GET ingredients=line|line). Returns per line name, canonicalId, qty, unit, metric (ml or g), category, optional/toTaste, prepNote, stated pack size, a typical pack hint, plus a merged shoppingList scaled to targetServings and unparsed lines. Deterministic, no outbound calls, no prices, nothing stored. Bad input (400) or nothing parsed (422) (Base: not charged; other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -4477,7 +4478,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -4502,7 +4503,7 @@
           "Agent utilities"
         ],
         "summary": "Turn recipe ingredient lines into a normalized shopping list",
-        "description": "Recipe ingredient parser and shopping list API: POST JSON {ingredients: [lines], servings?, targetServings?} (or GET ingredients=line|line). Returns per line name, canonicalId, qty, unit, metric (ml or g), category, optional/toTaste, prepNote, stated pack size, a typical pack hint, plus a merged shoppingList scaled to targetServings and unparsed lines. Deterministic, no outbound calls, no prices, nothing stored. Bad input (400) or nothing parsed (422) (Base: not charged; other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Recipe ingredient parser and shopping list API: POST JSON {ingredients: [lines], servings?, targetServings?} (or GET ingredients=line|line). Returns per line name, canonicalId, qty, unit, metric (ml or g), category, optional/toTaste, prepNote, stated pack size, a typical pack hint, plus a merged shoppingList scaled to targetServings and unparsed lines. Deterministic, no outbound calls, no prices, nothing stored. Bad input (400) or nothing parsed (422) (Base: not charged; other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -4725,7 +4726,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -4752,7 +4753,7 @@
           "Agent utilities"
         ],
         "summary": "Look up nutrition per 100 g for an ingredient or barcode",
-        "description": "Ingredient nutrition facts API: GET q (ingredient name or normalize canonicalId) and/or barcode (GTIN), optional n 1-5; POST JSON {items:[{q|barcode}]} max 10. Per 100 g: kcal, protein, fat, sat fat, carbs, sugars, fiber, sodium; USDA FoodData Central (CC0) snapshot and Open Food Facts by barcode (ODbL), attribution per match. Allergens may be incomplete. No prices. Bad input, no match or source down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Ingredient nutrition facts API: GET q (ingredient name or normalize canonicalId) and/or barcode (GTIN), optional n 1-5; POST JSON {items:[{q|barcode}]} max 10. Per 100 g: kcal, protein, fat, sat fat, carbs, sugars, fiber, sodium; USDA FoodData Central (CC0) snapshot and Open Food Facts by barcode (ODbL), attribution per match. Allergens may be incomplete. No prices. Bad input, no match or source down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -4930,7 +4931,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -4975,7 +4976,7 @@
           "Agent utilities"
         ],
         "summary": "Look up nutrition per 100 g for an ingredient or barcode",
-        "description": "Ingredient nutrition facts API: GET q (ingredient name or normalize canonicalId) and/or barcode (GTIN), optional n 1-5; POST JSON {items:[{q|barcode}]} max 10. Per 100 g: kcal, protein, fat, sat fat, carbs, sugars, fiber, sodium; USDA FoodData Central (CC0) snapshot and Open Food Facts by barcode (ODbL), attribution per match. Allergens may be incomplete. No prices. Bad input, no match or source down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Ingredient nutrition facts API: GET q (ingredient name or normalize canonicalId) and/or barcode (GTIN), optional n 1-5; POST JSON {items:[{q|barcode}]} max 10. Per 100 g: kcal, protein, fat, sat fat, carbs, sugars, fiber, sodium; USDA FoodData Central (CC0) snapshot and Open Food Facts by barcode (ODbL), attribution per match. Allergens may be incomplete. No prices. Bad input, no match or source down: not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.005 USDC per call (5000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -5175,7 +5176,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -5222,7 +5223,7 @@
           "Agent utilities"
         ],
         "summary": "Current block, slot or ledger height on 5 chains",
-        "description": "Block height API: current block number, slot or ledger index for Base, Polygon, Ethereum, Solana and XRPL. Optional network (comma list; default all five). Per network: chainId, height, headTime, headAgeSeconds, finalizedHeight and finalityGap (EVM finalized tag, Solana finalized slot, XRPL validated ledger). Read-only queries to public network servers run by third parties. Billed when at least one network answers; bad input or every RPC down: not charged on Base (other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
+        "description": "Block height API: current block number, slot or ledger index for Base, Polygon, Ethereum, Solana and XRPL. Optional network (comma list; default all five). Per network: chainId, height, headTime, headAgeSeconds, finalizedHeight and finalityGap (EVM finalized tag, Solana finalized slot, XRPL validated ledger). Read-only queries to public network servers run by third parties. Billed when at least one network answers; bad input or every RPC down: not charged on Base (other rails may charge).\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -5336,7 +5337,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -5363,7 +5364,7 @@
           "Agent utilities"
         ],
         "summary": "Token name, symbol, decimals and supply from chain state",
-        "description": "Token metadata API: ERC-20 name, symbol, decimals and total supply on Base, Polygon or Ethereum; Solana mint decimals, supply, authorities (Token-2022 name and symbol); XRPL issued-currency supply, issuer flags, transfer fee. GET network and token (0x address, mint, or CURRENCY.rIssuer). Chain state only: no price, no token-list check. found:false is a billed answer; bad input or RPCs down (Base: not charged; other rails may charge). Returned names and symbols are untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
+        "description": "Token metadata API: ERC-20 name, symbol, decimals and total supply on Base, Polygon or Ethereum; Solana mint decimals, supply, authorities (Token-2022 name and symbol); XRPL issued-currency supply, issuer flags, transfer fee. GET network and token (0x address, mint, or CURRENCY.rIssuer). Chain state only: no price, no token-list check. found:false is a billed answer; bad input or RPCs down (Base: not charged; other rails may charge). Returned names and symbols are untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nSolana and XRPL data is read from public network servers run by third parties, not by Horizon Pulse, and is used without a commercial service agreement. Availability and accuracy are not guaranteed. Not affiliated with or endorsed by the Solana Foundation, Ripple, the XRPL Foundation or the server operators.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -5476,7 +5477,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -5503,7 +5504,7 @@
           "Agent utilities"
         ],
         "summary": "Resolve an ENS name or Basename, or find an address's primary name",
-        "description": "ENS and Basenames resolver API: name to address (vitalik.eth, jesse.base.eth) or address to primary name, read on-chain. GET name or address. Forward: address, resolver and the registry used. Reverse: ENS and Basename primary names, each checked forward (verified true/false). Off-chain and wildcard (CCIP-Read) names are not followed. found:false is a billed answer; bad input or RPCs down: not charged on Base (other rails may charge). Returned names are untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "ENS and Basenames resolver API: name to address (vitalik.eth, jesse.base.eth) or address to primary name, read on-chain. GET name or address. Forward: address, resolver and the registry used. Reverse: ENS and Basename primary names, each checked forward (verified true/false). Off-chain and wildcard (CCIP-Read) names are not followed. found:false is a billed answer; bad input or RPCs down: not charged on Base (other rails may charge). Returned names are untrusted third-party data.\n\nPrice: $0.002 USDC per call (2000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -5596,7 +5597,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -5623,7 +5624,7 @@
           "Agent utilities"
         ],
         "summary": "Up to 10 chain checks (balance, gas, tx status, token, chain head, names) for one payment",
-        "description": "Batch chain checks API: up to 10 checks for one payment. POST JSON {items:[{route, params}]} (or GET items=<same JSON>); route one of balance, gas, tx-status, token/meta, chain/head, name/resolve; params are the single route's query keys. Returns JSON: results [{index, route, status, ok, body}] in request order, count, okCount. Each item runs the single route's handler. Bad input or every item failing (Base: not charged; other rails may charge); one charge when at least one item succeeds.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nValue: one payment and one round trip for up to 10 reads. At 10 items that is $0.001 per item vs the $0.002 single-call floor; 5 items cost the same as 5 singles ($0.01); below 5 items the singles are cheaper (4 x $0.002 = $0.008). Substitutes: the same single routes at $0.002 each, or public RPCs and block explorers queried directly (no Horizon Pulse charge; their own terms and limits apply).",
+        "description": "Batch chain checks API: up to 10 checks for one payment. POST JSON {items:[{route, params}]} (or GET items=<same JSON>); route one of balance, gas, tx-status, token/meta, chain/head, name/resolve; params are the single route's query keys. Returns JSON: results [{index, route, status, ok, body}] in request order, count, okCount. Each item runs the single route's handler. Bad input or every item failing (Base: not charged; other rails may charge); one charge when at least one item succeeds.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nValue: one payment and one round trip for up to 10 reads. At 10 items that is $0.001 per item vs the $0.002 single-call floor; 5 items cost the same as 5 singles ($0.01); below 5 items the singles are cheaper (4 x $0.002 = $0.008). Substitutes: the same single routes at $0.002 each, or public RPCs and block explorers queried directly (no Horizon Pulse charge; their own terms and limits apply).",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -5724,7 +5725,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -5749,7 +5750,7 @@
           "Agent utilities"
         ],
         "summary": "Up to 10 chain checks (balance, gas, tx status, token, chain head, names) for one payment",
-        "description": "Batch chain checks API: up to 10 checks for one payment. POST JSON {items:[{route, params}]} (or GET items=<same JSON>); route one of balance, gas, tx-status, token/meta, chain/head, name/resolve; params are the single route's query keys. Returns JSON: results [{index, route, status, ok, body}] in request order, count, okCount. Each item runs the single route's handler. Bad input or every item failing (Base: not charged; other rails may charge); one charge when at least one item succeeds.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nValue: one payment and one round trip for up to 10 reads. At 10 items that is $0.001 per item vs the $0.002 single-call floor; 5 items cost the same as 5 singles ($0.01); below 5 items the singles are cheaper (4 x $0.002 = $0.008). Substitutes: the same single routes at $0.002 each, or public RPCs and block explorers queried directly (no Horizon Pulse charge; their own terms and limits apply).",
+        "description": "Batch chain checks API: up to 10 checks for one payment. POST JSON {items:[{route, params}]} (or GET items=<same JSON>); route one of balance, gas, tx-status, token/meta, chain/head, name/resolve; params are the single route's query keys. Returns JSON: results [{index, route, status, ok, body}] in request order, count, okCount. Each item runs the single route's handler. Bad input or every item failing (Base: not charged; other rails may charge); one charge when at least one item succeeds.\n\nPrice: $0.01 USDC per call (10000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.\n\nValue: one payment and one round trip for up to 10 reads. At 10 items that is $0.001 per item vs the $0.002 single-call floor; 5 items cost the same as 5 singles ($0.01); below 5 items the singles are cheaper (4 x $0.002 = $0.008). Substitutes: the same single routes at $0.002 each, or public RPCs and block explorers queried directly (no Horizon Pulse charge; their own terms and limits apply).",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -5895,7 +5896,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -5922,7 +5923,7 @@
           "Agent utilities"
         ],
         "summary": "How Hacker News and Bluesky posts split on a question (not a poll)",
-        "description": "Hacker News and Bluesky opinion split, NOT a poll: how public posts divide on a question. GET q; optional sides (2-4, default yes,no), window (1-30d). Returns JSON: per-side share with 95% interval and n, counts per source, links only (no text or usernames; Bluesky links include the account's public ID, DID), caveats. Refuses elections, health and a named person's conduct. Under 30 decided posts, refusals and errors: not charged on Base (other rails may charge).\n\nPrice: $0.03 USDC per call (30000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Hacker News and Bluesky opinion split, NOT a poll: how public posts divide on a question. GET q; optional sides (2-4, default yes,no), window (1-30d). Returns JSON: per-side share with 95% interval and n, counts per source, links only (no text or usernames; Bluesky links include the account's public ID, DID), caveats. Refuses elections, health and a named person's conduct. Under 30 decided posts, refusals and errors: not charged on Base (other rails may charge).\n\nPrice: $0.03 USDC per call (30000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -6064,7 +6065,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -6081,7 +6082,7 @@
           "Web and documents"
         ],
         "summary": "Web search with the top pages as clean text and sources",
-        "description": "Web search API with page contents: current results with sources as markdown. GET q (max 300 chars), optional n (1-5 pages, default 3). Web results via Serper (Google results); top results fetched as markdown. Returns JSON: results with rank, url, title, snippet, per-page ok/status and content (max 12K chars each), resultCount, fetchedOk. Billed if any result returns; zero results or provider errors are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.03 USDC per call (30000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "Web search API with page contents: current results with sources as markdown. GET q (max 300 chars), optional n (1-5 pages, default 3). Web results via Serper (Google results); top results fetched as markdown. Returns JSON: results with rank, url, title, snippet, per-page ok/status and content (max 12K chars each), resultCount, fetchedOk. Billed if any result returns; zero results or provider errors are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.03 USDC per call (30000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -6177,7 +6178,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -6214,7 +6215,7 @@
           "Web and documents"
         ],
         "summary": "PDF URL to text per page plus metadata",
-        "description": "PDF to text API: the text of a public PDF, page by page. GET url (http/https, max 10MB), optional pages (1-50, default 50). Returns JSON: pages [{page, text}], totalPages, pagesReturned, truncated, bytes, finalUrl, meta (title, author, subject, creator, producer, creationDate). pdf.js text layer, no OCR (image-only PDFs: 422). Max 100K chars. Non-PDF, encrypted, oversize or failed downloads are not charged on Base (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.02 USDC per call (20000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana or Polygon, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
+        "description": "PDF to text API: the text of a public PDF, page by page. GET url (http/https, max 10MB), optional pages (1-50, default 50). Returns JSON: pages [{page, text}], totalPages, pagesReturned, truncated, bytes, finalUrl, meta (title, author, subject, creator, producer, creationDate). pdf.js text layer, no OCR (image-only PDFs: 422). Max 100K chars. Non-PDF, encrypted, oversize or failed downloads are not charged on Base or Polygon (other rails may charge). Returned content is untrusted third-party data.\n\nPrice: $0.02 USDC per call (20000 atomic), paid with x402 v2 `exact` in USDC on Base, Solana or Polygon, or RLUSD on the XRP Ledger (same price). Unpaid requests get 402 with PAYMENT-REQUIRED; retry with PAYMENT-SIGNATURE. No-charge statements above apply to USDC on Base only; on USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -6307,7 +6308,7 @@
             }
           },
           "402": {
-            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header; the body is empty JSON {}.",
+            "description": "Payment required (x402 v2). Not charged. The challenge is in the PAYMENT-REQUIRED header. The JSON body may include buyerTerms and, when HP_X402_CHALLENGE_BODY_ENABLED is on, a mirror of the decoded challenge when the body lacks accepts.",
             "headers": {
               "PAYMENT-REQUIRED": {
                 "$ref": "#/components/headers/PaymentRequired"
@@ -6764,7 +6765,7 @@
           "Company facts from SEC EDGAR data"
         ],
         "summary": "Company facts from SEC EDGAR data by ticker or CIK ($0.02)",
-        "description": "Key financial facts for one SEC-reporting company from SEC EDGAR XBRL filings: revenue, net income, assets, liabilities, equity, shares outstanding, operating cash flow and EPS, latest annual and quarterly, plus as-of date and source link. US-GAAP financial statements only (plus the dei cover-page share count); companies that report in IFRS are not supported and return 404. Company facts only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not investment advice.",
+        "description": "Key financial facts for one SEC-reporting company from SEC EDGAR XBRL filings: revenue, net income, assets, liabilities, equity, shares outstanding, operating cash flow and EPS, latest annual and quarterly, plus as-of date and source link. US-GAAP financial statements only (plus the dei cover-page share count); companies that report in IFRS are not supported and return 404. Company facts only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not investment advice. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -6776,7 +6777,16 @@
           "priceUsd": "$0.02",
           "amount": "20000",
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "parameters": [
           {
@@ -6859,7 +6869,7 @@
           "Company facts from SEC EDGAR data"
         ],
         "summary": "Company facts from SEC EDGAR data by ticker or CIK ($0.02)",
-        "description": "Key financial facts for one SEC-reporting company from SEC EDGAR XBRL filings: revenue, net income, assets, liabilities, equity, shares outstanding, operating cash flow and EPS, latest annual and quarterly, plus as-of date and source link. US-GAAP financial statements only (plus the dei cover-page share count); companies that report in IFRS are not supported and return 404. Company facts only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not investment advice.",
+        "description": "Key financial facts for one SEC-reporting company from SEC EDGAR XBRL filings: revenue, net income, assets, liabilities, equity, shares outstanding, operating cash flow and EPS, latest annual and quarterly, plus as-of date and source link. US-GAAP financial statements only (plus the dei cover-page share count); companies that report in IFRS are not supported and return 404. Company facts only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not investment advice. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -6871,7 +6881,16 @@
           "priceUsd": "$0.02",
           "amount": "20000",
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "requestBody": {
           "required": true,
@@ -7048,7 +7067,7 @@
       "get": {
         "operationId": "getDomainPrecheck",
         "summary": "Domain pre-purchase check ($0.02-$0.25)",
-        "description": "Registration verdict (registered, likely_unregistered or unknown) with age and status flags from registry RDAP, DNS, TLS, a look-alike similarity signal and an optional OFAC SDN address screen. Failed or throttled sources are unknown, never available. Not a guarantee of availability or safety; not legal advice. .dev and .app are not supported: a request with only those names is refused before payment; in a bulk batch they are removed before payment and the flat price still applies.",
+        "description": "Registration verdict (registered, likely_unregistered or unknown) with age and status flags from registry RDAP, DNS, TLS, a look-alike similarity signal and an optional OFAC SDN address screen. Failed or throttled sources are unknown, never available. Not a guarantee of availability or safety; not legal advice. .dev and .app are not supported: a request with only those names is refused before payment; in a bulk batch they are removed before payment and the flat price still applies. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7071,7 +7090,16 @@
             }
           ],
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "responses": {
           "200": {
@@ -7109,7 +7137,7 @@
       "post": {
         "operationId": "postDomainPrecheck",
         "summary": "Domain pre-purchase check ($0.02-$0.25)",
-        "description": "Registration verdict (registered, likely_unregistered or unknown) with age and status flags from registry RDAP, DNS, TLS, a look-alike similarity signal and an optional OFAC SDN address screen. Failed or throttled sources are unknown, never available. Not a guarantee of availability or safety; not legal advice. .dev and .app are not supported: a request with only those names is refused before payment; in a bulk batch they are removed before payment and the flat price still applies.",
+        "description": "Registration verdict (registered, likely_unregistered or unknown) with age and status flags from registry RDAP, DNS, TLS, a look-alike similarity signal and an optional OFAC SDN address screen. Failed or throttled sources are unknown, never available. Not a guarantee of availability or safety; not legal advice. .dev and .app are not supported: a request with only those names is refused before payment; in a bulk batch they are removed before payment and the flat price still applies. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7132,7 +7160,16 @@
             }
           ],
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "responses": {
           "200": {
@@ -7175,7 +7212,7 @@
           "PII pattern scan"
         ],
         "summary": "Best-effort PII pattern scan ($0.02)",
-        "description": "Best-effort scan of supplied text for common patterns: email, phone, US SSN, Luhn-checked card numbers, mod-97 IBANs, IP addresses, private-key shapes, BIP-39 seed phrases and API-key shapes. POST JSON {text, redact?}. Returns findings with type and offsets; redacted text only when redact is true. Best-effort only, not a compliance assessment. Informational only, no warranty. This service does not log or store the text you submit. USDC on Base only. Bad input is not charged.",
+        "description": "Best-effort scan of supplied text for common patterns: email, phone, US SSN, Luhn-checked card numbers, mod-97 IBANs, IP addresses, private-key shapes, BIP-39 seed phrases and API-key shapes. POST JSON {text, redact?}. Returns findings with type and offsets; redacted text only when redact is true. Best-effort only, not a compliance assessment. Informational only, no warranty. This service does not log or store the text you submit. USDC on Base or Polygon. Bad input is not charged. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7187,7 +7224,16 @@
           "priceUsd": "$0.02",
           "amount": "20000",
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "requestBody": {
           "required": true,
@@ -7268,7 +7314,564 @@
       "get": {
         "operationId": "getSecFilings",
         "summary": "SEC filings list ($0.02)",
-        "description": "Latest SEC EDGAR filings for one company: form, filed date, accession number, primary document URL, 8-K items. GET ticker, optional form, optional limit 1-20. Ticker list and submissions JSON only. USDC on Base only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. Bad input or an unknown ticker: Not charged.",
+        "description": "Latest SEC EDGAR filings for one company: form, filed date, accession number, primary document URL, 8-K items. GET ticker, optional form, optional limit 1-20. Ticker list and submissions JSON only. USDC on Base or Polygon. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. Bad input or an unknown ticker: Not charged. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.02",
+          "amount": "20000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/treasury/debt": {
+      "get": {
+        "operationId": "getTreasuryDebt",
+        "summary": "Treasury debt and cash balance ($0.01)",
+        "description": "U.S. Treasury debt to the penny: total, held by the public, and intragovernmental, with the 1-day, 30-day and 1-year change, plus the Daily Treasury Statement Treasury General Account (TGA) operating-cash balance and its daily change. No parameters. Source: api.fiscaldata.treasury.gov. debtUsd is USD. cashUsdMillions is millions of USD. Not a forecast. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.01",
+          "amount": "10000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pros/verify": {
+      "get": {
+        "operationId": "getProsVerify",
+        "summary": "Contractor license check ($0.05)",
+        "description": "California contractor license check, corporations and LLCs only: status, classifications, issue and expiration dates, bond and workers' comp facts, business name, city/county, business phone. GET license and purpose=consumer_contractor_check|license_verification. No personal names; no ratings. Not for employment, credit, insurance, housing or tenancy decisions (FCRA). found:false = no displayable record; records may be withheld on request. Bad input: Not charged. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.05",
+          "amount": "50000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.05 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sec/insider": {
+      "get": {
+        "operationId": "getSecInsider",
+        "summary": "SEC insider transactions ($0.02)",
+        "description": "Recent SEC Form 4 insider transactions for one company: insider and role, date, code, shares, price, shares owned after, filing link. GET ticker or cik, optional limit 1-10. USDC on Base or Polygon. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. Unknown ticker, no filings or SEC down: Not charged. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.02",
+          "amount": "20000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sec/13f": {
+      "get": {
+        "operationId": "getSec13f",
+        "summary": "SEC 13F holdings changes ($0.02)",
+        "description": "13F holdings changes: latest 13F-HR vs prior per holding (new, exited, increased, decreased), with filing links. 13F data is quarterly, filed up to 45 days after quarter-end, original 13F-HR only, and may not reflect current holdings. USDC on Base or Polygon. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.02",
+          "amount": "20000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sec/10k-risk": {
+      "get": {
+        "operationId": "getSec10kRisk",
+        "summary": "SEC 10-K risk factor headings ($0.5)",
+        "description": "10-K risk factor headings: the Item 1A risk headings from a company's latest original 10-K, as written and grouped by the filing's own sections, with the filing link. Extracted, not rewritten. USDC on Base or Polygon. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.5",
+          "amount": "500000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.5 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weather/alerts": {
+      "get": {
+        "operationId": "getWeatherAlerts",
+        "summary": "Active NWS weather alerts ($0.02)",
+        "description": "Active alerts for one point (lat, lon) or one US state (area), passed through from api.weather.gov: event, severity, urgency, headline, expires, areaDesc, instruction, description, status, messageType and id. Not an official warning service; not affiliated with or endorsed by NOAA/NWS. For life-safety decisions use weather.gov and local authorities. Up to 60 s old. Charged per answer, including when no alerts are active; bad input is refused before payment, not charged. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.02",
+          "amount": "20000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weather/storm-events": {
+      "get": {
+        "operationId": "getWeatherStormEvents",
+        "summary": "Preliminary SPC reports and one state of active NWS alerts ($0.002)",
+        "description": "Preliminary SPC reports (hail, wind, tornado) for one convective day, 12:00 UTC through 11:59 UTC the next day, and the six UTC dates before it. Active NWS alerts from one state feed. Not complete bbox, history, marine, or territory coverage. Not a forecast or property-damage proof. An empty valid result is charged as a full successful answer. Source errors, stale data, oversized responses, and too many matches are not charged. Comments are omitted. Bad input is not charged. USDC on Base only.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.002",
+          "amount": "2000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.002 USDC on Base only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weather/forecast": {
+      "get": {
+        "operationId": "getWeatherForecast",
+        "summary": "NWS point forecast by lat/lon ($0.005)",
+        "description": "NWS point forecast for one US lat/lon via api.weather.gov /points then the linked forecast: name, startTime, endTime, isDaytime, temperature, windSpeed, shortForecast, detailedForecast. Not an official forecast service; not affiliated with or endorsed by NOAA/NWS. For life-safety decisions use weather.gov and local authorities. Up to 60 s old. Charged per answer; bad input and points outside NWS coverage are refused before settlement and not charged. USDC on Base only.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.005",
+          "amount": "5000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.005 USDC on Base only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/site/audit": {
+      "get": {
+        "operationId": "getSiteAudit",
+        "summary": "Website audit for one public URL ($0.02-$0.12)",
+        "description": "Website audit API for one public page (standard) or up to 10 same-origin pages plus DNS email records (premium, ?tier=premium): security headers, HSTS, TLS, HTTPS redirect, on-page SEO, heuristic accessibility checks (not a WCAG or ADA conformance audit), robots.txt, sitemap, security.txt, a broken-link sample and agent-readiness checks, scored against our checklist, with fixes. Findings only. Obeys the site's robots.txt. Blocked or unreachable targets are not charged. USDC on Base only. Premium depth (?tier=premium, $0.12, 120000 atomic, USDC on Base only): the start page plus up to 9 same-origin pages it links to (10 pages max, robots.txt obeyed, 8 MB of responses per audit), mixed content, cookie flags (names and flags only; cookie values are not included in the report), CSP quality, certificate and redirect chains, robots.txt and sitemap validity, structured data, SPF/DMARC/CAA/DNSSEC, DKIM (common selectors), a check of up to 20 links and the full agent-readiness report. If the time or byte limit is reached, the report is charged and lists the pages not reached. If no linked page answers and every DNS email lookup fails, the call is refused and not charged.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "description": "One public http(s) URL or hostname (ports 80/443 only).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "https://example.com/"
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "required": false,
+            "description": "standard (default, $0.02) or premium ($0.12, up to 10 same-origin pages plus DNS email records).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "standard",
+                "premium"
+              ]
+            },
+            "example": "premium"
+          }
+        ],
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7304,7 +7907,7 @@
             }
           },
           "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base only.",
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.02-$0.12 USDC on Base only.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7316,63 +7919,23 @@
         }
       }
     },
-    "/api/treasury/debt": {
+    "/api/site/agent-readiness": {
       "get": {
-        "operationId": "getTreasuryDebt",
-        "summary": "Treasury debt and cash balance ($0.01)",
-        "description": "U.S. Treasury debt to the penny: total, held by the public, and intragovernmental, with the 1-day, 30-day and 1-year change, plus the Daily Treasury Statement Treasury General Account (TGA) operating-cash balance and its daily change. No parameters. Source: api.fiscaldata.treasury.gov. debtUsd is USD. cashUsdMillions is millions of USD. Not a forecast. USDC on Base only.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.01",
-          "amount": "10000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
+        "operationId": "getSiteAgentReadiness",
+        "summary": "Agent-readiness report for one public site ($0.05)",
+        "description": "Agent-readiness report for one public site: validates llms.txt, AI-crawler robots rules, /.well-known/x402 and each sampled unpaid 402 challenge (accepts, payTo format, network/asset, header-body mirror, Bazaar extension), MCP server card and endpoint, and openapi.json 402 responses. Scored against our checklist with fixes and evidence. Read-only: 402s are never paid. Obeys robots.txt. Blocked or unreachable targets are not charged. USDC on Base only.",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "description": "One public http(s) site URL or hostname (ports 80/443 only).",
+            "schema": {
+              "type": "string"
+            },
+            "example": "https://example.com/"
           }
-        }
-      }
-    },
-    "/api/pros/verify": {
-      "get": {
-        "operationId": "getProsVerify",
-        "summary": "Contractor license check ($0.05)",
-        "description": "California contractor license check, corporations and LLCs only: status, classifications, issue and expiration dates, bond and workers' comp facts, business name, city/county, business phone. GET license and purpose=consumer_contractor_check|license_verification. No personal names; no ratings. Not for employment, credit, insurance, housing or tenancy decisions (FCRA). found:false = no displayable record; records may be withheld on request. Bad input: Not charged. USDC on Base only.",
+        ],
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7420,219 +7983,11 @@
         }
       }
     },
-    "/api/sec/insider": {
-      "get": {
-        "operationId": "getSecInsider",
-        "summary": "SEC insider transactions ($0.02)",
-        "description": "Recent SEC Form 4 insider transactions for one company: insider and role, date, code, shares, price, shares owned after, filing link. GET ticker or cik, optional limit 1-10. USDC on Base only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. Unknown ticker, no filings or SEC down: Not charged.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.02",
-          "amount": "20000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/sec/13f": {
-      "get": {
-        "operationId": "getSec13f",
-        "summary": "SEC 13F holdings changes ($0.02)",
-        "description": "13F holdings changes: latest 13F-HR vs prior per holding (new, exited, increased, decreased), with filing links. 13F data is quarterly, filed up to 45 days after quarter-end, original 13F-HR only, and may not reflect current holdings. USDC on Base only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.02",
-          "amount": "20000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/sec/10k-risk": {
-      "get": {
-        "operationId": "getSec10kRisk",
-        "summary": "SEC 10-K risk factor headings ($0.5)",
-        "description": "10-K risk factor headings: the Item 1A risk headings from a company's latest original 10-K, as written and grouped by the filing's own sections, with the filing link. Extracted, not rewritten. USDC on Base only. Data from SEC EDGAR; not affiliated with or endorsed by the SEC. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.5",
-          "amount": "500000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.5 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/weather/alerts": {
-      "get": {
-        "operationId": "getWeatherAlerts",
-        "summary": "Active NWS weather alerts ($0.02)",
-        "description": "Active alerts for one point (lat, lon) or one US state (area), passed through from api.weather.gov: event, severity, urgency, headline, expires, areaDesc, instruction, description, status, messageType and id. Not an official warning service; not affiliated with or endorsed by NOAA/NWS. For life-safety decisions use weather.gov and local authorities. Up to 60 s old. Charged per answer, including when no alerts are active; bad input is refused before payment, not charged. USDC on Base only.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.02",
-          "amount": "20000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/bls/cpi": {
       "get": {
         "operationId": "getBlsCpi",
         "summary": "BLS Consumer Price Index series ($0.01)",
-        "description": "Consumer Price Index series from the U.S. Bureau of Labor Statistics Public Data API v2: up to 10 CPI series ids (e.g. CUUR0000SA0) with an optional start and end year (up to 20 years). Data credit: U.S. Bureau of Labor Statistics; not affiliated with or endorsed by BLS. Up to 1 hour old. Bad input is refused before payment, not charged. If no requested series returns data, the request is refused and not charged; if at least one series returns data, the full price is charged. USDC on Base only.",
+        "description": "Consumer Price Index series from the U.S. Bureau of Labor Statistics Public Data API v2: up to 10 CPI series ids (e.g. CUUR0000SA0) with an optional start and end year (up to 20 years). Data credit: U.S. Bureau of Labor Statistics; not affiliated with or endorsed by BLS. Up to 1 hour old. Bad input is refused before payment, not charged. If no requested series returns data, the request is refused and not charged; if at least one series returns data, the full price is charged. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7644,7 +7999,16 @@
           "priceUsd": "$0.01",
           "amount": "10000",
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "responses": {
           "200": {
@@ -7668,7 +8032,7 @@
             }
           },
           "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base only.",
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base or Polygon.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7684,7 +8048,7 @@
       "get": {
         "operationId": "getBlsJobs",
         "summary": "BLS jobs figures (payrolls, unemployment rate, hourly earnings) ($0.01)",
-        "description": "U.S. jobs figures from the Bureau of Labor Statistics API v2: total nonfarm payrolls, unemployment rate and average hourly earnings (seasonally adjusted), optional start and end year (max 20 years). Data credit: U.S. Bureau of Labor Statistics; not affiliated with or endorsed by BLS. Up to 1 hour old. Bad input is refused before payment, not charged. If no series returns data, the call is refused and not charged; if any series returns data, the full price is charged. USDC on Base only.",
+        "description": "U.S. jobs figures from the Bureau of Labor Statistics API v2: total nonfarm payrolls, unemployment rate and average hourly earnings (seasonally adjusted), optional start and end year (max 20 years). Data credit: U.S. Bureau of Labor Statistics; not affiliated with or endorsed by BLS. Up to 1 hour old. Bad input is refused before payment, not charged. If no series returns data, the call is refused and not charged; if any series returns data, the full price is charged. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7696,7 +8060,16 @@
           "priceUsd": "$0.01",
           "amount": "10000",
           "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
         },
         "responses": {
           "200": {
@@ -7720,7 +8093,7 @@
             }
           },
           "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base only.",
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base or Polygon.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7736,7 +8109,425 @@
       "get": {
         "operationId": "getTreasuryYieldCurve",
         "summary": "US Treasury daily par yield curve ($0.01)",
-        "description": "US Treasury daily par yield curve, 1-month to 30-year, plus 2s10s and 3-month/10-year spreads. Optional date=YYYY-MM-DD (default: latest day). Data credit: U.S. Department of the Treasury; not affiliated with or endorsed by the Treasury. Up to 30 minutes old. Informational only, no warranty; not advice. Bad input is refused before payment, not charged. If no curve exists for the date, it is refused and not charged; if any tenor returns data, the full price is charged. USDC on Base only.",
+        "description": "US Treasury daily par yield curve, 1-month to 30-year, plus 2s10s and 3-month/10-year spreads. Optional date=YYYY-MM-DD (default: latest day). Data credit: U.S. Department of the Treasury; not affiliated with or endorsed by the Treasury. Up to 30 minutes old. Informational only, no warranty; not advice. Bad input is refused before payment, not charged. If no curve exists for the date, it is refused and not charged; if any tenor returns data, the full price is charged. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.01",
+          "amount": "10000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domain/whois": {
+      "get": {
+        "operationId": "getDomainWhois",
+        "summary": "Domain registration lookup (.com/.net/.org) ($0.005)",
+        "description": "One .com, .net or .org domain from registry RDAP: registrar, dates, status, nameservers, DNSSEC, registry notices, source URL. No contact data. Other TLDs refused before payment. USDC on Base or Polygon. Buyer terms: results may not be used for marketing, spam or any unsolicited commercial message or solicitation, or to compile or resell a registration database. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.005",
+          "amount": "5000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.005 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domain/ssl": {
+      "get": {
+        "operationId": "getDomainSsl",
+        "summary": "SSL certificate expiry check ($0.005)",
+        "description": "TLS certificate for one public hostname, read from a direct handshake on port 443: issuer, subject, SANs, valid from/to, days remaining, expired, hostname match, chain length. No HTTP request is sent. One name per call. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.005",
+          "amount": "5000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.005 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domain/trust": {
+      "get": {
+        "operationId": "getDomainTrust",
+        "summary": "Domain checks bundle (.com/.net/.org) ($0.25)",
+        "description": "Domain checks bundle for one .com, .net or .org domain in one call: registry facts (registrar, created/expiry, status), TLS certificate (issuer, days to expiry, hostname match), MX/SPF/DMARC, HTTP security headers (redirects not followed), with a 0-100 check score and its reasons. Other TLDs refused before payment. USDC on Base or Polygon. Buyer terms: results may not be used for marketing, spam or any unsolicited commercial message or solicitation, or to compile or resell a registration database. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.25",
+          "amount": "250000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.25 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/email/check": {
+      "get": {
+        "operationId": "getEmailCheck",
+        "summary": "Email address check ($0.003)",
+        "description": "Email address check for one address: RFC 5322 syntax, MX records (null MX noted), SPF and DMARC records over DNS, role-account flag (info@, admin@ and similar) and a disposable-domain match. No SMTP connection is made, so mailbox existence is not checked. One address per call. Bad input or DNS failure: Not charged. USDC on Base or Polygon. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.003",
+          "amount": "3000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.003 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vuln/check": {
+      "get": {
+        "operationId": "getVulnCheck",
+        "summary": "Known-vulnerability check (CVE or package) ($0.02)",
+        "description": "CVE/package lookup: NVD CVSS, KEV status, GHSA ranges. USDC on Base or Polygon. Sources: NVD API, CISA KEV (CC0), GitHub Advisory Database (CC BY 4.0, https://github.com/advisories). This product uses the NVD API but is not endorsed or certified by the NVD. Not affiliated with or endorsed by NIST, CISA, DHS or GitHub. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything. On USDC on Base, errors are not charged, apart from the exceptions noted on a route. On USDC on Solana, and RLUSD on the XRP Ledger, a refused or failed request may still be charged. On Polygon (native USDC), a request is settled only when it succeeds (HTTP status below 400). Failed requests are not charged.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.02",
+          "amount": "20000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402",
+          "networks": [
+            "eip155:8453",
+            "eip155:137"
+          ],
+          "polygon": {
+            "network": "eip155:137",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x5b32c973596078a967562ca652761404f19be0e9"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base or Polygon.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vuln/lockfile": {
+      "post": {
+        "operationId": "postVulnLockfile",
+        "summary": "npm package-lock triage ($0.05)",
+        "description": "Batch triage of one npm package-lock.json (v2 or v3) against an injected reviewed-advisory snapshot. Returns affected locked versions, GHSA links, and the advisory's reported patched versions, ordered by severity and patchability. Lockfile presence is not a runtime install and is not a reachability finding. Ambiguous entries are UNKNOWN. Not a security audit. USDC on Base only. The EIP-3009 nonce is lockfileBindingNonce over the exact POST body. Signing instructions: https://horizonpulse.dev/lockfile-signing. A client-chosen random nonce is rejected.",
+        "x-payment-info": {
+          "protocol": "x402",
+          "x402Version": 2,
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "assetSymbol": "USDC",
+          "decimals": 6,
+          "priceUsd": "$0.05",
+          "amount": "50000",
+          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+        },
+        "responses": {
+          "200": {
+            "description": "Result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad input. Not charged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: PAYMENT-REQUIRED header, $0.05 USDC on Base only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/us/banking-calendar": {
+      "get": {
+        "operationId": "getUsBankingCalendar",
+        "summary": "US federal and Reserve Bank calendar ($0.01)",
+        "description": "Computed US federal, Board, and Reserve Bank calendar dates for one bounded range. Fedwire Funds and NSS dates are separate and can be unsettled. Not a complete United States business day. Not affiliated with the Board or any Reserve Bank. Computed from 5 U.S.C. § 6103 (United States Code 2024 edition on govinfo.gov) and the Board of Governors K.8 Saturday/Sunday rule on federalreserve.gov. Docket OP-1870 marks Fedwire Funds and NSS calendar-date uncertainty only; 2028-01-01 is not an effective date. No holiday table is copied. frbservices.org and newyorkfed.org are not computation inputs. Not official Federal Reserve System output. Not a warranty of completeness.",
         "x-payment-info": {
           "protocol": "x402",
           "x402Version": 2,
@@ -7773,266 +8564,6 @@
           },
           "402": {
             "description": "Payment required: PAYMENT-REQUIRED header, $0.01 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/domain/whois": {
-      "get": {
-        "operationId": "getDomainWhois",
-        "summary": "Domain registration lookup (.com/.net/.org) ($0.005)",
-        "description": "One .com, .net or .org domain from registry RDAP: registrar, dates, status, nameservers, DNSSEC, registry notices, source URL. No contact data. Other TLDs refused before payment. USDC on Base only. Buyer terms: results may not be used for marketing, spam or any unsolicited commercial message or solicitation, or to compile or resell a registration database.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.005",
-          "amount": "5000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.005 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/domain/ssl": {
-      "get": {
-        "operationId": "getDomainSsl",
-        "summary": "SSL certificate expiry check ($0.005)",
-        "description": "TLS certificate for one public hostname, read from a direct handshake on port 443: issuer, subject, SANs, valid from/to, days remaining, expired, hostname match, chain length. No HTTP request is sent. One name per call. USDC on Base only.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.005",
-          "amount": "5000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.005 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/domain/trust": {
-      "get": {
-        "operationId": "getDomainTrust",
-        "summary": "Domain checks bundle (.com/.net/.org) ($0.25)",
-        "description": "Domain checks bundle for one .com, .net or .org domain in one call: registry facts (registrar, created/expiry, status), TLS certificate (issuer, days to expiry, hostname match), MX/SPF/DMARC, HTTP security headers (redirects not followed), with a 0-100 check score and its reasons. Other TLDs refused before payment. USDC on Base only. Buyer terms: results may not be used for marketing, spam or any unsolicited commercial message or solicitation, or to compile or resell a registration database.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.25",
-          "amount": "250000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.25 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/email/check": {
-      "get": {
-        "operationId": "getEmailCheck",
-        "summary": "Email address check ($0.003)",
-        "description": "Email address check for one address: RFC 5322 syntax, MX records (null MX noted), SPF and DMARC records over DNS, role-account flag (info@, admin@ and similar) and a disposable-domain match. No SMTP connection is made, so mailbox existence is not checked. One address per call. Bad input or DNS failure: Not charged. USDC on Base only.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.003",
-          "amount": "3000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.003 USDC on Base only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/vuln/check": {
-      "get": {
-        "operationId": "getVulnCheck",
-        "summary": "Known-vulnerability check (CVE or package) ($0.02)",
-        "description": "CVE/package lookup: NVD CVSS, KEV status, GHSA ranges. USDC on Base only. Sources: NVD API, CISA KEV (CC0), GitHub Advisory Database (CC BY 4.0, https://github.com/advisories). This product uses the NVD API but is not endorsed or certified by the NVD. Not affiliated with or endorsed by NIST, CISA, DHS or GitHub. Not financial, investment, tax, legal or health advice. Quotes about tokens, securities or other financial products are not a recommendation to buy, sell or hold anything.",
-        "x-payment-info": {
-          "protocol": "x402",
-          "x402Version": 2,
-          "scheme": "exact",
-          "network": "eip155:8453",
-          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          "assetSymbol": "USDC",
-          "decimals": 6,
-          "priceUsd": "$0.02",
-          "amount": "20000",
-          "payTo": "0x5b32c973596078a967562ca652761404f19be0e9",
-          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
-        },
-        "responses": {
-          "200": {
-            "description": "Result.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad input. Not charged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required: PAYMENT-REQUIRED header, $0.02 USDC on Base only.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8095,7 +8626,7 @@
       },
       "PaymentRequired": {
         "type": "object",
-        "description": "Decoded shape of the PAYMENT-REQUIRED response header: base64-decode the header value and parse it as JSON to get this x402 v2 payment challenge (the live header may also carry Bazaar discovery metadata). Not sent in the 402 body, which is empty JSON {}.",
+        "description": "Decoded shape of the PAYMENT-REQUIRED response header: base64-decode the header value and parse it as JSON to get this x402 v2 payment challenge (the live header may also carry Bazaar discovery metadata). Spec-canonical location is the header. The unpaid 402 JSON body may be buyerTerms-only, or — when HP_X402_CHALLENGE_BODY_ENABLED is on — a mirror of this decoded object when the body lacks accepts.",
         "required": [
           "x402Version",
           "accepts"

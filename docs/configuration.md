@@ -2477,6 +2477,11 @@ quotas, paid options and prices of other operations in the description. This
 explicit field does not parse arbitrary vendor prose. Runtime rendering metadata
 is not serialized; imported registrations rebuild it from their provider settings.
 
+Observed provider pricing shapes that the shared adapters do not yet consume are
+tracked with their affected providers in the
+[custom pricing adapters plan](plans/custom-pricing-adapters.md); a provider
+declaration alone does not establish an adapter.
+
 `max_description_chars` keeps its existing generated-fallback behavior, including
 its visible truncation marker. Authored override fallbacks retain their existing
 limit bypass. New observed renderings apply the configured limit to the complete

@@ -29,7 +29,9 @@ The shipped asset manifest supplies the full denominator; repeated `--provider I
 selects a subset. Private overrides and directories are never scanned. All writes
 go into a new ignored `target/provider-updates/RUN`, preserving unrelated target
 content and every tracked file. Capture stores complete exact bytes under SHA-256
-names with their URL/path, purpose and outcome in `capture.json`. It records Git
+names with their URL/path, purpose, outcome and safe response metadata
+(`etag`, `last_modified`, `date`) in `capture.json`. The metadata is evidence for
+cache/validator drift; it is not authority and no request header is replayed. It records Git
 baseline/dirty status, executable hash/version, network policy, resolved Config,
 provider TOML, local asset, maintenance guidance and metadata. The selected ID/path
 map remains explicit even in an interrupted capture. Each completed remote read
@@ -50,6 +52,14 @@ asset requires exactly one such authority. Registry evidence uses `registry`.
 Remote spec and help URLs come from provider TOML, not a second inventory.
 Sources must be public credential-free URLs without queries/fragments. Missing
 metadata/authority is unresolved work, never permission to guess a source.
+
+Each completed remote read records only `etag`, `last_modified` and `date` response
+metadata. Packets expose current `response` and, when a prior capture exists,
+`previous_response` beside the source comparison so two sweeps can distinguish a
+changed validator, a changed body with a stable validator, or a changed validator
+with identical bytes. These are cache/refresh indicators, not proof that an operation was
+removed or its schema changed. The
+[stale cache expiry plan](plans/stale_cache_expiry.md) owns corroboration rules.
 
 The existing specialized AgentUtility registry join and Daedalus identity-header
 repair retain their current consumers and explicit invocation; the sweep never
@@ -115,10 +125,21 @@ because compilation omits unsupported constructs. The authored runtime asset and
 upstream projection are labeled separately; a projection does not recreate an
 authored catalog. With a prior capture, `previous_runtime` and `runtime_changes`
 compare the actual frozen runtime inputs and configurations independently of
-`previous_upstream` and `tool_changes`. `asset_changes` reports raw local-asset
+`previous_upstream` and `tool_changes`. A comparison with no upstream source,
+pricing, asset or removed-source differences reports `no upstream evidence change`;
+local provider TOML, maintenance-guidance and projection/config differences remain
+visible in `runtime_changes` and `tool_changes` but do not create upstream drift. `asset_changes` reports raw local-asset
 changes, including asset addition/removal; absent history is `null`. Authored-only
 or multiple-authority providers still receive runtime comparisons without an
 invented upstream union. No packet is marked accepted automatically.
+
+A complete vendor-copy download that is semantically identical to the committed
+asset produces `committed asset unchanged; no candidate` and no numbered candidate.
+Whitespace-only or object-order-only differences are not provider updates. A
+different OpenAPI document remains a candidate even when only descriptions or
+examples changed. `committed asset unchanged; no candidate` describes candidate
+staging against the current asset; prior-capture differences remain visible in the
+packet's comparison fields.
 
 Compilation failures preserve the independently parsed operation inventory. Override
 diagnostics may also use an explicitly labeled inventory with tool-name filters
@@ -172,17 +193,22 @@ not mean free.
 
 ### Pricing in packets
 
-- The production projection reports the effective `catalog_key` plus
-  `priced_operations` and `total_operations` counts. Generated `Cost:` text remains
+- The production projection reports the effective `catalog_key`, the number of
+  operations carrying pricing metadata (`pricing_metadata_operations`) and
+  `total_operations`. Metadata presence does not establish a usable estimate: an
+  operation may expose only authentication flags or a shape the adapter leaves
+  display-only or unknown. Inspect the generated `Cost:` text and normalized
+  packet values separately. Generated `Cost:` text remains
   visible in the effective and unoverridden tools. This shows coverage without
   treating catalog-derived text as an upstream price.
 - The packet's `pricing` object reports the configured external source, each
-  pricing source's observed root shape, capture status and prior-capture diff,
+  pricing source's observed root shape, capture status and prior-capture diff in
+  `pricing.evidence`,
   relocation flags, and an advisory signal inventory. Configured and resolved
   Config changes also remain visible in the normal runtime/config differences.
-- `pricing.relocation` flags a configured catalog key with no priced operations and
-  a changed, added or removed external source. These are review prompts, not
-  errors; many operations legitimately omit pricing.
+- `pricing.relocation` flags a configured catalog key with no operations carrying
+  pricing metadata and a changed, added or removed external source. These are
+  review prompts, not errors; many operations legitimately omit pricing.
 - `pricing.signals` lists sorted JSON key pointers whose names look pricing-related
   (`price`, `pricing`, `payment`, `tariff`, `billing`, `cost`, `credit`, `x402`
   other than `x402Version`) across remote schema, registry, discovery, guide, help,
@@ -192,6 +218,9 @@ not mean free.
 - Raw source diffs compare external pricing documents and guide/registry changes.
   Mapping an external `resources`/`items` document to operations is runtime-only
   and intentionally ambiguous; an offline sweep does not prove that mapping.
+  Vendor generation timestamps such as `generatedAt` or per-record `lastUpdated`
+  can change on every read. A timestamp-only diff is cache-generation evidence, not
+  a price or schema change; review the structural and amount fields separately.
 - Pricing evidence never stages a schema candidate. Candidate readiness remains
   governed by the schema authority and its complete supporting reads.
 
@@ -226,6 +255,22 @@ For each packet, in addition to the normal steps below:
    relocation unresolved, no pricing authority captured, or missing maintenance
    metadata. Report attempted coverage and unresolved authorities separately from
    accepted changes. Process success is not universal price verification.
+
+### Pricing coverage triage and adapter gaps
+
+Compare `pricing_metadata_operations` with `total_operations`, then inspect the
+generated `Cost:` text and `pricing.evidence`. A key can be present on every
+operation while the adapter still renders `Cost: unknown.` or raw JSON for an
+unsupported shape. Use the advisory `pricing.signals` pointers to locate candidate
+fields, then read the exact object before proposing a key, unit or code change.
+
+A new pricing declaration or adapter is a shared code and documentation change
+only when it has independent uses beyond one provider. Record a provider-specific
+or one-off shape in `pricing_description` or the owning caveat instead. Shapes that
+need reviewed custom adapters are tracked in the
+[custom pricing adapters plan](plans/custom-pricing-adapters.md), including the
+affected providers and the distinction between display-only and selection-capable
+metadata. Do not add provider-ID dispatch or a per-provider pricing recipe.
 
 ## Stage and accept changes
 
@@ -356,8 +401,9 @@ boundaries before implementation; avoid provider dispatch or per-provider recipe
 ## Validation responsibilities
 
 `make test CARGO_ARGS='--example provider_updates'` exercises shared synthetic
-contracts: frozen inputs, unavailable sibling evidence, baseline distinctions,
-masked overrides, method/name changes, filtered additions, full-copy closure,
+contracts: frozen inputs, safe response metadata, unavailable sibling evidence,
+baseline distinctions, semantically unchanged candidates, masked overrides,
+method/name changes, filtered additions, full-copy closure,
 external and declared pricing evidence isolation, external-document shape and diff
 reporting, pricing relocation/absent-key reporting, advisory key-pointer signals,
 legacy captures without pricing metadata, and missing or corrupt pricing blobs. Provider fixtures require

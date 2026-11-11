@@ -172,9 +172,29 @@ fn candidate(run: &Path, provider: &Provider) -> Result<Option<Vec<u8>>> {
     x402_treazury::catalog::build_tools(cfg, &root, &prefix)?;
     Ok(Some(raw))
 }
+fn semantically_equal(left: &[u8], right: &[u8]) -> bool {
+    match (
+        serde_json::from_slice::<Value>(left),
+        serde_json::from_slice::<Value>(right),
+    ) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
 pub(super) fn stage(run: &Path, provider: &Provider, index: usize) -> Result<Value> {
     match candidate(run, provider) {
         Ok(Some(raw)) => {
+            if let Some(asset) = &provider.asset
+                && let Ok(committed) = bytes(run, asset)
+                && semantically_equal(&committed, &raw)
+            {
+                return Ok(json!({
+                    "outcome":"committed asset unchanged; no candidate",
+                    "target":asset.source,
+                    "expected_preimage":asset.hash,
+                    "accepted":false
+                }));
+            }
             let name = format!("candidate-{index}.json");
             std::fs::write(run.join(&name), &raw)?;
             Ok(
@@ -282,6 +302,7 @@ mod tests {
             purpose: "schema".into(),
             hash: Some(store(run, &raw).unwrap()),
             outcome: "captured".into(),
+            response: None,
         };
         let mut provider = Provider {
             id: "synthetic".into(),
@@ -301,12 +322,50 @@ mod tests {
             outcome: "captured".into(),
         };
         assert_eq!(candidate(run, &provider).unwrap(), Some(raw.clone()));
+        let unchanged = stage(run, &provider, 0).unwrap();
+        assert_eq!(
+            unchanged["outcome"],
+            "committed asset unchanged; no candidate"
+        );
+        assert!(!run.join("candidate-0.json").exists());
+        let pretty =
+            serde_json::to_vec_pretty(&serde_json::from_slice::<Value>(&raw).unwrap()).unwrap();
+        let pretty_path = run.join("pretty-committed.json");
+        std::fs::write(&pretty_path, &pretty).unwrap();
+        let asset = provider.asset.as_mut().unwrap();
+        asset.source = pretty_path.to_str().unwrap().into();
+        asset.hash = Some(store(run, &pretty).unwrap());
+        assert_eq!(
+            stage(run, &provider, 0).unwrap()["outcome"],
+            "committed asset unchanged; no candidate"
+        );
+        let old = br#"{"openapi":"3.0.0","paths":{},"x-committed":"older"}"#;
+        let old_path = run.join("old-committed.json");
+        std::fs::write(&old_path, old).unwrap();
+        let asset = provider.asset.as_mut().unwrap();
+        asset.source = old_path.to_str().unwrap().into();
+        asset.hash = Some(store(run, old).unwrap());
         let result = stage(run, &provider, 0).unwrap();
         assert_eq!(
             std::fs::read(run.join(result["file"].as_str().unwrap())).unwrap(),
             raw
         );
         assert_eq!(result["accepted"], false);
+        let mut description_only = root.clone();
+        description_only["paths"]["/one"]["get"]["description"] = json!("changed");
+        let description_raw = serde_json::to_vec(&description_only).unwrap();
+        provider.inputs[0].hash = Some(store(run, &description_raw).unwrap());
+        assert_eq!(
+            candidate(run, &provider).unwrap(),
+            Some(description_raw.clone()),
+            "description-only upstream edits remain candidates"
+        );
+        let described = stage(run, &provider, 0).unwrap();
+        assert_eq!(
+            std::fs::read(run.join(described["file"].as_str().unwrap())).unwrap(),
+            description_raw,
+            "description-only upstream edits stage a candidate"
+        );
         let target = run.join("tracked-schema.json");
         std::fs::write(&target, b"intervening user edit").unwrap();
         provider.asset.as_mut().unwrap().source = target.to_str().unwrap().into();

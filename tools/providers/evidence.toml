@@ -30,7 +30,12 @@ sources = [{ url = "https://agproxy.shveik.dev/openapi.json", purpose = "schema"
 [horizonpulse]
 intent = "vendor-copy"
 guidance = "providers/CAVEATS.md#pinned-relay-contracts"
-sources = [{ url = "https://horizonpulse.dev/openapi.json", purpose = "schema" }]
+sources = [
+    { url = "https://horizonpulse.dev/openapi.json", purpose = "schema" },
+    # Vendor named-route catalog with dollar/atomic prices and tiers; advisory
+    # evidence only, not an accepted x402-resources/discovery document.
+    { url = "https://horizonpulse.dev/.well-known/x402", purpose = "pricing" },
+]
 
 [curl]
 intent = "vendor-copy"
