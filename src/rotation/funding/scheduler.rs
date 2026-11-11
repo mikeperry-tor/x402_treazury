@@ -30,8 +30,13 @@ pub(super) enum Mode {
 }
 
 fn draw_interval() -> std::time::Duration {
+    draw_allocation_interval(false)
+}
+
+fn draw_allocation_interval(initial: bool) -> std::time::Duration {
     use rand::RngExt;
-    std::time::Duration::from_secs(rand::rng().random_range(30..=120))
+    let range = if initial { 60..=240 } else { 30..=120 };
+    std::time::Duration::from_secs(rand::rng().random_range(range))
 }
 
 struct Opportunities(BTreeMap<String, tokio::time::Instant>);
@@ -49,10 +54,46 @@ impl Opportunities {
         )
     }
 
-    fn take_due(
+    /// Discover newly demanded groups without renewing already armed opportunities.
+    fn reconcile(
+        &mut self,
+        groups: &BTreeMap<String, bool>,
+        now: tokio::time::Instant,
+        mut draw: impl FnMut(bool) -> std::time::Duration,
+    ) {
+        self.0.retain(|name, _| groups.contains_key(name));
+        for (name, initial) in groups {
+            self.0
+                .entry(name.clone())
+                .or_insert_with(|| now + draw(*initial));
+        }
+    }
+
+    /// Read contention can defer eligibility acquisition without moving a group.
+    fn next_due(&self, retry: Option<tokio::time::Instant>) -> Option<tokio::time::Instant> {
+        retry.or_else(|| self.0.values().copied().min())
+    }
+
+    async fn refresh(
+        &mut self,
+        read: impl Future<Output = Result<BTreeMap<String, bool>>>,
+        retry_interval: std::time::Duration,
+        first_error: &mut Option<anyhow::Error>,
+    ) -> Result<(Vec<String>, Option<tokio::time::Instant>)> {
+        let intervals = read_result(read.await, first_error)?;
+        let observed = tokio::time::Instant::now();
+        let Some(intervals) = intervals else {
+            return Ok((Vec::new(), Some(observed + retry_interval)));
+        };
+        self.reconcile(&intervals, observed, draw_allocation_interval);
+        let groups = self.take_due_for(observed, |name| draw_allocation_interval(intervals[name]));
+        Ok((groups, None))
+    }
+
+    fn take_due_for(
         &mut self,
         now: tokio::time::Instant,
-        mut draw: impl FnMut() -> std::time::Duration,
+        mut draw: impl FnMut(&str) -> std::time::Duration,
     ) -> Vec<String> {
         self.0
             .iter_mut()
@@ -60,10 +101,19 @@ impl Opportunities {
                 if *due > now {
                     return None;
                 }
-                *due = now + draw();
+                *due = now + draw(name);
                 Some(name.clone())
             })
             .collect()
+    }
+
+    #[cfg(test)]
+    fn take_due(
+        &mut self,
+        now: tokio::time::Instant,
+        mut draw: impl FnMut() -> std::time::Duration,
+    ) -> Vec<String> {
+        self.take_due_for(now, |_| draw())
     }
 }
 
@@ -75,7 +125,7 @@ fn next_wake(
     pending: &VecDeque<Pending>,
     retry_due: Option<u64>,
     clock: &TickClock,
-    opportunities: &Opportunities,
+    opportunity_due: Option<tokio::time::Instant>,
     once: bool,
     explicit_due: Option<tokio::time::Instant>,
 ) -> Option<tokio::time::Instant> {
@@ -96,7 +146,7 @@ fn next_wake(
                 due.saturating_sub(clock.epoch),
             ))
         })
-        .chain(opportunities.0.values().copied())
+        .chain(opportunity_due)
         .chain(explicit_due)
         .min()
 }
@@ -450,7 +500,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             epoch: instant,
             started: tokio::time::Instant::now(),
         };
-        let (reader, health_after, allocation_groups) = {
+        let (reader, health_after, mut allocation_groups) = {
             let backend = self.backend.lock().await;
             (
                 backend.observations(),
@@ -458,18 +508,23 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 backend.allocation_groups(),
             )
         };
-        let mut opportunities = Opportunities::new(
-            if mode == Mode::Serving {
-                allocation_groups.clone()
-            } else {
-                Vec::new()
-            },
-            tokio::time::Instant::now(),
-            draw_interval,
-        );
-        let mut explicit_due = matches!(mode, Mode::Bootstrap | Mode::Explicit).then(|| {
-            tokio::time::Instant::now() + std::time::Duration::from_secs(self.poll_seconds.max(1))
-        });
+        if let Some(selected) = &self.allocation_selection {
+            allocation_groups.retain(|name| selected.contains(name));
+        }
+        let (deferred_groups, ordinary_groups): (Vec<_>, Vec<_>) = if mode == Mode::Serving {
+            allocation_groups
+                .iter()
+                .cloned()
+                .partition(|name| self.bootstrap_participants.contains(name))
+        } else {
+            Default::default()
+        };
+        let mut opportunities =
+            Opportunities::new(ordinary_groups, tokio::time::Instant::now(), draw_interval);
+        let mut deferred = Opportunities(BTreeMap::new());
+        let poll_interval = std::time::Duration::from_secs(self.poll_seconds.max(1));
+        let mut explicit_due = matches!(mode, Mode::Bootstrap | Mode::Explicit)
+            .then(|| tokio::time::Instant::now() + poll_interval);
         // Configuration is immutable for this owner. Current store restrictions,
         // group enablement, cap and exact claim are rechecked on every commit.
         for name in &allocation_groups {
@@ -514,20 +569,47 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let pass_due = clock.now();
         let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
             .map(|kind| LaneInventory::new(kind, boundary, pass_due));
+        let allocation_changes = self.store.funding_changes();
         let mut stopping = false;
+        let mut refresh_eligibility = !deferred_groups.is_empty();
+        let mut allocation_retry = None;
         loop {
             stopping |= stop.is_cancelled();
             if !stopping {
                 // Rearm all due groups before any Store/source work. Completion
                 // traffic and payment wakes cannot advance or redraw this schedule.
                 let now = tokio::time::Instant::now();
-                let groups = if explicit_due.is_some_and(|due| due <= now) {
-                    explicit_due =
-                        Some(now + std::time::Duration::from_secs(self.poll_seconds.max(1)));
+                let mut groups = if explicit_due.is_some_and(|due| due <= now) {
+                    explicit_due = Some(now + poll_interval);
                     allocation_groups.clone()
                 } else {
-                    opportunities.take_due(now, draw_interval)
+                    opportunities.take_due_for(now, |_| draw_interval())
                 };
+                if !deferred_groups.is_empty() {
+                    refresh_eligibility |= allocation_changes.notified().now_or_never().is_some();
+                }
+                let eligibility_due = allocation_retry.map_or_else(
+                    || refresh_eligibility || deferred.next_due(None).is_some_and(|due| due <= now),
+                    |due| due <= now,
+                );
+                if eligibility_due {
+                    let names = deferred_groups.clone();
+                    let (due, retry) = deferred
+                        .refresh(
+                            async {
+                                // The scheduler owns retries and reports read contention.
+                                self.store
+                                    .call(move |s| Ok(s.bootstrap_allocation_intervals(&names)))
+                                    .await?
+                            },
+                            poll_interval,
+                            &mut first_error,
+                        )
+                        .await?;
+                    groups.extend(due);
+                    allocation_retry = retry;
+                    refresh_eligibility = false;
+                }
                 for name in groups {
                     if self
                         .store
@@ -610,7 +692,11 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 &pending,
                 retry_due,
                 &clock,
-                &opportunities,
+                opportunities
+                    .next_due(None)
+                    .into_iter()
+                    .chain(deferred.next_due(allocation_retry))
+                    .min(),
                 once,
                 explicit_due,
             );
@@ -619,6 +705,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             } else {
                 tokio::select! {
                     completion = flight.reads.next(), if !flight.reads.is_empty() => completion,
+                    _ = allocation_changes.notified(), if !stopping && !deferred_groups.is_empty() => {
+                        refresh_eligibility = true;
+                        None
+                    },
                     _ = stop.cancelled(), if !stopping => {
                         stopping = true;
                         None
@@ -1597,3 +1687,7 @@ mod tests;
 #[cfg(test)]
 #[path = "opportunity_tests.rs"]
 mod opportunity_tests;
+
+#[cfg(test)]
+#[path = "bootstrap_opportunity_tests.rs"]
+mod bootstrap_opportunity_tests;

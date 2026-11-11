@@ -27,6 +27,93 @@ fn treasury() -> Value {
     json!({"state_dir":"never-opened-state","confirmations":1})
 }
 
+fn bootstrap_fixture() -> Value {
+    let mut value = fixture();
+    value["treasury"] = treasury();
+    value["funding"] = json!({});
+    value["wallets"]["payer"] = managed();
+    value["wallets"]["participant"] = managed();
+    value["wallet_bootstrap"] =
+        json!({"bootstrap_group":"payer", "deferred_groups":["participant"]});
+    value
+}
+
+#[test]
+fn bootstrap_policy_validates_resolved_managed_groups_without_allocating() {
+    let mut value = bootstrap_fixture();
+    let resolution = config(&value).validate().unwrap();
+    let setup = resolution.summary.bootstrap_setup.unwrap();
+    assert_eq!(setup.group, "payer");
+    assert_eq!(setup.initial_inventory_target_atomic, "5000000");
+    assert_eq!(setup.initial_inventory_maximum_atomic, "5000000");
+    assert_eq!(
+        resolution.summary.initial_inventory_target_atomic,
+        "10000000"
+    );
+    assert_eq!(resolution.bindings["one"]["a"].wallet, "payer");
+    for (policy, expected) in [
+        (
+            json!({"bootstrap_group":"payer","deferred_groups":[]}),
+            "wallet_bootstrap.deferred_groups must not be empty",
+        ),
+        (
+            json!({"bootstrap_group":"missing","deferred_groups":["participant"]}),
+            "wallet_bootstrap group missing must name a resolved managed wallet",
+        ),
+        (
+            json!({"bootstrap_group":"payer","deferred_groups":["missing"]}),
+            "wallet_bootstrap group missing must name a resolved managed wallet",
+        ),
+        (
+            json!({"bootstrap_group":"payer","deferred_groups":["payer"]}),
+            "wallet_bootstrap group cannot participate in itself",
+        ),
+        (
+            json!({"bootstrap_group":"payer","deferred_groups":["participant","participant"]}),
+            "duplicate wallet_bootstrap participant participant",
+        ),
+    ] {
+        value["wallet_bootstrap"] = policy;
+        error(&value, expected);
+    }
+    value["wallet_bootstrap"] =
+        json!({"bootstrap_group":"payer","deferred_groups":["participant"]});
+    value["wallets"]["participant"] = fixture()["wallets"]["payer"].clone();
+    error(
+        &value,
+        "wallet_bootstrap group participant must name a resolved managed wallet",
+    );
+    value["wallets"]["participant"] = managed();
+    value["wallets"]["payer"] = fixture()["wallets"]["payer"].clone();
+    error(
+        &value,
+        "wallet_bootstrap group payer must name a resolved managed wallet",
+    );
+}
+
+#[test]
+fn bootstrap_policy_accepts_explicit_generated_participants_and_absence() {
+    let mut value = bootstrap_fixture();
+    value["wallet_templates"] = json!({"small":managed()});
+    value["wallet_assignment"] = json!({"scope":"deployment", "template":"small"});
+    value["servers"]["one"]
+        .as_object_mut()
+        .unwrap()
+        .remove("wallet");
+    value["wallet_bootstrap"] =
+        json!({"bootstrap_group":"payer", "deferred_groups":["auto_v1_deployment"]});
+    let resolution = config(&value).validate().unwrap();
+    assert_eq!(
+        resolution.bootstrap.unwrap().deferred_groups,
+        ["auto_v1_deployment"]
+    );
+    assert_eq!(resolution.bindings["one"]["b"].wallet, "auto_v1_deployment");
+    value.as_object_mut().unwrap().remove("wallet_bootstrap");
+    let resolution = config(&value).validate().unwrap();
+    assert!(resolution.bootstrap.is_none());
+    assert!(resolution.summary.bootstrap_setup.is_none());
+}
+
 #[test]
 fn preliminary_stages_precede_structural_validation() {
     let mut v = fixture();
@@ -420,5 +507,20 @@ fn unauthenticated_listeners_require_host_checking() {
             &v,
             "server one: HTTP authentication and Host checking cannot both be disabled",
         );
+    }
+}
+
+#[test]
+fn bootstrap_policy_uses_explicit_field_names_without_legacy_aliases() {
+    use crate::rotation::assignment::BootstrapPolicy;
+    let canonical = json!({"bootstrap_group":"general", "deferred_groups":["personal"]});
+    let policy: BootstrapPolicy = serde_json::from_value(canonical.clone()).unwrap();
+    assert_eq!(serde_json::to_value(policy).unwrap(), canonical);
+    for obsolete in [
+        json!({"group":"general", "groups":["personal"]}),
+        json!({"bootstrap_group":"general", "groups":["personal"]}),
+        json!({"group":"general", "deferred_groups":["personal"]}),
+    ] {
+        assert!(serde_json::from_value::<BootstrapPolicy>(obsolete).is_err());
     }
 }

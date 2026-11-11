@@ -72,15 +72,7 @@ async fn exhausted_once_lanes_wait_for_completion_without_spinning() {
     }
     tokio::time::advance(Duration::from_secs(60)).await;
     assert_eq!(
-        next_wake(
-            &inventory,
-            &VecDeque::new(),
-            None,
-            &clock,
-            &Opportunities(BTreeMap::new()),
-            true,
-            None
-        ),
+        next_wake(&inventory, &VecDeque::new(), None, &clock, None, true, None,),
         None
     );
     assert_eq!(
@@ -89,9 +81,9 @@ async fn exhausted_once_lanes_wait_for_completion_without_spinning() {
             &VecDeque::new(),
             Some(1065),
             &clock,
-            &Opportunities(BTreeMap::new()),
+            None,
             true,
-            None
+            None,
         ),
         Some(start + Duration::from_secs(65)),
         "retained quote metadata must wake even without a pending inventory page"
@@ -107,9 +99,9 @@ async fn exhausted_once_lanes_wait_for_completion_without_spinning() {
             &VecDeque::new(),
             None,
             &clock,
-            &Opportunities(BTreeMap::new()),
+            None,
             false,
-            None
+            None,
         ),
         Some(start + Duration::from_secs(65))
     );
@@ -120,9 +112,9 @@ async fn exhausted_once_lanes_wait_for_completion_without_spinning() {
             &VecDeque::new(),
             None,
             &clock,
-            &Opportunities(BTreeMap::new()),
+            None,
             false,
-            None
+            None,
         ),
         Some(start + Duration::from_secs(65)),
         "unrepresentable epochs cannot panic or hide a nearer inventory pass"
@@ -315,7 +307,15 @@ async fn serving_defers_new_allocations_but_resumes_jobs_and_bootstrap_is_prompt
     );
     let stop = CancellationToken::new();
     let task = tokio::spawn(worker.run_bootstrap(stop.clone()));
-    assert_eq!(local(requests.recv()).await.unwrap(), "explicit");
+    // Previously allocated jobs remain observable; their random durable IDs do
+    // not establish an ordering relative to the newly captured explicit job.
+    loop {
+        let group = local(requests.recv()).await.unwrap();
+        if group == "explicit" {
+            break;
+        }
+        assert!(matches!(group.as_str(), "existing" | "cold"));
+    }
     stop.cancel();
     local(task).await.unwrap().unwrap();
     local(store.call(|s| {
@@ -324,6 +324,95 @@ async fn serving_defers_new_allocations_but_resumes_jobs_and_bootstrap_is_prompt
     }))
     .await
     .unwrap();
+    drop(store);
+    local(actor).await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_bootstrap_selection_fills_both_slots_and_keeps_previously_allocated_jobs() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    for name in ["selected", "unselected", "existing"] {
+        let reserves = if name == "selected" {
+            crate::rotation::test_capacity::two_reserves("4")
+        } else {
+            crate::rotation::test_capacity::small_reserve("4")
+        };
+        state
+            .ensure_capacity_group(
+                name,
+                &reserves,
+                Some(alloy_primitives::U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+    }
+    // This durable initial-funding intent predates command selection. It keeps
+    // current-authority quote/preparation progress even before source acceptance.
+    state.fill_funding_vacancies("existing").unwrap();
+    let original = state.funding_jobs().unwrap().remove(0);
+    let (store, actor) = StoreHandle::spawn(state);
+    let (requested, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        EmptyBackend {
+            groups: vec!["selected".into(), "unselected".into(), "existing".into()],
+            requested,
+        },
+        5,
+    )
+    .with_allocation_selection(["selected".into()].into());
+    let stop = CancellationToken::new();
+    let started = tokio::time::Instant::now();
+    let task = tokio::spawn(worker.run_bootstrap(stop.clone()));
+    let mut selected_requests = 0;
+    let mut existing_requested = false;
+    while selected_requests < 2 || !existing_requested {
+        match local(requests.recv()).await.unwrap().as_str() {
+            "selected" => selected_requests += 1,
+            "existing" => existing_requested = true,
+            other => panic!("unselected allocation reached funding: {other}"),
+        }
+    }
+    assert_eq!(
+        tokio::time::Instant::now(),
+        started,
+        "explicit allocations are prompt, without a serving opportunity"
+    );
+    local(store.call(move |s| {
+        let jobs = s.funding_jobs()?;
+        assert_eq!(jobs.len(), 3);
+        let selected = jobs
+            .iter()
+            .filter(|job| job.pool_name == "selected")
+            .collect::<Vec<_>>();
+        assert_eq!(selected.len(), 2);
+        assert_ne!(
+            s.funding_wallet_type(&selected[0].id)?,
+            s.funding_wallet_type(&selected[1].id)?
+        );
+        assert!(
+            jobs.iter()
+                .any(|job| job.id == original.id && job.operation_id == original.operation_id)
+        );
+        for pool in s.status()?.pools {
+            assert!(!s.has_bootstrap_demand(&pool.id)?);
+            if pool.name == "unselected" {
+                assert!(pool.addresses.is_empty());
+            }
+        }
+        Ok(())
+    }))
+    .await
+    .unwrap();
+    stop.cancel();
+    local(task).await.unwrap().unwrap();
     drop(store);
     local(actor).await.unwrap();
 }
@@ -431,4 +520,138 @@ async fn bootstrap_and_qualification_retry_failed_allocation_without_random_dela
         drop(store);
         local(actor).await.unwrap();
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn first_use_opportunities_keep_due_times_through_wakes_and_credit() {
+    let start = tokio::time::Instant::now();
+    let mut schedule = Opportunities(BTreeMap::new());
+    let mut draws = Vec::new();
+    let mut draw = |initial| {
+        draws.push(initial);
+        Duration::from_secs(if initial { 240 } else { 30 })
+    };
+    schedule.reconcile(&BTreeMap::new(), start, &mut draw);
+    assert!(schedule.0.is_empty(), "dormant groups have no opportunity");
+    let initial = BTreeMap::from([("participant".into(), true)]);
+    schedule.reconcile(&initial, start, &mut draw);
+    let first = schedule.0["participant"];
+    for elapsed in [1, 60, 120, 239] {
+        schedule.reconcile(&initial, start + Duration::from_secs(elapsed), &mut draw);
+        assert_eq!(schedule.0["participant"], first);
+    }
+    // First credit changes future rearming; it cannot advance this armed instant.
+    schedule.reconcile(
+        &[("participant".into(), false)].into(),
+        start + Duration::from_secs(120),
+        &mut draw,
+    );
+    assert_eq!(schedule.0["participant"], first);
+    assert_eq!(draws, [true]);
+    assert!(
+        schedule
+            .take_due_for(first - Duration::from_secs(1), |_| panic!("not due"))
+            .is_empty()
+    );
+    assert_eq!(
+        schedule.take_due_for(first, |_| Duration::from_secs(30)),
+        ["participant"]
+    );
+    assert_eq!(schedule.0["participant"], first + Duration::from_secs(30));
+    // Removing participation is ordinary policy, while removing an enabled group
+    // drops its volatile schedule. Reopen reconstructs from durable facts.
+    schedule.reconcile(&BTreeMap::new(), first, |_| panic!("no group"));
+    assert!(schedule.0.is_empty());
+    for initial in [true, false] {
+        for _ in 0..32 {
+            let delay = draw_allocation_interval(initial).as_secs();
+            assert!(if initial {
+                (60..=240).contains(&delay)
+            } else {
+                (30..=120).contains(&delay)
+            });
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn delayed_eligibility_read_preserves_first_use_and_retry_intervals() {
+    let mut schedule = Opportunities(BTreeMap::new());
+    let mut error = None;
+    let poll = Duration::from_secs(5);
+    let (due, retry) = schedule
+        .refresh(
+            async {
+                tokio::time::sleep(Duration::from_secs(241)).await;
+                Ok([("participant".into(), true)].into())
+            },
+            poll,
+            &mut error,
+        )
+        .await
+        .unwrap();
+    let first = schedule.0["participant"];
+    let elapsed = first - tokio::time::Instant::now();
+    assert!((Duration::from_secs(60)..=Duration::from_secs(240)).contains(&elapsed));
+    assert!(due.is_empty() && retry.is_none());
+
+    let (due, retry) = schedule
+        .refresh(
+            async {
+                tokio::time::sleep(Duration::from_secs(12)).await;
+                Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    None,
+                )
+                .into())
+            },
+            poll,
+            &mut error,
+        )
+        .await
+        .unwrap();
+    assert!(due.is_empty());
+    assert_eq!(retry.unwrap() - tokio::time::Instant::now(), poll);
+    assert_eq!(schedule.0["participant"], first);
+}
+
+#[tokio::test(start_paused = true)]
+async fn eligibility_retry_masks_overdue_opportunity_without_changing_it() {
+    let start = tokio::time::Instant::now();
+    let clock = TickClock {
+        epoch: 1000,
+        started: start,
+    };
+    let mut inventory = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
+        .map(|kind| LaneInventory::new(kind, 0, 2000));
+    for lane in &mut inventory {
+        lane.exhausted = true;
+    }
+    let schedule = Opportunities(BTreeMap::from([("demanded".into(), start)]));
+    let retry = start + Duration::from_secs(5);
+    assert_eq!(
+        next_wake(
+            &inventory,
+            &VecDeque::new(),
+            None,
+            &clock,
+            schedule.next_due(Some(retry)),
+            false,
+            None
+        ),
+        Some(retry)
+    );
+    assert_eq!(schedule.0["demanded"], start);
+    assert_eq!(
+        next_wake(
+            &inventory,
+            &VecDeque::new(),
+            None,
+            &clock,
+            schedule.next_due(None),
+            false,
+            None
+        ),
+        Some(start)
+    );
 }

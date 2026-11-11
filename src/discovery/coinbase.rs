@@ -132,7 +132,7 @@ impl Manager {
             }
         };
         import::endpoint(url.as_str()).context("coinbase_search policy rejected")?;
-        let client = self.source_client(owner)?;
+        let client = self.source_client(owner)?.capture_effective(false).await?;
         let manager = self.clone();
         let owned_client = client.clone();
         let listener = owner.to_owned();

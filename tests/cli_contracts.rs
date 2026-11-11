@@ -912,43 +912,130 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     }
     let jobs = store.status().unwrap().funding_jobs.len();
     drop(store);
+    // Both command policies retain catalog-free completion. With bootstrap
+    // enabled, uncredited participants and ordinary nonparticipants are excluded
+    // from this explicit setup command, although serving funds the latter.
+    for bootstrap_policy in [false, true] {
+        let mut enabled = config.replace("auto_fund=false", "auto_fund=true");
+        let existing_job = if bootstrap_policy {
+            enabled.push_str(
+                r#"
+[wallet_bootstrap]
+bootstrap_group="web"
+deferred_groups=["participant"]
+[wallets.participant]
+mode="zcash_rotation"
+max_api_payment_usdc="0.50"
+[wallets.nonparticipant]
+mode="zcash_rotation"
+max_api_payment_usdc="0.25"
+"#,
+            );
+            let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
+            let pool = store
+                .ensure_capacity_group(
+                    "participant",
+                    &crate::capacity_fixture::two_reserves("4"),
+                    Some(alloy_primitives::U256::from(1_000_000u64)),
+                    0,
+                )
+                .unwrap();
+            let job = store
+                .allocate_capacity_kind(
+                    &pool,
+                    x402_treazury::rotation::store::AllocationKind::Large,
+                    true,
+                )
+                .unwrap()
+                .unwrap();
+            let job = store.funding_job(&job).unwrap().unwrap();
+            assert!(
+                store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .new_funding_allowed
+            );
+            Some(job)
+        } else {
+            None
+        };
+        std::fs::write(dir.join("deployment.toml"), enabled).unwrap();
+        for json_output in [false, true] {
+            let mut args = args.to_vec();
+            if json_output {
+                args.push("--json");
+            }
+            let output = run(dir, &args, &[("BASE", "https://127.0.0.1:1")]).await;
+            if json_output {
+                let summary = good(output);
+                assert_eq!(summary["captured_completed_groups"], json!(["web"]));
+                assert_eq!(
+                    summary["balance_estimates"],
+                    json!([
+                        {"wallet_name":"web", "wallet_type":"large", "balance_estimate_usdc":"2.123456"},
+                        {"wallet_name":"web", "wallet_type":"small", "balance_estimate_usdc":"2.123456"}
+                    ])
+                );
+            } else {
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let text = String::from_utf8(output.stdout).unwrap();
+                assert_eq!(
+                    text,
+                    "Wallet bootstrap completed.\n\nAdvisory wallet balance estimates (USDC):\n  web (large): 2.123456 USDC\n  web (small): 2.123456 USDC\n"
+                );
+            }
+            // Closed ownership is immediately available and no new jobs were queued.
+            let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
+            let saved = store.status().unwrap();
+            assert_eq!(
+                saved.funding_jobs.len(),
+                jobs + usize::from(existing_job.is_some())
+            );
+            if let Some(job) = &existing_job {
+                let current = store.funding_job(&job.id).unwrap().unwrap();
+                assert_eq!(current.operation_id, job.operation_id);
+                assert_eq!(current.wallet_id, job.wallet_id);
+                assert!(
+                    !store
+                        .funding_facts(&job.id, &job.operation_id)
+                        .unwrap()
+                        .new_funding_allowed
+                );
+            }
+            assert_eq!(
+                saved
+                    .pools
+                    .iter()
+                    .map(|pool| pool.name.as_str())
+                    .collect::<Vec<_>>(),
+                if existing_job.is_some() {
+                    vec!["participant", "web"]
+                } else {
+                    vec!["web"]
+                }
+            );
+            let db = rusqlite::Connection::open_with_flags(
+                state.join("state.sqlite"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM bootstrap_demand", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    }
     std::fs::write(
         dir.join("deployment.toml"),
         config.replace("auto_fund=false", "auto_fund=true"),
     )
     .unwrap();
-    for json_output in [false, true] {
-        let mut args = args.to_vec();
-        if json_output {
-            args.push("--json");
-        }
-        let output = run(dir, &args, &[("BASE", "https://127.0.0.1:1")]).await;
-        if json_output {
-            let summary = good(output);
-            assert_eq!(summary["captured_completed_groups"], json!(["web"]));
-            assert_eq!(
-                summary["balance_estimates"],
-                json!([
-                    {"wallet_name":"web", "wallet_type":"large", "balance_estimate_usdc":"2.123456"},
-                    {"wallet_name":"web", "wallet_type":"small", "balance_estimate_usdc":"2.123456"}
-                ])
-            );
-        } else {
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let text = String::from_utf8(output.stdout).unwrap();
-            assert_eq!(
-                text,
-                "Wallet bootstrap completed.\n\nAdvisory wallet balance estimates (USDC):\n  web (large): 2.123456 USDC\n  web (small): 2.123456 USDC\n"
-            );
-        }
-        // Closed ownership is immediately available and no new jobs were queued.
-        let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
-        assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
-    }
     let serving = ["serve", "--config", "deployment.toml"];
     // Serving validates auth before bootstrap, then recognizes the funded
     // identity before trying the deliberately missing catalog. No listener starts.
@@ -965,7 +1052,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     let error = bad(run(dir, &serving, &env).await);
     assert!(error.contains("catalog local_read failed"), "{error}");
     let store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
-    assert_eq!(store.status().unwrap().funding_jobs.len(), jobs);
+    assert_eq!(store.status().unwrap().funding_jobs.len(), jobs + 1);
 }
 
 #[tokio::test]
@@ -1502,6 +1589,90 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
     assert_eq!(shown["network"]["tor_isolation_retries"], 2);
     assert_eq!(shown["network"]["read_timeout_seconds"], 60);
     assert!(!dir.path().join("state").exists());
+}
+
+#[tokio::test]
+async fn bootstrap_warming_opens_only_authorities_used_by_explicit_or_implicit_relay() {
+    for explicit in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let owner = x402_treazury::treasury::Treasury::create(
+            state.clone(),
+            key.clone(),
+            2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
+        ).await.unwrap();
+        let id = owner.status().await.unwrap().treasury_id;
+        owner.close().await.unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"paths":{"/read":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let relay_wallet = if explicit { "wallet='participant'" } else { "" };
+        std::fs::write(
+            dir.path().join("deployment.toml"),
+            format!(
+                r#"
+version=1
+[treasury]
+state_dir='state'
+key_file='key'
+indexer_url='https://127.0.0.1:1'
+[funding]
+base_rpc_url_env='BASE'
+base_rpc_fallback_url_envs=[]
+[wallets.bootstrap]
+mode='zcash_rotation'
+max_api_payment_usdc='1'
+[wallets.participant]
+mode='zcash_rotation'
+max_api_payment_usdc='1'
+[wallet_bootstrap]
+bootstrap_group='bootstrap'
+deferred_groups=['participant']
+[sources.api]
+spec='spec.json'
+base_url='https://api.example.com'
+[servers.api]
+listen='127.0.0.1:0'
+wallet='participant'
+bearer_token_env='UNUSED_WARM_TOKEN'
+sources=['api']
+[relay_fallback]
+{relay_wallet}
+[relay_fallback.relays]
+GET=[{provider:?}]
+"#,
+                provider = concat!(env!("CARGO_MANIFEST_DIR"), "/providers/curl/provider.toml")
+            ),
+        )
+        .unwrap();
+        let output = run(
+            dir.path(),
+            &["catalog", "warm", "--config", "deployment.toml"],
+            &[("BASE", "https://127.0.0.1:1")],
+        )
+        .await;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let store = Store::open(&state, &key, &id).unwrap();
+        let status = store.status().unwrap();
+        let groups: Vec<_> = status.pools.iter().map(|pool| pool.name.as_str()).collect();
+        assert_eq!(
+            groups,
+            if explicit {
+                vec!["participant"]
+            } else {
+                vec!["bootstrap", "participant"]
+            }
+        );
+        assert!(store.funding_jobs().unwrap().is_empty());
+    }
 }
 
 #[tokio::test]

@@ -12,6 +12,8 @@ use tracing::Instrument;
 use x402_chain_eip155::{V2Eip155ExactClient, V2Eip155UptoClient};
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
+#[cfg(test)]
+mod bootstrap_tests;
 mod document_identity;
 mod lifetime;
 pub(crate) mod signer;
@@ -167,6 +169,10 @@ pub struct PaidClient {
     max_help_bytes: usize,
     payer: Option<Arc<RwLock<Arc<Payer>>>>,
     managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
+    /// Ordinary group used until this destination has its first positive credit.
+    bootstrap: Option<Arc<crate::rotation::manager::ManagedPool>>,
+    /// Store-only activation remains available when the payment transport is not.
+    bootstrap_demand: Option<(crate::rotation::store::StoreHandle, String)>,
     /// Invocation-local advertised amount; never payment authority or learned data.
     initial_price: Option<U256>,
 }
@@ -176,14 +182,89 @@ impl PaidClient {
         self
     }
 
-    pub(crate) fn startup_funding_pool(
-        &self,
-    ) -> Option<Arc<crate::rotation::manager::ManagedPool>> {
+    pub(crate) fn managed_pool(&self) -> Option<Arc<crate::rotation::manager::ManagedPool>> {
+        self.managed.clone()
+    }
+
+    pub(crate) fn with_bootstrap(
+        mut self,
+        pool: Arc<crate::rotation::manager::ManagedPool>,
+    ) -> Self {
+        self.bootstrap = self.managed.as_ref().map(|_| pool);
+        self
+    }
+
+    pub(crate) fn with_bootstrap_demand(
+        mut self,
+        store: crate::rotation::store::StoreHandle,
+        pool: String,
+    ) -> Self {
+        self.bootstrap_demand = Some((store, pool));
+        self
+    }
+
+    pub(crate) fn is_bootstrap_participant(&self) -> bool {
+        self.bootstrap.is_some() || self.bootstrap_demand.is_some()
+    }
+
+    pub(crate) fn bootstrap_handoff_limit(&self, effective: &Self) -> Option<U256> {
+        let bootstrap = self.bootstrap.as_ref()?;
+        let limit = self.managed.as_ref()?.payment_limit();
+        (Arc::ptr_eq(bootstrap, effective.managed.as_ref()?) && limit > bootstrap.payment_limit())
+            .then_some(limit)
+    }
+
+    pub(crate) fn without_bootstrap(mut self) -> Self {
+        self.bootstrap = None;
+        self.bootstrap_demand = None;
+        self
+    }
+
+    /// Capture one authority before dispatch; accepted work never follows handoff.
+    pub(crate) async fn capture_effective(&self, activate: bool) -> Result<Self> {
+        let mut client = self.clone();
+        let activate = activate
+            && !self.relay_call
+            && matches!(
+                self.relay_purpose,
+                crate::discovery_relay::Purpose::ApiRequests
+            );
+        if activate && let Some((store, pool)) = &self.bootstrap_demand {
+            let pool = pool.clone();
+            store
+                .call(move |state| state.activate_bootstrap_demand(&pool))
+                .await?;
+        }
+        client.bootstrap_demand = None;
+        if let (Some(destination), Some(bootstrap)) = (&self.managed, &self.bootstrap) {
+            client.managed = Some(destination.capture_effective(bootstrap, activate).await?);
+            client.bootstrap = None;
+        }
+        Ok(client)
+    }
+
+    pub(crate) fn startup_funding_pool(&self) -> Option<Self> {
         self.require_available().ok()?;
-        self.managed
-            .as_ref()
-            .filter(|pool| pool.has_finite_payment_limit())
-            .cloned()
+        let pool = self.managed.as_ref()?;
+        (pool.has_finite_payment_limit()
+            || self
+                .bootstrap
+                .as_ref()
+                .is_some_and(|pool| pool.has_finite_payment_limit()))
+        .then(|| self.clone())
+    }
+
+    pub(crate) async fn startup_funding_ready(clients: &[Self]) -> Result<bool> {
+        let pools = clients
+            .iter()
+            .filter_map(|client| {
+                client
+                    .managed
+                    .as_ref()
+                    .map(|pool| (pool.clone(), client.bootstrap.clone()))
+            })
+            .collect::<Vec<_>>();
+        crate::rotation::manager::ManagedPool::startup_funding_ready(&pools).await
     }
 
     pub fn new(payer: Payer) -> Self {
@@ -205,6 +286,8 @@ impl PaidClient {
             timeout: None,
             payer: Some(Arc::new(RwLock::new(Arc::new(payer)))),
             managed: None,
+            bootstrap: None,
+            bootstrap_demand: None,
             initial_price: None,
         }
     }
@@ -227,6 +310,8 @@ impl PaidClient {
             timeout: None,
             payer: None,
             managed: Some(pool),
+            bootstrap: None,
+            bootstrap_demand: None,
             initial_price: None,
         }
     }
@@ -250,6 +335,8 @@ impl PaidClient {
             timeout: None,
             payer: None,
             managed: None,
+            bootstrap: None,
+            bootstrap_demand: None,
             initial_price: None,
         }
     }
@@ -267,26 +354,36 @@ impl PaidClient {
         }
         Ok(())
     }
-    pub(crate) async fn discovery_changes(&self) -> Result<Option<Arc<tokio::sync::Notify>>> {
+    pub(crate) async fn discovery_changes(&self) -> Result<Vec<Arc<tokio::sync::Notify>>> {
         self.require_available()?;
-        match &self.managed {
-            Some(pool) => pool.discovery_changes().await.map(Some),
-            None => Ok(None),
+        let mut changes = Vec::new();
+        if let Some(pool) = &self.managed {
+            changes.push(pool.discovery_changes().await?);
         }
+        if let Some(pool) = &self.bootstrap {
+            changes.push(pool.discovery_changes().await?);
+        }
+        Ok(changes)
     }
-    pub(crate) async fn discovery_requires_creation(&self) -> Result<bool> {
-        self.require_available()?;
+    pub(crate) async fn discovery_dependency(
+        &self,
+        require_destination: bool,
+    ) -> Result<(bool, bool)> {
         match &self.managed {
-            Some(pool) => pool.discovery_requires_creation().await,
-            None => Ok(false),
+            Some(pool) => {
+                pool.discovery_dependency(self.bootstrap.as_deref(), require_destination)
+                    .await
+            }
+            None => Ok((false, false)),
         }
     }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
         self.require_available()?;
-        match &self.managed {
+        let client = self.capture_effective(false).await?;
+        match &client.managed {
             Some(pool) => pool.discovery_ready().await,
             None => {
-                ensure!(self.payer.is_some(), "discovery relay requires a payer");
+                ensure!(client.payer.is_some(), "discovery relay requires a payer");
                 Ok(true)
             }
         }
@@ -366,10 +463,12 @@ impl PaidClient {
     /// This selects no spending authority and never prepares or funds a wallet.
     pub(crate) async fn documentation_identity(&self) -> Result<crate::network::IsolationId> {
         self.require_available()?;
-        let address = if let Some(pool) = &self.managed {
+        let client = self.capture_effective(false).await?;
+        let address = if let Some(pool) = &client.managed {
             pool.documentation_address().await?
         } else {
-            self.payer
+            client
+                .payer
                 .as_ref()
                 .context("documentation wallet unavailable")?
                 .read()
@@ -409,6 +508,7 @@ impl PaidClient {
             Default::default(),
             &SubmissionProgress::default(),
             None,
+            false,
             |output, _status| {
                 let text = output.render(None, &Default::default())?.into_text()?;
                 Ok((text, true))
@@ -457,6 +557,7 @@ impl PaidClient {
             Default::default(),
             &SubmissionProgress::default(),
             operation,
+            true,
             move |output, _status| Ok((output.render(mapping.as_ref(), &limits)?, true)),
         )
         .await
@@ -482,6 +583,7 @@ impl PaidClient {
             Default::default(),
             progress,
             operation,
+            false,
             |output, facts| {
                 let valid = output.is_valid_unmapped();
                 Ok(((output, facts.and_then(|facts| facts.provider)), valid))
@@ -504,6 +606,7 @@ impl PaidClient {
             headers,
             &SubmissionProgress::default(),
             None,
+            true,
             |output, _status| Ok((output.render(None, &Default::default())?, true)),
         )
         .await
@@ -515,6 +618,7 @@ impl PaidClient {
         headers: crate::discovery::raw::ManualRawHeaders,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
+        activate: bool,
         finish: impl FnOnce(crate::output::HttpOutput, Option<ResponseFacts>) -> Result<(T, bool)>
         + Send
         + 'static,
@@ -528,28 +632,42 @@ impl PaidClient {
         self.run_owned(
             diagnostics::scope(async move {
                 let mut observed_price = None;
-                let result = client
-                    .execute_response_owned(
-                        route,
-                        headers,
-                        &progress,
-                        operation.clone(),
-                        &mut observed_price,
-                    )
-                    .await
-                    .and_then(|(mut output, unsigned_promotion, status)| {
-                        output.observed_price = observed_price;
-                        diagnostics::stage("output_conversion");
-                        let (output, valid) =
-                            finish(output, status).map_err(|error| match status {
-                                Some(facts) => error.context(facts),
-                                None => error,
-                            })?;
-                        if valid && let Some((selected, transport)) = unsigned_promotion {
-                            crate::network::global().promote_http(&selected, &transport);
-                        }
-                        Ok(output)
+                let result = async {
+                    let private = headers.is_private();
+                    let mut request = build_request(route)?;
+                    let padding = client.cover.as_ref().and_then(|(config, _)| {
+                        config
+                            .padding
+                            .as_ref()
+                            .filter(|padding| padding.on_api_requests)
+                            .map(|padding| padding.header_name.as_str())
                     });
+                    headers.apply(&mut request)?;
+                    reserve_runtime_headers(&mut request, padding)?;
+                    let effective = client.capture_effective(activate).await?;
+                    effective
+                        .execute_response_owned(
+                            request,
+                            private,
+                            &progress,
+                            operation,
+                            &mut observed_price,
+                        )
+                        .await
+                }
+                .await
+                .and_then(|(mut output, unsigned_promotion, status)| {
+                    output.observed_price = observed_price;
+                    diagnostics::stage("output_conversion");
+                    let (output, valid) = finish(output, status).map_err(|error| match status {
+                        Some(facts) => error.context(facts),
+                        None => error,
+                    })?;
+                    if valid && let Some((selected, transport)) = unsigned_promotion {
+                        crate::network::global().promote_http(&selected, &transport);
+                    }
+                    Ok(output)
+                });
                 diagnostics::finish(&result, &progress, client.relay_call);
                 with_payment_context(
                     progress.possible(),
@@ -568,8 +686,8 @@ impl PaidClient {
     }
     async fn execute_response_owned(
         &self,
-        route: RoutedRequest,
-        headers: crate::discovery::raw::ManualRawHeaders,
+        request: reqwest::Request,
+        private: bool,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
         observed_price: &mut Option<crate::output::ObservedPrice>,
@@ -587,17 +705,6 @@ impl PaidClient {
             .payer
             .as_ref()
             .map(|p| p.read().expect("payer lock poisoned").clone());
-        let private = headers.is_private();
-        let mut request = build_request(route)?;
-        let padding = self.cover.as_ref().and_then(|(config, _)| {
-            config
-                .padding
-                .as_ref()
-                .filter(|padding| padding.on_api_requests)
-                .map(|padding| padding.header_name.as_str())
-        });
-        headers.apply(&mut request)?;
-        reserve_runtime_headers(&mut request, padding)?;
         let unsigned_only = self.unsigned_only || crate::qualification::unsigned_case();
         let through = match &self.managed {
             Some(pool) if !unsigned_only => pool.inventory_boundary().await?,

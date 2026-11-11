@@ -647,7 +647,6 @@ impl RelayContinuation {
         self.resume_mode(
             None,
             None,
-            false,
             crate::discovery_relay::document::RequestKind::Document,
         )
         .await
@@ -659,7 +658,6 @@ impl RelayContinuation {
         self.resume_mode(
             Some(gate),
             None,
-            false,
             crate::discovery_relay::document::RequestKind::Document,
         )
         .await
@@ -667,12 +665,11 @@ impl RelayContinuation {
     pub(crate) async fn resume_when_ready(
         &self,
         gate: std::sync::Arc<crate::network::DiscoveryCapacity>,
-        operator_status: Option<tokio::sync::watch::Sender<bool>>,
+        readiness: crate::discovery_relay::CatalogReadiness,
     ) -> Result<LoadedCatalog> {
         self.resume_mode(
             Some(gate),
-            operator_status,
-            true,
+            Some(readiness),
             crate::discovery_relay::document::RequestKind::Document,
         )
         .await
@@ -683,8 +680,7 @@ impl RelayContinuation {
     async fn resume_mode(
         &self,
         gate: Option<std::sync::Arc<crate::network::DiscoveryCapacity>>,
-        operator_status: Option<tokio::sync::watch::Sender<bool>>,
-        wait_for_ready: bool,
+        readiness: Option<crate::discovery_relay::CatalogReadiness>,
         kind: crate::discovery_relay::document::RequestKind,
     ) -> Result<LoadedCatalog> {
         let cfg = &self.config;
@@ -717,14 +713,14 @@ impl RelayContinuation {
             );
         }
         let relay = cfg.relay_fallback.as_ref().expect("captured relay");
-        let response = if wait_for_ready {
+        let response = if let Some(readiness) = readiness {
             relay
                 .fetch_when_ready_bounded(
                     &cfg.spec,
                     cfg.max_spec_bytes,
                     "max_spec_bytes",
                     gate,
-                    operator_status,
+                    readiness,
                     self.retry_after,
                 )
                 .await
@@ -740,7 +736,11 @@ impl RelayContinuation {
                 .await
         }
         .inspect_err(|error| {
-            if kind != crate::discovery_relay::document::RequestKind::Pricing {
+            // The deferred catalog owner reports authored configuration problems
+            // with the source and operator action.
+            if kind != crate::discovery_relay::document::RequestKind::Pricing
+                && !error.is::<diagnostics::Problem>()
+            {
                 crate::discovery_relay::log_failure(cfg, "catalog", error);
             }
         })?;
@@ -828,7 +828,6 @@ pub(crate) async fn load_json_pricing(
                 .resume_mode(
                     gate,
                     None,
-                    false,
                     crate::discovery_relay::document::RequestKind::Pricing,
                 )
                 .await

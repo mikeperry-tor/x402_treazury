@@ -2153,6 +2153,120 @@ async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
 }
 
 #[tokio::test]
+async fn import_coalescing_survives_first_credit_for_the_same_destination() {
+    use crate::rotation::{
+        base::BaseRpc,
+        manager::ManagedPool,
+        store::{AllocationKind, Store, StoreHandle},
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let temp = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &temp.path().join("state"),
+        &temp.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::test_capacity::small_reserve("2");
+    let [shared, writer, reader] = ["shared", "writer", "reader"].map(|name| {
+        state
+            .ensure_capacity_group(name, &reserves, None, 0)
+            .unwrap()
+    });
+    state
+        .allocate_capacity_kind(&writer, AllocationKind::Small, true)
+        .unwrap();
+    let job = state.funding_jobs().unwrap().remove(0);
+    let (store, worker) = StoreHandle::spawn(state);
+    let managed = |pool| {
+        Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool,
+                BaseRpc::new("http://127.0.0.1:1").unwrap(),
+                SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    let shared = managed(shared);
+    let clients = [("writer", writer), ("reader", reader)]
+        .map(|(name, pool)| {
+            (
+                name.into(),
+                PaidClient::managed(managed(pool)).with_bootstrap(shared.clone()),
+            )
+        })
+        .into();
+    drop(shared);
+    let mut configured = listeners(false);
+    for name in ["writer", "reader"] {
+        configured.get_mut(name).unwrap().wallet = Some(name.into());
+    }
+    let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
+        views: configured
+            .keys()
+            .map(|name| (name.clone(), vec![]))
+            .collect(),
+        ..Default::default()
+    }));
+    let manager = Manager::new(configured, clients, catalog, vec![])
+        .await
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let (endpoint, server) = listen(axum::Router::new().fallback({
+        let (calls, arrived, release) = (calls.clone(), arrived.clone(), release.clone());
+        move || {
+            let (calls, arrived, release) = (calls.clone(), arrived.clone(), release.clone());
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    arrived.notify_one();
+                    release.notified().await;
+                }
+                axum::Json(spec())
+            }
+        }
+    }))
+    .await;
+    *manager.fixture_endpoint.lock().unwrap() = Some(endpoint);
+    let url = "https://api.example.com/openapi.json";
+    let key = fetch_key(&manager, url);
+    let first = tokio::spawn({
+        let manager = manager.clone();
+        async move { manager.document("writer", url).await.unwrap() }
+    });
+    arrived.notified().await;
+    let cell = manager.fetches.lock().unwrap()[&key].clone();
+    // A different destination sharing the bootstrap payer has its own acquisition.
+    manager.document("reader", url).await.unwrap();
+    store
+        .call(move |s| s.record_credit(&job.wallet_id, "1", "fixture", 100))
+        .await
+        .unwrap();
+    let joined = {
+        let mut joined = std::pin::pin!(manager.document("writer", url));
+        let before = Arc::strong_count(&cell);
+        assert!(futures_util::poll!(&mut joined).is_pending());
+        assert_eq!(Arc::strong_count(&cell), before + 1);
+        release.notify_one();
+        joined.await.unwrap()
+    };
+    assert!(Arc::ptr_eq(&first.await.unwrap(), &joined));
+    assert!(Arc::ptr_eq(
+        &manager.document("writer", url).await.unwrap(),
+        &joined
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    server.abort();
+    drop((key, cell, manager, store));
+    worker.await.unwrap();
+}
+
+#[tokio::test]
 async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
     use axum::routing::get;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -3880,3 +3994,147 @@ mod efficiency_tests;
 
 #[path = "publication_read_tests.rs"]
 mod publication_read_tests;
+
+#[tokio::test]
+async fn bootstrap_demand_starts_only_at_restored_dynamic_or_valid_raw_invocation() {
+    use crate::rotation::error::AdmissionError;
+    use crate::rotation::store::{Store, StoreHandle};
+    let temp = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &temp.path().join("state"),
+        &temp.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::test_capacity::small_reserve("2");
+    let dynamic_pool = state
+        .ensure_capacity_group("dynamic", &reserves, None, 0)
+        .unwrap();
+    let raw_pool = state
+        .ensure_capacity_group("raw", &reserves, None, 0)
+        .unwrap();
+    let (store, owner) = StoreHandle::spawn(state);
+    // A missing transport cannot prevent durable demand, and guarantees this
+    // socket-free fixture never dispatches an API request or signs a payment.
+    let client = |pool: String| {
+        PaidClient::unavailable(AdmissionError::WalletNotReady(
+            "fixture transport unavailable",
+        ))
+        .with_bootstrap_demand(store.clone(), pool)
+    };
+    let clients = BTreeMap::from([
+        ("dynamic".into(), client(dynamic_pool.clone())),
+        ("raw".into(), client(raw_pool.clone())),
+    ]);
+    let mut configured = with_registry(listeners(true), Some(temp.path().join("registry.sqlite")));
+    configured.get_mut("writer").unwrap().wallet = Some("dynamic".into());
+    configured.get_mut("reader").unwrap().wallet = Some("raw".into());
+    configured.get_mut("hidden").unwrap().wallet = Some("raw".into());
+    let catalog = || {
+        Arc::new(CatalogState::new(CatalogSnapshot {
+            views: ["writer", "reader", "hidden"]
+                .into_iter()
+                .map(|name| (name.to_owned(), vec![]))
+                .collect(),
+            ..Default::default()
+        }))
+    };
+    let m = Manager::new(configured.clone(), clients.clone(), catalog(), vec![])
+        .await
+        .unwrap();
+    add(&m, "bootstrap_demo", "persistent", "server").await;
+    let assert_demand = |dynamic, raw| {
+        let dynamic_pool = dynamic_pool.clone();
+        let raw_pool = raw_pool.clone();
+        store.call(move |s| {
+            assert_eq!(s.has_bootstrap_demand(&dynamic_pool)?, dynamic);
+            assert_eq!(s.has_bootstrap_demand(&raw_pool)?, raw);
+            assert!(s.funding_jobs()?.is_empty());
+            assert!(s.status()?.treasury_operations.is_empty());
+            assert!(
+                s.status()?
+                    .pools
+                    .iter()
+                    .all(|group| group.addresses.is_empty())
+            );
+            Ok(())
+        })
+    };
+    assert_demand(false, false).await.unwrap();
+    drop(m);
+    // Restore published tools from the existing registry under the same trusted
+    // endpoint bindings; no declaration or import is first-use API demand.
+    let m = Manager::new(configured, clients.clone(), catalog(), vec![])
+        .await
+        .unwrap();
+    let writer = server(&m, "writer");
+    let found = writer
+        .invoke(
+            "x402_treazury_tools_search",
+            json!({"source_name":"bootstrap_demo"}).as_object().unwrap(),
+        )
+        .await
+        .unwrap();
+    let found: Value = serde_json::from_str(&found).unwrap();
+    let tool_id = found["items"][0]["tool_id"].as_str().unwrap();
+    assert!(
+        writer
+            .invoke(
+                "x402_treazury_tool_call",
+                json!({"tool_id":"missing", "arguments":{}})
+                    .as_object()
+                    .unwrap()
+            )
+            .await
+            .is_err()
+    );
+    assert_demand(false, false).await.unwrap();
+    for (endpoint, args) in [
+        (
+            "hidden",
+            json!({"method":"GET","url":"https://api.example.com/read"}),
+        ),
+        (
+            "reader",
+            json!({"method":"GET","url":"http://127.0.0.1/private"}),
+        ),
+        (
+            "reader",
+            json!({"method":"GET","url":"https://api.example.com/read","headers":{"Host":"forbidden"}}),
+        ),
+    ] {
+        assert!(
+            server(&m, endpoint)
+                .invoke(raw::NAME, args.as_object().unwrap())
+                .await
+                .is_err()
+        );
+    }
+    assert_demand(false, false).await.unwrap();
+    let error = writer
+        .invoke(
+            "x402_treazury_tool_call",
+            json!({"tool_id":tool_id,"arguments":{}})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is::<AdmissionError>());
+    assert_demand(true, false).await.unwrap();
+    let error = server(&m, "reader")
+        .invoke(
+            raw::NAME,
+            json!({"method":"GET","url":"https://api.example.com/read"})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is::<AdmissionError>());
+    assert_demand(true, true).await.unwrap();
+    drop((writer, m, clients));
+    drop(store);
+    owner.await.unwrap();
+}

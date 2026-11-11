@@ -295,12 +295,30 @@ async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences
     .unwrap();
     assert_eq!(shown["wallets"].as_object().unwrap().len(), 2);
     assert_eq!(
+        shown["wallet_bootstrap"],
+        serde_json::json!({"bootstrap_group":"web","deferred_groups":["company"]})
+    );
+    assert_eq!(shown["wallet_summary"]["bootstrap_setup"]["group"], "web");
+    assert_eq!(
+        shown["wallet_summary"]["bootstrap_setup"]["initial_inventory_target_atomic"],
+        "2000000"
+    );
+    assert_eq!(
+        shown["wallet_summary"]["bootstrap_setup"]["initial_inventory_maximum_atomic"],
+        "3000000"
+    );
+    assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
+    assert_eq!(
+        shown["wallet_bindings"]["social"]["social"]["wallet"],
+        "company"
+    );
+    assert_eq!(
         shown["wallet_summary"]["initial_inventory_target_atomic"],
         "4000000"
     );
     assert_eq!(
         shown["wallet_summary"]["initial_inventory_maximum_atomic"],
-        "8000000"
+        "6000000"
     );
     assert_eq!(shown["wallets"]["web"]["max_api_payment_usdc"], "0.10");
     assert_eq!(shown["wallets"]["company"]["max_api_payment_usdc"], "0.50");
@@ -311,7 +329,7 @@ async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences
         );
         assert_eq!(
             shown["wallets"][name]["reserves"]["small"]["max_funding_amount_usdc"],
-            "4.00"
+            "3.00"
         );
         assert_eq!(
             shown["wallets"][name]["max_retirement_remainder_usdc"],
@@ -333,6 +351,84 @@ async fn comprehensive_example_exposes_reserves_without_obsolete_fee_preferences
             .get("max_refund_shielding_fee_zec")
             .is_none()
     );
+}
+
+#[test]
+fn example_bootstrap_policies_preserve_destination_groups_and_opt_out() {
+    use alloy_primitives::U256;
+    use x402_treazury::{deployment::MetaConfig, rotation::assignment};
+    for (text, bootstrap, participants, group_count) in [
+        (
+            include_str!("../examples/deployments/comprehensive.toml"),
+            "web",
+            vec!["company"],
+            2u64,
+        ),
+        (
+            include_str!("../examples/deployments/research_desk.toml"),
+            "general",
+            vec!["personal", "health", "financial"],
+            4u64,
+        ),
+    ] {
+        let mut config: MetaConfig = toml::from_str(text).unwrap();
+        let resolution = assignment::resolve(&config).unwrap();
+        let policy = resolution.bootstrap.as_ref().unwrap();
+        assert_eq!(policy.bootstrap_group, bootstrap);
+        assert_eq!(policy.deferred_groups, participants);
+        let setup = resolution.summary.bootstrap_setup.as_ref().unwrap();
+        assert_eq!(setup.initial_inventory_target_atomic, "2000000");
+        assert_eq!(setup.initial_inventory_maximum_atomic, "3000000");
+        assert_eq!(
+            resolution.summary.initial_inventory_target_atomic,
+            (U256::from(2_000_000u64) * U256::from(group_count)).to_string()
+        );
+        assert_eq!(
+            resolution.summary.initial_inventory_maximum_atomic,
+            (U256::from(3_000_000u64) * U256::from(group_count)).to_string()
+        );
+        if bootstrap == "general" {
+            assert_eq!(config.servers.len(), 12);
+            assert_eq!(
+                resolution.bindings["health"]
+                    .values()
+                    .next()
+                    .unwrap()
+                    .wallet,
+                "health"
+            );
+            let cap = |name: &str| {
+                let WalletConfig::ZcashRotation {
+                    max_api_payment_usdc,
+                    ..
+                } = &resolution.wallets[name]
+                else {
+                    panic!("managed example")
+                };
+                max_api_payment_usdc.as_str()
+            };
+            assert_eq!(cap("general"), "1.00");
+            assert_eq!(cap("health"), "0.50");
+        }
+        let bindings = serde_json::to_value(&resolution.bindings).unwrap();
+        config.wallet_bootstrap = None;
+        let separate = assignment::resolve(&config).unwrap();
+        assert!(separate.bootstrap.is_none());
+        assert!(separate.summary.bootstrap_setup.is_none());
+        assert_eq!(
+            separate.summary.initial_inventory_target_atomic,
+            resolution.summary.initial_inventory_target_atomic
+        );
+        assert_eq!(
+            separate.summary.initial_inventory_maximum_atomic,
+            resolution.summary.initial_inventory_maximum_atomic
+        );
+        assert_eq!(
+            serde_json::to_value(separate.bindings).unwrap(),
+            bindings,
+            "bootstrap policy does not rewrite destination bindings"
+        );
+    }
 }
 
 #[test]
@@ -370,9 +466,9 @@ fn reserve_shape_resolves_fixed_ranges_and_slot_defaults() {
             "2000000",
             "2000000",
         ),
-        ("[large]\nfunding_amount_usdc='10'", "12000000", "14000000"),
-        ("[small]", "2000000", "4000000"),
-        ("[large]", "12000000", "29000000"),
+        ("[large]\nfunding_amount_usdc='10'", "12000000", "13000000"),
+        ("[small]", "2000000", "3000000"),
+        ("[large]", "12000000", "28000000"),
     ] {
         let reserves: ReservesConfig = toml::from_str(text).unwrap();
         reserves.validate().unwrap();

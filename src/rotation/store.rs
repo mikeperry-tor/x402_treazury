@@ -1,6 +1,7 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
 mod backup;
 pub(crate) mod balances;
+mod bootstrap_demand;
 mod capacity;
 #[cfg(test)]
 mod codec_compatibility_tests;
@@ -241,6 +242,7 @@ pub struct Store {
     refund_observations: std::collections::BTreeMap<String, (i64, bool)>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
+    funding_changes: std::sync::Arc<tokio::sync::Notify>,
     direct_changes: std::sync::Arc<tokio::sync::Notify>,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
@@ -420,6 +422,7 @@ impl Store {
         tx.commit()?;
         evidence::initialize_runtime(&db)?;
         source_reconciliation::initialize(&db)?;
+        bootstrap_demand::initialize(&db)?;
         File::open(dir)?.sync_all()?;
         if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
             File::open(parent)?.sync_all()?;
@@ -437,6 +440,7 @@ impl Store {
             inventory_failure: Default::default(),
             group_gates: Default::default(),
             treasury_changes: Default::default(),
+            funding_changes: Default::default(),
             direct_changes: Default::default(),
             db,
             _lock: std::sync::Arc::new(owner),
@@ -501,6 +505,7 @@ impl Store {
             inventory_failure: Default::default(),
             group_gates: Default::default(),
             treasury_changes: Default::default(),
+            funding_changes: Default::default(),
             direct_changes: Default::default(),
             db,
             _lock: std::sync::Arc::new(owner),
@@ -512,6 +517,7 @@ impl Store {
         configure(&store.db)?;
         evidence::initialize_runtime(&store.db)?;
         source_reconciliation::initialize(&store.db)?;
+        bootstrap_demand::initialize(&store.db)?;
         direct_swap::initialize(&store.db)?;
         Ok(store)
     }
@@ -744,10 +750,6 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        ensure!(
-            funding::record_initial_credit(&tx, wallet, support.observation.available())?,
-            "insufficient confirmed credit"
-        );
         tx.execute(
             "UPDATE wallets SET balance=?2,block_hash=?3,block_height=?4 WHERE id=?1",
             params![
@@ -757,7 +759,15 @@ impl Store {
                 i64::try_from(height)?
             ],
         )?;
-        funding::publish_initial_credit(&tx, wallet)?;
+        ensure!(
+            funding::publish_observed_credit(
+                &tx,
+                wallet,
+                support.observation.available(),
+                &self.funding_changes
+            )?,
+            "insufficient confirmed credit"
+        );
         tx.commit()?;
         Ok(())
     }
@@ -1205,6 +1215,7 @@ pub struct StoreHandle {
     worker_stopped: tokio::sync::watch::Receiver<bool>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
+    funding_changes: std::sync::Arc<tokio::sync::Notify>,
     direct_changes: std::sync::Arc<tokio::sync::Notify>,
     balance_observers: observation::Observers,
     funding_owner: std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>>,
@@ -1214,6 +1225,7 @@ impl StoreHandle {
         let lock = store._lock.clone();
         let group_gates = store.group_gates.clone();
         let treasury_changes = store.treasury_changes.clone();
+        let funding_changes = store.funding_changes.clone();
         let direct_changes = store.direct_changes.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Work>(32);
         let worker = tokio::task::spawn_blocking(move || {
@@ -1244,6 +1256,7 @@ impl StoreHandle {
                 worker_stopped,
                 group_gates,
                 treasury_changes,
+                funding_changes,
                 direct_changes,
                 balance_observers: Default::default(),
                 funding_owner: Default::default(),
@@ -1258,6 +1271,9 @@ impl StoreHandle {
     }
     pub(crate) fn is_stopped(&self) -> bool {
         self.sender.is_closed()
+    }
+    pub(crate) fn funding_changes(&self) -> std::sync::Arc<tokio::sync::Notify> {
+        self.funding_changes.clone()
     }
     pub(crate) fn funding_owner(
         &self,
@@ -1466,6 +1482,7 @@ impl Store {
             self.evidence_namespace,
             true,
             retirement_allowed,
+            &self.funding_changes,
         )?;
         commit_chain_view(tx, pool, &view, &depleted, &mut self.retirement_work)?;
         Ok(())
@@ -1549,6 +1566,7 @@ impl Store {
             self.evidence_namespace,
             false,
             retirement_allowed,
+            &self.funding_changes,
         )?;
         commit_chain_view(tx, pool, &view, &depleted, &mut self.retirement_work)?;
         self.notify_capacity_changed(pool);
@@ -2002,8 +2020,8 @@ fn apply_chain_view(
     namespace: Uuid,
     complete: bool,
     retire: bool,
+    funding_changes: &tokio::sync::Notify,
 ) -> Result<ChainPublication> {
-    let mut depleted = ChainPublication::default();
     validate_chain_balances(tx, pool, view, namespace)?;
     apply_chain_resolutions(tx, pool, view, namespace)?;
     let rows: Vec<(String, String, String)> = if complete {
@@ -2022,8 +2040,7 @@ fn apply_chain_view(
             })
             .collect::<rusqlite::Result<_>>()?
     };
-    publish_chain_balances(tx, pool, view, namespace, retire, &rows, &mut depleted)?;
-    Ok(depleted)
+    publish_chain_balances(tx, pool, view, namespace, retire, &rows, funding_changes)
 }
 
 fn validate_chain_balances(
@@ -2141,8 +2158,9 @@ fn publish_chain_balances(
     namespace: Uuid,
     retire: bool,
     rows: &[(String, String, String)],
-    depleted: &mut ChainPublication,
-) -> Result<()> {
+    funding_changes: &tokio::sync::Notify,
+) -> Result<ChainPublication> {
+    let mut depleted = ChainPublication::default();
     for (id, role, _target) in rows {
         let Some(balance) = view.balances.get(id) else {
             ensure!(role == "RETIRED", "incomplete Base view");
@@ -2182,9 +2200,12 @@ fn publish_chain_balances(
         )?;
         if let Some(certificate) = view.balance_certificates.get(id) {
             let support = evidence::check_balance(tx, namespace, certificate)?;
-            if funding::record_initial_credit(tx, id, support.observation.available())? {
-                funding::publish_initial_credit(tx, id)?;
-            }
+            funding::publish_observed_credit(
+                tx,
+                id,
+                support.observation.available(),
+                funding_changes,
+            )?;
             if retire && capacity::retire_with_support(tx, pool, id, &support, super::base::now()?)?
             {
                 let tolerance: String = tx.query_row(
@@ -2237,12 +2258,15 @@ fn publish_chain_balances(
                     confirmations: 1,
                 },
             };
-            if funding::record_initial_credit(tx, id, support.observation.available())? {
-                funding::publish_initial_credit(tx, id)?;
-            }
+            funding::publish_observed_credit(
+                tx,
+                id,
+                support.observation.available(),
+                funding_changes,
+            )?;
         }
     }
-    Ok(())
+    Ok(depleted)
 }
 
 #[cfg(test)]

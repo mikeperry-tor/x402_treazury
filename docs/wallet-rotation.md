@@ -204,7 +204,7 @@ USD conversion-overhead ceiling:
 | Control | Scope and purpose |
 | --- | --- |
 | `swap_control.max_send_zec` | Optional direct-tool payment plus actual fee ceiling; default unlimited. Accepted authority remains bound to that operation. |
-| Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-4 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
+| Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-3 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
 | `max_api_payment_usdc` | Per-x402-payment USDC authority, independent of ZEC funding. Managed profiles require an explicit setting; static default is $1. `none`/`off` means unlimited. |
 | `max_retirement_remainder_usdc` | Automatic retirement threshold, default $0.001; no transfer or replacement authority. |
 | Funding recovery authority | No per-job recovery-count cutoff. A replacement requires safe original-source closure, a current unconsumed claim and enabled funding/qualification authority. Direct sends do not gain replacement-payment authority. |
@@ -238,7 +238,7 @@ max_api_payment_usdc = "1.00"
 max_retirement_remainder_usdc = "0.001"
 
 [wallets.research.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
 # Explicitly enabling a large slot opts into its $10-25 default range:
 # [wallets.research.reserves.large]
@@ -246,7 +246,7 @@ max_retirement_remainder_usdc = "0.001"
 
 | Setting | Meaning |
 | --- | --- |
-| `reserves.small` | Omitted or empty defaults to a randomized $2-4 nominal range. |
+| `reserves.small` | Omitted or empty defaults to a randomized $2-3 nominal range. |
 | `reserves.large` | Absent stays disabled; an explicit empty table opts into the $10-25 randomized default. |
 | Slot `funding_amount_usdc` | Fixed positive nominal target; optional `max_funding_amount_usdc` adds bridge-minimum headroom. |
 | Slot `min_funding_amount_usdc` + `max_funding_amount_usdc` | Uniform randomized nominal amount within the inclusive range; equal endpoints are valid. |
@@ -264,11 +264,17 @@ A group cap may exceed its reserve bounds, and bounds may exceed the cap.
 Neither case promises that initial funding can serve every allowed price. The
 fresh initial-inventory range is the sum of slot minima through the sum of slot
 maxima, including bridge-minimum headroom and excluding fees. The default small range alone
-is $2-4; with an explicitly enabled large slot it is $12-29. Report actual
+is $2-3; with an explicitly enabled large slot it is $12-28. Report actual
 credits, output ceilings, retained holdings and costs separately. Smaller reserve
 sizes offer more cheap-call rotation opportunities; larger sizes support expensive
 calls but can keep more traffic on an address. See
-[sizing and selection limits](configuration.md).
+[sizing and selection limits](configuration.md#reserve-sizing-and-fragmentation),
+including the approximately $5 nominal estimate across the first small wallet and
+its later replacement ($4-6 before bridge-floor adjustments, source fees and
+other costs). The first payment opens the replacement vacancy; both allocations
+are not required at startup. Changes to defaults use current-claim and unsigned
+quote refresh rules; in-bounds saved draws, consumed claims and accepted older
+operations above the new default retain their existing meaning.
 
 `auto_fund=false` pauses new funding, while independently permitted retirement and
 reconciliation continue. Financial completion and current payment usability are
@@ -587,6 +593,35 @@ local evidence/signature recovery loop remains. Unknown journal outcomes grant n
 
 The serialized Store owns commits after waiter cancellation. Signing and network
 I/O do not hold a group turn to stabilize advisory balances.
+
+### First-use bootstrap participants
+
+The optional [bootstrap policy](configuration.md#bootstrap-wallet-policy) keeps one
+ordinary group available while explicitly participating groups prepare on first
+API use. Demand is one durable UUID-bound fact in the existing serialized Store;
+it carries no monetary amount. The existing consumed initial-claim fact over the
+full funding history records permanent handoff after any positive credit. No
+current-role, balance threshold or second readiness ledger controls that handoff.
+A trusted invocation captures the effective group once before unsigned dispatch.
+All signing, caps, inventory traversal, cover and transport ownership stay within
+that group for the call, including through handoff or cancellation.
+
+Uncredited dormant participants receive no new serving allocations. Activation
+arms one independently drawn uniform integer 60–240-second opportunity; later
+initial opportunities use the same window until credit. Both enabled slots keep
+small-first independent commits. Already armed instants survive arbitrary wakes
+and credit; only subsequent rearming after credit uses the ordinary 30–120-second
+window. The existing retained owner checks eligibility at startup, when demand or
+new credit is recorded, and when a participant is due. Credit on work that was
+already in flight can arm ordinary opportunities even without first-use demand.
+New opportunities and busy
+read retries start from read completion. Ordinary groups and accepted work keep
+their independent schedules. Restart redraws volatile opportunities.
+Disabling automatic funding prevents allocations without deleting demand or
+recovery ownership. Removing policy restores ordinary behavior; UUID-preserving
+renames and re-addition retain history. No top-up or bootstrap fallback follows
+later depletion. This cadence can weaken funding-time correlation; it does not
+promise unlinkability or erase common-payer history.
 
 ### Early rotation and refill opportunities
 

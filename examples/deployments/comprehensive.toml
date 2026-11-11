@@ -1,25 +1,37 @@
 # Comprehensive showcase: curated research, shared pools, Tor and agent-added APIs.
-# Listener -> sources -> pool:
+# Listener -> sources -> intended group (company initially uses web):
 # web     -> Exa, SocialFetch web/community, Google Trends -> web
 # social  -> social platforms, Telegram and people research -> company
 # company -> selected company, grants and security research -> company
 # toolbox -> endpoint-local agent-added sources -> company
-# All pools share one treasury. Paid discovery follows each source's assigned pool.
+# All groups share one treasury. Implicit paid discovery follows effective routing.
 # See examples/README.md for setup and the smaller managed.toml starter.
-# Reserve sizes are funding preferences; the explicit group cap governs every wallet.
+# Reserve sizes are funding preferences; the effective payer group supplies the payment cap.
 # Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
 # Size optional large to at least 2x expected maximum payment (prefer 4x); this is not a payment cap.
 # Eligible payers use advisory estimates; permitted signatures do not require a target balance.
-# Serving binds listeners before funding; explicit bootstrap waits its captured slot jobs.
+# Serving binds listeners before funding; wallet bootstrap prepares only web's enabled reserves.
 # First positive USDC credit consumes the initial claim, even below its nominal minimum; accepted source work stays owned.
 # Three research contexts and a toolbox share one Zcash treasury and two rotating wallet pools.
-# Social, company and toolbox share a payer wallet and Tor identity; web stays separate.
+# All contexts initially share web's payer and $0.10 cap. After company's first credit,
+# social/company/toolbox share company's payer and $0.50 cap, separately from web.
 # Copy this file to comprehensive.local.toml before editing.
 # Existing state/privacy and state/privacy-sources.sqlite identities are retained.
 # Run each agent against the MCP listener for its research context.
 # Separate wallets/circuits do not hide identifying terms in API request content.
 version = 1
+
+# Fund web first. The first valid company/social/toolbox API call records demand;
+# company prepares later at randomized 60-240-second opportunities, without making
+# calls wait for swaps. Cap refusals still record demand. Even tiny first credit
+# permanently hands later calls to company; depletion never returns them to web.
+# A company group credited in an earlier run uses its own payer immediately.
+# Comment out this entire table to fund both groups normally and avoid payer sharing
+# from the beginning. Existing funds and historical links are not moved or erased.
+[wallet_bootstrap]
+bootstrap_group = "web"
+deferred_groups = ["company"]
 
 # Tor Browser SOCKS endpoint; keep Tor Browser running while serving.
 # Catalog/help identities are discovery-scoped; paid calls follow wallets.
@@ -31,9 +43,10 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 60
 
-# Paid fallback for blocked catalog GETs, using each source's assigned
-# wallet. Shared sources choose one assigned profile deterministically; config
-# show reports discovery_wallets. Paid API calls retain their listener bindings.
+# Paid fallback for blocked catalog GETs. Shared sources choose an intended group
+# deterministically; uncredited company discovery can use web without activating
+# company funding. config show reports discovery_wallets. An explicit wallet below
+# keeps that selected group; bootstrap routing grants no new relay permission.
 [relay_fallback]
 source_discovery = true # directory search and service metadata
 api_requests = false # opt in to disclose actual API requests
@@ -57,11 +70,13 @@ confidentiality = "public"
 # Leave BASE_RPC_URL unset to use the built-in Base RPC failover list.
 base_rpc_url_env = "BASE_RPC_URL"
 
-# Each pool starts with one small reserve and no separate active wallet.
-# Two groups with default $2-$4 small reserves have $4-$8 nominal bounds including any accepted bridge-minimum redraw; fees and replacements are additional.
-# Allow additional treasury funds for those costs and replacements after the first payment.
-# Actual deposits reflect each operation's selected nominal amount and bridge minimums. All declared pools initialize, even
-# unused ones: remove unused wallet definitions and update bindings to save funding.
+# Initial setup: web's one default $2-3 small allocation; allow the $3 upper bound
+# plus source fees and bridge costs. Eventual configured initial inventory across
+# both groups is $4-6 nominal (also the initial range with this policy disabled).
+# Keep extra capital for company preparation, relay payments and replacements.
+# One group's first wallet plus its later replacement average about $5 nominal
+# across two $2-3 allocations ($4-6 before bridge floors/fees), not $5 at startup.
+# The first payment makes a READY payer ACTIVE and opens its replacement vacancy.
 # max_api_payment_usdc caps one payment, not the total research budget.
 [wallets.web]
 mode = "zcash_rotation"
@@ -69,18 +84,19 @@ max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.10"
 
 [wallets.web.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
-# Social, company and toolbox share this pool, reserve and Tor payer identities.
-# The shared $0.50 per-payment cap covers the selected RelayShield tools.
-# Social and toolbox calls use this same cap; larger batches may still exceed it.
+# Social, company and toolbox share this intended group after its first credit.
+# Until then, web's $0.10 cap can refuse some selected calls; activation still stands.
+# Company's later $0.50 cap covers selected RelayShield tools, but large batches
+# can exceed it. Captured calls finish under their original payer and cap.
 [wallets.company]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.50"
 
 [wallets.company.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's
@@ -93,8 +109,12 @@ max_api_payment_usdc = "0.50"
 
 # SocialFetch appears in two contexts with overlapping Reddit coverage,
 # demonstrating that even the same provider/tool can use different payers.
-# Using different wallets keeps the social queries to SocialFetch unlinked and
-# isolated from the webinfo queries.
+# After company receives initial credit, these contexts stop reusing one payer.
+# Shared bootstrap payments remain visibly linked. Separate initial addresses
+# avoid direct payer reuse, but closely spaced funding swaps still reveal timing
+# correlation. First-use activation and randomized later opportunities can weaken
+# that timing signal; provider, amount, content and settlement correlations remain.
+# Delayed funding cannot erase earlier links and is not an unlinkability guarantee.
 
 [sources.social]
 extends = "../../providers/socialfetch.toml"
@@ -112,14 +132,14 @@ exclude_tools = ["socialfetch_help"]
 extends = "../../providers/exa.toml"
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
-# within the shared $0.50 cap for one matched result; use small batches.
+# within company's $0.50 cap after first credit, above the initial $0.10 cap.
 [sources.pdl_people]
 extends = "../../providers/pdl.toml"
 include_tools = ["pdl_person_*"]
 
 # Structured company discovery complements Deepline enrichment.
 # The PDL catalog lists $0.10 per company result; prefer small batches under
-# the shared $0.50 per-payment cap.
+# company's $0.50 cap after first credit; web's $0.10 cap applies before then.
 [sources.pdl_company]
 extends = "../../providers/pdl.toml"
 include_tools = ["pdl_company_search"]
@@ -139,7 +159,7 @@ include_tools = [
   "stableenrich_serper_people_image_search",
 ]
 
-# Company estimates are $0.0126-$0.08 per call, within the $0.50 cap.
+# Company estimates are $0.0126-$0.08 per call, within both effective caps.
 # FullEnrich company search ($0.15) is omitted. Keep person/contact enrichment
 # on the social listener.
 [sources.company_stableenrich]
@@ -205,7 +225,7 @@ include_tools = [
 # Multi-board job search (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter,
 # Bayt, BDJobs, Naukri). Base price is $0.05 + $0.002 * len(sites) * maxResults,
 # so len(sites) * maxResults <= 25 keeps an individual query at $0.10 or less
-# under the shared $0.50 cap; prefer small batches even with that headroom.
+# under company's later $0.50 cap; initially web's $0.10 cap applies.
 # (hirescrape_linkedin's job-search modes from llms.txt are absent from its OpenAPI schema.)
 [sources.company_hirescrape]
 extends = "../../providers/hirescrape.toml"
@@ -247,7 +267,7 @@ extends = "../../providers/relayshield/phone-reputation.toml"
 include_tools = ["relayshield_phone_reputation"]
 
 # Focused NetIntel phone, IP and company-infrastructure intelligence.
-# Inherit the company wallet and its $0.50 per-payment cap.
+# Inherit company: web's $0.10 cap before first credit, company's $0.50 afterward.
 [sources.company_netintel]
 extends = "../../providers/netintel.toml"
 include_tools = [
@@ -261,13 +281,13 @@ include_tools = [
 ]
 
 # IP enrichment and satellite observations for company infrastructure/site research.
-# Inherit the existing company wallet and its $0.50 per-payment cap.
+# Inherit company: web's $0.10 cap before first credit, company's $0.50 afterward.
 [sources.company_ipintel]
 extends = "../../providers/ipintel.toml"
 include_tools = ["ipintel_ip_lookup", "ipintel_satellite"]
 
 # Company profiles, public records, market signals and specialist research through Vaaya.
-# Inherit the existing company wallet and its $0.50 per-payment cap.
+# Inherit company: web's $0.10 cap before first credit, company's $0.50 afterward.
 [sources.company_vaaya]
 extends = "../../providers/vaaya.toml"
 include_tools = [
@@ -308,7 +328,8 @@ extends = "../../providers/google-trends.toml"
 extends = "../../providers/genuinegood.toml"
 include_tools = ["genuinegood_search", "genuinegood_detail"]
 
-# MCP endpoints expose separate toolsets; social, company and toolbox share payment identity.
+# MCP endpoints expose separate toolsets. All initially share web; after company's
+# first credit, social/company/toolbox share company's payment identity.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
 [servers.web]
 instructions_text = "Web research and aggregate keyword trends. Preserve source links, dates and coverage; trends do not describe an individual’s behavior."

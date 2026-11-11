@@ -71,6 +71,87 @@ or listeners. Explicitly set
 Zcash support does not spend funds. Source limits remain required. See the
 [wallet defaults and commands](wallet-cli.md#one-configuration-for-wallet-commands).
 
+## Bootstrap wallet policy
+
+The optional root table declares one ordinary managed group and explicit managed
+participants:
+
+```toml
+[wallet_bootstrap]
+bootstrap_group = "general"
+deferred_groups = ["personal", "health", "financial"]
+```
+
+Names resolve against the complete wallet assignment, including explicitly named
+generated groups. Missing or static groups, self-membership, duplicate participants
+and an empty participant list are errors. Omit the whole table to opt out.
+Source/listener bindings continue to name destination groups; the table does not
+merge groups, transfer balances or change generated names.
+
+`config show` and `wallet preview` report the resolved table and the selected
+group's nominal `bootstrap_setup` bounds separately from the eventual initial
+inventory bounds across all configured groups. The setup projection describes the
+explicit bootstrap command; ordinary serving also funds nonparticipants normally.
+The routing projection identifies the bootstrap group's payment authority before
+a participant's first positive initial credit. Inspection makes no activation,
+allocation or network request.
+
+A validated remote API invocation records durable first-use demand for its
+participating destination, even for a free response or API cache hit. Invalid,
+denied and unresolved calls, discovery/search, registration, catalogs, pricing,
+metadata help and warming do not activate funding. Calls select the bootstrap
+payment authority until the destination has recorded any positive initial credit,
+including partial credit on a historical or retired wallet. That handoff is
+permanent: depletion, refunds and later role changes cannot restore bootstrap use.
+The captured group's cap, inventory, payer transport and financial journal govern
+the whole call. Changing routing affects later captures only; agent/session inputs
+cannot select policy or owners. Inventory exhaustion never makes a call wait for
+funding, and no cross-group retry is introduced.
+
+Dormant participants receive no new allocations in serving. First use wakes the
+existing background owner and arms an independent uniform integer 60–240-second
+opportunity; both enabled slots may fill then. Calls and unrelated completions do
+not move an armed due time. Subsequent rearming after first credit uses ordinary
+30–120 seconds without advancing an already armed opportunity. Restart retains
+UUID-bound demand/credit and redraws volatile intervals. Bootstrap/nonparticipants
+keep ordinary funding. Accepted work retains its original recovery ownership;
+`auto_fund=false` still prevents new funding. Removing the table or a participant
+restores ordinary routing/allocation; re-adding preserves historical facts.
+Implicit discovery may use bootstrap inventory without activation; explicit relay
+wallet choices retain their selected authority and permissions. If an explicit
+relay wallet is a dormant participant and a catalog needs the relay,
+startup reports that it needs first-use activation. Invoke an API bound to that
+group on an independently reachable endpoint, or configure a relay wallet with
+available capacity and restart. Explicit bootstrap prepares only the configured
+bootstrap group. When a catalog needs a relay group with no restorable
+wallet, credit or first-use demand, startup checks whether any endpoint can
+activate that group independently of the catalog. If the configured bindings and
+endpoint capabilities provide no such route, startup reports a catalog failure.
+An optional source is omitted for that run, releasing its waiting endpoints
+once their other catalogs have settled.
+Filtered tools and aliases of the same blocked download cannot supply an
+activation route. Independent catalog downloads can still publish usable tools
+while discovery waits. The catalog owner reassesses these routes when downloads
+settle or enter a first-use wait. Catalogs waiting on one another for first use
+cannot supply an activation route. Optional blockers settle before required
+failures, allowing their omission to expose a usable endpoint. Before failing,
+the relay rechecks the relevant wallet facts and its current route decision.
+This also applies when an implicit relay needs the destination's higher payment ceiling.
+If the destination still needs a wallet and new managed funding is unavailable,
+the catalog reports that operator action is required.
+Catalog readiness and the advisory startup announcement consider effective
+inventory and caps.
+With this table, explicit `wallet bootstrap` promptly funds and waits only for the
+bootstrap group's captured enabled reserve claims, without participant activation,
+catalogs or listeners. It also excludes ordinary nonparticipants from this setup
+selection; serving funds them on their usual opportunities. Without the table,
+the command captures every declared managed group's enabled reserves. Existing
+durably allocated jobs outside selection may continue under current enabled funding
+authority; accepted source liabilities retain their original recovery ownership.
+Selection limits new allocations and command completeness. Sync, status, preview and
+offline initialization remain non-activating; qualification retains its named
+allocation and payment authority.
+
 ## Multiple MCP ports from one configuration
 
 Deployment catalog acquisition shares capacity for active Tor isolation scopes.
@@ -483,7 +564,7 @@ max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
 max_retirement_remainder_usdc = "0.001" # Default per group; explicit "0" requires exact zero.
 
 [wallet_templates.small.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
 # Explicitly enabling a large slot opts into its $10-25 default range:
 # [wallet_templates.small.reserves.large]
@@ -536,7 +617,7 @@ caps retain their default; missing managed caps remain errors.
 A cap above every nominal bound is valid, and nominal bounds above the cap are
 valid; neither arrangement authorizes extra funding.
 
-`reserves.small` defaults to a randomized $2-4 nominal range when omitted or empty.
+`reserves.small` defaults to a randomized $2-3 nominal range when omitted or empty.
 `reserves.large` is optional; an absent large table stays disabled, while an
 explicit empty `reserves.large` enables the randomized $10-25 default. Defaults are
 resolved per slot, so the small range never applies to large. A slot configures
@@ -668,7 +749,7 @@ explicit unreferenced profiles; it excludes unused templates and static wallets.
 These are configured nominal bounds, not a live balance, guaranteed inventory total
 or quote for additional funds: the fresh-group formula is the sum of slot minima
 through the sum of slot maxima, including bridge-minimum headroom. With the
-default small range and an enabled large default it is $12-$29. Existing addresses
+default small range and an enabled large default it is $12-$28. Existing addresses
 keep their captured targets; accumulated retained holdings, fees and retirement
 amounts are separate. Offline inspection cannot infer migration cost or usable
 capacity.
@@ -708,7 +789,20 @@ Low, unknown and zero estimates remain fallbacks. A sufficient bound payer stays
 stable after challenge discovery; role preference alone adds no unsigned handoff.
 It does not sort by balance or sum fragments.
 
-With the default small and large ranges, each fresh wallet draws between $2-4 or
+A uniform default small allocation has a $2.50 nominal mean. Preparing its first
+wallet and first replacement takes two $2-3 allocations: $4-6 nominal, averaging
+approximately $5 before bridge-floor adjustments, source fees and bridge costs.
+The first funded wallet starts READY; its first journaled payment makes it ACTIVE
+and opens a vacancy. The replacement becomes READY later. This estimates capital
+across two allocations; it does not require both at startup or promise $5 remains
+simultaneously spendable after payments. Allow randomization headroom to $6, plus
+fees, ongoing use/replacements and any separately enabled large reserves. A
+bridge-minimum floor can bias draws upward, so $5 is neither an all-in cost nor a
+universal observed mean. A route requiring a nominal minimum above $3 is refused
+under the existing amount-limit/backoff behavior; the ceiling is not raised
+silently and is not a ZEC spending cap.
+
+With the default small and large ranges, each fresh wallet draws between $2-3 or
 $10-25 respectively. Repeated calls can still leave remainders at several
 addresses; those balances cannot collectively authorize one payment. This
 illustrates sizing below the recommendation, not a wallet-count limit, and
@@ -2142,8 +2236,11 @@ or `Content-Range`, local policy/byte bounds, redirects and other `4xx` are term
 A relayed `402` never reaches target signing. Origin HTTP remains no-follow;
 configured relays can follow redirects under the trust boundary below. Accepted
 work retains fetching, validation and cache/source publication after disconnect.
-Shared cache identities retain the exact payer and effective document policy;
-possible charges survive parsing, publication and cleanup errors.
+Shared document cache identities retain the effective document policy and the
+pinned static payer or configured managed routing authority. Deferred routing
+keeps both the destination and bootstrap in the key. Each accepted exchange
+captures the effective payer. Possible charges survive parsing, publication and
+cleanup errors.
 
 After exhausted origin attempts, each authored position has at most one logical
 acquisition. Its unsigned relay-service requests use the same configured Tor
@@ -2187,9 +2284,11 @@ authenticated target requests. Adding a relay does not expose it as an MCP tool.
 Ordinary managed serving binds listeners before funding. Static fallback waits
 on existing eligible-payer notifications without allocating funds or consuming
 network attempts. Endpoints with `wait_for_catalogs = false` keep available tools
-callable during discovery. Paid warming opens only its
-resolved wallets, denies new funding and starts no workers; bootstrap/fund them
-first. `--direct` warming stays unsigned and bypasses the relay. Ordinary
+callable during discovery. Paid warming opens the resolved relay wallets and the
+bootstrap group when an implicit participant relay can use it. An explicit relay
+wallet keeps its selected authority. Warming denies new funding and starts no
+workers. Prepare the chosen payer before warming. `--direct` warming stays
+unsigned and bypasses the relay. Ordinary
 `config check` and catalog inspection never
 pay through the relay. Qualification rejects paid relay startup.
 

@@ -127,7 +127,14 @@ impl Deployment {
             .wallet_resolution
             .wallets
             .iter()
-            .filter(|(_, wallet)| wallet.managed())
+            .filter(|(name, wallet)| {
+                wallet.managed()
+                    && self
+                        .wallet_resolution
+                        .bootstrap
+                        .as_ref()
+                        .is_none_or(|policy| *name == &policy.bootstrap_group)
+            })
             .map(|(name, _)| name.clone())
             .collect();
         ensure!(
@@ -234,7 +241,9 @@ async fn supervise(
     let summary = run_workers(
         monitor,
         owner.run_commands(commands, sender, stop.clone()),
-        worker.run_bootstrap(stop.clone()),
+        worker
+            .with_allocation_selection(names.clone())
+            .run_bootstrap(stop.clone()),
         stop,
     )
     .await?;

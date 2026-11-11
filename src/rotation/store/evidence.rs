@@ -1161,9 +1161,12 @@ impl Store {
                 i64::try_from(support.observation.confirmed.anchor.height)?
             ],
         )?;
-        if super::funding::record_initial_credit(&tx, wallet, support.observation.available())? {
-            super::funding::publish_initial_credit(&tx, wallet)?;
-        }
+        super::funding::publish_observed_credit(
+            &tx,
+            wallet,
+            support.observation.available(),
+            &self.funding_changes,
+        )?;
         tx.commit()?;
         Ok(support)
     }

@@ -746,8 +746,12 @@ requested/reported-destination checks and the configured relay trust boundary.
 
 Help caches and active import coalescing include retained payer authority and
 effective document policy. A static help binding pins the exact payer independently
-of later ordinary API payer replacement; managed bindings retain their existing
-pool authority. Accepted help/add/refresh work survives waiter cancellation through
+of later ordinary API payer replacement. Help, imports, and pricing can fetch
+public documents from their origins without resolving a managed payer. An
+eligible paid relay captures its effective pool before dispatch, without
+activating funding. Routing policies retain both destination and bootstrap
+identity in compatibility keys. Existing in-flight acquisitions and cached
+possibly-paid outcomes keep their accepted authority through later handoff. Accepted help/add/refresh work survives waiter cancellation through
 validation and cache/source publication. Shared failures preserve typed bounds and
 possible-charge facts. Possible-paid help failures remain cached so joined waiters
 cannot sequentially purchase the same failed initialization; proven unpaid help
@@ -825,7 +829,26 @@ enabled. Vendor descriptions are untrusted data and grant no additional authorit
 ## Trusted invocation and payment scope
 
 Every direct or fallback invocation captures one immutable catalog snapshot and
-its trusted `BoundTool`. Advisory price hints belong to the acquired static catalog
+its trusted `BoundTool`. When `wallet_bootstrap` is configured, a validated remote
+API invocation records first-use demand for its participating destination and
+captures the effective group before dispatch. This covers static tools,
+`tool_call`, restored/registered tools and `raw_call`, including free responses
+and response-cache hits. Invalid arguments, denied permissions and unresolved
+names never activate demand. Tool/source listing, search, registration, catalog
+and pricing loads, document/help metadata and paid discovery relays remain
+non-activating. An authored API operation containing `help` in its name is still
+an API invocation.
+
+The bootstrap group's payment cap applies until the destination's first positive
+initial credit has ever been recorded, including partial credit and retired
+wallet history. Later calls then use the destination's cap; depletion never returns
+them to bootstrap. A call captured earlier keeps its effective group, original
+payer transport, journals and liabilities through completion or cancellation.
+Activation survives a cap refusal and merely wakes background funding; calls
+neither allocate wallets nor wait for swaps. Bootstrap policy grants no new relay,
+registration or disclosure permission.
+
+Advisory price hints belong to the acquired static catalog
 cache generation and original HTTP method/path template. Compatible aliases,
 listeners and wallet groups share these observations. Tools without that acquired
 handle, including local catalogs and dynamic imports, do not use the shared hint

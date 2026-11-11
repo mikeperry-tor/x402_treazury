@@ -614,6 +614,44 @@ reconciles existing work rather than inferring non-payment from a missing respon
 
 ## Wallet selection and network isolation
 
+An optional deployment `wallet_bootstrap` policy routes explicitly participating
+managed groups through one ordinary bootstrap group until the destination has
+recorded its first positive initial credit. The trusted API boundary validates
+binding, permission and arguments, persists UUID-bound first-use demand, and
+captures one effective group before unsigned dispatch. Even free or response-cache
+hits activate demand; discovery, catalogs, pricing, registration and help metadata
+do not. Activation only wakes the retained funding owner: it allocates no wallet,
+performs no swap I/O and never waits for funding in the call path.
+
+The effective group owns that call's payment cap, inventory boundary, signers,
+journal, transport and cover state. Credit arriving during an accepted call changes
+later captures only. Tiny positive credit counts, including on historical retired
+wallets; later depletion, refunds and reorg repair cannot restore bootstrap routing.
+There is no cross-group insufficient-funds traversal or fallback after handoff.
+Current configuration selects participation; persisted demand and consumed claims
+survive rename, restart and removal/re-addition without a deployment-phase ledger.
+Qualification retains its reviewed named allocations and does not substitute
+bootstrap wallets.
+
+Implicit discovery payers follow the same source assignment and may capture existing
+bootstrap inventory without creating participant demand. An explicit
+`relay_fallback.wallet` keeps that selected authority. Deferred catalog waits
+subscribe to both possible groups before checking current effective readiness;
+participant credit can hand off a waiting acquisition without a lost wake. A started
+acquisition retains its captured payer, shared in-flight ownership and possible
+fees. A deferred catalog relay whose compatible offer was refused unsigned
+under the bootstrap cap can wait for handoff when the offer fits the destination
+cap and no earlier authorization might have charged. Compatible catalog and
+pricing acquisitions share that refusal while they still use bootstrap.
+Pricing returns its refusal without waiting for funding. Destination credit
+lets a later shared acquisition use the new authority. Document
+cache identities retain both destination and configured bootstrap authority
+where routing is still deferred; completed content remains reusable.
+Offline document reads select only existing effective managed authority, including
+explicitly named generated groups, without declaring or activating participants.
+The advisory startup funding announcement evaluates effective groups and caps in
+one Store projection and never waits for every dormant participant reserve.
+
 Runtime price hints guide selection while wallet-scoped HTTP pooling, cover
 ownership and Tor isolation bind each attempt to its payer. With a price hint,
 initial selection prefers estimated-affordable RETAINED, then ACTIVE, then READY,

@@ -41,8 +41,7 @@ impl DeferredDocument {
     async fn resume(
         &self,
         gate: Arc<crate::network::DiscoveryCapacity>,
-        can_allocate: bool,
-        operator_status: Option<tokio::sync::watch::Sender<bool>>,
+        readiness: crate::discovery_relay::CatalogReadiness,
     ) -> Result<Document> {
         let prepared = self
             .0
@@ -65,11 +64,9 @@ impl DeferredDocument {
             .await;
         match prepared {
             Ok(PreparedDocument::Ready(document)) => Ok(document.clone()),
-            Ok(PreparedDocument::Relay(pending)) => Ok(Arc::new(
-                pending
-                    .resume_when_ready(gate, if can_allocate { None } else { operator_status })
-                    .await?,
-            )),
+            Ok(PreparedDocument::Relay(pending)) => {
+                Ok(Arc::new(pending.resume_when_ready(gate, readiness).await?))
+            }
             Err(error) => Err(anyhow::Error::new(error.clone())),
         }
     }
@@ -87,17 +84,18 @@ pub(super) struct PendingSource {
     document: DeferredDocument,
 }
 impl PendingSource {
+    #[cfg(test)]
+    pub(super) fn shares_download(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.document.0, &other.document.0)
+    }
+
     pub async fn resume(
         &self,
         id: &str,
         gate: Arc<crate::network::DiscoveryCapacity>,
-        can_allocate: bool,
-        status: tokio::sync::watch::Sender<bool>,
+        readiness: crate::discovery_relay::CatalogReadiness,
     ) -> Result<Source> {
-        let document = self
-            .document
-            .resume(gate.clone(), can_allocate, Some(status))
-            .await?;
+        let document = self.document.resume(gate.clone(), readiness).await?;
         if let Some(hints) = &document.hints {
             hints.slot.record_configuration(&self.config).await;
         }
@@ -794,13 +792,15 @@ mod deferred_tests {
             document,
         };
         let (source, logs) = crate::limits::tests::capture(async {
-            let (status, _) = tokio::sync::watch::channel(false);
+            let (status, _) = tokio::sync::watch::channel(Default::default());
             pending
                 .resume(
                     "fixture",
                     Arc::new(crate::network::DiscoveryCapacity::new(1)),
-                    false,
-                    status,
+                    crate::discovery_relay::CatalogReadiness {
+                        status: Some(status),
+                        ..Default::default()
+                    },
                 )
                 .await
                 .expect("serving retains the unsupported operation for inspection")
@@ -917,8 +917,8 @@ mod deferred_tests {
         let task_gate = gate.clone();
         let mut resumes = tokio::spawn(async move {
             tokio::join!(
-                first.resume(task_gate.clone(), true, None),
-                second.resume(task_gate, true, None)
+                first.resume(task_gate.clone(), Default::default()),
+                second.resume(task_gate, Default::default())
             )
         });
         tokio::select! {

@@ -745,59 +745,100 @@ async fn serving_selection_distinguishes_endpoint_and_source_failure_reasons() {
 
 #[tokio::test]
 async fn serving_selection_preserves_cross_listener_cover_ownership() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::routing_tests::serving_selection_preserves_cross_listener_cover_ownership",
+    ) {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("spec.json"),
         r#"{"paths":{"/read":{"get":{}}}}"#,
     )
     .unwrap();
-    let mut value = fixture();
-    value["sources"]["alias"]["spec"] = json!("spec.json");
-    value["sources"]["other"] =
-        json!({"spec":"spec.json","base_url":"https://example.com","send_tools":[{"to":"two"}]});
-    let path = dir.path().join("deployment.toml");
-    std::fs::write(&path, toml::to_string(&config(&value)).unwrap()).unwrap();
-    let mut deployment = Deployment::load(&path).await.unwrap();
-    let table: toml::Table = toml::from_str(
-        include_str!("../../docs/cover-traffic.md")
-            .split("```toml\n")
-            .nth(1)
+    for bootstrap in [false, true] {
+        let mut value = fixture();
+        value["network"] = json!({"cover_traffic_enabled": true});
+        value["sources"]["alias"]["spec"] = json!("spec.json");
+        value["sources"]["other"] = json!({"spec":"spec.json","base_url":"https://example.com","send_tools":[{"to":"two"}]});
+        if bootstrap {
+            let managed = json!({"mode":"zcash_rotation", "max_api_payment_usdc":"1", "reserves":{"small":{"funding_amount_usdc":"2"}}});
+            value["wallets"]["payer"] = managed.clone();
+            value["wallets"]["participant"] = managed;
+            value["treasury"] = json!({"state_dir":"never-opened"});
+            value["funding"] = json!({});
+            value["sources"]["other"]["wallet"] = json!("participant");
+            value["wallet_bootstrap"] =
+                json!({"bootstrap_group":"payer", "deferred_groups":["participant"]});
+        }
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(&path, toml::to_string(&config(&value)).unwrap()).unwrap();
+        let mut deployment = Deployment::load(&path).await.unwrap();
+        let table: toml::Table = toml::from_str(
+            include_str!("../../docs/cover-traffic.md")
+                .split("```toml\n")
+                .nth(1)
+                .unwrap()
+                .split("```")
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut cover: crate::cover::Config = table["cover_traffic"].clone().try_into().unwrap();
+        cover.url = "https://example.com/cover".into();
+        for source in deployment.sources.values_mut() {
+            source.config.cover_traffic = Some(cover.clone());
+        }
+        // The same owner key spans two listeners. Per-listener validation would
+        // incorrectly accept these conflicting profiles independently.
+        deployment
+            .sources
+            .get_mut("other")
             .unwrap()
-            .split("```")
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
-    let mut cover: crate::cover::Config = table["cover_traffic"].clone().try_into().unwrap();
-    cover.url = "https://example.com/cover".into();
-    for source in deployment.sources.values_mut() {
-        source.config.cover_traffic = Some(cover.clone());
+            .config
+            .cover_traffic
+            .as_mut()
+            .unwrap()
+            .concurrency = 1;
+        // Qualification's catalog snapshot is prepared before a run installs
+        // its qualification binding. It still uses destination authority.
+        let mut snapshot_config = config(&value);
+        for id in ["alias", "other"] {
+            let cover = deployment.sources[id]
+                .config
+                .cover_traffic
+                .as_ref()
+                .unwrap();
+            snapshot_config
+                .sources
+                .get_mut(id)
+                .unwrap()
+                .provider
+                .insert(
+                    "cover_traffic".into(),
+                    toml::Value::try_from(cover).unwrap(),
+                );
+        }
+        std::fs::write(&path, toml::to_string(&snapshot_config).unwrap()).unwrap();
+        let (snapshot, _) = Deployment::inspect_catalogs(&path).await;
+        assert_eq!(snapshot.is_ok(), bootstrap, "{:?}", snapshot.err());
+        let error = deployment.refresh_selection(true).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("conflicting cover settings for shared wallet/origin")
+        );
+        assert!(deployment.selection_errors.is_empty());
+        assert_eq!(deployment.selected["one"].len(), 1);
+        assert_eq!(deployment.selected["two"].len(), 1);
+        deployment
+            .sources
+            .get_mut("other")
+            .unwrap()
+            .config
+            .cover_traffic = Some(cover);
+        deployment.refresh_selection(true).unwrap();
+        assert_eq!(deployment.selected["one"][0].0, "alias");
+        assert_eq!(deployment.selected["two"][0].0, "other");
     }
-    // The same owner key spans two listeners. Per-listener validation would
-    // incorrectly accept these conflicting profiles independently.
-    deployment
-        .sources
-        .get_mut("other")
-        .unwrap()
-        .config
-        .cover_traffic
-        .as_mut()
-        .unwrap()
-        .concurrency = 1;
-    let error = deployment.refresh_selection(true).unwrap_err();
-    assert!(format!("{error:#}").contains("conflicting cover settings for shared wallet/origin"));
-    assert!(deployment.selection_errors.is_empty());
-    assert_eq!(deployment.selected["one"].len(), 1);
-    assert_eq!(deployment.selected["two"].len(), 1);
-    deployment
-        .sources
-        .get_mut("other")
-        .unwrap()
-        .config
-        .cover_traffic = Some(cover);
-    deployment.refresh_selection(true).unwrap();
-    assert_eq!(deployment.selected["one"][0].0, "alias");
-    assert_eq!(deployment.selected["two"][0].0, "other");
 }
 
 #[test]

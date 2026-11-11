@@ -58,7 +58,7 @@ Back up the treasury and stop serving before changing a group name:
 ```sh
 x402_treazury wallet backup --config deployment.toml --destination secrets/backup
 x402_treazury wallet rename research general --config deployment.toml
-# Update wallet declarations and source/listener wallet references in deployment.toml.
+# Update wallet declarations, source/listener references and wallet_bootstrap group names.
 x402_treazury wallet preview --config deployment.toml
 x402_treazury serve --config deployment.toml
 ```
@@ -70,6 +70,9 @@ location and identity settings are used; neither name must occur in that file.
 The command authenticates and exclusively owns the store without decoding the SDK
 wallet, loading catalogs, contacting the network, or allocating/funding wallets.
 Existing supported additive store initializers may run on opening.
+Update `wallet_bootstrap.bootstrap_group` and `wallet_bootstrap.deferred_groups`
+references when they name the renamed group. UUID-bound first-use demand and
+historical initial-credit facts stay with that group.
 
 The stable group UUID, payer keys, roles, claims, generations, balances, accepted
 inputs, signed bytes and pending obligations remain owned by the same group.
@@ -323,9 +326,17 @@ After depositing sufficient ZEC into the treasury, run:
 x402_treazury wallet bootstrap --config examples/deployments/managed.local.toml
 ```
 
-This declares configured groups, runs the production treasury/funding workers,
-and waits for the first positive credit on its captured enabled
-reserve generations. It closes treasury ownership before exiting, requires
+With `[wallet_bootstrap]`, this declares and captures only the ordinary managed
+group named by `bootstrap_group`, then promptly funds its enabled small/large
+reserve claims. It neither activates nor allocates participating groups or other
+declared groups. Without the table, it retains the usual capture of every declared
+managed group's enabled reserves. It runs the production treasury/funding workers
+and waits for the first positive credit on those captured reserve generations.
+Selection restricts new allocations and command completeness. Previously allocated
+jobs outside the selection may continue quotes and funding under current enabled
+funding authority. Bootstrap applies the current reserve settings to existing
+groups before processing their jobs. Accepted source liabilities retain their
+original terms and recovery ownership. The command closes treasury ownership before exiting, requires
 `funding.auto_fund=true`, and respects actual source spendability, safe source closure and qualification allocation counts. Static wallets are
 excluded and need external funding. No catalogs, pricing, listener tokens, static
 signing keys or MCP listeners are needed. Network traffic follows the deployment
@@ -339,7 +350,8 @@ exit status. Add `--json` for the versioned machine-readable result, including
 `balance_estimate_usdc` fields. The JSON result separates current serving/inventory readiness from
 completion of captured work (see [capacity output](#versioned-capacity-output)).
 Bootstrap allocates its captured vacant claims promptly, without ordinary serving's
-30–120-second opportunities or proactive rotation of captured payers. It observes
+30–120-second opportunities, participant 60–240-second opportunities or proactive
+rotation of captured payers. It observes
 those original obligations without chasing replacement generations.
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
 source work closes after canonical confirmation or buried finite signed expiry
@@ -365,15 +377,26 @@ funding. MCP HTTP availability follows each endpoint's `wait_for_catalogs` setti
 Remote catalog discovery and pending paid
 relay discovery continue under the retained owner; relay discovery
 waits for its assigned payer without allocating wallets itself. Serving does not
-wait for bootstrap completeness. Ordinary serving first schedules each group's
-independent 30–120-second refill opportunity; restart redraws and downtime or funding
+wait for bootstrap completeness. With bootstrap policy, dormant participants wait
+for a validated API invocation, then independently schedule initial opportunities
+at 60–240 seconds; they use the bootstrap group's inventory and cap until their
+first positive initial credit. Serving also schedules nonparticipating groups on
+ordinary 30–120-second opportunities, although the explicit setup command selects
+only the bootstrap group. With no table, every declared managed group uses the
+ordinary policy. Restart redraws and downtime or funding
 work can extend actual waiting. Exhaustion adds no emergency refill.
 `auto_fund=false` pauses new funding and makes
 explicit bootstrap fail, while accepted operations remain observed; qualification
-funding restrictions retain their existing lifecycle. `catalog warm` never starts
-funding: use `wallet bootstrap` first when warming needs a managed paid relay wallet.
-Its relay-wallet owner temporarily denies new funding for this command only; it
-uses existing funded wallets without changing the deployment's `auto_fund` setting.
+funding restrictions retain their existing lifecycle. `catalog warm` uses
+existing payer capacity and denies new funding for the command. Prepare the
+effective relay payer first. With bootstrap policy, an explicit relay wallet
+outside the bootstrap group needs its own capacity. See
+[bootstrap wallet policy](configuration.md#bootstrap-wallet-policy).
+
+`wallet sync`, status, preview and offline initialization never activate
+participants. Qualification retains its separately reviewed named-wallet
+allocations and API authority; bootstrap policy cannot substitute a bootstrap
+payer for a qualification case or increase its permitted allocation count.
 
 ## Treasury and managed pools
 
@@ -563,8 +586,12 @@ readers remain upstream implementation.
 The application accepts database schema 23 only, for owner opens and read-only
 status, identity and qualification inspection. Older and future versions fail
 before changing source state; opening them does not convert them. Canonical fresh
-stores include current source-disposition and payment-resolution histories. A
-schema-23 store interrupted before those empty histories were initialized can
+stores include current source-disposition and payment-resolution histories and a
+UUID-keyed first-use demand table for bootstrap participants. The demand table
+contains no amounts or allocation authority; the existing consumed initial-claim
+fact across all historical funding jobs, including retired wallets, records
+whether a group has ever received initial credit. Rename and backup preserve
+both facts. A schema-23 store interrupted before those empty tables were initialized can
 finish their idempotent initialization under exclusive ownership without
 rewriting financial records. Existing history and snapshot references remain
 preserved, including the guard against automatic disclosure of previously closed
@@ -1081,7 +1108,7 @@ RPC policy as the deployment; choosing another provider discloses those addresse
 to that provider.
 
 Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc`. `reserves.small` defaults to a
-randomized $2-4 nominal range; an absent `reserves.large` stays disabled, while an
+randomized $2-3 nominal range; an absent `reserves.large` stays disabled, while an
 explicit empty `[reserves.large]` opts into $10-25. A slot may instead set
 `funding_amount_usdc` for a fixed target (optionally with
 `max_funding_amount_usdc` headroom), or both `min_funding_amount_usdc` and
@@ -1090,7 +1117,11 @@ exact micro-USDC decimals, and a maximum must be at least its minimum/target.
 Actual spendable treasury funds and SDK-calculated transaction fees govern each transfer; there is no separate per-operation ZEC
 spending budget. The group payment cap is independent of reserve size; a price
 above a nominal funding floor can be attempted by an eligible wallet under that
-payment cap.
+payment cap. A small-only group's first wallet and first replacement total $4-6
+nominal, averaging approximately $5 before bridge floors, source fees and other
+costs. The first journaled payment opens the replacement vacancy; this does not
+require both allocations at startup. Allow headroom to $6 and capital for ongoing
+use and any large reserves; see [reserve sizing](configuration.md#reserve-sizing-and-fragmentation).
 
 `max_retirement_remainder_usdc` defaults to `"0.001"` (1,000 atomic USDC units)
 independently per managed group; explicit `"0"` requires exact zero. Retired funds

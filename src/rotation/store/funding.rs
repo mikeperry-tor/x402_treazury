@@ -240,11 +240,34 @@ pub fn applicable_requirement(db: &Connection, job: &str) -> Result<DestinationR
 /// The wallet's unique initial claim is consumed by its first positive observed
 /// credit. It is never reopened by spending, reorgs, refunds or provider flags.
 /// Existing readiness columns retain this fact; they no longer certify a target.
-pub(crate) fn record_initial_credit(db: &Connection, wallet: &str, balance: U256) -> Result<bool> {
-    if balance > U256::ZERO {
-        db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=funding_jobs.id),readiness_requirement=?2,readiness_capacity=?2 WHERE wallet_id=?1 AND readiness_requirement IS NULL",params![wallet,balance.to_string()])?;
+fn record_initial_credit(
+    db: &Connection,
+    wallet: &str,
+    balance: U256,
+    funding_changes: &tokio::sync::Notify,
+) -> Result<bool> {
+    if balance > U256::ZERO
+        && db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=funding_jobs.id),readiness_requirement=?2,readiness_capacity=?2 WHERE wallet_id=?1 AND readiness_requirement IS NULL",params![wallet,balance.to_string()])? != 0
+    {
+        // Eligibility reads queue on the same Store owner and run after this
+        // transaction completes. A rollback causes only a redundant read.
+        funding_changes.notify_one();
+        return Ok(true);
     }
     initial_credit_recorded(db, wallet)
+}
+
+pub(super) fn publish_observed_credit(
+    db: &Connection,
+    wallet: &str,
+    balance: U256,
+    funding_changes: &tokio::sync::Notify,
+) -> Result<bool> {
+    let credited = record_initial_credit(db, wallet, balance, funding_changes)?;
+    if credited {
+        publish_initial_credit(db, wallet)?;
+    }
+    Ok(credited)
 }
 pub(crate) fn initial_credit_recorded(db: &Connection, wallet: &str) -> Result<bool> {
     Ok(db.query_row(
@@ -271,7 +294,12 @@ pub(crate) fn record_readiness(
     wallet: &str,
     support: &super::evidence::BalanceSupport,
 ) -> Result<bool> {
-    record_initial_credit(db, wallet, support.observation.available())
+    record_initial_credit(
+        db,
+        wallet,
+        support.observation.available(),
+        &tokio::sync::Notify::new(),
+    )
 }
 
 impl Store {
@@ -296,9 +324,7 @@ impl Store {
             "initial credit recipient changed"
         );
         tx.execute("UPDATE wallets SET balance=?2,low_balance=refresh_pending,balance_refresh_error=NULL WHERE id=?1",params![wallet,balance.to_string()])?;
-        if record_initial_credit(&tx, wallet, balance)? {
-            publish_initial_credit(&tx, wallet)?;
-        }
+        publish_observed_credit(&tx, wallet, balance, &self.funding_changes)?;
         tx.commit()?;
         self.notify_capacity_changed(&pool);
         Ok(())
@@ -1005,7 +1031,7 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
 
 /// Publication is driven by destination readiness, never financial completion.
 /// Exact configured claims govern publication of funded roles.
-pub(crate) fn publish_initial_credit(db: &Connection, wallet: &str) -> Result<()> {
+fn publish_initial_credit(db: &Connection, wallet: &str) -> Result<()> {
     let job: String = db.query_row(
         "SELECT id FROM funding_jobs WHERE wallet_id=?1 AND readiness_requirement IS NOT NULL",
         [wallet],
@@ -2822,10 +2848,26 @@ mod completion_tests {
         .unwrap();
         store.save_funding_quote(&job.id, &quote).unwrap();
         assert!(destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
-        assert!(record_initial_credit(&store.db, &job.wallet_id, U256::from(9)).unwrap());
+        assert!(
+            record_initial_credit(
+                &store.db,
+                &job.wallet_id,
+                U256::from(9),
+                &store.funding_changes
+            )
+            .unwrap()
+        );
         store.db.execute("UPDATE funding_jobs SET readiness_support='malformed',readiness_disputed='old' WHERE id=?1",[&job.id]).unwrap();
         assert!(!destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
-        assert!(record_initial_credit(&store.db, &job.wallet_id, U256::ZERO).unwrap());
+        assert!(
+            record_initial_credit(
+                &store.db,
+                &job.wallet_id,
+                U256::ZERO,
+                &store.funding_changes
+            )
+            .unwrap()
+        );
         assert_eq!(store.destination_requirement(&job.id).unwrap().amount, "9");
         assert!(
             store
@@ -4557,7 +4599,13 @@ mod completion_tests {
             store
                 .record_destination_readiness(&job.id, "1", "partial-credit", 1)
                 .unwrap();
-            record_initial_credit(&store.db, &job.wallet_id, U256::ZERO).unwrap();
+            record_initial_credit(
+                &store.db,
+                &job.wallet_id,
+                U256::ZERO,
+                &store.funding_changes,
+            )
+            .unwrap();
             assert!(
                 store
                     .funding_facts(&job.id, &job.operation_id)
@@ -4596,7 +4644,8 @@ mod completion_tests {
             .unwrap();
         submit_source_for_status(&mut store, &job);
         store.confirm_spend(&job.operation_id).unwrap();
-        record_initial_credit(&store.db, &job.wallet_id, U256::ONE).unwrap();
+        record_initial_credit(&store.db, &job.wallet_id, U256::ONE, &store.funding_changes)
+            .unwrap();
         store
             .db
             .execute(

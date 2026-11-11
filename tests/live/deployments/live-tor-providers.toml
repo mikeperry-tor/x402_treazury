@@ -33,7 +33,7 @@ max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible 
 max_api_payment_usdc = "0.20"
 
 [wallets.coverage_a.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
 [wallets.coverage_b]
 mode = "zcash_rotation"
@@ -41,7 +41,7 @@ max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible 
 max_api_payment_usdc = "0.20"
 
 [wallets.coverage_b.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
 [sources.agent402]
 extends = "../../../providers/agent402.toml"

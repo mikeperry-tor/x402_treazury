@@ -1,6 +1,6 @@
 # Research APIs grouped into task-oriented MCP endpoints.
 #
-# Endpoint   Scope                                              Wallet
+# Endpoint   Scope                                              Intended group
 # --------   -----                                              ------
 # toolbox    Dynamic provider management and raw calls          general
 # web        Search, retrieval, news, archives and images       general
@@ -16,13 +16,16 @@
 # security   Threats, breaches and infrastructure checks        financial
 #
 # Wallets group endpoints by what the upstream learns about the caller, not by
-# topic. General research reveals only an anonymous researcher; personal and
+# topic. General research often omits explicit identity; personal and
 # health requests can carry the caller's own identity, location, contacts or
 # medical context; financial requests carry money interests and crypto
-# identities. Separate pools bound cross-topic payer correlation, and wallet
-# address rotation bounds temporal linkage across funding tranches. Neither
-# hides request content from a vendor, nor prevents same-session content/time
-# correlation.
+# identities. All initially share general's payer and $1 cap. After each group's
+# first positive credit, it uses its own payer; health then has a $0.50 cap.
+# Separate addresses avoid direct payer reuse, but closely spaced initial swaps
+# still provide a funding-time correlation signal. First-use activation and later
+# randomized opportunities can weaken that signal. Shared bootstrap payments use
+# a visibly common payer; amounts, timing, providers, content and settlement still
+# correlate activity. Delayed funding cannot erase prior links or hide content.
 #
 # Transport is isolated per payer and destination, so the same provider reached
 # through different wallets uses separate Tor circuits; that does not hide
@@ -38,6 +41,16 @@
 
 version = 1
 
+# Prepare general first; other groups activate only on a validated API invocation,
+# including a free response or cache hit. Calls do not wait for swaps. Initial
+# funding opportunities are independently drawn from 60-240 seconds until credit.
+# Previously credited groups route directly; depletion never returns to general.
+# Comment out the entire table for ordinary funding and separate groups from the
+# beginning; this does not move funds or erase historical links.
+[wallet_bootstrap]
+bootstrap_group = "general"
+deferred_groups = ["personal", "health", "financial"]
+
 [network]
 mode = "tor"
 socks_endpoint = "127.0.0.1:9150"
@@ -46,8 +59,9 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 240
 
-# Paid fallback for blocked catalog/help GETs. Paid API calls retain their
-# listener bindings.
+# Paid fallback for blocked catalog/help GETs follows effective group routing.
+# Existing general inventory can pay for uncredited groups' discovery without
+# activating funding. An explicit relay wallet override keeps its selected group.
 [relay_fallback]
 source_discovery = true
 api_requests = false
@@ -66,6 +80,9 @@ indexer_url = "https://na.zec.rocks:443"
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 
+# Initial setup is general's one $2-3 small allocation, plus fees and bridge costs.
+# Eventual initial inventory across four groups is $8-12 nominal; keep additional
+# capital for later group preparation, relays and ongoing replacements.
 # General research has the largest API surface and rotates most often.
 # LoneStar CrownBlock region/report calls advertise $1.00 pricing.
 [wallets.general]
@@ -73,12 +90,12 @@ mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
 
 [wallets.general.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 # To set an explicit range, uncomment and adjust:
 # min_funding_amount_usdc = "2.00"
 # max_funding_amount_usdc = "4.00"
-# A smaller range reduces long-term linkability; a larger one may make you
-# stand out compared to other treazury users.
+# Smaller reserves offer more rotation opportunities; amounts and timing can
+# still correlate activity.
 
 # Identity, contact, home and trip research share this payer pool. These
 # requests can reveal who and where the caller is. Maxwell local tips
@@ -88,26 +105,27 @@ mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
 
 [wallets.personal.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 # To set an explicit range, uncomment and adjust:
 # min_funding_amount_usdc = "2.00"
 # max_funding_amount_usdc = "4.00"
-# A smaller range reduces long-term linkability; a larger one may make you
-# stand out compared to other treazury users.
+# Smaller reserves offer more rotation opportunities; amounts and timing can
+# still correlate activity.
 
-# Health requests can reveal medical context, so they are isolated from every
-# other payer pool.
+# Health initially shares general's payer and $1 cap. After its first positive
+# credit it uses a separate payer and its own $0.50 cap. Sensitive request content
+# remains visible to the provider throughout.
 [wallets.health]
 mode = "zcash_rotation"
 max_api_payment_usdc = "0.50"
 
 [wallets.health.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 # To set an explicit range, uncomment and adjust:
 # min_funding_amount_usdc = "2.00"
 # max_funding_amount_usdc = "4.00"
-# A smaller range reduces long-term linkability; a larger one may make you
-# stand out compared to other treazury users.
+# Smaller reserves offer more rotation opportunities; amounts and timing can
+# still correlate activity.
 
 # Business, finance and security research share this payer pool. These
 # requests carry money interests and crypto identities. Arkham lookups and
@@ -117,12 +135,12 @@ mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
 
 [wallets.financial.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 # To set an explicit range, uncomment and adjust:
 # min_funding_amount_usdc = "2.00"
 # max_funding_amount_usdc = "4.00"
-# A smaller range reduces long-term linkability; a larger one may make you
-# stand out compared to other treazury users.
+# Smaller reserves offer more rotation opportunities; amounts and timing can
+# still correlate activity.
 
 # Each source owns its ordered exclusions and endpoint assignments. The first
 # matching send_tools rule consumes a tool; destination arrays preserve explicit sharing.

@@ -6,14 +6,23 @@ use std::cmp::Ordering;
 pub(crate) enum Authority {
     Unsigned,
     Static(Arc<Payer>),
-    Managed(Arc<crate::rotation::manager::ManagedPool>),
+    Managed(
+        Arc<crate::rotation::manager::ManagedPool>,
+        Option<Arc<crate::rotation::manager::ManagedPool>>,
+    ),
 }
 impl Authority {
-    fn key(&self) -> (u8, usize) {
+    fn key(&self) -> (u8, usize, usize) {
         match self {
-            Self::Unsigned => (0, 0),
-            Self::Static(payer) => (1, Arc::as_ptr(payer) as usize),
-            Self::Managed(pool) => (2, Arc::as_ptr(pool) as usize),
+            Self::Unsigned => (0, 0, 0),
+            Self::Static(payer) => (1, Arc::as_ptr(payer) as usize, 0),
+            Self::Managed(pool, bootstrap) => (
+                2,
+                Arc::as_ptr(pool) as usize,
+                bootstrap
+                    .as_ref()
+                    .map_or(0, |pool| Arc::as_ptr(pool) as usize),
+            ),
         }
     }
 }
@@ -22,7 +31,7 @@ impl std::fmt::Debug for Authority {
         f.write_str(match self {
             Self::Unsigned => "Unsigned",
             Self::Static(_) => "Static",
-            Self::Managed(_) => "Managed",
+            Self::Managed(..) => "Managed",
         })
     }
 }
@@ -51,7 +60,7 @@ impl PaidClient {
             client.payer = Some(Arc::new(RwLock::new(payer.clone())));
             Authority::Static(payer)
         } else if let Some(pool) = &self.managed {
-            Authority::Managed(pool.clone())
+            Authority::Managed(pool.clone(), self.bootstrap.clone())
         } else {
             Authority::Unsigned
         };

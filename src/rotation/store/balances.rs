@@ -107,8 +107,13 @@ impl Store {
                     [wallet],
                     |r| r.get(0),
                 )?;
-                if initial_claim && super::funding::record_initial_credit(&tx, wallet, value)? {
-                    super::funding::publish_initial_credit(&tx, wallet)?;
+                if initial_claim {
+                    super::funding::publish_observed_credit(
+                        &tx,
+                        wallet,
+                        value,
+                        &self.funding_changes,
+                    )?;
                 }
             }
             None => {

@@ -4,7 +4,41 @@ use crate::deployment::MetaConfig;
 use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootstrapPolicy {
+    pub bootstrap_group: String,
+    pub deferred_groups: Vec<String>,
+}
+
+impl BootstrapPolicy {
+    fn validate(&self, wallets: &BTreeMap<String, WalletConfig>) -> Result<()> {
+        ensure!(
+            !self.deferred_groups.is_empty(),
+            "wallet_bootstrap.deferred_groups must not be empty"
+        );
+        let mut participants = BTreeSet::new();
+        for name in std::iter::once(&self.bootstrap_group).chain(self.deferred_groups.iter()) {
+            ensure!(
+                wallets.get(name).is_some_and(WalletConfig::managed),
+                "wallet_bootstrap group {name} must name a resolved managed wallet"
+            );
+        }
+        for name in &self.deferred_groups {
+            ensure!(
+                name != &self.bootstrap_group,
+                "wallet_bootstrap group cannot participate in itself"
+            );
+            ensure!(
+                participants.insert(name),
+                "duplicate wallet_bootstrap participant {name}"
+            );
+        }
+        Ok(())
+    }
+}
 
 pub const AUTO_PREFIX: &str = "auto_v1_";
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -45,6 +79,18 @@ pub struct WalletSummary {
     pub initial_inventory_target_usdc: String,
     pub initial_inventory_maximum_atomic: String,
     pub initial_inventory_maximum_usdc: String,
+    /// Explicit bootstrap command setup only; existing totals describe eventual inventory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_setup: Option<BootstrapSetup>,
+}
+#[derive(Serialize)]
+pub struct BootstrapSetup {
+    pub group: String,
+    pub initial_inventory_target_atomic: String,
+    pub initial_inventory_target_usdc: String,
+    pub initial_inventory_maximum_atomic: String,
+    pub initial_inventory_maximum_usdc: String,
+    pub routing: &'static str,
 }
 pub struct Resolution {
     pub source_bindings: crate::deployment::routing::EffectiveBindings,
@@ -52,6 +98,7 @@ pub struct Resolution {
     pub bindings: WalletBindings,
     pub generated: BTreeMap<String, GeneratedWallet>,
     pub summary: WalletSummary,
+    pub bootstrap: Option<BootstrapPolicy>,
 }
 impl Scope {
     fn identity(self, server: &str, source: &str) -> String {
@@ -183,6 +230,10 @@ pub(crate) fn resolve_with_bindings(
         }
         bindings.insert(server_name.clone(), server_bindings);
     }
+    let bootstrap = config.wallet_bootstrap.clone();
+    if let Some(policy) = &bootstrap {
+        policy.validate(&wallets)?;
+    }
     let mut minimum = U256::ZERO;
     let mut maximum = U256::ZERO;
     let mut count = 0;
@@ -205,6 +256,21 @@ pub(crate) fn resolve_with_bindings(
             u64::try_from(total % scale)?
         ))
     };
+    let bootstrap_setup = bootstrap.as_ref().map(|policy| -> Result<BootstrapSetup> {
+        let WalletConfig::ZcashRotation { reserves, .. } = &wallets[&policy.bootstrap_group] else {
+            unreachable!("validated managed bootstrap group")
+        };
+        let minimum = reserves.initial_inventory_minimum_atomic()?;
+        let maximum = reserves.initial_inventory_maximum_atomic()?;
+        Ok(BootstrapSetup {
+            group: policy.bootstrap_group.clone(),
+            initial_inventory_target_atomic: minimum.to_string(),
+            initial_inventory_target_usdc: usdc(minimum)?,
+            initial_inventory_maximum_atomic: maximum.to_string(),
+            initial_inventory_maximum_usdc: usdc(maximum)?,
+            routing: "Participating groups use this group's payment authority until their first positive initial credit; serving also funds nonparticipants normally.",
+        })
+    }).transpose()?;
     let summary = WalletSummary {
         managed_pool_count: count,
         generated_pool_count: generated.len(),
@@ -212,6 +278,7 @@ pub(crate) fn resolve_with_bindings(
         initial_inventory_target_usdc: usdc(minimum)?,
         initial_inventory_maximum_atomic: maximum.to_string(),
         initial_inventory_maximum_usdc: usdc(maximum)?,
+        bootstrap_setup,
     };
     Ok(Resolution {
         source_bindings,
@@ -219,5 +286,6 @@ pub(crate) fn resolve_with_bindings(
         bindings,
         generated,
         summary,
+        bootstrap,
     })
 }

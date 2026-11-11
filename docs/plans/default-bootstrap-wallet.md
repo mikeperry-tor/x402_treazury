@@ -2,8 +2,9 @@
 
 ## Status and scope
 
-Active implementation plan; no feature implementation has begun. Working branch:
-`main`. Starting baseline: `9ca86bdb407152ab1581e14c5d110185d870bb48`.
+Implementation and selected validation are complete. Final G2/evidence review
+is pending; P6 cleanup remains. Working branch:
+`default-wallet-bootstrap`. Starting baseline: `9ca86bdb407152ab1581e14c5d110185d870bb48`.
 The unrelated untracked `state` entry is outside this work and must remain untouched.
 This planning change does not yet change examples to unsupported TOML or advertise
 unimplemented behavior in maintained guides.
@@ -29,15 +30,15 @@ The optional root deployment table is:
 
 ```toml
 [wallet_bootstrap]
-group = "general"
-groups = ["personal", "health", "financial"]
+bootstrap_group = "general"
+deferred_groups = ["personal", "health", "financial"]
 ```
 
-- `group` names one ordinary managed wallet group. It retains its own addresses,
+- `bootstrap_group` names one ordinary managed wallet group. It retains its own addresses,
   payment cap, reserve bounds, rotation, retirement, transport identity and journals.
   It can have its own endpoint bindings and remains managed after all participants
   transition. There is no shutdown or merge operation.
-- `groups` explicitly lists participating managed groups. Validate names against
+- `deferred_groups` explicitly lists participating managed groups. Validate names against
   resolved wallets, including generated groups if explicitly named; reject missing
   or static groups, duplicate participants and self-membership. Do not infer
   participation from all declarations or allow nested/cyclic bootstrap policies.
@@ -202,13 +203,13 @@ Implement these example changes only with parser/runtime support:
 ```toml
 # examples/deployments/comprehensive.toml
 [wallet_bootstrap]
-group = "web"
-groups = ["company"]
+bootstrap_group = "web"
+deferred_groups = ["company"]
 
 # examples/deployments/research_desk.toml
 [wallet_bootstrap]
-group = "general"
-groups = ["personal", "health", "financial"]
+bootstrap_group = "general"
+deferred_groups = ["personal", "health", "financial"]
 ```
 
 - Preserve source selection, endpoint bindings, provider permissions, state paths
@@ -414,10 +415,190 @@ until implementation. Do not claim planned checks have run.
   proposed nominal bounds/means were checked; existing relevant default/draw/redraw
   tests should be reused rather than duplicated. No runtime or live bridge
   validation was performed. Exact revision review is reported at handoff.
-- P1/P1a–P6, G1/G2 and all implementation validation are pending. Update this section
+- Historical initial status: P1/P1a–P6, G1/G2 and implementation validation were pending. Update this section
   with reviewed SHAs, findings/dispositions, fixups, actual nonzero test counts
   and carried-forward evidence.
 - Before completion, verify AGENTS.md's existing links still reach the owning
   configuration, observation, reconciliation, network and testing contracts; add
   an owning-guide link only if the maintained boundary needs one. Keep detailed
   feature contracts in those guides, not a duplicate checklist in AGENTS.md.
+
+- Execution begins on `default-wallet-bootstrap` at plan SHA
+  `dd62a40082074d39bb92c217c55ef7c3b10df628`; reused all recorded planning reviews.
+  Independent read-only verification of that exact plan found no unresolved staging
+  issue. P1 adds pure policy resolution/setup projection and UUID-bound demand plus
+  all-history consumed-claim credit queries, including an additive schema-23 initializer.
+  Serving and explicit bootstrap reject the table at this intermediate boundary.
+  Three configuration/staging and three Store durability/concurrency tests authored;
+  compiler/runtime validation awaits the frozen integrated snapshot. Exact-SHA review pending.
+
+- P1 implementation committed as `40dbebff`; independent exact-SHA review requested.
+  P1a changes default small nominal sizing to $2–3, tests absent/empty slots and
+  $12–28 large-enabled totals, and updates maintained default references together.
+  Existing saved-choice/unsigned-refresh/accepted-quote contracts remain unchanged;
+  targeted runtime evidence remains pending. No new dependency or policy cap added.
+
+- Independent exact reviews found no material findings in P1 `40dbebff` and P1a
+  `5334824c`, including combined P0–P1a and saved-draw/accepted-work consumers.
+  User naming correction is fixup `8bd205de`: canonical table fields are now
+  `bootstrap_group` and `deferred_groups`, with obsolete/mixed names rejected.
+  Its independent exact review found no material finding; behavior is unchanged.
+- P2 integrates trusted invocation activation, immutable effective payer capture,
+  nonactivating documents/discovery/relay, effective-cap advisory readiness and
+  serving eligibility/opportunities. Qualification keeps named authority.
+  Independent early review found transient eligibility-read propagation and
+  offline reads unnecessarily requiring both saved pools; corrected before commit.
+  Busy/locked reads use existing inventory retry cadence without changing armed
+  opportunities, and existing document reads select only required saved authority.
+  A smaller finite/unlimited-cap advisory issue is also corrected. Cover preflight
+  checks both possible shared owners under its existing configuration contract.
+- P2 focused validation initially passed three configuration tests. Subsequent
+  58-test bootstrap run passed 57, including actual relay handoff/explicit payer,
+  both cap directions and funding-worker restart/paused/dormant scenarios. One
+  authored invalid-input fixture incorrectly assumed missing required query inputs
+  are rejected by the existing router; it now exercises an actually invalid missing
+  path parameter instead. Earlier fixture synchronization used aggregate health to
+  infer completion across clock jumps; deterministic source callbacks and explicit
+  owner replacement now establish the intended ordering. EVM identity assertions
+  compare canonical lowercase addresses. No production contract was loosened.
+  Complete rerun pending; interrupted/failed runs are not counted as suite passes.
+- Initial G1 complexity analysis completed (504 files, 11,303 callable spaces,
+  no exclusions) against `9ca86bdb`; artifacts under ignored
+  `target/complexity-runs/20261110T213053Z-8d11f1f9`. Independent full JSON/CSV and
+  unchanged-hotspot review disposition: `validate_selected_cover` CogC 28 checks
+  possible shared authorities; `initialize_wallets_mode` CogC 50/CycC 53 retains
+  qualification, degraded transport, selected closure and cleanup;
+  `schedule_owned` CogC 70/CycC 76 keeps eligibility retry separate from accepted
+  I/O and unchanged armed instants. No compelling simplification was identified.
+  Renaming/tests invalidate individual source hashes; final source-matched run pending.
+- P2 production build, warning gate, compatibility and broader runtime/lifecycle
+  stages remain pending until integration gates permit subsequent implementation.
+  macOS lib-test linking emitted an oversized `__eh_frame` compact-unwind warning;
+  no warning-free compiler claim is made from those test runs. Tests use the
+  repository's copied/ad-hoc-signed macOS harness and only temporary unfunded state.
+
+- G1 passed for exact P2 `7752966fd6a7e5e63336476a6d68e6ddf1249435`
+  and combined P0–P2 history: independent review found no unresolved material
+  finding or compelling simplification. Focused `make test CARGO_ARGS='--lib bootstrap'`
+  passed 58/58 using socket-capable copied macOS harnesses. Source-matched metrics
+  in `target/complexity-runs/20261110T213920Z-8b1fa46e` cover 504 files/11,309
+  callables with no exclusions/hash mismatches. All three warning dispositions
+  above remain accepted. General required-query schema checking is pre-existing
+  router behavior; the invalid-path test establishes rejected-route activation
+  boundaries, not exhaustive schema validation.
+- P1a follow-up fixup `8299d678` corrects three missed default-only assertions in
+  `tests/managed_config.rs`; fixed/custom sizing assertions remain unchanged.
+  Independent exact review and execution pending.
+- P3 selects only the configured bootstrap group for explicit setup capture,
+  initialization and summary. Its worker allocation-name selection restricts new
+  allocations without narrowing Backend configuration or accepted-job observation.
+  Added prompt both-slot/other-owned-job and real CLI policy/absent-policy coverage;
+  command staging rejection removed and owning guides updated. Exact SHA review
+  and selected final validation pending.
+
+- P3 committed `6d60890c`; independent exact review requested alongside P1a
+  assertion fixup. P4 enables both example tables with the user-selected canonical
+  field names. Maintained README/example guidance distinguishes bootstrap-only
+  setup, eventual inventory and two-allocation preparation capital, effective cap
+  transitions and timing/common-payer privacy tradeoffs. Pure inspection tests
+  resolve actual examples and opt-out bindings. Author's Python TOML comparison
+  against pre-P4 files, removing only the new root table, found every other value
+  identical (bindings, state paths, permissions, providers, explicit sizing/caps
+  and endpoint instructions). Endpoint instructions/search keywords were reviewed;
+  no routing/cap claims required agent-facing changes. Parser/runtime execution
+  and exact review remain pending; no live privacy claim follows.
+
+- Follow-up P2 consumer correction: offline document reads now obtain effective
+  managed profiles through the existing assignment projection, so an explicitly
+  named generated bootstrap group works without a matching explicit wallets entry.
+  Extended the no-SDK existing-authority regression with that case. A supplemental
+  socket-free restored-registry/wrapped-dynamic/raw invocation regression verifies
+  registration, search, unknown tools, denied/invalid raw requests do not activate;
+  actual valid API invocation records demand even when transport is unavailable,
+  without allocations, signers or I/O. Initial test fixture omitted required empty
+  listener catalog views; corrected the fixture without production changes.
+  Combined focused bootstrap rerun passed 59/59 (copied macOS harness, socket-capable
+  only for tests that need TLS). Exact fixup and affected G1 scope review pending.
+
+- Exact independent P3 `6d60890c`, P4 `4d8423b1` and P1a fixup `8299d678`
+  reviews found no unresolved material runtime finding. Review initially questioned
+  continuing unselected pre-existing ALLOCATED jobs, then reconciled the full agreed
+  accepted-allocation contract and withdrew a proposed additional funding gate.
+  Durable allocations already express accepted initial-funding intent; selection
+  limits new allocations/completeness, while existing jobs retain current-authority
+  funding/recovery. Clarified owning CLI/configuration prose and the test's intent;
+  no redundant per-step financial enforcement added. Exact clarification fixup
+  review pending. Full `managed_config` socket-free target passed 18/18, including
+  actual example policies, opt-out bindings and the default-only assertion fixup.
+- Final selected validation: production `make build`, full `make check-clippy`
+  (production compiler plus all-target regtest-feature Clippy warning gate), full
+  `make check-compat`; then library runtime tests, affected startup/CLI/configuration/
+  treasury-sync/manual-header integration consumers, and full `make check-lifecycle`.
+  Existing default-example evidence carries forward without another managed_config
+  execution unless affected inputs change. Final source-matched complexity and G2
+  combined review remain required before cleanup. No live-funded, Docker-consensus,
+  real-Tor or reproducibility qualification is selected.
+
+- Final warning gate found an eight-argument earliest-wake helper. Moved the
+  opportunity/retry earliest-instant projection onto its existing Opportunities
+  owner and passed that one value to the general wake aggregator. This reduces
+  coupling without another state type, lint exemption, timer or changed due time.
+  Existing wake/retry stability tests exercise the same behavior. P2 fixup exact
+  review and affected checks/production build/final metrics rerun required.
+  Earlier successful managed_config evidence is unaffected; the incomplete warning
+  gate is not counted as a pass.
+
+- Focused wake validation exposed an existing ordering-dependent assertion from
+  baseline commit `d97cf7c1`: an explicit worker may observe a previously allocated
+  job before its newly allocated job because durable IDs do not imply that order.
+  The fixture now accepts those known existing jobs while requiring the explicit
+  job to progress without clock advancement; its final exact allocation count is
+  preserved. No production ordering/policy changed. Baseline-targeted fixup review
+  and focused rerun pending; other nine opportunity tests passed in that run.
+
+- Final exact source reviewed and validated: `629a56423c8559656f5a412d92c63a68a04fc934`
+  (all preceding unsquashed commits/fixups retained). Independent exact reviews of
+  scheduler-projection fixup `418f45fd` and baseline fixture-order fixup `629a5642`
+  found no material findings. The focused opportunity rerun passed 10/10.
+- Production `make build` passed on that frozen source with no warnings; full
+  `make check-clippy` passed its production lib/bin compiler and all-target
+  `zcash-regtest` Clippy warning gate without warnings. The earlier failed gate
+  remains recorded and is superseded only by these successful corrected-source runs.
+- Final complexity artifacts:
+  `target/complexity-runs/20261110T215222Z-56dd99ad`, 504 files, 11,323 callables,
+  no exclusions or source/lock hash mismatches. Independent full JSON/CSV review
+  retained the three owning-function dispositions: cover validation CogC 28,
+  initialization CogC 50/CycC 53, scheduler CogC 71/CycC 78. The scheduler's small
+  increase preserves selected new allocations with complete existing-job ownership;
+  its earliest-wake projection adds no state. No compelling simplification remains.
+- Full `make check-compat` passed: crypto vectors 2, payments 15, SDK compatibility
+  3, MCP/server 11 (31 total), with its fixed Pepper verification also passing.
+- `make test CARGO_ARGS='--lib --test startup --test cli_contracts --test config --test treasury_sync --test headers'`
+  passed: library 1,391 (24 existing optional/helper cases ignored), CLI 26,
+  configuration 16, headers 11, startup 19 (one helper ignored), treasury sync 27
+  (one public-mainnet qualification ignored). No failure; 1,490 parent tests passed.
+  The earlier full socket-free managed_config result, 18/18, remains applicable:
+  its relevant parser/default/example inputs did not change. No repeated matrix run.
+- Full `make check-lifecycle` passed with its fixed `zcash-testutils` selection:
+  67 tests passed, one isolated fatal-owner helper ignored by the parent harness.
+  The complete synthetic SDK reorg test finished successfully; no work deadline,
+  skip or contract relaxation was introduced. This is offline synthetic-chain
+  evidence, not live settlement, Docker consensus, Tor qualification or measured privacy.
+- `make fmt-check`, tracked whitespace, maintained local Markdown file targets,
+  AGENTS owning-guide headings and exact example TOML-value preservation checks
+  passed. The only untracked entry is the original untouched `state`.
+  Clarified wallet rename guidance to update both new policy name references while
+  preserving UUID-bound demand/credit; this prose-only addition changes no runtime
+  or test input. No AGENTS duplication or additional owning-guide link is needed.
+- Compiler/runtime logs are retained under ignored
+  `target/default-bootstrap-wallet-validation/` (`build-final.log`,
+  `check-clippy-final.log`, `check-compat.log`, `runtime-default.log`,
+  `check-lifecycle.log`). Runtime harnesses use copied/ad-hoc-signed macOS binaries.
+  Lib-test linking emitted the existing oversized `__eh_frame` compact-unwind
+  diagnostic; production/compiler/Clippy gates were clean. Ignored helpers and
+  optional/live cases are not counted as passes. Build/executable revision stays
+  `629a5642`; evidence carries forward through prose-only review/cleanup commits
+  without claiming those binaries embed a later Git SHA.
+- P5 final exact evidence/G2 review is requested on this update; P6 begins only
+  after no material finding or compelling simplification remains. No push or merge
+  is authorized. Completed plan deletion will retain all history and private evidence.

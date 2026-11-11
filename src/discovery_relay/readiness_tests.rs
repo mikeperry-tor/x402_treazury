@@ -9,6 +9,224 @@ use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 use std::{sync::atomic::Ordering, time::Duration};
 
+#[tokio::test]
+async fn explicit_deferred_relay_reports_demand_and_retains_its_selected_payer() {
+    use crate::payment::SpendPolicy;
+    use tracing::instrument::WithSubscriber;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::test_capacity::small_reserve("2");
+    let bootstrap = state
+        .ensure_capacity_group("bootstrap", &reserves, None, 0)
+        .unwrap();
+    let destination = state
+        .ensure_capacity_group("destination", &reserves, None, 0)
+        .unwrap();
+    let sibling = state
+        .ensure_capacity_group("sibling", &reserves, None, 0)
+        .unwrap();
+    state
+        .allocate_capacity_kind(&bootstrap, AllocationKind::Small, true)
+        .unwrap();
+    let job = state.funding_jobs().unwrap().remove(0);
+    state
+        .record_credit(&job.wallet_id, "2000000", "fixture", 100)
+        .unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let managed = |pool| {
+        Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool,
+                BaseRpc::new("http://127.0.0.1:1").unwrap(),
+                SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    let client = PaidClient::managed(managed(destination.clone()))
+        .with_bootstrap(managed(bootstrap.clone()));
+    let sibling_client =
+        PaidClient::managed(managed(sibling.clone())).with_bootstrap(managed(bootstrap));
+    let (transport, calls, server) = fixture(envelope(TARGET), false, false).await;
+    let policy = Policy {
+        wallet: Some("destination".into()),
+        relays: BTreeMap::from([(
+            "GET".into(),
+            vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml")],
+        )]),
+        ..Default::default()
+    };
+    let mut relay = build(
+        &policy,
+        &dir.path().join("deployment.toml"),
+        &[("api".into(), "destination".into())].into(),
+        &[("destination".into(), client.clone())].into(),
+    )
+    .await
+    .unwrap()
+    .remove("api")
+    .unwrap();
+    Arc::get_mut(&mut relay).unwrap().sequence = transport.sequence.clone();
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        relay.fetch_when_ready_bounded(
+            TARGET,
+            4096,
+            "max_spec_bytes",
+            None,
+            CatalogReadiness {
+                activation_blocked: Some(tokio::sync::watch::channel(Some(Vec::new())).1),
+                ..Default::default()
+            },
+            None,
+        ),
+    )
+    .await
+    .unwrap()
+    .err()
+    .unwrap();
+    assert!(
+        format!("{error:#}").contains("no endpoint can activate it while this catalog is pending")
+    );
+    assert_eq!(calls.calls.load(Ordering::SeqCst), 0);
+    // Only a changed topology decision can revoke a paused proof. Repeated
+    // publication of the same proof cannot require sibling quiet to settle.
+    for revoke in [false, true] {
+        let (decision, changed) = tokio::sync::watch::channel(Some(vec![relay.clone()]));
+        let readiness = CatalogReadiness {
+            activation_blocked: Some(changed),
+            ..Default::default()
+        };
+        let mut reported = false;
+        let mut checking = Box::pin(relay.report_dependency(&readiness, false, &mut reported));
+        assert!(futures_util::poll!(&mut checking).is_pending());
+        store.call(|_| Ok(())).await.unwrap();
+        let (entered, waiting_for_block) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let holding = tokio::spawn({
+            let store = store.clone();
+            async move {
+                store
+                    .call(move |_| {
+                        entered.send(()).unwrap();
+                        held.recv().unwrap();
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        waiting_for_block.await.unwrap();
+        assert!(futures_util::poll!(&mut checking).is_pending());
+        publish_activation_decision(
+            &decision,
+            if revoke {
+                None
+            } else {
+                Some(vec![relay.clone()])
+            },
+        );
+        release.send(()).unwrap();
+        let result = checking.await;
+        assert_eq!(result.is_ok(), revoke);
+        if let Err(error) = result {
+            assert!(error.is::<crate::catalog::diagnostics::Problem>());
+        }
+        holding.await.unwrap();
+        assert_eq!(calls.calls.load(Ordering::SeqCst), 0);
+    }
+
+    let mut sibling_policy = policy.clone();
+    sibling_policy.wallet = Some("sibling".into());
+    let sibling_relay = Relay::new(
+        &sibling_policy,
+        &dir.path().join("deployment.toml"),
+        sibling_client.clone(),
+    )
+    .await
+    .unwrap();
+    let (_decision, changed) = tokio::sync::watch::channel(Some(vec![sibling_relay]));
+    let readiness = CatalogReadiness {
+        activation_blocked: Some(changed),
+        ..Default::default()
+    };
+    let mut reported = false;
+    let mut checking = Box::pin(relay.report_dependency(&readiness, false, &mut reported));
+    assert!(futures_util::poll!(&mut checking).is_pending());
+    store.call(|_| Ok(())).await.unwrap();
+    // Its status still says waiting, but a trusted sibling call has already
+    // recorded durable demand. This old proof cannot fail the target.
+    sibling_client.capture_effective(true).await.unwrap();
+    checking.await.unwrap();
+    assert_eq!(calls.calls.load(Ordering::SeqCst), 0);
+    drop((_decision, readiness, sibling_client));
+    let waiting = super::tests::dependency_wait_signal(&relay).await;
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let fetch = tokio::spawn({
+        let relay = relay.clone();
+        async move { relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes").await }
+            .with_subscriber(subscriber)
+    });
+    tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+        .await
+        .unwrap();
+    assert!(
+        std::fs::read_to_string(log.path())
+            .unwrap()
+            .contains("explicit relay wallet that needs first-use activation")
+    );
+    assert_eq!(calls.calls.load(Ordering::SeqCst), 0);
+    let pool = destination.clone();
+    store
+        .call(move |s| {
+            assert!(!s.has_bootstrap_demand(&pool)?);
+            assert_eq!(s.funding_jobs()?.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // A separate invocation supplies demand. The original waiter resumes on
+    // ordinary capacity publication without substituting bootstrap authority.
+    client.capture_effective(true).await.unwrap();
+    let recipient = store
+        .call(move |s| {
+            assert!(s.has_bootstrap_demand(&destination)?);
+            let job = s
+                .allocate_capacity_kind(&destination, AllocationKind::Small, true)?
+                .unwrap();
+            let job = s.funding_job(&job)?.unwrap();
+            s.record_credit(&job.wallet_id, "2000000", "fixture", 101)?;
+            Ok(job.recipient.to_ascii_lowercase())
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), fetch)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(calls.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.payers.lock().unwrap().as_slice(), [recipient]);
+    relay.drain().await;
+    drop((relay, client, store));
+    worker.await.unwrap();
+    server.abort();
+}
+
 pub(crate) async fn rpc(timestamp: u64, Json(v): Json<Value>) -> Json<Value> {
     let result = match v["method"].as_str().unwrap() {
         "eth_chainId" => json!("0x2105"),
@@ -36,6 +254,229 @@ pub(crate) async fn rpc(timestamp: u64, Json(v): Json<Value>) -> Json<Value> {
         other => panic!("unexpected RPC {other}"),
     };
     Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
+}
+
+#[tokio::test]
+async fn bootstrap_only_cap_refusal_waits_for_credit_without_publishing_failure() {
+    use crate::payment::SpendPolicy;
+
+    for (destination_cap, deferred, handoff) in [
+        ("0.02", true, true),
+        ("0.006", true, false),
+        ("0.02", false, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = crate::rotation::test_capacity::small_reserve("2");
+        let [bootstrap, destination] = [("bootstrap", "0.005"), ("destination", destination_cap)]
+            .map(|(name, cap)| {
+                let policy = SpendPolicy::dollars(cap).unwrap();
+                let pool = state
+                    .ensure_capacity_group(name, &reserves, policy.max_atomic, 0)
+                    .unwrap();
+                (pool, policy)
+            });
+        let job = state
+            .allocate_capacity_kind(&bootstrap.0, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let bootstrap_job = state.funding_job(&job).unwrap().unwrap();
+        state
+            .record_credit(&bootstrap_job.wallet_id, "1000000", "fixture", 100)
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let managed = |(pool, policy): &(String, SpendPolicy)| {
+            Arc::new(
+                ManagedPool::new(
+                    store.clone(),
+                    pool.clone(),
+                    BaseRpc::new("http://127.0.0.1:1").unwrap(),
+                    policy.clone(),
+                )
+                .unwrap(),
+            )
+        };
+        let (mut relay, calls, server) = fixture(envelope(TARGET), false, false).await;
+        Arc::get_mut(&mut relay).unwrap().client =
+            PaidClient::managed(managed(&destination)).with_bootstrap(managed(&bootstrap));
+        if handoff {
+            // A strict pricing acquisition uses the same scope and URL. Its
+            // refusal remains useful to the deferred catalog aliases below.
+            let error = relay
+                .fetch(TARGET, 4096, "max_spec_bytes")
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(RelayFailure::from_error(&error).kind(), "price_limit");
+        }
+        let waiting = super::tests::dependency_wait_signal(&relay).await;
+        let (status, operator) = tokio::sync::watch::channel(CatalogDependency::default());
+        let fetch = tokio::spawn({
+            let relay = relay.clone();
+            async move {
+                if deferred {
+                    relay
+                        .fetch_when_ready_bounded(
+                            TARGET,
+                            4096,
+                            "max_spec_bytes",
+                            None,
+                            CatalogReadiness {
+                                status: Some(status),
+                                ..Default::default()
+                            },
+                            None,
+                        )
+                        .await
+                } else {
+                    relay.fetch(TARGET, 4096, "max_spec_bytes").await
+                }
+            }
+        });
+        let joined = if handoff {
+            tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+                .await
+                .unwrap();
+            assert!(
+                operator.borrow().operator_required,
+                "the unavailable destination allocation needs operator action"
+            );
+            {
+                let state = relay.state.lock().await;
+                assert_eq!(state.outcomes.len(), 1);
+                assert!(state.outcomes.values().all(|outcome| {
+                    outcome
+                        .as_ref()
+                        .err()
+                        .is_some_and(|failure| failure.bootstrap_cap && !failure.possible)
+                }));
+                assert!(state.stopped.is_empty());
+            }
+            assert_eq!(calls.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(calls.signed.load(Ordering::SeqCst), 0);
+            store
+                .call(move |s| s.low_balance(&bootstrap_job.pool_id, &bootstrap_job.wallet_id))
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+                .await
+                .unwrap();
+            assert_eq!(
+                calls.calls.load(Ordering::SeqCst),
+                1,
+                "an unrelated wallet wake cannot repeat the refused relay POST"
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), waiting.notified())
+                    .await
+                    .is_err()
+            );
+            let alias = tokio::spawn({
+                let relay = relay.clone();
+                async move { relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes").await }
+            });
+            tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+                .await
+                .unwrap();
+            assert_eq!(
+                calls.calls.load(Ordering::SeqCst),
+                1,
+                "catalog aliases share the refusal"
+            );
+            let pool = destination.0.clone();
+            let recipient = store
+                .call(move |s| {
+                    assert!(!s.has_bootstrap_demand(&pool)?);
+                    let job = s
+                        .allocate_capacity_kind(&pool, AllocationKind::Small, true)?
+                        .unwrap();
+                    let job = s.funding_job(&job)?.unwrap();
+                    s.finish_balance(
+                        &pool,
+                        &job.wallet_id,
+                        Some(alloy_primitives::U256::from(1_000_000)),
+                    )?;
+                    Ok(job.recipient.to_ascii_lowercase())
+                })
+                .await
+                .unwrap();
+            Some((alias, recipient))
+        } else {
+            None
+        };
+        let result = tokio::time::timeout(Duration::from_secs(5), fetch)
+            .await
+            .unwrap()
+            .unwrap();
+        if handoff {
+            let response = result.unwrap();
+            let (alias, recipient) = joined.unwrap();
+            let joined = tokio::time::timeout(Duration::from_secs(5), alias)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(Arc::ptr_eq(&response, &joined));
+            assert_eq!(calls.payers.lock().unwrap().as_slice(), [recipient]);
+            assert_eq!(calls.calls.load(Ordering::SeqCst), 3);
+
+            // After permanent handoff, a retired destination cannot supply a
+            // signer and must not hide the need for a new wallet.
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            db.execute(
+                "UPDATE wallets SET role='RETIRED' WHERE pool_id=?1",
+                [&destination.0],
+            )
+            .unwrap();
+            drop(db);
+            let (status, operator) = tokio::sync::watch::channel(CatalogDependency::default());
+            let next = tokio::spawn({
+                let relay = relay.clone();
+                async move {
+                    relay
+                        .fetch_when_ready_bounded(
+                            "https://example.com/another.json",
+                            4096,
+                            "max_spec_bytes",
+                            None,
+                            CatalogReadiness {
+                                status: Some(status),
+                                ..Default::default()
+                            },
+                            None,
+                        )
+                        .await
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+                .await
+                .unwrap();
+            assert!(
+                operator.borrow().operator_required,
+                "retired wallet history cannot clear operator action"
+            );
+            assert_eq!(calls.calls.load(Ordering::SeqCst), 3);
+            next.abort();
+            let _ = next.await;
+        } else {
+            assert_eq!(
+                RelayFailure::from_error(&result.err().unwrap()).kind(),
+                "price_limit"
+            );
+            assert_eq!(calls.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(calls.signed.load(Ordering::SeqCst), 0);
+        }
+        relay.drain().await;
+        drop((relay, store));
+        worker.await.unwrap();
+        server.abort();
+    }
 }
 
 #[tokio::test]
@@ -241,7 +682,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     assert_eq!(f.signed.load(Ordering::SeqCst), 0);
 
     let dependency_wait = super::tests::dependency_wait_signal(&relay).await;
-    let capacity_changes = relay.client.discovery_changes().await.unwrap().unwrap();
+    let capacity_changes = relay.client.discovery_changes().await.unwrap().remove(0);
     let waiting = tokio::spawn({
         let relay = relay.clone();
         async move { relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes").await }
@@ -486,13 +927,27 @@ async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
         let gate = gate.clone();
         waiters.push(tokio::spawn(async move {
             relay
-                .fetch_when_ready_bounded(TARGET, 4096, "max_spec_bytes", Some(gate), None, None)
+                .fetch_when_ready_bounded(
+                    TARGET,
+                    4096,
+                    "max_spec_bytes",
+                    Some(gate),
+                    CatalogReadiness::default(),
+                    None,
+                )
                 .await
         }));
     }
     tokio::time::timeout(
         Duration::from_secs(5),
-        ready.fetch_when_ready_bounded(TARGET, 4096, "max_spec_bytes", Some(gate), None, None),
+        ready.fetch_when_ready_bounded(
+            TARGET,
+            4096,
+            "max_spec_bytes",
+            Some(gate),
+            CatalogReadiness::default(),
+            None,
+        ),
     )
     .await
     .unwrap()
@@ -514,4 +969,190 @@ async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
     worker.await.unwrap();
     empty_task.abort();
     paid_task.abort();
+}
+
+#[tokio::test]
+async fn bootstrap_relay_waiters_handoff_on_first_credit_without_demand_or_duplicate_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::test_capacity::small_reserve("2");
+    let bootstrap = state
+        .ensure_capacity_group(
+            "bootstrap",
+            &reserves,
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0,
+        )
+        .unwrap();
+    let destination = state
+        .ensure_capacity_group(
+            "destination",
+            &reserves,
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0,
+        )
+        .unwrap();
+    state
+        .allocate_capacity_kind(&destination, AllocationKind::Small, true)
+        .unwrap();
+    let job = state.funding_jobs().unwrap().remove(0);
+    let (store, worker) = StoreHandle::spawn(state);
+    let manager_store = store.clone();
+    let manager = move |pool| {
+        Arc::new(
+            ManagedPool::new(
+                manager_store.clone(),
+                pool,
+                BaseRpc::new("http://127.0.0.1:1").unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    let participant = PaidClient::managed(manager(destination.clone()))
+        .with_bootstrap(manager(bootstrap.clone()));
+    let (mut implicit, implicit_calls, implicit_server) =
+        fixture(envelope(TARGET), false, false).await;
+    Arc::get_mut(&mut implicit).unwrap().client = participant.clone();
+    let dependency_wait = super::tests::dependency_wait_signal(&implicit).await;
+    let gate = Arc::new(crate::network::DiscoveryCapacity::new(1));
+    let mut waiting = Vec::new();
+    for _ in 0..2 {
+        let relay = implicit.clone();
+        let gate = gate.clone();
+        waiting.push(tokio::spawn(async move {
+            relay
+                .fetch_when_ready_bounded(
+                    TARGET,
+                    4096,
+                    "max_spec_bytes",
+                    Some(gate),
+                    CatalogReadiness::default(),
+                    None,
+                )
+                .await
+        }));
+        // This existing hook runs after both route notices have been enabled and
+        // the empty bootstrap has returned DependencyWait. No elapsed-time guess.
+        tokio::time::timeout(Duration::from_secs(5), dependency_wait.notified())
+            .await
+            .unwrap();
+    }
+    assert_eq!(implicit_calls.calls.load(Ordering::SeqCst), 0);
+
+    // Exercise explicit-wallet resolution and production relay construction. Only
+    // the transport sequence is replaced with the existing local TLS fixture.
+    let (explicit_fixture, explicit_calls, explicit_server) =
+        fixture(envelope(TARGET), false, false).await;
+    let config: crate::deployment::MetaConfig = serde_json::from_value(json!({
+        "version":1,
+        "wallets":{
+            "destination":{"mode":"zcash_rotation","max_api_payment_usdc":"1"},
+            "operator":{"mode":"static","private_key_env":"UNREAD"}},
+        "sources":{"api":{"spec":"unused.json"}},
+        "servers":{"one":{"listen":"127.0.0.1:0","wallet":"destination","sources":["api"]}}
+    }))
+    .unwrap();
+    let policy = Policy {
+        wallet: Some("operator".into()),
+        relays: BTreeMap::from([(
+            "GET".into(),
+            vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml")],
+        )]),
+        ..Default::default()
+    };
+    let bindings = resolve_wallets(
+        &policy,
+        &config,
+        &crate::rotation::assignment::resolve(&config).unwrap(),
+        ["api".into()],
+    )
+    .unwrap();
+    assert_eq!(bindings["api"], "operator");
+    let clients = BTreeMap::from([
+        ("operator".into(), explicit_fixture.client.clone()),
+        ("destination".into(), participant.clone()),
+    ]);
+    let mut explicit = build(
+        &policy,
+        &dir.path().join("deployment.toml"),
+        &bindings,
+        &clients,
+    )
+    .await
+    .unwrap()
+    .remove("api")
+    .unwrap();
+    Arc::get_mut(&mut explicit).unwrap().sequence = explicit_fixture.sequence.clone();
+    explicit
+        .fetch_when_ready_bounded(
+            TARGET,
+            4096,
+            "max_spec_bytes",
+            Some(gate),
+            CatalogReadiness::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(explicit_calls.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(implicit_calls.calls.load(Ordering::SeqCst), 0);
+    assert!(waiting.iter().all(|waiter| !waiter.is_finished()));
+
+    // One atomic unit permanently hands off; payment amounts remain advisory
+    // selection inputs, so this does not introduce a minimum-credit gate.
+    store
+        .call(move |state| {
+            state.record_funding_balance(
+                &job.id,
+                &job.operation_id,
+                &job.wallet_id,
+                &job.recipient,
+                alloy_primitives::U256::ONE,
+            )
+        })
+        .await
+        .unwrap();
+    for waiter in waiting {
+        tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+    assert_eq!(implicit_calls.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(implicit_calls.signed.load(Ordering::SeqCst), 1);
+    store
+        .call(move |state| {
+            assert!(!state.has_bootstrap_demand(&destination)?);
+            assert!(!state.has_bootstrap_demand(&bootstrap)?);
+            assert_eq!(state.funding_jobs()?.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let journal: (i64, String) = db
+        .query_row(
+            "SELECT COUNT(*),p.name FROM payment_attempts a JOIN pools p ON p.id=a.pool_id GROUP BY p.name",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(journal, (1, "destination".into()));
+    drop(db);
+    implicit.drain().await;
+    explicit.drain().await;
+    drop((implicit, explicit, explicit_fixture, clients, participant));
+    drop(manager);
+    drop(store);
+    worker.await.unwrap();
+    implicit_server.abort();
+    explicit_server.abort();
 }

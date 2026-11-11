@@ -26,20 +26,31 @@ You can also optionally grant your agent a set of tools to discover and add x402
 > calls before rotation. Identifying request contents across these rotations can
 > also link activity.
 
-Each managed wallet group starts with one small Base USDC reserve and an
-optional large reserve, without a separate active allocation. Funded retained wallets remain available for payments.
+Each managed wallet group uses one small Base USDC reserve and an
+optional large reserve, without a separate active allocation. With optional
+bootstrap deferral, participating groups prepare after first API use and initially
+share the configured bootstrap group's payer. Funded retained wallets remain
+available for payments.
 Validated recent price estimates can choose the smallest sufficient wallet before
 the ordinary request. A reserve's first journaled payment makes it active and
 leaves its slot vacant; the previous active becomes retained. Ordinary authorized
 funding fills each vacancy independently of payment and retirement.
 Funding, confirmation and payment uncertainty are persisted across restarts.
 
-A managed group's small slot defaults to a randomized $2-5 nominal range; an
+A managed group's small slot defaults to a randomized $2-3 nominal range; an
 explicit empty large slot opts into $10-25. Set `funding_amount_usdc` for a fixed
 target, or `min_funding_amount_usdc` plus `max_funding_amount_usdc` for a custom
 inclusive range. Bridge-minimum redraws stay within the slot maximum. Actual
 spendable Zcash treasury funds govern enabled funding; the API payment cap is
 separate.
+
+For a small-only group, the first wallet and its first replacement together draw
+$4-6 nominal, averaging approximately $5 before bridge floors, fees and other
+costs. The first wallet becomes ACTIVE on its first journaled payment; its
+replacement becomes READY later. Allow headroom above the average, plus ongoing
+use and any large reserves. This is a capital estimate across two allocations,
+not a requirement to fund both at startup or a promise of $5 remaining spendable.
+See [reserve sizing](docs/configuration.md#reserve-sizing-and-fragmentation).
 
 Payment requests, wallet-specific balance checks and swap jobs use the current
 payer wallet address as the Tor circuit isolation identity. Switching payers
@@ -109,8 +120,8 @@ For treasury initialization over Tor, pass the same option to `wallet init`, or
 initialize using the deployment with the embedded policy.
 
 Send enough ZEC to the shielded receive address printed by initialization to cover
-the $5 upper nominal USDC bound plus source fees and bridge costs. The pool draws a
-randomized $2-5 USDC nominal reserve; NEAR bridge minimums can raise the
+the $3 upper initial nominal USDC bound plus source fees and bridge costs. The pool draws a
+randomized $2-3 USDC nominal reserve; NEAR bridge minimums can raise the
 operation's local floor within that range. Keep additional funds for fees and
 future replacements. Each payment is capped at
 $0.50. Funding starts after the listener binds, so tools remain visible while
@@ -130,8 +141,11 @@ other exclusive wallet administration requires stopping it. See
 ## Comprehensive walkthrough: Zcash and Tor
 
 The [comprehensive deployment](examples/deployments/comprehensive.toml)
-provides four MCP endpoints backed by two rotating wallet pools. Social, company
-and toolbox share a wallet and Tor payer identity; web uses a separate wallet:
+provides four MCP endpoints and two intended wallet groups. All initially use the
+web group's payer and $0.10 per-payment cap. After the company group's first
+positive credit, social, company and toolbox share its separate payer and $0.50
+cap; web keeps its own group. Previously credited company groups route directly
+on restart, and later depletion never returns them to web:
 
 | Research context | Selected APIs | MCP endpoint |
 | --- | --- | --- |
@@ -140,8 +154,8 @@ and toolbox share a wallet and Tor payer identity; web uses a separate wallet:
 | Company | PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants, RelayShield security and phone reputation, NetIntel phone/IP/infrastructure intelligence | `http://127.0.0.1:6339/mcp` |
 | Toolbox | API discovery, direct calls and persistent agent-added tools | `http://127.0.0.1:6340/mcp` |
 
-SocialFetch's overlapping Reddit tools use different wallets on the web and social
-endpoints. Company tools are explicitly selected by name to keep the agent's
+SocialFetch's overlapping Reddit tools use different groups on the web and social
+endpoints after company's first credit. Company tools are explicitly selected by name to keep the agent's
 context focused.
 
 The company endpoint adds 12 selected RelayShield security tools: email breach and
@@ -158,7 +172,8 @@ Seven selected NetIntel tools add phone validation and formatting, IP threat
 reputation and combined reports, geolocation, WHOIS/RDAP registration data,
 cloud-provider detection and website technology fingerprinting. NetIntel phone intelligence complements RelayShield reputation;
 it does not establish scam history or live reachability. Advertised prices for
-these tools are $0.002-$0.20 per call, within the shared company wallet's $0.50 cap.
+these tools are $0.002-$0.20 per call, within company's eventual $0.50 cap; calls
+above web's initial $0.10 cap can be refused while company prepares.
 
 The social endpoint enables `discover_on_demand = true` because of its large
 number of tools. This [on-demand discovery mode](docs/agent-sources.md)
@@ -169,7 +184,7 @@ find the tools without loading every definition into context.
 
 The toolbox endpoint enables
 [Agent API Auto-Discovery and Tool Addition](#agent-api-auto-discovery-and-tool-addition)
-using the company wallet. Added APIs are saved in `state/privacy-sources.sqlite` and
+using the company group (initially routed through web). Added APIs are saved in `state/privacy-sources.sqlite` and
 restored after restart; their tools are available only on the toolbox endpoint.
 
 ### 1. Build x402_treazury and start Tor
@@ -237,8 +252,12 @@ target/release/x402_treazury serve
 ```
 
 `serve` synchronizes the treasury, discovers API catalogs, and funds
-USDC wallets in the background after listeners bind. With no or insufficient
-spendable ZEC, it keeps monitoring and retries funding automatically. You can
+USDC wallets in the background after listeners bind. This example initially
+prepares web only. A validated company/social/toolbox API invocation records
+company demand; independent randomized 60–240-second opportunities prepare it
+later without making API calls wait for swaps. Free responses and response-cache
+hits activate demand too; discovery, registration and metadata do not. With
+insufficient spendable ZEC, it keeps monitoring and retries funding automatically. You can
 deposit ZEC before starting it or at any time afterward.
 
 > **NOTE: Single Instance Only**
@@ -246,9 +265,16 @@ deposit ZEC before starting it or at any time afterward.
 > Run only one `serve` process per treasury directory. `wallet status` is safe to
 > run alongside it. See the [wallet reference](docs/wallet-cli.md) for other commands.
 
-API payments are capped at
-**0.10 USDC for web** and **0.50 USDC for company, social and toolbox**,
-which share the company wallet. These are per-payment caps, not total budgets.
+API payments initially use **web's 0.10 USDC cap**, including company, social
+and toolbox. After company's first positive credit, those three contexts use
+**company's 0.50 USDC cap**. A cap refusal still records first-use demand; earlier
+captured calls finish under their original authority. These are per-payment caps,
+not total budgets.
+
+If the treasury is already funded, optionally run `wallet bootstrap` before
+`serve`. With this example it waits only for web's enabled reserve claims, without
+catalogs or listeners. Stop serving before running this exclusive command; it does
+not prepare company or activate participant demand.
 
 ### 4. Fund the treasury and connect
 
@@ -260,13 +286,39 @@ export X402_TREAZURY_CONFIG="examples/deployments/comprehensive.local.toml"
 target/release/x402_treazury wallet status
 ```
 
-Send ZEC to that **shielded receive address**. The example's two wallet groups each draw a $2-$5 nominal USDC reserve: **$4-$10 combined nominal bounds, including any accepted bridge-minimum redraw within each slot maximum**. Fees and future wallet replacements are additional.
+Send ZEC to that **shielded receive address**. Initial setup funds one web wallet
+with a **$2–3 nominal USDC allocation**. Cover the $3 upper bound plus source fees
+and bridge costs, with additional capital for company preparation, relay payments
+and future replacements. Both groups' eventual configured initial allocations
+sum to $4–6 nominal; that is also the initial range with bootstrap deferral disabled.
+These amounts exclude fees and are neither guaranteed credit nor lifetime costs.
 
-> **NOTE: All declared managed wallets are auto-funded**
->
-> Removing an MCP server definition entry does not remove its wallet pool's funding setup. To reduce
-> initial funding, remove an unused `[wallets.NAME]` definition and remove or
-> rebind servers and sources that reference it before starting `serve`.
+The approximately $5 per-group estimate for the first small wallet and its later
+replacement covers two allocations ($4–6 before bridge floors and fees), not this
+one-wallet setup. The first payment makes the READY wallet ACTIVE and opens its
+replacement vacancy. Allow headroom above the average: two draws can total $6,
+and bridge floors can bias nominal amounts upward.
+
+The example enables this policy:
+
+```toml
+[wallet_bootstrap]
+bootstrap_group = "web"
+deferred_groups = ["company"]
+```
+
+Comment out the whole table to fund both declared groups normally and use
+separate payers from the beginning. Other nonparticipating managed groups retain
+ordinary funding when the table is present. Existing funds and historical links
+are not moved or erased. Removing a listener alone does not disable its declared
+managed group.
+
+Separate initial addresses avoid direct payer reuse, but closely spaced swaps
+still provide a funding-time correlation signal. First-use activation and
+randomized later opportunities can weaken that signal. Bootstrap payments use a
+visibly common payer; timing, amounts, providers, request content and settlement
+can still correlate activity. Delayed funding does not erase earlier links or
+provide an unlinkability guarantee.
 
 While enabled reserve claims need funds, `serve` discovers later ZEC deposits
 and confirmations at its shared observation cadence, then funds the managed USDC
@@ -286,7 +338,9 @@ for the discovery scopes and unavailable-treasury exception.
 The comprehensive example uses a [paid discovery relay](docs/configuration.md#relay-fallback)
 over Tor when catalog requests are blocked, rate limited or time out.
 Relay fees depend on the configured provider and request; relay-dependent catalogs
-appear when their payer wallet becomes usable.
+appear when their effective payer becomes usable. Implicit company discovery can
+use web inventory without activating company funding; an explicit relay-wallet
+override keeps its selected group.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
@@ -301,9 +355,10 @@ To stop, press Ctrl-C once and allow the announced transaction-safety drain to f
 
 ## Using Expensive APIs
 
-The comprehensive example caps each web payment at $0.10 and each payment from the
-shared company/social/toolbox wallet at $0.50. The selected RelayShield tools
-advertise $0.05-$0.40 per call, within that shared cap. Larger company/grant
+The comprehensive example initially uses web's $0.10 payment cap everywhere.
+Company/social/toolbox calls switch to company's $0.50 cap after its first credit.
+The selected RelayShield tools advertise $0.05-$0.40 per call, so some can be
+refused during preparation even though they fit the later company cap. Larger company/grant
 queries and result batches can still exceed it. Increase `max_api_payment_usdc`
 on the relevant wallet group to authorize larger individual payments; live
 challenges determine the actual amount.
@@ -359,7 +414,7 @@ Each generated group has its own wallets and payment identity; using the same
 template does not make the groups share funds or addresses.
 
 For example, this `research` template gives each listener its own group with the
-default $2-5 small and $10-25 large nominal ranges. It permits payments up to
+default $2-3 small and $10-25 large nominal ranges. It permits payments up to
 $2.50, following the 4x large-wallet sizing guidance above:
 
 ```toml
@@ -369,7 +424,7 @@ max_api_payment_usdc = "2.50"
 max_retirement_remainder_usdc = "0.001"
 
 [wallet_templates.research.reserves.small]
-# Default randomized nominal funding: $2-5.
+# Default randomized nominal funding: $2-3.
 
 [wallet_templates.research.reserves.large]
 # Default randomized nominal funding: $10-25.
@@ -387,8 +442,8 @@ The retirement tolerance defaults to $0.001 independently per group; explicit
 `"0"` requires exact zero. Retired funds remain owned at their addresses. Positive
 tolerance has no cumulative stranded-funds cap.
 
-Each generated group in this example has a $12-$30 nominal USDC inventory range, so
-three automatically assigned listeners would have $36-$90 in combined nominal
+Each generated group in this example has a $12-$28 nominal USDC inventory range, so
+three automatically assigned listeners would have $36-$84 in combined nominal
 bounds. `config show` displays the resolved bindings and combined initial-inventory
 minimum and maximum before allocating anything. These bounds include any accepted
 bridge-minimum redraw within each slot maximum; fees and later replacements are

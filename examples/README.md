@@ -16,22 +16,61 @@ The [README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-m
 building, treasury setup and serving.
 
 [deployments/comprehensive.toml](deployments/comprehensive.toml) combines curated
-research sources, four listeners, two named pools, paid discovery relay and a
-persistent endpoint for agent-added APIs. Its relationship map explains sharing.
-It retains the `state/privacy` treasury, registry and operational identities of
-the original privacy template; renaming the template does not migrate state.
+research sources, four listeners, two intended groups, paid discovery relay and a
+persistent endpoint for agent-added APIs. Web supplies the initial common payer
+and $0.10 payment cap. First company/social/toolbox API use activates later company
+preparation; its first positive credit switches those contexts permanently to
+company's payer and $0.50 cap. A cap refusal still records demand. It retains the
+`state/privacy` treasury, registry and operational identities; renaming the example
+does not migrate state.
 
-[deployments/research_desk.toml](deployments/research_desk.toml) distributes
-its research sources across eleven task-oriented endpoints using four topical
-wallet profiles: web for web and science; social for health and social; financials for business, finance,
-property and security;
-and global for world, travel and the toolbox. Ordered source `send_tools` rules group
-tool families, exclude editorial choices and express sharing with destination
-arrays. Each source has one final catch-all that assigns or excludes unmatched
-tools; listeners retain endpoint properties,
-instructions, capabilities and wallet references. See
-[source tool distribution](../docs/configuration.md#source-tool-distribution) for
-matching, potential bindings and `config check --explain-routing` inspection.
+Initial setup is web's one default $2–3 nominal small allocation. Cover the $3
+upper bound plus source fees and bridge costs, and keep capital for company
+preparation, relay payments and ongoing replacements. Both groups' eventual
+initial allocations total $4–6 nominal. Preparing a group's first small wallet and
+its later replacement instead spans two allocations: $4–6 nominal, averaging
+approximately $5 before bridge-floor adjustments and fees. The first payment
+makes READY become ACTIVE and opens the replacement vacancy. Allow randomization
+headroom to $6; bridge floors can bias draws upward, so $5 is neither an all-in
+cost nor a guaranteed balance. A nominal bridge minimum above the $3 ceiling can
+refuse a route rather than silently increasing the bound.
+
+[deployments/research_desk.toml](deployments/research_desk.toml) distributes sources
+across twelve task-oriented endpoints with four intended groups: general for
+web, science, shopping, world and the toolbox; personal for social, property and
+travel; health for care research; financial for business, finance and security.
+General supplies the initial common payer and $1 cap. First API use activates each
+participating group independently; after that group's first credit it uses its own
+payer permanently. Previously credited groups route directly on restart; depletion
+never returns them to general. Health's cap therefore changes from general's $1 to health's $0.50.
+Initial general setup is $2–3 nominal, while the eventual four-group initial range
+is $8–12, before fees and later replacements.
+
+Both examples use `[wallet_bootstrap]` with explicit `bootstrap_group` and
+`deferred_groups`. New participant allocations wait for first use and randomized
+60–240-second opportunities; API calls never wait for swaps. Implicit paid
+catalog/help discovery can use existing bootstrap inventory without activating
+a group; explicit relay wallet choices remain authoritative. Run `wallet init`
+for treasury setup, fund the shielded receive address, and optionally run
+`wallet bootstrap` before `serve` to prepare only the bootstrap group's enabled
+reserves without catalogs/listeners. `serve` binds listeners before background
+funding. Exclusive wallet commands require stopping serving; see the
+[wallet reference](../docs/wallet-cli.md).
+
+Comment out the entire bootstrap table for ordinary funding and separate groups
+from the beginning. Existing funds and earlier links remain in place. Separate
+initial addresses avoid direct payer reuse, but closely spaced swaps reveal a
+funding-time correlation signal. First-use activation and randomized later
+opportunities can weaken that signal. Shared bootstrap payments have a visibly
+common payer, and timing, amounts, providers, content and settlement can still
+correlate activity. Delayed funding cannot erase prior links or guarantee
+unlinkability.
+
+Ordered source `send_tools` rules group tool families, exclude editorial choices
+and express sharing with destination arrays. Each source has one final catch-all
+that assigns or excludes unmatched tools; endpoint capability and wallet bindings
+remain intact. See [source tool distribution](../docs/configuration.md#source-tool-distribution)
+for matching and `config check --explain-routing` inspection.
 
 Exa mode choice remains advisory in the managed starter and research desk. Lite
 is $0.004 for lower-cost indexed search with restricted inputs and no live fetching;

@@ -297,15 +297,15 @@ impl Store {
         Ok(default_identity(&self.db, pool)?.is_some())
     }
 
-    /// Diagnostic fact only: no wallet exists that observation could restore.
+    /// Diagnostic fact only: no nonretired wallet exists that observation could restore.
     /// A false identity lookup alone cannot establish this fact.
     pub(crate) fn payment_identity_requires_creation(&self, pool: &str) -> Result<bool> {
-        let (pools, wallets): (i64, i64) = self.db.query_row(
-            "SELECT (SELECT count(*) FROM pools WHERE id=?1), (SELECT count(*) FROM wallets WHERE pool_id=?1)",
+        let (exists, restorable): (bool, bool) = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pools WHERE id=?1), EXISTS(SELECT 1 FROM wallets WHERE pool_id=?1 AND role!='RETIRED')",
             [pool], |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        ensure!(pools == 1, "missing capacity group");
-        Ok(wallets == 0)
+        ensure!(exists, "missing capacity group");
+        Ok(!restorable)
     }
 
     /// Initialize authority explicitly; migration never derives a payment cap

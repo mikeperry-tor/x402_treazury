@@ -24,12 +24,16 @@ pub(super) struct Runtime {
     startup_ready: Option<tokio::sync::oneshot::Sender<readiness::FundingPools>>,
 }
 enum Event {
-    OperatorStatus(String, Option<bool>, tokio::sync::watch::Receiver<bool>),
+    Dependency(
+        String,
+        Option<crate::discovery_relay::CatalogDependency>,
+        tokio::sync::watch::Receiver<crate::discovery_relay::CatalogDependency>,
+    ),
     Catalog(String, Result<Box<Source>>),
 }
 fn status_change(
     id: String,
-    mut receiver: tokio::sync::watch::Receiver<bool>,
+    mut receiver: tokio::sync::watch::Receiver<crate::discovery_relay::CatalogDependency>,
 ) -> futures_util::future::BoxFuture<'static, Event> {
     async move {
         let value = receiver
@@ -37,11 +41,133 @@ fn status_change(
             .await
             .ok()
             .map(|()| *receiver.borrow_and_update());
-        Event::OperatorStatus(id, value, receiver)
+        Event::Dependency(id, value, receiver)
     }
     .boxed()
 }
+
+fn can_activate_relay_wallet(
+    deployment: &Deployment,
+    blocked: &BTreeSet<String>,
+    wallet: Option<&str>,
+) -> bool {
+    deployment.listeners.iter().any(|(name, listener)| {
+        if listener.wait_for_catalogs
+            && (listener.sources.iter().any(|id| blocked.contains(id))
+                || matches!(deployment.endpoint_readiness(name), Some(Err(_))))
+        {
+            return false;
+        }
+        let Some(wallet) = wallet else { return true };
+        (listener.wallet.as_deref() == Some(wallet)
+            && crate::discovery::policy::EndpointPolicy::from(listener).any())
+            || deployment.wallet_resolution.bindings[name]
+                .iter()
+                .any(|(id, binding)| {
+                    !blocked.contains(id)
+                        && binding.wallet == wallet
+                        && (deployment.pending_sources.contains_key(id)
+                            || deployment.selected[name]
+                                .iter()
+                                .any(|(source, tool)| source == id && tool.help_url.is_none()))
+                })
+    })
+}
+
+// A pending origin or active acquisition may still publish usable tools. Only
+// proven first-use dependencies participate in this temporary closure.
+fn blocked_activations(deployment: &Deployment, mut blocked: BTreeSet<String>) -> BTreeSet<String> {
+    loop {
+        let remaining: BTreeSet<_> = blocked
+            .iter()
+            .filter(|id| {
+                let wallet = deployment.pending_sources[*id]
+                    .config
+                    .relay_fallback
+                    .as_ref()
+                    .and_then(|relay| relay.configured_wallet());
+                !can_activate_relay_wallet(deployment, &blocked, wallet)
+            })
+            .cloned()
+            .collect();
+        if remaining.len() == blocked.len() {
+            return remaining;
+        }
+        blocked = remaining;
+    }
+}
+
 impl Runtime {
+    fn update_activation_decisions(
+        &self,
+        waiting: &BTreeSet<String>,
+        decisions: &BTreeMap<
+            String,
+            tokio::sync::watch::Sender<crate::discovery_relay::ActivationDecision>,
+        >,
+    ) {
+        let blocked = blocked_activations(&self.deployment, waiting.clone());
+        // Omission can release a listener and its activation routes. Wait for
+        // that publication before considering another terminal decision.
+        let selected = blocked
+            .iter()
+            .min_by_key(|id| !self.deployment.config.sources[*id].optional_startup);
+        let mut proof_sources = blocked.clone();
+        let wallets: BTreeSet<_> = blocked
+            .iter()
+            .filter_map(|id| {
+                self.deployment.pending_sources[id]
+                    .config
+                    .relay_fallback
+                    .as_ref()
+            })
+            .map(|relay| relay.configured_wallet())
+            .collect();
+        for wallet in wallets {
+            let candidate = blocked_activations(
+                &self.deployment,
+                proof_sources
+                    .iter()
+                    .filter(|id| {
+                        self.deployment.pending_sources[*id]
+                            .config
+                            .relay_fallback
+                            .as_ref()
+                            .is_none_or(|relay| relay.configured_wallet() != wallet)
+                    })
+                    .cloned()
+                    .collect(),
+            );
+            if selected.is_some_and(|id| candidate.contains(id)) {
+                proof_sources = candidate;
+            }
+        }
+        // Omit unrelated groups from the proof: their Store availability cannot
+        // decide whether this source has an activation route.
+        let mut groups = BTreeMap::new();
+        for id in &proof_sources {
+            if let Some(relay) = &self.deployment.pending_sources[id].config.relay_fallback {
+                groups
+                    .entry(relay.configured_wallet())
+                    .or_insert(relay.clone());
+            }
+        }
+        if let Some(relay) = selected.and_then(|id| {
+            self.deployment.pending_sources[id]
+                .config
+                .relay_fallback
+                .as_ref()
+        }) {
+            groups.remove(&relay.configured_wallet());
+        }
+        let proof: Vec<_> = groups.into_values().collect();
+        for (id, decision) in decisions {
+            crate::discovery_relay::publish_activation_decision(
+                decision,
+                (selected == Some(id)).then(|| proof.clone()),
+            );
+        }
+    }
     pub fn new(
         deployment: Deployment,
         wallets: BTreeMap<String, PaidClient>,
@@ -225,21 +351,26 @@ impl Runtime {
         let failure = std::future::pending::<()>();
         tokio::pin!(failure);
         let mut work = FuturesUnordered::new();
+        let mut waiting = BTreeSet::new();
+        let mut decisions = BTreeMap::new();
         let gate = self.deployment.catalog_capacity.clone();
         for (id, pending) in &self.deployment.pending_sources {
             let id = id.clone();
             let pending = pending.clone();
             let gate = gate.clone();
-            let can_allocate = self.can_allocate;
-            let (status, changed) = tokio::sync::watch::channel(false);
+            let (status, changed) = tokio::sync::watch::channel(Default::default());
+            let (decision, activation_blocked) = tokio::sync::watch::channel(None);
+            decisions.insert(id.clone(), decision);
+            let readiness = crate::discovery_relay::CatalogReadiness {
+                status: Some(status),
+                can_allocate: self.can_allocate,
+                activation_blocked: Some(activation_blocked),
+            };
             let status_id = id.clone();
             work.push(status_change(status_id, changed));
             work.push(
                 async move {
-                    let result = pending
-                        .resume(&id, gate, can_allocate, status)
-                        .await
-                        .map(Box::new);
+                    let result = pending.resume(&id, gate, readiness).await.map(Box::new);
                     Event::Catalog(id, result)
                 }
                 .boxed(),
@@ -255,18 +386,25 @@ impl Runtime {
             let Some(event) = event else { continue };
             let previous_selection_errors = self.deployment.selection_errors.clone();
             match event {
-                Event::OperatorStatus(id, required, receiver) => {
-                    let Some(required) = required else {
+                Event::Dependency(id, dependency, receiver) => {
+                    let Some(dependency) = dependency else {
                         continue;
                     };
                     let Some(pending) = self.deployment.pending_sources.get_mut(&id) else {
                         continue;
                     };
-                    pending.operator_required = required;
+                    pending.operator_required = dependency.operator_required;
+                    if dependency.needs_demand {
+                        waiting.insert(id.clone());
+                    } else {
+                        waiting.remove(&id);
+                    }
                     work.push(status_change(id, receiver));
                 }
                 Event::Catalog(id, result) => {
                     self.deployment.pending_sources.remove(&id);
+                    waiting.remove(&id);
+                    decisions.remove(&id);
                     let result = result.and_then(|source| {
                         self.accept_source(&id, *source)
                             .context(crate::catalog::LoadStage::Selection)
@@ -319,6 +457,7 @@ impl Runtime {
             }
             self.report_selection_failures(&previous_selection_errors);
             self.signal_readiness();
+            self.update_activation_decisions(&waiting, &decisions);
         }
         drop(work);
         self.startup_ready.take();
@@ -338,6 +477,103 @@ mod tests {
     use axum::{Router, routing::get};
     use serde_json::json;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn pending_catalog_counts_only_independent_routes_for_its_wallet() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"paths":{"/read":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(
+            &path,
+            r#"
+version=1
+[wallets.needed]
+mode='static'
+private_key_env='NEEDED'
+[wallets.other]
+mode='static'
+private_key_env='OTHER'
+[sources.pending]
+spec='spec.json'
+base_url='https://api.example.com'
+[sources.local]
+spec='spec.json'
+base_url='https://api.example.com'
+[servers.waiting]
+listen='127.0.0.1:0'
+bearer_token_env='TOKEN'
+wallet='needed'
+sources=['pending']
+[servers.independent]
+listen='127.0.0.1:0'
+bearer_token_env='TOKEN'
+wallet='other'
+sources=['local']
+"#,
+        )
+        .unwrap();
+        let mut deployment = Deployment::load(&path).await.unwrap();
+        let can_activate = |deployment: &Deployment| {
+            can_activate_relay_wallet(
+                deployment,
+                &BTreeSet::from(["pending".into()]),
+                Some("needed"),
+            )
+        };
+        assert!(
+            !can_activate(&deployment),
+            "the unrelated endpoint uses another wallet"
+        );
+        deployment
+            .listeners
+            .get_mut("waiting")
+            .unwrap()
+            .wait_for_catalogs = false;
+        assert!(
+            !can_activate(&deployment),
+            "the pending catalog has no tools to activate its own wallet"
+        );
+
+        let independent = deployment.listeners.get_mut("independent").unwrap();
+        independent.wallet = Some("needed".into());
+        independent.raw_url_calls = true;
+        assert!(
+            can_activate(&deployment),
+            "a separate raw API route can activate demand"
+        );
+        deployment
+            .listeners
+            .get_mut("independent")
+            .unwrap()
+            .raw_url_calls = false;
+        deployment
+            .wallet_resolution
+            .bindings
+            .get_mut("independent")
+            .unwrap()
+            .get_mut("local")
+            .unwrap()
+            .wallet = "needed".into();
+        assert!(
+            can_activate(&deployment),
+            "another source using the needed wallet can activate demand"
+        );
+        let selected = deployment.selected.get_mut("independent").unwrap();
+        selected[0].1.help_url = Some("https://api.example.com/help".into());
+        assert!(
+            !can_activate(&deployment),
+            "metadata calls cannot activate demand"
+        );
+        deployment.selected.get_mut("independent").unwrap().clear();
+        assert!(
+            !can_activate(&deployment),
+            "an excluded binding supplies no callable API"
+        );
+    }
 
     #[tokio::test]
     async fn deferred_unsupported_contract_publishes_issues_before_endpoint_failure() {
@@ -752,6 +988,7 @@ discover_on_demand=true
         let envelope = json!({"url":target,"method":"GET","statusCode":200,"headers":{},"body":r#"{"operations":[{"method":"GET","path":"/read"}]}"#,"redirectChain":[],"error":null});
         let (mut relay, fixture, relay_task) =
             crate::discovery_relay::tests::fixture(envelope, false, stall).await;
+        crate::discovery_relay::tests::set_wallet(&mut relay, "selected");
         if let Some(payer) = payer {
             crate::discovery_relay::tests::set_client(&mut relay, payer);
         }
@@ -1125,6 +1362,335 @@ wait_for_catalogs=false
             .unwrap()
             .unwrap();
         api.abort();
+    }
+
+    #[tokio::test]
+    async fn pending_activation_routes_follow_independent_catalog_outcomes() {
+        if public_target_fixture("pending_activation_routes_follow_independent_catalog_outcomes")
+            .await
+        {
+            return;
+        }
+        let (dir, mut running, _catalog, _fixture, relay, api) = prepared(false, false, None).await;
+        let mut runtime = running.deferred.take().unwrap();
+        let deployment = &mut runtime.deployment;
+        let provider = &mut deployment.config.sources.get_mut("b").unwrap().provider;
+        let spec = provider["spec"].as_str().unwrap().to_owned();
+        provider.insert(
+            "spec".into(),
+            toml::Value::String(format!("{spec}?independent")),
+        );
+        provider.insert("prefix".into(), toml::Value::String("second".into()));
+        let relays = deployment
+            .pending_sources
+            .iter()
+            .map(|(id, pending)| (id.clone(), pending.config.relay_fallback.clone().unwrap()))
+            .collect();
+        let (sources, unavailable, pending) = startup::load(
+            &deployment.config,
+            &deployment.wallet_resolution.source_bindings,
+            &dir.path().join("deployment.toml"),
+            startup::CatalogPurpose::Serving,
+            relays,
+            true,
+            false,
+            deployment.catalog_capacity.clone(),
+        )
+        .await
+        .unwrap();
+        deployment.sources = sources;
+        deployment.unavailable_sources = unavailable;
+        deployment.pending_sources = pending;
+        assert!(!deployment.pending_sources["a"].shares_download(&deployment.pending_sources["b"]));
+        let listener = deployment.listeners.get_mut("one").unwrap();
+        listener.wait_for_catalogs = false;
+        listener.sources = vec!["a".into(), "b".into()];
+        deployment.refresh_selection(true).unwrap();
+        let waiting = BTreeSet::from(["a".into()]);
+        assert!(
+            blocked_activations(deployment, waiting.clone()).is_empty(),
+            "an independent unreported origin can still publish an activation route"
+        );
+        let both = BTreeSet::from(["a".into(), "b".into()]);
+        assert_eq!(
+            blocked_activations(deployment, both.clone()),
+            both,
+            "distinct catalogs waiting on demand cannot activate one another"
+        );
+        let policy = crate::discovery_relay::Policy {
+            wallet: Some("other".into()),
+            relays: BTreeMap::from([(
+                "GET".into(),
+                vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml")],
+            )]),
+            ..Default::default()
+        };
+        let second = crate::discovery_relay::Relay::new(
+            &policy,
+            &dir.path().join("deployment.toml"),
+            PaidClient::unsigned(),
+        )
+        .await
+        .unwrap();
+        deployment
+            .pending_sources
+            .get_mut("b")
+            .unwrap()
+            .config
+            .relay_fallback = Some(second);
+        let mut independent = deployment.listeners["one"].clone();
+        independent.sources.clear();
+        independent.wallet = Some("other".into());
+        independent.raw_url_calls = true;
+        deployment
+            .listeners
+            .insert("independent".into(), independent);
+        deployment
+            .wallet_resolution
+            .bindings
+            .insert("independent".into(), BTreeMap::new());
+        assert!(
+            blocked_activations(deployment, both.clone()).is_empty(),
+            "an independent second-group call can unlock the transitive first-group route"
+        );
+        deployment.listeners.remove("independent");
+        deployment.wallet_resolution.bindings.remove("independent");
+        assert_eq!(blocked_activations(deployment, both.clone()), both);
+        deployment
+            .listeners
+            .get_mut("one")
+            .unwrap()
+            .wait_for_catalogs = true;
+        let (a_decision, a) = tokio::sync::watch::channel(None);
+        let (b_decision, b_status) = tokio::sync::watch::channel(None);
+        runtime.update_activation_decisions(
+            &both,
+            &BTreeMap::from([("a".into(), a_decision), ("b".into(), b_decision)]),
+        );
+        assert!(
+            a.borrow().as_ref().unwrap().is_empty(),
+            "a direct cycle cannot require another group's Store projection"
+        );
+        assert!(
+            b_status.borrow().is_none(),
+            "settle one blocker before deciding another"
+        );
+        let deployment = &mut runtime.deployment;
+        deployment
+            .listeners
+            .get_mut("one")
+            .unwrap()
+            .wait_for_catalogs = false;
+        let b = deployment.pending_sources.remove("b").unwrap();
+        deployment.refresh_selection(true).unwrap();
+        assert_eq!(
+            blocked_activations(deployment, waiting.clone()),
+            waiting,
+            "failed independent origin cannot leave a frozen activation route"
+        );
+        let source = Source::from_document(
+            "b",
+            b.config,
+            Arc::new(json!({"operations":[{"method":"GET","path":"/read"}]})),
+        )
+        .unwrap();
+        runtime.accept_source("b", source).unwrap();
+        assert!(
+            blocked_activations(&runtime.deployment, waiting.clone()).is_empty(),
+            "a published API can activate demand"
+        );
+        runtime.deployment.selected.get_mut("one").unwrap()[0]
+            .1
+            .help_url = Some("https://api.example.com/help".into());
+        assert_eq!(
+            blocked_activations(&runtime.deployment, waiting.clone()),
+            waiting,
+            "a completed help-only source cannot activate demand"
+        );
+        runtime.deployment.selected.get_mut("one").unwrap().clear();
+        assert_eq!(
+            blocked_activations(&runtime.deployment, waiting.clone()),
+            waiting,
+            "completed filtered-out tools cannot activate demand"
+        );
+        drop((runtime, running));
+        relay.abort();
+        api.abort();
+    }
+
+    #[tokio::test]
+    async fn relay_catalog_settles_when_every_endpoint_blocks_activation() {
+        if public_target_fixture("relay_catalog_settles_when_every_endpoint_blocks_activation")
+            .await
+        {
+            return;
+        }
+        use crate::{
+            payment::SpendPolicy,
+            rotation::{
+                base::BaseRpc,
+                manager::ManagedPool,
+                store::{AllocationKind, Store, StoreHandle},
+            },
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = crate::rotation::test_capacity::small_reserve("2");
+        let bootstrap_cap = SpendPolicy::dollars("0.005").unwrap();
+        let destination_cap = SpendPolicy::dollars("0.02").unwrap();
+        let bootstrap = state
+            .ensure_capacity_group("bootstrap", &reserves, bootstrap_cap.max_atomic, 0)
+            .unwrap();
+        let destination = state
+            .ensure_capacity_group("destination", &reserves, destination_cap.max_atomic, 0)
+            .unwrap();
+        state
+            .allocate_capacity_kind(&bootstrap, AllocationKind::Small, true)
+            .unwrap();
+        let job = state.funding_jobs().unwrap().remove(0);
+        state
+            .record_credit(&job.wallet_id, "1000000", "fixture", 100)
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let managed = |pool, policy| {
+            Arc::new(
+                ManagedPool::new(
+                    store.clone(),
+                    pool,
+                    BaseRpc::new("http://127.0.0.1:1").unwrap(),
+                    policy,
+                )
+                .unwrap(),
+            )
+        };
+        let payer = PaidClient::managed(managed(destination.clone(), destination_cap))
+            .with_bootstrap(managed(bootstrap, bootstrap_cap));
+        for mode in ["required", "optional", "mixed"] {
+            let optional = mode == "optional";
+            let (_dir, mut running, catalog, fixture, relay, api) =
+                prepared(false, false, Some(payer.clone())).await;
+            let readiness = running.catalog_readiness.remove("one").unwrap();
+            let mut runtime = running.deferred.take().unwrap();
+            assert!(
+                runtime.deployment.pending_sources["a"]
+                    .shares_download(&runtime.deployment.pending_sources["b"])
+            );
+            for source in ["a", "b"] {
+                runtime
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut(source)
+                    .unwrap()
+                    .optional_startup = optional;
+            }
+            let mut required_readiness = None;
+            if mode == "mixed" {
+                runtime
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut("b")
+                    .unwrap()
+                    .optional_startup = true;
+                let mut listener = runtime.deployment.listeners["one"].clone();
+                listener.sources = vec!["a".into()];
+                runtime.deployment.listeners.insert("two".into(), listener);
+                runtime.deployment.listeners.get_mut("one").unwrap().sources =
+                    vec!["healthy".into(), "b".into()];
+                runtime.deployment.wallet_resolution.bindings.insert(
+                    "two".into(),
+                    runtime.deployment.wallet_resolution.bindings["one"].clone(),
+                );
+                runtime.deployment.refresh_selection(true).unwrap();
+                let (send, receive) = tokio::sync::oneshot::channel();
+                runtime.readiness.insert("two".into(), send);
+                required_readiness = Some(receive);
+                let mut snapshot = (*catalog.read()).clone();
+                snapshot.views.insert("two".into(), Vec::new());
+                snapshot.instructions.insert("two".into(), None);
+                catalog.publish(snapshot);
+            }
+            let listener = runtime.deployment.listeners.get_mut("one").unwrap();
+            let original_sources = listener.sources.clone();
+            listener.sources.retain(|source| source != "a");
+            assert!(
+                !can_activate_relay_wallet(
+                    &runtime.deployment,
+                    &BTreeSet::from(["a".into(), "b".into()]),
+                    Some("selected"),
+                ),
+                "waiting for a shared alias also blocks the listener's otherwise callable tools"
+            );
+            runtime.deployment.listeners.get_mut("one").unwrap().sources = original_sources;
+            let stop = CancellationToken::new();
+            let deferred = tokio::spawn(runtime.run(stop.clone()));
+            let result = tokio::time::timeout(Duration::from_secs(5), readiness)
+                .await
+                .expect("a catalog cannot wait for its own listener")
+                .unwrap();
+            assert_eq!(result.is_ok(), mode != "required", "{mode}: {result:?}");
+            if mode != "required" {
+                let snapshot = catalog.read();
+                assert_eq!(snapshot.views["one"].len(), 1);
+                assert!(snapshot.views["one"][0].tool.name.starts_with("healthy_"));
+                let instructions = snapshot.instructions["one"].as_deref().unwrap();
+                if optional {
+                    assert!(instructions.contains("Source a: UNAVAILABLE"));
+                }
+                assert!(instructions.contains("Source b: UNAVAILABLE"));
+            }
+            assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
+            let untouched_destination = destination.clone();
+            store
+                .call(move |s| {
+                    assert!(!s.has_bootstrap_demand(&untouched_destination)?);
+                    assert_eq!(s.funding_jobs()?.len(), 1);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            if let Some(mut required) = required_readiness {
+                assert!(matches!(
+                    required.try_recv(),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+                ));
+                let destination = destination.clone();
+                store
+                    .call(move |s| {
+                        s.activate_bootstrap_demand(&destination)?;
+                        s.allocate_capacity_kind(&destination, AllocationKind::Small, true)?;
+                        let job = s
+                            .funding_jobs()?
+                            .into_iter()
+                            .find(|job| job.pool_id == destination)
+                            .unwrap();
+                        s.record_credit(&job.wallet_id, "1000000", "fixture", 100)?;
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                tokio::time::timeout(Duration::from_secs(5), required)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+            }
+            stop.cancel();
+            drop(deferred.await.unwrap());
+            relay.abort();
+            api.abort();
+        }
+        drop((payer, store));
+        worker.await.unwrap();
     }
 
     #[tokio::test]

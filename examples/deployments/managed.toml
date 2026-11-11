@@ -16,7 +16,7 @@ mode = "zcash_rotation"
 max_api_payment_usdc = "0.50" # Per authorization, independently of reserve size.
 
 [wallets.research.reserves.small]
-# Default randomized nominal funding: $2-4.
+# Default randomized nominal funding: $2-3.
 
 [sources.exa]
 extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.

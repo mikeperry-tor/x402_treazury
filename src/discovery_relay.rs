@@ -81,9 +81,14 @@ pub(crate) async fn build(
         if let std::collections::btree_map::Entry::Vacant(entry) = wallets.entry(wallet.clone()) {
             let mut scoped = policy.clone();
             scoped.wallet = Some(wallet.clone());
-            let relay =
-                Relay::new_scoped(&scoped, path, clients[wallet].clone(), Arc::clone(&state))
-                    .await?;
+            let relay = Relay::new_scoped(
+                &scoped,
+                path,
+                clients[wallet].clone(),
+                policy.wallet.is_some(),
+                Arc::clone(&state),
+            )
+            .await?;
             entry.insert(relay);
         }
         relays.insert(source.clone(), wallets[wallet].clone());
@@ -287,6 +292,7 @@ struct TargetFailure {
     limit: Option<(&'static str, usize)>,
     advance: bool,
     possible: bool,
+    bootstrap_cap: bool,
     retry_after: Option<crate::network::RetryAfter>,
     relay: Option<(&'static str, usize)>,
     location: &'static str,
@@ -300,6 +306,7 @@ impl TargetFailure {
             limit: None,
             advance,
             possible: false,
+            bootstrap_cap: false,
             retry_after: None,
             relay: None,
             location: "relay selection",
@@ -366,9 +373,58 @@ impl std::fmt::Display for RetryDisposition {
 }
 impl std::error::Error for RetryDisposition {}
 
+#[derive(Debug)]
+struct BootstrapCapWait;
+impl std::fmt::Display for BootstrapCapWait {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("bootstrap relay offer requires the destination wallet's payment ceiling")
+    }
+}
+impl std::error::Error for BootstrapCapWait {}
+
+#[derive(Clone, Copy)]
+enum StaticAcquisition {
+    Strict,
+    Deferred,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct CatalogDependency {
+    pub(crate) operator_required: bool,
+    pub(crate) needs_demand: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct CatalogReadiness {
+    pub(crate) status: Option<tokio::sync::watch::Sender<CatalogDependency>>,
+    pub(crate) can_allocate: bool,
+    pub(crate) activation_blocked: Option<tokio::sync::watch::Receiver<ActivationDecision>>,
+}
+
+pub(crate) type ActivationDecision = Option<Vec<Arc<Relay>>>;
+
+pub(crate) fn publish_activation_decision(
+    sender: &tokio::sync::watch::Sender<ActivationDecision>,
+    decision: ActivationDecision,
+) {
+    sender.send_if_modified(|current| {
+        let same_groups = current
+            .iter()
+            .flatten()
+            .map(Arc::as_ptr)
+            .eq(decision.iter().flatten().map(Arc::as_ptr));
+        if current.is_some() == decision.is_some() && same_groups {
+            return false;
+        }
+        *current = decision;
+        true
+    });
+}
+
 #[derive(Clone)]
 pub struct Relay {
     client: PaidClient,
+    explicit_participant: bool,
     sequence: SearchRelay,
     pub key: String,
     sources: Vec<String>,
@@ -402,17 +458,31 @@ impl Response {
 }
 impl Relay {
     pub async fn new(policy: &Policy, path: &Path, client: PaidClient) -> Result<Arc<Self>> {
-        Self::new_scoped(policy, path, client, Arc::default()).await
+        Self::new_scoped(
+            policy,
+            path,
+            client,
+            policy.wallet.is_some(),
+            Arc::default(),
+        )
+        .await
     }
     async fn new_scoped(
         policy: &Policy,
         path: &Path,
         client: PaidClient,
+        explicit_wallet: bool,
         state: Arc<tokio::sync::Mutex<State>>,
     ) -> Result<Arc<Self>> {
         let sequence = SearchRelay::load(policy, path).await?;
+        let explicit_participant = explicit_wallet && client.is_bootstrap_participant();
         Ok(Arc::new(Self {
-            client,
+            client: if explicit_wallet {
+                client.without_bootstrap()
+            } else {
+                client
+            },
+            explicit_participant,
             sequence,
             key: serde_json::to_string(&policy.wallet)?,
             sources: policy.sources.clone(),
@@ -421,6 +491,12 @@ impl Relay {
     }
     pub fn allows(&self, source: &str) -> bool {
         self.sources.is_empty() || self.sources.iter().any(|s| s == source)
+    }
+    pub(crate) fn configured_wallet(&self) -> Option<&str> {
+        self.sequence.wallet()
+    }
+    pub(crate) async fn activation_needed(&self) -> Result<bool> {
+        Ok(self.client.discovery_dependency(true).await?.1)
     }
     pub async fn drain(&self) {
         self.client.drain().await;
@@ -431,7 +507,7 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_when_ready_bounded(url, limit, setting, None, None, None)
+        self.fetch_when_ready_bounded(url, limit, setting, None, CatalogReadiness::default(), None)
             .await
     }
     #[allow(clippy::too_many_arguments)]
@@ -441,58 +517,161 @@ impl Relay {
         limit: usize,
         setting: &'static str,
         gate: Option<Arc<crate::network::DiscoveryCapacity>>,
-        operator_status: Option<tokio::sync::watch::Sender<bool>>,
+        mut readiness: CatalogReadiness,
         retry_after: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
         let capacity = self.client.discovery_changes().await?;
         let relay_changes = self.state.lock().await.changes.clone();
+        let mut reported_operator_action = false;
         loop {
-            let relay_changed = relay_changes.notified();
-            tokio::pin!(relay_changed);
-            relay_changed.as_mut().enable();
-            let capacity_notice = capacity
-                .as_ref()
-                .map(|changes| changes.clone().notified_owned());
-            let mut capacity_notice = capacity_notice.map(Box::pin);
-            if let Some(notice) = &mut capacity_notice {
-                notice.as_mut().enable();
-            }
-            if let Some(status) = &operator_status {
-                let required = self.client.discovery_requires_creation().await?;
+            if let Some(status) = &readiness.status {
                 status.send_if_modified(|old| {
-                    let changed = *old != required;
-                    *old = required;
+                    let changed = old.needs_demand;
+                    old.needs_demand = false;
                     changed
                 });
             }
+            let relay_changed = relay_changes.notified();
+            tokio::pin!(relay_changed);
+            relay_changed.as_mut().enable();
+            let mut capacity_notices = futures_util::stream::FuturesUnordered::new();
+            for changes in &capacity {
+                let mut notice = Box::pin(changes.clone().notified_owned());
+                notice.as_mut().enable();
+                capacity_notices.push(notice);
+            }
             let result = self
-                .fetch_with_capacity(
+                .fetch_static(
                     url,
                     limit,
                     setting,
                     gate.iter().cloned().collect(),
                     retry_after,
+                    StaticAcquisition::Deferred,
                 )
                 .await;
             match result {
                 Err(error)
-                    if RetryDisposition::from_error(&error) == RetryDisposition::DependencyWait =>
+                    if RetryDisposition::from_error(&error) == RetryDisposition::DependencyWait
+                        || error.is::<BootstrapCapWait>() =>
                 {
-                    #[cfg(test)]
-                    if let Some(signal) = &self.state.lock().await.dependency_wait {
-                        signal.notify_one();
-                    }
-                    let notice = async {
-                        match capacity_notice {
-                            Some(notice) => notice.await,
-                            None => std::future::pending().await,
+                    loop {
+                        self.report_dependency(
+                            &readiness,
+                            error.is::<BootstrapCapWait>(),
+                            &mut reported_operator_action,
+                        )
+                        .await?;
+                        #[cfg(test)]
+                        if let Some(signal) = &self.state.lock().await.dependency_wait {
+                            signal.notify_one();
                         }
-                    };
-                    tokio::select! { _ = notice => {}, _ = relay_changed => {} }
+                        let notice = async {
+                            use futures_util::StreamExt;
+                            if capacity_notices.is_empty() {
+                                std::future::pending::<()>().await;
+                            } else {
+                                capacity_notices.next().await;
+                            }
+                        };
+                        let decision = async {
+                            if let Some(receiver) = &mut readiness.activation_blocked
+                                && receiver.changed().await.is_ok()
+                            {
+                                return;
+                            }
+                            std::future::pending::<()>().await;
+                        };
+                        tokio::select! {
+                            biased;
+                            _ = notice => break,
+                            _ = &mut relay_changed => break,
+                            _ = decision => {}
+                        }
+                    }
                 }
                 outcome => return outcome,
             }
         }
+    }
+    async fn report_dependency(
+        &self,
+        readiness: &CatalogReadiness,
+        cap_wait: bool,
+        reported_operator_action: &mut bool,
+    ) -> Result<()> {
+        let require_destination = self.explicit_participant || cap_wait;
+        let status = readiness.status.as_ref();
+        if status.is_none()
+            && readiness.activation_blocked.is_none()
+            && (!require_destination || *reported_operator_action)
+        {
+            return Ok(());
+        }
+        let mut decision = readiness.activation_blocked.clone();
+        let proof = decision
+            .as_mut()
+            .and_then(|receiver| receiver.borrow_and_update().clone());
+        // This status is advisory. Its Store read cannot end an otherwise
+        // recoverable catalog wait.
+        let Ok((needs_wallet, needs_demand)) =
+            self.client.discovery_dependency(require_destination).await
+        else {
+            return Ok(());
+        };
+        let operator_required = status.is_some() && !readiness.can_allocate && needs_wallet;
+        if let Some(status) = status {
+            let current = CatalogDependency {
+                operator_required,
+                needs_demand,
+            };
+            status.send_if_modified(|old| {
+                let changed = *old != current;
+                *old = current;
+                changed
+            });
+        }
+        let mut blocked = needs_demand && proof.is_some();
+        let has_siblings = proof.as_ref().is_some_and(|siblings| !siblings.is_empty());
+        if blocked {
+            for relay in proof.into_iter().flatten() {
+                // A sibling's demand may already be durable while its status event
+                // is queued. Keep this read on the affected dependency waiter.
+                if !relay.activation_needed().await.unwrap_or(false) {
+                    blocked = false;
+                    break;
+                }
+            }
+        }
+        if blocked && has_siblings {
+            blocked = self.activation_needed().await.unwrap_or(false);
+        }
+        if decision
+            .as_ref()
+            .is_some_and(|receiver| receiver.has_changed().unwrap_or(false))
+        {
+            blocked = false;
+        }
+        if blocked {
+            let action = if operator_required {
+                "The catalog relay needs an unactivated wallet group and no endpoint can activate it while this catalog is pending. Configure a relay wallet with capacity, or enable managed funding and expose a reachable activation route"
+            } else {
+                "The catalog relay needs an unactivated wallet group and no endpoint can activate it while this catalog is pending. Configure an available relay wallet or a reachable endpoint for first-use activation"
+            };
+            return Err(crate::catalog::diagnostics::Problem(action).into());
+        }
+        if !*reported_operator_action && (needs_demand || cap_wait && operator_required) {
+            let action = if operator_required {
+                "The catalog needs a relay wallet that cannot be created while managed funding is unavailable. Enable managed funding or configure an available relay wallet"
+            } else if cap_wait {
+                "The catalog relay offer exceeds the bootstrap payment ceiling and needs a destination wallet that has yet to be activated. Invoke an API bound to that group on a reachable endpoint, or configure an available relay wallet and restart"
+            } else {
+                "Catalog discovery is waiting for an explicit relay wallet that needs first-use activation. Invoke an API bound to that group on a reachable endpoint, or configure an available relay wallet and restart"
+            };
+            tracing::info!(relay_wallet = %self.key, "{action}");
+            *reported_operator_action = true;
+        }
+        Ok(())
     }
     pub async fn fetch(
         &self,
@@ -510,6 +689,25 @@ impl Relay {
         setting: &'static str,
         capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
         retry_after: Option<crate::network::RetryAfter>,
+    ) -> Result<Arc<Response>> {
+        self.fetch_static(
+            url,
+            limit,
+            setting,
+            capacity,
+            retry_after,
+            StaticAcquisition::Strict,
+        )
+        .await
+    }
+    async fn fetch_static(
+        &self,
+        url: &str,
+        limit: usize,
+        setting: &'static str,
+        capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
+        retry_after: Option<crate::network::RetryAfter>,
+        acquisition: StaticAcquisition,
     ) -> Result<Arc<Response>> {
         let target = adapters::TargetRequest {
             method: reqwest::Method::GET,
@@ -538,8 +736,9 @@ impl Relay {
         {
             return cached;
         }
-        if !self
-            .client
+        let client = self.client.capture_effective(false).await?;
+        let handoff_limit = self.client.bootstrap_handoff_limit(&client);
+        if !client
             .discovery_ready()
             .await
             .map_err(|e| RelayFailure::from_error(&e))?
@@ -551,18 +750,25 @@ impl Relay {
         crate::network::sleep_retry_after(retry_after).await;
         let relay = self.clone();
         self.client
-            .run_owned(async move { relay.fetch_owned(request, capacity).await })
+            .run_owned(async move {
+                relay
+                    .fetch_owned(request, capacity, client, handoff_limit, acquisition)
+                    .await
+            })
             .await?
     }
     async fn fetch_owned(
         &self,
         request: StaticFetch,
         capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
+        client: PaidClient,
+        handoff_limit: Option<alloy_primitives::U256>,
+        acquisition: StaticAcquisition,
     ) -> Result<Arc<Response>> {
         request
             .prepared
             .acquire(
-                self.client.clone(),
+                client,
                 &request.target,
                 sequence::Contract::Catalog,
                 request.limit,
@@ -571,7 +777,13 @@ impl Relay {
                 crate::limits::HELP_BYTES,
                 None,
                 &capacity,
-                Some((self.state.clone(), &request.scope)),
+                Some(sequence::StaticRequest::new(
+                    self.state.clone(),
+                    &request.scope,
+                    &request.target,
+                    handoff_limit,
+                    acquisition,
+                )),
                 None,
             )
             .await
@@ -703,7 +915,7 @@ pub(crate) mod tests {
     pub(crate) struct Fixture {
         pub(crate) calls: Arc<AtomicUsize>,
         pub(crate) signed: Arc<AtomicUsize>,
-        payers: Arc<std::sync::Mutex<Vec<String>>>,
+        pub(super) payers: Arc<std::sync::Mutex<Vec<String>>>,
         body: Value,
         reject: bool,
         pub(super) arrived: Arc<tokio::sync::Notify>,
@@ -775,6 +987,7 @@ pub(crate) mod tests {
         (
             Arc::new(Relay {
                 client: PaidClient::new(payer),
+                explicit_participant: false,
                 sequence: SearchRelay::fixture(endpoint, Config::default()),
                 key: "fixture".into(),
                 sources: vec![],
@@ -813,6 +1026,13 @@ pub(crate) mod tests {
             .expect("fixture relay is unshared")
             .client = client;
     }
+    pub(crate) fn set_wallet(relay: &mut Arc<Relay>, wallet: &str) {
+        Arc::get_mut(relay)
+            .expect("unshared fixture")
+            .sequence
+            .policy
+            .wallet = Some(wallet.into());
+    }
     pub(crate) fn is_idle(relay: &Relay) -> bool {
         relay
             .state
@@ -834,6 +1054,7 @@ pub(crate) mod tests {
         .unwrap();
         Relay {
             client: PaidClient::new(payer),
+            explicit_participant: false,
             sequence: first.sequence.clone(),
             key: "second-wallet".into(),
             sources: vec![],

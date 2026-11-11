@@ -4,7 +4,7 @@ use crate::{
     network::NetworkConfig,
     payment::SpendPolicy,
     rotation::{
-        assignment::{GeneratedWallet, WalletBindings, WalletSummary},
+        assignment::{BootstrapPolicy, GeneratedWallet, WalletBindings, WalletSummary},
         config::{ReservesConfig, WalletConfig, retirement_remainder},
         store::{PoolStatus, Status},
     },
@@ -23,6 +23,7 @@ pub(super) struct Report {
     bindings: WalletBindings,
     generated: BTreeMap<String, GeneratedWallet>,
     summary: WalletSummary,
+    wallet_bootstrap: Option<BootstrapPolicy>,
     managed: BTreeMap<String, Managed>,
     omitted: BTreeMap<String, Omitted>,
     pub(super) startup_conflicts: Vec<String>,
@@ -127,6 +128,7 @@ pub(super) fn report(config_path: &Path, policy: Option<&NetworkConfig>) -> Resu
         bindings: resolved.bindings,
         generated: resolved.generated,
         summary: resolved.summary,
+        wallet_bootstrap: resolved.bootstrap,
         managed,
         omitted,
         startup_conflicts,
@@ -198,12 +200,23 @@ impl Report {
         );
         writeln!(
             text,
-            "\nNominal initial reserve sizing: {}–{} USDC across {} managed groups",
+            "\nEventual nominal initial reserve sizing: {}–{} USDC across {} managed groups",
             self.summary.initial_inventory_target_usdc,
             self.summary.initial_inventory_maximum_usdc,
             self.summary.managed_pool_count
         )
         .unwrap();
+        if let Some(setup) = &self.summary.bootstrap_setup {
+            writeln!(
+                text,
+                "Explicit bootstrap setup: group {}, {}–{} USDC nominal; {}",
+                setup.group,
+                setup.initial_inventory_target_usdc,
+                setup.initial_inventory_maximum_usdc,
+                setup.routing
+            )
+            .unwrap();
+        }
         writeln!(
             text,
             "Requested auto-funding: {}",

@@ -134,7 +134,16 @@ pub async fn warm_cache_with_network(
             &deployment.wallet_resolution,
             selected.iter().cloned(),
         )?;
-        let needed = bindings.values().cloned().collect();
+        let mut needed: BTreeSet<_> = bindings.values().cloned().collect();
+        if policy.wallet.is_none()
+            && let Some(bootstrap) = &deployment.wallet_resolution.bootstrap
+            && bootstrap
+                .deferred_groups
+                .iter()
+                .any(|group| needed.contains(group))
+        {
+            needed.insert(bootstrap.bootstrap_group.clone());
+        }
         let initialized = deployment
             .initialize_wallets(
                 &std::env::vars().collect(),

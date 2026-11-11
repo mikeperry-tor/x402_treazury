@@ -45,10 +45,7 @@ impl ExistingRead {
                     owner: None,
                 })
             }
-            WalletConfig::ZcashRotation {
-                max_api_payment_usdc,
-                ..
-            } => {
+            WalletConfig::ZcashRotation { .. } => {
                 let treasury = config
                     .treasury
                     .as_ref()
@@ -67,8 +64,35 @@ impl ExistingRead {
                     crate::rotation::store::TreasuryNetwork::Mainnet,
                 )
                 .await?;
-                let pools = store.advisory_pools(&[name.to_owned()])?;
-                ensure!(pools.len() == 1, "existing managed pool unavailable");
+                let destination = store.advisory_pools(&[name.to_owned()])?;
+                let credited = destination
+                    .first()
+                    .map(|id| store.has_initial_credit(id))
+                    .transpose()?
+                    .unwrap_or(false);
+                let effective = config
+                    .wallet_bootstrap
+                    .as_ref()
+                    .filter(|policy| {
+                        !credited && policy.deferred_groups.iter().any(|group| group == name)
+                    })
+                    .map_or(name, |policy| policy.bootstrap_group.as_str());
+                let profiles = crate::rotation::assignment::managed_profiles(config);
+                let WalletConfig::ZcashRotation {
+                    max_api_payment_usdc,
+                    ..
+                } = profiles
+                    .get(effective)
+                    .copied()
+                    .context("effective documentation wallet unavailable")?
+                else {
+                    anyhow::bail!("effective documentation wallet must be managed")
+                };
+                let pools = store.advisory_pools(&[effective.to_owned()])?;
+                ensure!(
+                    pools.len() == 1,
+                    "existing managed documentation pool unavailable"
+                );
                 let spend = SpendPolicy::dollars(max_api_payment_usdc)?;
                 let owner = StoreOnlyOwner::new(store);
                 let result = crate::rotation::manager::ManagedPool::new(
@@ -76,10 +100,11 @@ impl ExistingRead {
                     pools[0].clone(),
                     base,
                     spend,
-                );
+                )
+                .map(|pool| PaidClient::managed(Arc::new(pool)));
                 match result {
-                    Ok(pool) => Ok(Self {
-                        client: Some(PaidClient::managed(Arc::new(pool))),
+                    Ok(client) => Ok(Self {
+                        client: Some(client),
                         owner: Some(owner),
                     }),
                     Err(error) => {
@@ -174,6 +199,107 @@ mod tests {
             assert_eq!(calls.lock().unwrap().len(), usize::from(allowed));
         }
     }
+    #[tokio::test]
+    async fn bootstrap_document_read_opens_only_existing_effective_authority() {
+        use crate::rotation::store::{AllocationKind, Store};
+        use alloy_primitives::U256;
+        for (credited, generated) in [(false, false), (true, false), (false, true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = dir.path().join("state");
+            let key = dir.path().join("key");
+            let mut store = Store::create(&state, &key, 1, b"invalid SDK snapshot").unwrap();
+            let id = store.id().to_owned();
+            let bootstrap = if generated {
+                "auto_v1_deployment"
+            } else {
+                "bootstrap"
+            };
+            let effective = if credited { "selected" } else { bootstrap };
+            let pool = store
+                .ensure_capacity_group(
+                    effective,
+                    &crate::rotation::test_capacity::small_reserve("2"),
+                    Some(U256::from(1_000_000)),
+                    0,
+                )
+                .unwrap();
+            store
+                .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+                .unwrap();
+            let job = store.funding_jobs().unwrap().remove(0);
+            store
+                .record_credit(&job.wallet_id, "1", "fixture", 100)
+                .unwrap();
+            let expected = crate::network::IsolationId::evm(&job.recipient).unwrap();
+            drop(store);
+            let mut cfg = config();
+            for name in ["selected", "bootstrap"] {
+                cfg.wallets.insert(
+                    name.into(),
+                    serde_json::from_value(
+                        json!({"mode":"zcash_rotation","max_api_payment_usdc":"1"}),
+                    )
+                    .unwrap(),
+                );
+            }
+            cfg.wallet_bootstrap = Some(
+                serde_json::from_value(
+                    json!({"bootstrap_group":bootstrap,"deferred_groups":["selected"]}),
+                )
+                .unwrap(),
+            );
+            if generated {
+                let template = cfg.wallets.remove("bootstrap").unwrap();
+                cfg.wallet_templates.insert("template".into(), template);
+                cfg.wallet_assignment = Some(
+                    serde_json::from_value(json!({"scope":"deployment", "template":"template"}))
+                        .unwrap(),
+                );
+                cfg.sources.insert(
+                    "generated".into(),
+                    serde_json::from_value(json!({"spec":"never-read.json"})).unwrap(),
+                );
+                cfg.servers.insert(
+                    "assignment".into(),
+                    serde_json::from_value(
+                        json!({"listen":"127.0.0.1:0", "sources":["generated"]}),
+                    )
+                    .unwrap(),
+                );
+            }
+            cfg.treasury = Some(
+                serde_json::from_value(json!({"state_dir":state,"key_file":key,"id":id})).unwrap(),
+            );
+            cfg.funding = Some(
+                serde_json::from_value(
+                    json!({"base_rpc_url_env":"BASE_ONLY","base_rpc_fallback_url_envs":[]}),
+                )
+                .unwrap(),
+            );
+            let owner = ExistingRead::load_from(&cfg, "owner", |name| {
+                assert_eq!(name, "BASE_ONLY");
+                Some("http://127.0.0.1:1".into())
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                owner.client().documentation_identity().await.unwrap(),
+                expected
+            );
+            owner.close().await.unwrap();
+            let store = Store::open(&state, &key, &id).unwrap();
+            assert_eq!(store.funding_jobs().unwrap().len(), 1);
+            assert!(!store.has_bootstrap_demand(&pool).unwrap());
+            assert!(
+                store
+                    .advisory_pools(&[if credited { "bootstrap" } else { "selected" }.into()])
+                    .unwrap()
+                    .is_empty(),
+                "document read must not declare the other group"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn existing_managed_pool_needs_no_sdk_funding_credentials_or_allocation() {
         use crate::rotation::store::Store;

@@ -163,6 +163,10 @@ pub(crate) struct SearchRelay {
     pub(super) policy: Policy,
 }
 impl SearchRelay {
+    pub(super) fn wallet(&self) -> Option<&str> {
+        self.policy.wallet.as_deref()
+    }
+
     pub(crate) fn enabled(&self, purpose: Purpose) -> bool {
         match purpose {
             Purpose::SourceDiscovery => self.policy.source_discovery,
@@ -338,7 +342,9 @@ impl SearchRelay {
                 help_limit,
                 timeout,
                 capacity,
-                cache,
+                cache.map(|(state, scope)| {
+                    StaticRequest::new(state, scope, target, None, StaticAcquisition::Strict)
+                }),
                 initial_delay,
             )
             .await
@@ -362,18 +368,15 @@ impl Prepared {
         limit: usize,
         setting: &'static str,
     ) -> Option<Result<Arc<Response>>> {
-        let cache = StaticRequest {
-            state,
-            scope,
-            url: target.url.to_string(),
-        };
+        let cache = StaticRequest::new(state, scope, target, None, StaticAcquisition::Strict);
         let mut any_payment = false;
         let mut last = TargetFailure::new("no_representable_relay", None, false);
         for (entry, _) in &self.entries {
-            match cache.admit(entry).await {
+            match cache.admit(entry, false).await {
                 Admission::Cached(Ok(response)) => {
                     return Some(checked_cached(response, entry, limit, setting, any_payment));
                 }
+                Admission::Cached(Err(failure)) if failure.bootstrap_cap => return None,
                 Admission::Cached(Err(failure)) => {
                     any_payment |= failure.possible;
                     if !failure.advance {
@@ -405,20 +408,16 @@ impl Prepared {
         help_limit: usize,
         timeout: Option<Duration>,
         capacity: &[Arc<crate::network::DiscoveryCapacity>],
-        cache: Option<(Arc<tokio::sync::Mutex<State>>, &str)>,
+        cache: Option<StaticRequest<'_>>,
         mut initial_delay: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
-        let cache = cache.map(|(state, scope)| StaticRequest {
-            state,
-            scope,
-            url: target.url.to_string(),
-        });
+        let client = client.capture_effective(false).await?;
         let mut any_payment = false;
         let mut pending_delay = None;
         let mut last = TargetFailure::new("no_representable_relay", None, false);
         for (index, (entry, body)) in self.entries.iter().enumerate() {
             let admission = match &cache {
-                Some(cache) => cache.admit(entry).await,
+                Some(cache) => cache.admit(entry, cache.handoff_limit.is_none()).await,
                 None => Admission::Ready(None),
             };
             let admission = match admission {
@@ -429,7 +428,7 @@ impl Prepared {
                     crate::network::sleep_retry_after(initial_delay.take()).await;
                     crate::network::sleep_retry_after(pending_delay.take()).await;
                     match &cache {
-                        Some(cache) => cache.admit(entry).await,
+                        Some(cache) => cache.admit(entry, cache.handoff_limit.is_none()).await,
                         None => Admission::Ready(None),
                     }
                 }
@@ -470,6 +469,7 @@ impl Prepared {
                             outer_limit,
                             help_limit,
                             timeout,
+                            cache.as_ref().and_then(|cache| cache.handoff_limit),
                         )
                         .await;
                     let definitive = match &exchange {
@@ -494,7 +494,11 @@ impl Prepared {
                                 payment_may_have_occurred: any_payment || possible,
                             })
                         })
-                        .map_err(|outcome| outcome.failure);
+                        .map_err(|outcome| {
+                            let mut failure = outcome.failure;
+                            failure.bootstrap_cap = outcome.eligible_handoff && !any_payment;
+                            failure
+                        });
                     if let Some(cache) = &cache {
                         cache.publish(entry, outcome.clone(), definitive).await;
                     }
@@ -508,6 +512,14 @@ impl Prepared {
                 }
                 Err(failure) => {
                     any_payment |= failure.possible;
+                    if failure.bootstrap_cap
+                        && !any_payment
+                        && cache.as_ref().is_some_and(|cache| {
+                            matches!(cache.acquisition, StaticAcquisition::Deferred)
+                        })
+                    {
+                        return Err(BootstrapCapWait.into());
+                    }
                     if !failure.advance {
                         return Err(failure.error(any_payment));
                     }
@@ -581,6 +593,7 @@ fn checked_cached(
 struct ExchangeFailure {
     failure: TargetFailure,
     definitive: bool,
+    eligible_handoff: bool,
 }
 impl Entry {
     #[allow(clippy::too_many_arguments)]
@@ -595,6 +608,7 @@ impl Entry {
         outer_limit: Option<usize>,
         help_limit: usize,
         timeout: Option<Duration>,
+        handoff_limit: Option<alloy_primitives::U256>,
     ) -> std::result::Result<(Decoded, Duration, bool, Option<StatusCode>), ExchangeFailure> {
         let scoped = self.client(client, outer_limit, help_limit, timeout);
         let progress = crate::payment::SubmissionProgress::default();
@@ -660,6 +674,12 @@ impl Entry {
             ExchangeFailure {
                 failure,
                 definitive: !possible,
+                eligible_handoff: !possible
+                    && handoff_limit.is_some_and(|limit| {
+                        cause
+                            .downcast_ref::<crate::rotation::manager::RefusedOffer>()
+                            .is_some_and(|offer| offer.0 <= limit)
+                    }),
             }
         })?;
         let response = self
@@ -696,6 +716,7 @@ impl Entry {
                 ExchangeFailure {
                     failure,
                     definitive: attributable || local || !possible,
+                    eligible_handoff: false,
                 }
             })?;
         // Refine only accepted complete responses: incomplete delivery must
@@ -762,6 +783,7 @@ impl Entry {
                 Err(ExchangeFailure {
                     failure,
                     definitive: true,
+                    eligible_handoff: false,
                 })
             }
         }
@@ -769,25 +791,56 @@ impl Entry {
 }
 
 /// Static discovery owns one scoped cache outcome, including failed accepted work.
-struct StaticRequest<'a> {
+pub(super) struct StaticRequest<'a> {
     state: Arc<tokio::sync::Mutex<State>>,
     scope: &'a str,
     url: String,
+    handoff_limit: Option<alloy_primitives::U256>,
+    acquisition: StaticAcquisition,
 }
 enum Admission {
     Cached(std::result::Result<Arc<Response>, TargetFailure>),
     Unavailable,
     Ready(Option<tokio::sync::OwnedMutexGuard<()>>),
 }
-impl StaticRequest<'_> {
+impl<'a> StaticRequest<'a> {
+    pub(super) fn new(
+        state: Arc<tokio::sync::Mutex<State>>,
+        scope: &'a str,
+        target: &TargetRequest,
+        handoff_limit: Option<alloy_primitives::U256>,
+        acquisition: StaticAcquisition,
+    ) -> Self {
+        Self {
+            state,
+            scope,
+            url: target.url.to_string(),
+            handoff_limit,
+            acquisition,
+        }
+    }
     fn key(&self, entry: &Entry) -> (String, String) {
         (cache_key(self.scope, entry), self.url.clone())
     }
-    async fn admit(&self, entry: &Entry) -> Admission {
+    async fn admit(&self, entry: &Entry, ignore_bootstrap_refusal: bool) -> Admission {
+        let key = self.key(entry);
+        let retained = |state: &State| {
+            state
+                .outcomes
+                .get(&key)
+                .filter(|outcome| {
+                    !ignore_bootstrap_refusal
+                        || outcome
+                            .as_ref()
+                            .err()
+                            .is_none_or(|failure| !failure.bootstrap_cap)
+                })
+                .cloned()
+        };
         let gate = {
             let mut state = self.state.lock().await;
-            if let Some(outcome) = state.outcomes.get(&self.key(entry)) {
-                return Admission::Cached(outcome.clone());
+            if let Some(outcome) = retained(&state) {
+                return Admission::Cached(outcome);
             }
             state
                 .providers
@@ -799,8 +852,8 @@ impl StaticRequest<'_> {
         // failed. Wait outside State, then observe its complete publication.
         let guard = gate.lock_owned().await;
         let state = self.state.lock().await;
-        if let Some(outcome) = state.outcomes.get(&self.key(entry)) {
-            Admission::Cached(outcome.clone())
+        if let Some(outcome) = retained(&state) {
+            Admission::Cached(outcome)
         } else if state.stopped.contains(&entry.provider_key) {
             tracing::debug!(
                 relay_format = label(entry.format),
@@ -829,8 +882,14 @@ impl StaticRequest<'_> {
         if definitive {
             state.stopped.remove(&entry.provider_key);
         }
+        let waits_for_credit = outcome
+            .as_ref()
+            .err()
+            .is_some_and(|failure| failure.bootstrap_cap);
         state.outcomes.insert(self.key(entry), outcome);
-        state.changes.notify_waiters();
+        if !waits_for_credit {
+            state.changes.notify_waiters();
+        }
     }
 }
 

@@ -81,6 +81,34 @@ impl Fixture {
 }
 
 #[test]
+fn bootstrap_preview_separates_setup_from_eventual_inventory_without_demand() {
+    let mut fixture = Fixture::new();
+    fixture.declare("current");
+    fixture.declare("participant");
+    let mut config = fixture.config();
+    config["wallets"]["participant"] = config["wallets"]["current"].clone();
+    config["wallet_bootstrap"] =
+        json!({"bootstrap_group":"current", "deferred_groups":["participant"]});
+    let before = fixture.logical_state();
+    let report = fixture.report(&config).unwrap();
+    let setup = report.summary.bootstrap_setup.as_ref().unwrap();
+    assert_eq!(setup.group, "current");
+    assert_eq!(setup.initial_inventory_target_atomic, "2000000");
+    assert_eq!(setup.initial_inventory_maximum_atomic, "2000000");
+    assert_eq!(report.summary.initial_inventory_target_atomic, "4000000");
+    assert_eq!(report.summary.initial_inventory_maximum_atomic, "4000000");
+    assert_eq!(
+        report.wallet_bootstrap.as_ref().unwrap().deferred_groups,
+        ["participant"]
+    );
+    let human = report.human();
+    assert!(human.contains("Eventual nominal initial reserve sizing: 4.000000–4.000000"));
+    assert!(human.contains("Explicit bootstrap setup: group current, 2.000000–2.000000"));
+    assert!(human.contains("first positive initial credit"));
+    assert_eq!(before, fixture.logical_state());
+}
+
+#[test]
 fn inventory_classification_is_read_only_without_keys_and_while_owned() {
     let mut fixture = Fixture::new();
     let current = fixture.declare("current");

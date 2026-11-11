@@ -55,6 +55,7 @@ pub struct MetaConfig {
     #[serde(default)]
     pub wallet_templates: BTreeMap<String, WalletConfig>,
     pub wallet_assignment: Option<Assignment>,
+    pub wallet_bootstrap: Option<assignment::BootstrapPolicy>,
     pub servers: BTreeMap<String, ListenerConfig>,
 }
 #[derive(Deserialize, Serialize)]
@@ -398,6 +399,7 @@ async fn install_funding_restrictions(
 
 fn validate_selected_cover(
     wallet_resolution: &Resolution,
+    bootstrap: Option<&assignment::BootstrapPolicy>,
     sources: &BTreeMap<String, Source>,
     selected: &BTreeMap<String, Vec<(String, ToolSpec)>>,
 ) -> Result<()> {
@@ -416,24 +418,28 @@ fn validate_selected_cover(
                     source.base_url.clone()
                 };
                 cover.validate_origin(&route)?;
-                let key = (
-                    wallet_resolution.bindings[server][id].wallet.clone(),
-                    reqwest::Url::parse(&route)?.origin().ascii_serialization(),
-                    source.config.transport(),
-                    crate::network::global()
-                        .read_timeout(
-                            source
-                                .config
-                                .read_timeout_seconds
-                                .map(Duration::from_secs_f64),
-                        )
-                        .as_millis(),
-                );
-                if let Some(previous) = cover_owners.insert(key, cover) {
-                    ensure!(
-                        previous == cover,
-                        "conflicting cover settings for shared wallet/origin"
-                    );
+                let destination = &wallet_resolution.bindings[server][id].wallet;
+                let bootstrap_owner = bootstrap
+                    .filter(|policy| policy.deferred_groups.contains(destination))
+                    .map(|policy| &policy.bootstrap_group);
+                let origin = reqwest::Url::parse(&route)?.origin().ascii_serialization();
+                let transport = source.config.transport();
+                let timeout = crate::network::global()
+                    .read_timeout(
+                        source
+                            .config
+                            .read_timeout_seconds
+                            .map(Duration::from_secs_f64),
+                    )
+                    .as_millis();
+                for authority in std::iter::once(destination).chain(bootstrap_owner) {
+                    let key = (authority.clone(), origin.clone(), transport, timeout);
+                    if let Some(previous) = cover_owners.insert(key, cover) {
+                        ensure!(
+                            previous == cover,
+                            "conflicting cover settings for shared wallet/origin"
+                        );
+                    }
                 }
             }
         }
@@ -492,7 +498,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"source_bindings":wallet_resolution.source_bindings,"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"source_bindings":wallet_resolution.source_bindings,"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"wallet_bootstrap":wallet_resolution.bootstrap,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -1102,7 +1108,12 @@ impl Deployment {
                 .call(move |s| s.configure_profiles(&managed, &statics))
                 .await?;
             for (name, w) in &self.wallet_resolution.wallets {
-                if only_wallets.is_some_and(|selected| !selected.contains(name)) {
+                let selected = only_wallets.is_none_or(|selected| selected.contains(name));
+                // Explicit bootstrap still processes existing jobs outside its
+                // allocation selection. Those jobs need current claim policy.
+                if !selected && !(auto_fund
+                    && restriction == crate::rotation::restriction::FundingRestriction::Ordinary)
+                {
                     continue;
                 }
                 if let WalletConfig::ZcashRotation {
@@ -1121,18 +1132,43 @@ impl Deployment {
                     let cap = policy.max_atomic;
                     let pool = store
                         .call(move |s| {
-                            s.ensure_capacity_group(&group_name, &reserves, cap, retirement)
+                            if selected {
+                                return s.ensure_capacity_group(&group_name, &reserves, cap, retirement).map(Some);
+                            }
+                            if let Some(pool) = s.advisory_pools(&[group_name])?.first() {
+                                s.configure_capacity_group(pool, cap, retirement, &reserves)?;
+                            }
+                            Ok(None)
                         })
                         .await?;
+                    let Some(pool) = pool else { continue };
                     let client = if let Some(base) = capabilities.base() {
                         let manager = std::sync::Arc::new(ManagedPool::new(store.clone(), pool, base.clone(), policy)?);
                         managed_pools.push(manager.clone());
                         PaidClient::managed(manager)
                     } else {
-                        PaidClient::unavailable(crate::rotation::error::AdmissionError::WalletNotReady(
-                            "managed Base configuration unavailable; correct configuration and restart"))
+                        let client = PaidClient::unavailable(crate::rotation::error::AdmissionError::WalletNotReady(
+                            "managed Base configuration unavailable; correct configuration and restart"));
+                        if !crate::qualification::active()
+                            && self.wallet_resolution.bootstrap.as_ref().is_some_and(|policy| policy.deferred_groups.contains(name))
+                        {
+                            client.with_bootstrap_demand(store.clone(), pool)
+                        } else {
+                            client
+                        }
                     };
                     wallets.insert(name.clone(), client);
+                }
+            }
+            // Qualification retains named destination authority and reviewed allocations.
+            if !crate::qualification::active() && let Some(policy) = &self.wallet_resolution.bootstrap {
+                let bootstrap = wallets.get(&policy.bootstrap_group).and_then(PaidClient::managed_pool);
+                if let Some(bootstrap) = bootstrap {
+                    for name in &policy.deferred_groups {
+                        if let Some(client) = wallets.get_mut(name) {
+                            *client = client.clone().with_bootstrap(bootstrap.clone());
+                        }
+                    }
                 }
             }
             Ok(())
@@ -1197,6 +1233,13 @@ impl Deployment {
                                 store.clone(),
                                 backend,
                                 f.poll_seconds,
+                            )
+                            .with_bootstrap_participants(
+                                self.wallet_resolution
+                                    .bootstrap
+                                    .as_ref()
+                                    .map(|policy| policy.deferred_groups.iter().cloned().collect())
+                                    .unwrap_or_default(),
                             ),
                         ),
                     }))
@@ -1415,7 +1458,12 @@ impl Deployment {
         // This validation intentionally spans endpoints sharing one payer/origin.
         // Unlike endpoint filters, a conflicting cover policy is a shared resource
         // failure; preserve the existing source admission boundary for that case.
-        validate_selected_cover(&self.wallet_resolution, &self.sources, &selected)?;
+        let bootstrap = self
+            .wallet_resolution
+            .bootstrap
+            .as_ref()
+            .filter(|_| !crate::qualification::active() && !catalog_evidence::collecting());
+        validate_selected_cover(&self.wallet_resolution, bootstrap, &self.sources, &selected)?;
         self.selected = selected;
         self.conflicting_tools = conflicts;
         self.selection_errors = errors;

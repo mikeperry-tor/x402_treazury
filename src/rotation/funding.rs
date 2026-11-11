@@ -155,6 +155,8 @@ pub struct FundingWorker<B> {
     pub store: StoreHandle,
     pub backend: std::sync::Arc<tokio::sync::Mutex<B>>,
     pub poll_seconds: u64,
+    bootstrap_participants: std::collections::BTreeSet<String>,
+    allocation_selection: Option<std::collections::BTreeSet<String>>,
     #[cfg(test)]
     inventory_test_hook: Option<std::sync::Arc<scheduler::InventoryTestHook>>,
 }
@@ -164,6 +166,8 @@ impl<B> Clone for FundingWorker<B> {
             store: self.store.clone(),
             backend: self.backend.clone(),
             poll_seconds: self.poll_seconds,
+            bootstrap_participants: self.bootstrap_participants.clone(),
+            allocation_selection: self.allocation_selection.clone(),
             #[cfg(test)]
             inventory_test_hook: self.inventory_test_hook.clone(),
         }
@@ -175,9 +179,26 @@ impl<B: FundingBackend> FundingWorker<B> {
             store,
             backend: std::sync::Arc::new(tokio::sync::Mutex::new(backend)),
             poll_seconds,
+            bootstrap_participants: Default::default(),
+            allocation_selection: None,
             #[cfg(test)]
             inventory_test_hook: None,
         }
+    }
+    pub(crate) fn with_bootstrap_participants(
+        mut self,
+        groups: std::collections::BTreeSet<String>,
+    ) -> Self {
+        self.bootstrap_participants = groups;
+        self
+    }
+    /// Restrict new allocations while observing all already owned funding jobs.
+    pub(crate) fn with_allocation_selection(
+        mut self,
+        groups: std::collections::BTreeSet<String>,
+    ) -> Self {
+        self.allocation_selection = Some(groups);
+        self
     }
     pub async fn run(self, stop: CancellationToken) -> Result<()> {
         self.run_mode(

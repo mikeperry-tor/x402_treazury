@@ -170,6 +170,8 @@ struct PaidFixture {
     signers: Arc<Mutex<Vec<String>>>,
     held: tokio_util::sync::CancellationToken,
     release: tokio_util::sync::CancellationToken,
+    origin_held: tokio_util::sync::CancellationToken,
+    release_origin: tokio_util::sync::CancellationToken,
 }
 async fn origin(
     State(state): State<PaidFixture>,
@@ -183,6 +185,10 @@ async fn origin(
         .lock()
         .unwrap()
         .push((kind.clone(), "origin".into()));
+    if kind == "managed-handoff" {
+        state.origin_held.cancel();
+        state.release_origin.cancelled().await;
+    }
     if matches!(kind.as_str(), "healthy" | "healthy-metadata-off") {
         "independent origin".into_response()
     } else {
@@ -254,6 +260,90 @@ fn sequence(state: &PaidFixture, kind: &str) -> Vec<String> {
         .map(|(_, step)| step.clone())
         .collect()
 }
+
+async fn managed_help_captures_payer_after_origin_failure(
+    fixture: &PaidFixture,
+    relay: Arc<crate::discovery_relay::SearchRelay>,
+) {
+    use crate::rotation::{
+        base::BaseRpc,
+        manager::ManagedPool,
+        store::{AllocationKind, Store, StoreHandle},
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &temp.path().join("state"),
+        &temp.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::test_capacity::small_reserve("2");
+    let [bootstrap, destination] = ["bootstrap", "destination"].map(|name| {
+        let pool = state
+            .ensure_capacity_group(name, &reserves, None, 0)
+            .unwrap();
+        let job = state
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        state.funding_job(&job).unwrap().unwrap()
+    });
+    state
+        .record_credit(&bootstrap.wallet_id, "1000000", "fixture", 100)
+        .unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let managed = |pool| {
+        Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool,
+                BaseRpc::new("https://rpc.example.com").unwrap(),
+                SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    let client = PaidClient::managed(managed(destination.pool_id.clone()))
+        .with_bootstrap(managed(bootstrap.pool_id))
+        .with_document_relay(Some(relay));
+    let help = bound("https://api.example.com/docs/managed-handoff", client);
+    let acquisition = tokio::spawn(async move { help.invoke_output(&Default::default()).await });
+    tokio::time::timeout(Duration::from_secs(5), fixture.origin_held.cancelled())
+        .await
+        .unwrap();
+    let job = destination.clone();
+    store
+        .call(move |s| s.record_credit(&job.wallet_id, "1000000", "fixture", 101))
+        .await
+        .unwrap();
+    fixture.release_origin.cancel();
+    let output = tokio::time::timeout(Duration::from_secs(5), acquisition)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(output.payment_may_have_occurred);
+    assert_eq!(output.text, "complete relay help\n");
+    assert_eq!(
+        fixture.signers.lock().unwrap().as_slice(),
+        [destination.recipient.to_ascii_lowercase()]
+    );
+    assert_eq!(
+        sequence(fixture, "managed-handoff"),
+        ["origin", "challenge", "signed"]
+    );
+    store
+        .call(move |s| {
+            assert!(!s.has_bootstrap_demand(&destination.pool_id)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    worker.await.unwrap();
+}
+
 async fn paid_fixture() {
     use crate::{
         discovery_relay::SearchRelay,
@@ -287,6 +377,8 @@ async fn paid_fixture() {
     let client = PaidClient::new(payer(113)).with_document_relay(Some(Arc::new(
         SearchRelay::fixture("https://spec.example.com/relay".into(), Config::default()),
     )));
+    managed_help_captures_payer_after_origin_failure(&fixture, client.document_relay().unwrap())
+        .await;
     let held = bound("https://api.example.com/docs/held", client.clone());
     let expected = held.help.client.documentation_identity().await.unwrap();
     client.replace_payer(payer(114));
@@ -335,7 +427,7 @@ async fn paid_fixture() {
     );
     let signer: crate::payment::signer::EvmSigner = format!("{:064x}", 113).parse().unwrap();
     assert_eq!(
-        fixture.signers.lock().unwrap()[0],
+        fixture.signers.lock().unwrap()[1],
         signer.address().to_string().to_ascii_lowercase(),
         "the exact help-binding payer snapshot signed the relay request"
     );

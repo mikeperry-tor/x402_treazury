@@ -1,11 +1,13 @@
 //! One advisory startup announcement; never gates serving or financial work.
 use super::*;
+#[cfg(test)]
 use crate::rotation::manager::ManagedPool;
 use futures_util::{StreamExt, stream::FuturesUnordered};
+#[cfg(test)]
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-pub(super) type FundingPools = Option<Vec<Arc<ManagedPool>>>;
+pub(super) type FundingPools = Option<Vec<PaidClient>>;
 
 impl Deployment {
     // Static loads use the same listener-owned readiness result as deferred publication.
@@ -104,15 +106,17 @@ pub(super) async fn announce(
     );
 }
 
-async fn wait_for_funding(pools: &[Arc<ManagedPool>]) -> Result<()> {
+async fn wait_for_funding(pools: &[PaidClient]) -> Result<()> {
     loop {
         let mut changes = FuturesUnordered::new();
         for pool in pools {
-            let mut changed = Box::pin(pool.discovery_changes().await?.notified_owned());
-            changed.as_mut().enable();
-            changes.push(changed);
+            for notice in pool.discovery_changes().await? {
+                let mut changed = Box::pin(notice.notified_owned());
+                changed.as_mut().enable();
+                changes.push(changed);
+            }
         }
-        if ManagedPool::startup_funding_ready(pools).await? {
+        if PaidClient::startup_funding_ready(pools).await? {
             return Ok(());
         }
         changes.next().await;
@@ -299,7 +303,11 @@ sources=["local"]
                 .await
                 .is_err()
         );
-        assert!(catalog_send.send(Some(pools)).is_ok());
+        assert!(
+            catalog_send
+                .send(Some(pools.into_iter().map(PaidClient::managed).collect()))
+                .is_ok()
+        );
         one_send.send(()).unwrap();
         assert!(
             tokio::time::timeout(Duration::from_millis(20), &mut task)
@@ -362,12 +370,24 @@ sources=["local"]
         drop(catalog_send);
         announce(catalogs, vec![]).await;
         let (catalog_send, catalogs) = oneshot::channel();
-        assert!(catalog_send.send(Some(pools.clone())).is_ok());
+        assert!(
+            catalog_send
+                .send(Some(
+                    pools.iter().cloned().map(PaidClient::managed).collect()
+                ))
+                .is_ok()
+        );
         let (listener_send, listener) = oneshot::channel();
         drop(listener_send);
         announce(catalogs, vec![listener]).await;
         let (catalog_send, catalogs) = oneshot::channel();
-        assert!(catalog_send.send(Some(pools.clone())).is_ok());
+        assert!(
+            catalog_send
+                .send(Some(
+                    pools.iter().cloned().map(PaidClient::managed).collect()
+                ))
+                .is_ok()
+        );
         let mut pending = Box::pin(announce(catalogs, vec![]));
         assert!(
             tokio::time::timeout(Duration::from_millis(20), &mut pending)

@@ -243,10 +243,11 @@ impl BoundTool {
                 })
                 .await?
         } else {
+            let route = self.tool.route(&self.base, args)?;
             let (client, operation) = self.execution_scope();
             client
                 .execute_rendered_scoped(
-                    self.tool.route(&self.base, args)?,
+                    route,
                     operation,
                     self.tool.response_mapping.as_ref(),
                     &self.tool.image_limits,
