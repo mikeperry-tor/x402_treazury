@@ -1242,6 +1242,44 @@ Apollo has no active provider definition. Request-ID retry/recovery semantics
 require independent verification before integration; catalog/quote availability
 does not resolve that uncertainty.
 
+## Reviewed and rejected: x402node and openverbs
+
+Both were investigated on 2026-11-11 for possible `research_desk` use or reserve
+coverage; neither has an enabled provider definition. Recording them here avoids
+repeating the same wide-catalog review on a later topic.
+
+**x402node (`api.x402node.dev`).** The catalog is large and broad, but payment is
+currently unusable. Every sampled paid call returned `402 Payment Required:
+payment rejected` (`/search/academic`, $0.008; `/defi/dex-volume`, $0.01). The
+advertised Base USDC requirement sets the EIP-712 domain name to `USDC Coin`
+instead of the contract's `USD Coin`, so the EIP-3009 authorization cannot
+validate. The advertised pay-to wallet (`0x4466d4A84b7c49a6A094ec6eef4a0712D6dd125e`)
+received its last successful incoming USDC transfer at 2026-11-10 04:37:42 UTC,
+with none observed since, consistent with a botched deployment around that time.
+Catalog and unsigned-schema discovery work, and no paid response was sampled. Even if payment
+is restored, the sampled domains were dominated: OpenAlex scholarly search at
+$0.008 versus APEX `research_search` ($0.003) and 2s `papers_search` ($0.006 with
+abstracts); Ethereum-only Uniswap DEX reads at $0.01–$0.02 versus Otto
+`pools_search` ($0.001 across chains); and asynchronous Amazon-only commerce at
+$0.02–$0.03 versus OpenWeb Ninja ($0.003 across marketplaces). Its distinct
+capabilities were citation formatting/BibTeX, arXiv-ID metadata, token liquidity
+depth, an aggregate DEX-volume ranking, and Amazon reviews/seller profiles; none
+was purchasable. Revisit only after the payment challenge and settlement resume,
+and then as a narrow curated subset.
+
+**openverbs (`openverbs.com`).** This is 93 independent service subdomains, each
+with its own `openapi.json`; the apex is a catalog and does not expose a combined
+spec (`/openapi.json` is 404). One provider definition has one `spec` and one
+`base_url`, so a backup would require roughly 93 tiny provider files (or 93 pinned
+catalogs) rather than one. Payment worked (x402, with an MPP alternative), but
+overlapping endpoints were more expensive and often thinner: OpenAlex
+`/v1/scholar` at $0.006 without abstracts versus APEX $0.003; Amazon search at
+$0.006 versus OpenWeb Ninja $0.003; Google Shopping at $0.006 with a weaker
+sample than OpenWeb Ninja. Its `science` family is astro/chemistry/physics
+calculators, not literature, so it is not a papers fallback. Rejected as a
+research-desk source or reserve; a specific service can still be registered
+dynamically if a future need justifies it.
+
 ## Payment extension and offer boundaries
 
 Additional extension semantics:

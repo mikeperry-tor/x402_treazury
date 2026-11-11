@@ -372,6 +372,12 @@ request-ID retry/recovery uncertainty is documented in
 [provider caveats](CAVEATS.md). A public x402 quote
 is not sufficient evidence that a useful paid call is supported.
 
+x402node (`api.x402node.dev`) and the openverbs subdomain catalog were also
+reviewed and rejected in November 2026. x402node's payment challenge failures and
+openverbs' 93-catalog surface are documented in the
+[reviewed-and-rejected caveats](CAVEATS.md#reviewed-and-rejected-x402node-and-openverbs)
+so the same wide-catalog review is not repeated.
+
 Source management automatically supplies x402 List browsing, ranked recommendations
 and service details using the embedded `x402-list/directory.openapi.json` contract. The `x402-list.toml` provider is only
 needed when exposing the broader directory API separately. The embedded three-operation
