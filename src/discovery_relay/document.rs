@@ -427,6 +427,10 @@ impl PreparedDocument {
     #[tracing::instrument(name = "document_request", level = "warn", skip_all,
         fields(document_id = %self.options.id, request_kind = ?self.options.kind))]
     pub(crate) async fn acquire(self, client: &PaidClient, failure: Failure) -> Result<Document> {
+        let client = client
+            .clone()
+            .with_relay_purpose(super::Purpose::ProviderMetadata)
+            .relay_authority();
         if !failure.fallback || !client.has_document_authority() {
             return Err(failure.error);
         }

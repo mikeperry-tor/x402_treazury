@@ -48,9 +48,9 @@ is $8–12, before fees and later replacements.
 
 Both examples use `[wallet_bootstrap]` with explicit `bootstrap_group` and
 `deferred_groups`. New participant allocations wait for first use and randomized
-60–240-second opportunities; API calls never wait for swaps. Implicit paid
-catalog/help discovery can use existing bootstrap inventory without activating
-a group; explicit relay wallet choices remain authoritative. Run `wallet init`
+30–120-second opportunities; API calls never wait for swaps. Paid metadata and
+directory relay fees stay on the bootstrap group across API cutover and do not
+activate a group. Run `wallet init`
 for treasury setup, fund the shielded receive address, and optionally run
 `wallet bootstrap` before `serve` to prepare only the bootstrap group's enabled
 reserves without catalogs/listeners. `serve` binds listeners before background

@@ -2153,7 +2153,7 @@ async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
 }
 
 #[tokio::test]
-async fn import_coalescing_survives_first_credit_for_the_same_destination() {
+async fn metadata_imports_share_bootstrap_authority_across_handoff_and_listeners() {
     use crate::rotation::{
         base::BaseRpc,
         manager::ManagedPool,
@@ -2192,15 +2192,19 @@ async fn import_coalescing_survives_first_credit_for_the_same_destination() {
         )
     };
     let shared = managed(shared);
+    let metadata = Arc::new(PaidClient::managed(shared.clone()));
     let clients = [("writer", writer), ("reader", reader)]
         .map(|(name, pool)| {
             (
                 name.into(),
-                PaidClient::managed(managed(pool)).with_bootstrap(shared.clone()),
+                PaidClient::managed(managed(pool))
+                    .with_bootstrap(shared.clone())
+                    .with_metadata_payer(metadata.clone()),
             )
         })
         .into();
     drop(shared);
+    drop(metadata);
     let mut configured = listeners(false);
     for name in ["writer", "reader"] {
         configured.get_mut(name).unwrap().wallet = Some(name.into());
@@ -2241,8 +2245,11 @@ async fn import_coalescing_survives_first_credit_for_the_same_destination() {
     });
     arrived.notified().await;
     let cell = manager.fetches.lock().unwrap()[&key].clone();
-    // A different destination sharing the bootstrap payer has its own acquisition.
-    manager.document("reader", url).await.unwrap();
+    // Different listeners with the same metadata authority join one acquisition.
+    let reader = tokio::spawn({
+        let manager = manager.clone();
+        async move { manager.document("reader", url).await.unwrap() }
+    });
     store
         .call(move |s| s.record_credit(&job.wallet_id, "1", "fixture", 100))
         .await
@@ -2256,11 +2263,12 @@ async fn import_coalescing_survives_first_credit_for_the_same_destination() {
         joined.await.unwrap()
     };
     assert!(Arc::ptr_eq(&first.await.unwrap(), &joined));
+    assert!(Arc::ptr_eq(&reader.await.unwrap(), &joined));
     assert!(Arc::ptr_eq(
         &manager.document("writer", url).await.unwrap(),
         &joined
     ));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     server.abort();
     drop((key, cell, manager, store));
     worker.await.unwrap();

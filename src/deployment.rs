@@ -397,6 +397,22 @@ async fn install_funding_restrictions(
     Ok(())
 }
 
+fn configure_metadata_payer(
+    bootstrap: Option<&assignment::BootstrapPolicy>,
+    wallets: &mut BTreeMap<String, PaidClient>,
+) {
+    if crate::qualification::active() || catalog_evidence::collecting() {
+        return;
+    }
+    let Some(payer) = bootstrap.and_then(|policy| wallets.get(&policy.bootstrap_group)) else {
+        return;
+    };
+    let payer = std::sync::Arc::new(payer.relay_authority().without_bootstrap());
+    for client in wallets.values_mut() {
+        *client = client.clone().with_metadata_payer(payer.clone());
+    }
+}
+
 fn validate_selected_cover(
     wallet_resolution: &Resolution,
     bootstrap: Option<&assignment::BootstrapPolicy>,
@@ -1171,6 +1187,7 @@ impl Deployment {
                     }
                 }
             }
+            configure_metadata_payer(self.wallet_resolution.bootstrap.as_ref(), &mut wallets);
             Ok(())
             }.await;
             if let Err(error) = setup {
@@ -1708,6 +1725,10 @@ impl Deployment {
                 initialized.wallets.insert(name, PaidClient::new(payer));
             }
         }
+        configure_metadata_payer(
+            self.wallet_resolution.bootstrap.as_ref(),
+            &mut initialized.wallets,
+        );
         Ok(())
     }
 

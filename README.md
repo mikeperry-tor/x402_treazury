@@ -254,7 +254,7 @@ target/release/x402_treazury serve
 `serve` synchronizes the treasury, discovers API catalogs, and funds
 USDC wallets in the background after listeners bind. This example initially
 prepares web only. A validated company/social/toolbox API invocation records
-company demand; independent randomized 60–240-second opportunities prepare it
+company demand; independent randomized 30–120-second opportunities prepare it
 later without making API calls wait for swaps. Free responses and response-cache
 hits activate demand too; discovery, registration and metadata do not. With
 insufficient spendable ZEC, it keeps monitoring and retries funding automatically. You can

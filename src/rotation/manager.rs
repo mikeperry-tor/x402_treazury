@@ -104,9 +104,6 @@ impl ManagedPool {
     pub(crate) fn has_finite_payment_limit(&self) -> bool {
         self.policy.max_atomic.is_some()
     }
-    pub(crate) fn payment_limit(&self) -> U256 {
-        self.policy.max_atomic.unwrap_or(U256::MAX)
-    }
     pub(crate) async fn startup_funding_ready(
         pools: &[(Arc<Self>, Option<Arc<Self>>)],
     ) -> Result<bool> {
@@ -249,28 +246,10 @@ impl ManagedPool {
             .call(move |s| Ok(s.capacity_changes(&pool)))
             .await
     }
-    pub(crate) async fn discovery_dependency(
-        &self,
-        bootstrap: Option<&Self>,
-        require_destination: bool,
-    ) -> Result<(bool, bool)> {
+    pub(crate) async fn discovery_requires_creation(&self) -> Result<bool> {
         let pool = self.pool.clone();
-        let bootstrap = bootstrap.map(|bootstrap| bootstrap.pool.clone());
         self.store
-            .call(move |s| {
-                let payer = match bootstrap {
-                    Some(bootstrap) if !require_destination && !s.has_initial_credit(&pool)? => {
-                        bootstrap
-                    }
-                    _ => pool.clone(),
-                };
-                let needs_wallet = s.payment_identity_requires_creation(&payer)?;
-                let needs_demand = require_destination
-                    && needs_wallet
-                    && !s.has_bootstrap_demand(&pool)?
-                    && !s.has_initial_credit(&pool)?;
-                Ok((needs_wallet, needs_demand))
-            })
+            .call(move |s| s.payment_identity_requires_creation(&pool))
             .await
     }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
@@ -612,18 +591,6 @@ fn strip_extensions(challenge: &mut Value) -> Result<bool> {
         .remove("extensions");
     Ok(omitted)
 }
-/// The lowest compatible offer refused by the captured policy before signing.
-#[derive(Debug)]
-pub(crate) struct RefusedOffer(pub(crate) U256);
-
-impl std::fmt::Display for RefusedOffer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("compatible offer exceeds the configured ceiling")
-    }
-}
-
-impl std::error::Error for RefusedOffer {}
-
 fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
     let version = match challenge["x402Version"].as_u64() {
         Some(1) => 1u8,
@@ -638,7 +605,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
             .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
         AdmissionError::UnsupportedPayment("extensions require explicit support")
     );
-    let mut price_rejected: Option<U256> = None;
+    let mut price_rejected = false;
     let mut selected: Option<Offer> = None;
     for raw in challenge["accepts"]
         .as_array()
@@ -741,8 +708,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
         })();
         if let Ok(offer) = parsed {
             if policy.max_atomic.is_some_and(|cap| offer.amount > cap) {
-                price_rejected =
-                    Some(price_rejected.map_or(offer.amount, |old| old.min(offer.amount)));
+                price_rejected = true;
                 continue;
             }
             // Keep the original exact offer, and retain challenge order on ties.
@@ -757,12 +723,10 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
     if let Some(offer) = selected {
         return Ok(offer);
     }
-    if let Some(amount) = price_rejected {
-        return Err(
-            anyhow::Error::new(RefusedOffer(amount)).context(AdmissionError::PriceLimit(
-                "no offer fits configured API payment ceiling",
-            )),
-        );
+    if price_rejected {
+        anyhow::bail!(AdmissionError::PriceLimit(
+            "no offer fits configured API payment ceiling"
+        ));
     }
     anyhow::bail!(AdmissionError::UnsupportedPayment(
         "no compatible EIP-3009 offer"

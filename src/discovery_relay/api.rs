@@ -22,6 +22,7 @@ pub(crate) fn fallback<'a>(
 ) -> futures_util::future::BoxFuture<'a, Result<(HttpOutput, Option<crate::payment::ResponseFacts>)>>
 {
     Box::pin(async move {
+        let client = client.relay_authority();
         if !failure.fallback || !client.has_document_authority() {
             return Err(failure.error);
         }

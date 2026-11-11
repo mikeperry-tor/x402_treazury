@@ -173,6 +173,8 @@ pub struct PaidClient {
     bootstrap: Option<Arc<crate::rotation::manager::ManagedPool>>,
     /// Store-only activation remains available when the payment transport is not.
     bootstrap_demand: Option<(crate::rotation::store::StoreHandle, String)>,
+    /// Fixed infrastructure payer, independent of API first-use handoff.
+    metadata_payer: Option<Arc<PaidClient>>,
     /// Invocation-local advertised amount; never payment authority or learned data.
     initial_price: Option<U256>,
 }
@@ -201,17 +203,6 @@ impl PaidClient {
     ) -> Self {
         self.bootstrap_demand = Some((store, pool));
         self
-    }
-
-    pub(crate) fn is_bootstrap_participant(&self) -> bool {
-        self.bootstrap.is_some() || self.bootstrap_demand.is_some()
-    }
-
-    pub(crate) fn bootstrap_handoff_limit(&self, effective: &Self) -> Option<U256> {
-        let bootstrap = self.bootstrap.as_ref()?;
-        let limit = self.managed.as_ref()?.payment_limit();
-        (Arc::ptr_eq(bootstrap, effective.managed.as_ref()?) && limit > bootstrap.payment_limit())
-            .then_some(limit)
     }
 
     pub(crate) fn without_bootstrap(mut self) -> Self {
@@ -288,6 +279,7 @@ impl PaidClient {
             managed: None,
             bootstrap: None,
             bootstrap_demand: None,
+            metadata_payer: None,
             initial_price: None,
         }
     }
@@ -312,6 +304,7 @@ impl PaidClient {
             managed: Some(pool),
             bootstrap: None,
             bootstrap_demand: None,
+            metadata_payer: None,
             initial_price: None,
         }
     }
@@ -337,6 +330,7 @@ impl PaidClient {
             managed: None,
             bootstrap: None,
             bootstrap_demand: None,
+            metadata_payer: None,
             initial_price: None,
         }
     }
@@ -365,16 +359,10 @@ impl PaidClient {
         }
         Ok(changes)
     }
-    pub(crate) async fn discovery_dependency(
-        &self,
-        require_destination: bool,
-    ) -> Result<(bool, bool)> {
+    pub(crate) async fn discovery_requires_creation(&self) -> Result<bool> {
         match &self.managed {
-            Some(pool) => {
-                pool.discovery_dependency(self.bootstrap.as_deref(), require_destination)
-                    .await
-            }
-            None => Ok((false, false)),
+            Some(pool) => pool.discovery_requires_creation().await,
+            None => Ok(false),
         }
     }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {

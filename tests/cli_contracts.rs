@@ -1592,7 +1592,7 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
 }
 
 #[tokio::test]
-async fn bootstrap_warming_opens_only_authorities_used_by_explicit_or_implicit_relay() {
+async fn bootstrap_warming_opens_only_fixed_bootstrap_authority() {
     for explicit in [true, false] {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
@@ -1663,14 +1663,7 @@ GET=[{provider:?}]
         let store = Store::open(&state, &key, &id).unwrap();
         let status = store.status().unwrap();
         let groups: Vec<_> = status.pools.iter().map(|pool| pool.name.as_str()).collect();
-        assert_eq!(
-            groups,
-            if explicit {
-                vec!["participant"]
-            } else {
-                vec!["bootstrap", "participant"]
-            }
-        );
+        assert_eq!(groups, vec!["bootstrap"]);
         assert!(store.funding_jobs().unwrap().is_empty());
     }
 }

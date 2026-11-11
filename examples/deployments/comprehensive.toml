@@ -23,7 +23,7 @@
 version = 1
 
 # Fund web first. The first valid company/social/toolbox API call records demand;
-# company prepares later at randomized 60-240-second opportunities, without making
+# company prepares later at randomized 30-120-second opportunities, without making
 # calls wait for swaps. Cap refusals still record demand. Even tiny first credit
 # permanently hands later calls to company; depletion never returns them to web.
 # A company group credited in an earlier run uses its own payer immediately.

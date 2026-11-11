@@ -6,23 +6,14 @@ use std::cmp::Ordering;
 pub(crate) enum Authority {
     Unsigned,
     Static(Arc<Payer>),
-    Managed(
-        Arc<crate::rotation::manager::ManagedPool>,
-        Option<Arc<crate::rotation::manager::ManagedPool>>,
-    ),
+    Managed(Arc<crate::rotation::manager::ManagedPool>),
 }
 impl Authority {
-    fn key(&self) -> (u8, usize, usize) {
+    fn key(&self) -> (u8, usize) {
         match self {
-            Self::Unsigned => (0, 0, 0),
-            Self::Static(payer) => (1, Arc::as_ptr(payer) as usize, 0),
-            Self::Managed(pool, bootstrap) => (
-                2,
-                Arc::as_ptr(pool) as usize,
-                bootstrap
-                    .as_ref()
-                    .map_or(0, |pool| Arc::as_ptr(pool) as usize),
-            ),
+            Self::Unsigned => (0, 0),
+            Self::Static(payer) => (1, Arc::as_ptr(payer) as usize),
+            Self::Managed(pool) => (2, Arc::as_ptr(pool) as usize),
         }
     }
 }
@@ -53,14 +44,45 @@ impl Ord for Authority {
 }
 
 impl PaidClient {
-    pub(crate) fn pin_document_authority(&self) -> (Self, Authority) {
+    pub(crate) fn with_metadata_payer(mut self, payer: Arc<Self>) -> Self {
+        self.metadata_payer = Some(payer);
+        self
+    }
+
+    pub(crate) fn has_metadata_payer(&self) -> bool {
+        self.metadata_payer.is_some()
+    }
+
+    pub(crate) fn relay_authority(&self) -> Self {
+        let purpose = self.relay_purpose;
         let mut client = self.clone();
-        let authority = if let Some(payer) = &self.payer {
+        if !matches!(purpose, crate::discovery_relay::Purpose::ApiRequests)
+            && let Some(payer) = &self.metadata_payer
+        {
+            client.payer = payer.payer.clone();
+            client.managed = payer.managed.clone();
+            client.cover = payer.cover.clone();
+            client.unavailable = payer.unavailable;
+            client.unsigned_only = payer.unsigned_only;
+            client.bootstrap = None;
+            client.bootstrap_demand = None;
+        }
+        client.metadata_payer = None;
+        client.relay_purpose = purpose;
+        client
+    }
+
+    pub(crate) fn pin_document_authority(&self) -> (Self, Authority) {
+        let mut client = self
+            .clone()
+            .with_relay_purpose(crate::discovery_relay::Purpose::ProviderMetadata)
+            .relay_authority();
+        let authority = if let Some(payer) = &client.payer {
             let payer = payer.read().expect("payer lock poisoned").clone();
             client.payer = Some(Arc::new(RwLock::new(payer.clone())));
             Authority::Static(payer)
-        } else if let Some(pool) = &self.managed {
-            Authority::Managed(pool.clone(), self.bootstrap.clone())
+        } else if let Some(pool) = &client.managed {
+            Authority::Managed(pool.clone())
         } else {
             Authority::Unsigned
         };

@@ -22,7 +22,7 @@ pub struct Observation {
 tokio::task_local! {
     static OBSERVATIONS: RefCell<BTreeMap<String, Observation>>;
 }
-pub(super) fn collecting() -> bool {
+pub(crate) fn collecting() -> bool {
     OBSERVATIONS.try_with(|_| ()).is_ok()
 }
 pub(super) async fn capture<T>(future: impl Future<Output = T>) -> (T, Vec<Observation>) {

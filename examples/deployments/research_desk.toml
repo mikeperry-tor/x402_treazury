@@ -43,7 +43,7 @@ version = 1
 
 # Prepare general first; other groups activate only on a validated API invocation,
 # including a free response or cache hit. Calls do not wait for swaps. Initial
-# funding opportunities are independently drawn from 60-240 seconds until credit.
+# funding opportunities are independently drawn from 30-120 seconds.
 # Previously credited groups route directly; depletion never returns to general.
 # Comment out the entire table for ordinary funding and separate groups from the
 # beginning; this does not move funds or erase historical links.

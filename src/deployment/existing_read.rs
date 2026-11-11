@@ -22,13 +22,17 @@ impl ExistingRead {
             .get(listener)
             .filter(|server| crate::discovery::policy::EndpointPolicy::from(*server).management())
             .context("provider_management_disabled")?;
-        let name = listener
-            .wallet
-            .as_deref()
+        let name = config
+            .wallet_bootstrap
+            .as_ref()
+            .map(|policy| policy.bootstrap_group.as_str())
+            .or(listener.wallet.as_deref())
             .context("provider management wallet unavailable")?;
+        let managed = crate::rotation::assignment::managed_profiles(config);
         let wallet = config
             .wallets
             .get(name)
+            .or_else(|| managed.get(name).copied())
             .context("provider management wallet unavailable")?;
         match wallet {
             WalletConfig::Static {
@@ -45,7 +49,10 @@ impl ExistingRead {
                     owner: None,
                 })
             }
-            WalletConfig::ZcashRotation { .. } => {
+            WalletConfig::ZcashRotation {
+                max_api_payment_usdc,
+                ..
+            } => {
                 let treasury = config
                     .treasury
                     .as_ref()
@@ -64,31 +71,7 @@ impl ExistingRead {
                     crate::rotation::store::TreasuryNetwork::Mainnet,
                 )
                 .await?;
-                let destination = store.advisory_pools(&[name.to_owned()])?;
-                let credited = destination
-                    .first()
-                    .map(|id| store.has_initial_credit(id))
-                    .transpose()?
-                    .unwrap_or(false);
-                let effective = config
-                    .wallet_bootstrap
-                    .as_ref()
-                    .filter(|policy| {
-                        !credited && policy.deferred_groups.iter().any(|group| group == name)
-                    })
-                    .map_or(name, |policy| policy.bootstrap_group.as_str());
-                let profiles = crate::rotation::assignment::managed_profiles(config);
-                let WalletConfig::ZcashRotation {
-                    max_api_payment_usdc,
-                    ..
-                } = profiles
-                    .get(effective)
-                    .copied()
-                    .context("effective documentation wallet unavailable")?
-                else {
-                    anyhow::bail!("effective documentation wallet must be managed")
-                };
-                let pools = store.advisory_pools(&[effective.to_owned()])?;
+                let pools = store.advisory_pools(&[name.to_owned()])?;
                 ensure!(
                     pools.len() == 1,
                     "existing managed documentation pool unavailable"
@@ -200,10 +183,10 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn bootstrap_document_read_opens_only_existing_effective_authority() {
+    async fn bootstrap_document_read_stays_on_existing_bootstrap_after_destination_credit() {
         use crate::rotation::store::{AllocationKind, Store};
         use alloy_primitives::U256;
-        for (credited, generated) in [(false, false), (true, false), (false, true)] {
+        for (credited, generated) in [(false, false), (true, false), (false, true), (true, true)] {
             let dir = tempfile::tempdir().unwrap();
             let state = dir.path().join("state");
             let key = dir.path().join("key");
@@ -214,10 +197,9 @@ mod tests {
             } else {
                 "bootstrap"
             };
-            let effective = if credited { "selected" } else { bootstrap };
             let pool = store
                 .ensure_capacity_group(
-                    effective,
+                    bootstrap,
                     &crate::rotation::test_capacity::small_reserve("2"),
                     Some(U256::from(1_000_000)),
                     0,
@@ -231,6 +213,24 @@ mod tests {
                 .record_credit(&job.wallet_id, "1", "fixture", 100)
                 .unwrap();
             let expected = crate::network::IsolationId::evm(&job.recipient).unwrap();
+            if credited {
+                let destination = store
+                    .ensure_capacity_group(
+                        "selected",
+                        &crate::rotation::test_capacity::small_reserve("2"),
+                        Some(U256::from(1_000_000)),
+                        0,
+                    )
+                    .unwrap();
+                let id = store
+                    .allocate_capacity_kind(&destination, AllocationKind::Small, true)
+                    .unwrap()
+                    .unwrap();
+                let job = store.funding_job(&id).unwrap().unwrap();
+                store
+                    .record_credit(&job.wallet_id, "1000000", "fixture", 100)
+                    .unwrap();
+            }
             drop(store);
             let mut cfg = config();
             for name in ["selected", "bootstrap"] {
@@ -288,15 +288,20 @@ mod tests {
             );
             owner.close().await.unwrap();
             let store = Store::open(&state, &key, &id).unwrap();
-            assert_eq!(store.funding_jobs().unwrap().len(), 1);
-            assert!(!store.has_bootstrap_demand(&pool).unwrap());
-            assert!(
-                store
-                    .advisory_pools(&[if credited { "bootstrap" } else { "selected" }.into()])
-                    .unwrap()
-                    .is_empty(),
-                "document read must not declare the other group"
+            assert_eq!(
+                store.funding_jobs().unwrap().len(),
+                if credited { 2 } else { 1 }
             );
+            assert!(!store.has_bootstrap_demand(&pool).unwrap());
+            if !credited {
+                assert!(
+                    store
+                        .advisory_pools(&["selected".into()])
+                        .unwrap()
+                        .is_empty(),
+                    "document read must not declare the other group"
+                );
+            }
         }
     }
 

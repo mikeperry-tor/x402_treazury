@@ -83,7 +83,9 @@ impl Fixture {
         }
     }
     fn client(&self) -> PaidClient {
-        PaidClient::managed(self.destination.clone()).with_bootstrap(self.bootstrap.clone())
+        PaidClient::managed(self.destination.clone())
+            .with_bootstrap(self.bootstrap.clone())
+            .with_metadata_payer(Arc::new(PaidClient::managed(self.bootstrap.clone())))
     }
     async fn credit(&self, amount: u64) {
         let job = self.job.clone();
@@ -302,9 +304,13 @@ async fn participant_help_reads_healthy_origin_while_wallet_store_is_busy() {
         .unwrap()
         .remove(0);
     tool.help_url = Some(format!("https://{address}/help"));
+    let client = fixture
+        .client()
+        .with_metadata_payer(Arc::new(PaidClient::unavailable(
+            crate::rotation::error::AdmissionError::WalletNotReady("fixture metadata unavailable"),
+        )));
     let help =
-        crate::catalog_state::bind(vec![(tool, fixture.client(), format!("https://{address}"))])
-            .remove(0);
+        crate::catalog_state::bind(vec![(tool, client, format!("https://{address}"))]).remove(0);
     let (entered, waiting) = tokio::sync::oneshot::channel();
     let (release, resume) = std::sync::mpsc::channel();
     let worker = tokio::spawn({
@@ -336,6 +342,124 @@ async fn participant_help_reads_healthy_origin_while_wallet_store_is_busy() {
     assert!(!fixture.demand().await);
     server.abort();
     drop(help);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn metadata_relays_stay_on_bootstrap_while_api_relay_uses_captured_destination() {
+    use crate::{
+        discovery_relay::{self, Purpose, document},
+        network::acquisition::{Failure, FallbackPolicy},
+    };
+    let fixture = Fixture::new("1", "1");
+    let bootstrap = fixture
+        .bootstrap
+        .candidate()
+        .await
+        .unwrap()
+        .address
+        .to_ascii_lowercase();
+    let destination = fixture.job.recipient.to_ascii_lowercase();
+    fixture.credit(1_000_000).await;
+    let target = "https://example.com/openapi.json";
+    let (relay, calls, server) = discovery_relay::tests::fixture(json!({
+        "url":target, "method":"GET", "statusCode":200,
+        "headers":{"content-type":"text/plain"}, "body":"metadata", "redirectChain":[], "error":null
+    }), false, false).await;
+    let search = Arc::new(
+        (*discovery_relay::tests::search_relay(&relay))
+            .clone()
+            .with_policy(discovery_relay::Policy {
+                api_requests: true,
+                ..Default::default()
+            }),
+    );
+    let client = fixture
+        .client()
+        .with_document_relay(Some(search.clone()))
+        .capture_effective(false)
+        .await
+        .unwrap();
+    let failure = || {
+        Failure::status(
+            anyhow::anyhow!("fixture origin unavailable"),
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            &reqwest::header::HeaderMap::new(),
+            FallbackPolicy::BlockingFailures,
+        )
+    };
+    let options = document::Options::new(
+        target,
+        crate::network::IsolationId::discovery(target).unwrap(),
+        4096,
+        "max_help_bytes",
+    );
+    let result = document::prepare_fallback(&search, &options)
+        .unwrap()
+        .unwrap()
+        .acquire(&client, failure())
+        .await
+        .unwrap();
+    assert_eq!(result.body.as_slice(), b"metadata");
+    search
+        .fetch(
+            client.clone().with_relay_purpose(Purpose::SourceDiscovery),
+            target,
+            |_| Ok(()),
+            None,
+        )
+        .await
+        .unwrap();
+    let request = reqwest::Request::new(reqwest::Method::GET, target.parse().unwrap());
+    discovery_relay::api::fallback(
+        &client,
+        &request,
+        failure(),
+        &SubmissionProgress::default(),
+        &[],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        calls.payers.lock().unwrap().as_slice(),
+        &[bootstrap.clone(), bootstrap.clone(), destination.clone()]
+    );
+    assert!(!fixture.demand().await);
+
+    let unavailable = PaidClient::unavailable(
+        crate::rotation::error::AdmissionError::WalletNotReady("fixture destination unavailable"),
+    )
+    .with_metadata_payer(Arc::new(PaidClient::managed(fixture.bootstrap.clone())))
+    .with_document_relay(Some(search.clone()));
+    document::fallback(&unavailable, &options, failure())
+        .await
+        .unwrap();
+    assert_eq!(calls.payers.lock().unwrap().last().unwrap(), &bootstrap);
+    assert!(
+        discovery_relay::api::fallback(
+            &unavailable,
+            &request,
+            failure(),
+            &SubmissionProgress::default(),
+            &[]
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(calls.signed.load(std::sync::atomic::Ordering::SeqCst), 4);
+    let direct = PaidClient::managed(fixture.destination.clone()).with_document_relay(Some(search));
+    document::fallback(&direct, &options, failure())
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.payers.lock().unwrap().last().unwrap(),
+        &destination,
+        "without bootstrap policy metadata retains its destination payer"
+    );
+    assert_eq!(calls.signed.load(std::sync::atomic::Ordering::SeqCst), 5);
+    relay.drain().await;
+    server.abort();
+    drop((relay, client, unavailable, direct));
     fixture.close().await;
 }
 

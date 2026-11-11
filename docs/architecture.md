@@ -263,8 +263,9 @@ failures. Consumer validation promotes only accepted origin content and preserve
 possible fees through cache/registry publication, qualification and cleanup. `src/discovery_relay/` shares one ordered
 method-specific relay traversal with small provider-owned encoders/decoders.
 Bootstrap uses complete pinned local schemas rather than another network fetch.
-It resolves one static wallet per source (or an explicit override); Coinbase uses
-the authenticated endpoint payer. The relay's ordinary paid client participates
+With bootstrap policy, metadata and built-in discovery relay fees use the fixed
+bootstrap group. Otherwise static discovery resolves one wallet per source or
+an explicit override, and Coinbase uses the authenticated endpoint payer. The relay's ordinary paid client participates
 in unsigned recovery while recursive fallback is disabled.
 
 Static relay exchanges serialize per provider across wallets, retaining that
@@ -293,8 +294,9 @@ The operator accepts the relay's remote redirect/public-destination enforcement
 and plaintext integrity. Relay TLS does not establish target TLS or content
 authenticity. Target credentials and payment signatures remain excluded.
 
-Document relay calls retain the existing source-bound payer and owner and use
-`provider_metadata` permission. Trusted caller purpose selects `source_discovery`
+Document relay calls retain their acquisition owner and use `provider_metadata`
+permission. Their fixed bootstrap payer is independent of API cutover; deployments
+without bootstrap policy retain source-bound payment authority. Trusted caller purpose selects `source_discovery`
 for built-in directory/Coinbase calls and `api_requests` for actual API calls. The
 shared immutable relay context retains all preferences; callers do not replace it
 with category-specific clients or caches. Existing help/import
@@ -306,8 +308,9 @@ retains normal explicit retry behavior. Source-add ownership spans fetching thro
 validated registry/catalog publication. Revision/removal fences still govern publication.
 
 CLI refresh tries the unsigned origin first. Only a representable eligible relay
-request loads the saved registration owner's selected static key or authenticated
-existing managed store/pool and Base transport. That narrow owner starts no SDK,
+request loads the existing bootstrap metadata group under bootstrap policy.
+Otherwise it loads the saved registration owner's selected static key or
+authenticated existing managed store/pool and Base transport. That narrow owner starts no SDK,
 wallet allocation or funding worker; it drains and closes after success or failure.
 Missing document payment authority leaves origin retrieval available. These paths
 create no target-signing or uncertain-outcome replay authority.
@@ -633,22 +636,19 @@ survive rename, restart and removal/re-addition without a deployment-phase ledge
 Qualification retains its reviewed named allocations and does not substitute
 bootstrap wallets.
 
-Implicit discovery payers follow the same source assignment and may capture existing
-bootstrap inventory without creating participant demand. An explicit
-`relay_fallback.wallet` keeps that selected authority. Deferred catalog waits
-subscribe to both possible groups before checking current effective readiness;
-participant credit can hand off a waiting acquisition without a lost wake. A started
-acquisition retains its captured payer, shared in-flight ownership and possible
-fees. A deferred catalog relay whose compatible offer was refused unsigned
-under the bootstrap cap can wait for handoff when the offer fits the destination
-cap and no earlier authorization might have charged. Compatible catalog and
-pricing acquisitions share that refusal while they still use bootstrap.
-Pricing returns its refusal without waiting for funding. Destination credit
-lets a later shared acquisition use the new authority. Document
-cache identities retain both destination and configured bootstrap authority
-where routing is still deferred; completed content remains reusable.
-Offline document reads select only existing effective managed authority, including
-explicitly named generated groups, without declaring or activating participants.
+With bootstrap policy enabled, metadata and directory relay fees permanently use
+the bootstrap group. This includes static catalogs/pricing and runtime help,
+imports and probes. Its cap and inventory apply independently of API cutover,
+including when a legacy static relay wallet override is configured. Off-by-default
+API/raw fallback retains the API call's captured authority. Non-bootstrap
+deployments and qualification preserve their named authority.
+Deferred catalog waits subscribe to bootstrap capacity before checking readiness;
+ordinary funding runs independently of catalogs. Price refusals remain terminal
+cached outcomes under that fixed payer. A started acquisition retains its captured
+payer, shared in-flight ownership and possible fees. Document compatibility keys
+retain the actual metadata payer and existing policy/limits. Offline document
+reads open only the existing bootstrap metadata group, including explicitly named
+generated groups, without declaring or activating participants.
 The advisory startup funding announcement evaluates effective groups and caps in
 one Store projection and never waits for every dormant participant reserve.
 

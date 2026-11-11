@@ -37,7 +37,9 @@ definitions retain recommendation metadata without enabling recommendation selec
 raw calls retain their separate authority.
 See [catalog selection](configuration.md) for composition and stale-advice behavior.
 
-Wallet-owned documentation discovery retains the selected wallet identity.
+With bootstrap metadata policy, unsigned documentation discovery can use URL-bound
+discovery isolation without loading a wallet. Otherwise wallet-owned documentation
+discovery retains the selected wallet identity.
 Participating transport scopes distinguish origins; common API credentials, content
 and timing remain service-visible correlation. This does not allocate another
 wallet or grant payment authority.
@@ -178,9 +180,10 @@ known OpenAPI URLs can use `providers_add_remote` when remote management is enab
 MCP/unknown protocols remain metadata only. A published usage-document URL can be
 read with `provider_details_remote(documentation_url=...)` when available.
 
-Public Coinbase reads are unsigned and use an existing endpoint wallet's
-documentation identity without allocation, funding or observation. Missing
-identity fails that workflow. Direct mode uses one origin attempt; Tor adds
+Public Coinbase reads are unsigned. With bootstrap metadata policy, origin reads
+use URL-bound discovery isolation and need no wallet lookup. Otherwise they use
+an existing endpoint wallet's documentation identity without allocation, funding
+or observation; missing identity fails that workflow. Direct mode uses one origin attempt; Tor adds
 `network.tor_isolation_retries` eligible fresh-isolation retries (default 2), with
 the shared eligibility and `Retry-After` policy, including terminal delay before
 fallback. Only complete valid search JSON may promote an origin scope. HTTP 206,
@@ -196,8 +199,9 @@ the directory lookup is discovery and later documents/probes are metadata.
 Trusted code selects categories; agent arguments, method or hostname cannot.
 With no relay section all requests remain origin-only.
 
-Relays use the endpoint's existing wallet regardless of a static relay wallet
-override, with ordinary payment admission, journaling and insufficient-funds
+With bootstrap policy, metadata and discovery relay fees use its bootstrap group.
+Otherwise runtime relays use the endpoint's existing wallet regardless of a static
+relay wallet override, with ordinary payment admission, journaling and insufficient-funds
 traversal. Each authorization may charge; uncertain paid failure grants no replay.
 The selected relay sees the query URL and supplies target content/status/headers
 under the configured direct/Tor policy and relay trust boundary. Origin challenges
@@ -748,9 +752,11 @@ Help caches and active import coalescing include retained payer authority and
 effective document policy. A static help binding pins the exact payer independently
 of later ordinary API payer replacement. Help, imports, and pricing can fetch
 public documents from their origins without resolving a managed payer. An
-eligible paid relay captures its effective pool before dispatch, without
-activating funding. Routing policies retain both destination and bootstrap
-identity in compatibility keys. Existing in-flight acquisitions and cached
+eligible paid relay captures its payer before dispatch, without activating
+funding. With bootstrap policy, metadata and built-in discovery relay fees stay
+on the bootstrap group across API cutover. API/raw relay fallback keeps its
+captured API payer. Compatibility keys retain the actual metadata authority.
+Existing in-flight acquisitions and cached
 possibly-paid outcomes keep their accepted authority through later handoff. Accepted help/add/refresh work survives waiter cancellation through
 validation and cache/source publication. Shared failures preserve typed bounds and
 possible-charge facts. Possible-paid help failures remain cached so joined waiters
@@ -934,8 +940,10 @@ succeeds without saving the registry. Removal performs no network or wallet work
 
 Generic refresh fetches and validates new bytes through the configured network
 policy without pricing probes. Origin retrieval needs no wallet credentials. Only
-when an eligible relay acquisition is necessary does refresh load the saved owner's
-selected existing payer. Static mode reads only that profile's key; managed mode
+when an eligible relay acquisition is necessary does refresh load its existing
+metadata payer. Bootstrap policy selects its bootstrap group, including generated
+groups. Otherwise refresh uses the saved owner's selected payer. Static mode
+reads only that profile's key, and managed mode
 opens the authenticated existing store and named pool with Base transport, without
 SDK reconstruction, pool/wallet allocation or funding workers. Unrepresentable
 relay requests do not load a key or store. The owner remains alive through registry

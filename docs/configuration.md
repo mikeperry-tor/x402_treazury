@@ -109,35 +109,23 @@ cannot select policy or owners. Inventory exhaustion never makes a call wait for
 funding, and no cross-group retry is introduced.
 
 Dormant participants receive no new allocations in serving. First use wakes the
-existing background owner and arms an independent uniform integer 60–240-second
-opportunity; both enabled slots may fill then. Calls and unrelated completions do
-not move an armed due time. Subsequent rearming after first credit uses ordinary
-30–120 seconds without advancing an already armed opportunity. Restart retains
+existing background owner and arms an independent uniform integer 30–120-second
+opportunity; both enabled slots may fill then. Calls, credit and unrelated completions
+do not move an armed due time. All eligible groups use this same interval. Restart retains
 UUID-bound demand/credit and redraws volatile intervals. Bootstrap/nonparticipants
 keep ordinary funding. Accepted work retains its original recovery ownership;
 `auto_fund=false` still prevents new funding. Removing the table or a participant
 restores ordinary routing/allocation; re-adding preserves historical facts.
-Implicit discovery may use bootstrap inventory without activation; explicit relay
-wallet choices retain their selected authority and permissions. If an explicit
-relay wallet is a dormant participant and a catalog needs the relay,
-startup reports that it needs first-use activation. Invoke an API bound to that
-group on an independently reachable endpoint, or configure a relay wallet with
-available capacity and restart. Explicit bootstrap prepares only the configured
-bootstrap group. When a catalog needs a relay group with no restorable
-wallet, credit or first-use demand, startup checks whether any endpoint can
-activate that group independently of the catalog. If the configured bindings and
-endpoint capabilities provide no such route, startup reports a catalog failure.
-An optional source is omitted for that run, releasing its waiting endpoints
-once their other catalogs have settled.
-Filtered tools and aliases of the same blocked download cannot supply an
-activation route. Independent catalog downloads can still publish usable tools
-while discovery waits. The catalog owner reassesses these routes when downloads
-settle or enter a first-use wait. Catalogs waiting on one another for first use
-cannot supply an activation route. Optional blockers settle before required
-failures, allowing their omission to expose a usable endpoint. Before failing,
-the relay rechecks the relevant wallet facts and its current route decision.
-This also applies when an implicit relay needs the destination's higher payment ceiling.
-If the destination still needs a wallet and new managed funding is unavailable,
+Paid metadata relays permanently use the bootstrap group, including catalogs,
+pricing, help, imports, probes and built-in directory discovery. This takes
+precedence over `relay_fallback.wallet` while bootstrap policy is enabled.
+The bootstrap group's payment cap applies. A cap refusal is terminal for that
+acquisition. Metadata does not activate participants or switch payer at API cutover.
+Off-by-default API/raw relay fallback retains the API call's captured group.
+Serving catalogs can wait for ordinary bootstrap funding and resume on its
+capacity notifications. Bootstrap funding is independent of catalogs and first-use
+demand. Explicit bootstrap prepares only the configured bootstrap group.
+If a relay payer still needs a wallet and new managed funding is unavailable,
 the catalog reports that operator action is required.
 Catalog readiness and the advisory startup announcement consider effective
 inventory and caps.
@@ -2149,7 +2137,7 @@ search-result metadata is terminal success.
 source_discovery = true # directory/resource searches; default true
 api_requests = false # actual API data; default false
 provider_metadata = true # catalogs/help/imports/probes; default true
-# wallet = "web" # optional static payer override
+# wallet = "web" # static payer override outside bootstrap policy
 # sources = ["social"] # optional static source selection; empty selects all
 
 [relay_fallback.relays]
@@ -2196,7 +2184,9 @@ These defaults apply only when the section exists. Without it no paid relay is
 created. Disabled preferences leave origin retrieval available but authorize no
 relay request or signature. `serve`, `warm`, `on_demand` and `search` are rejected
 configuration keys. Method lists, formats and static `wallet`/`sources` bindings
-remain separate settings; runtime reads retain the authenticated endpoint/source's
+remain separate settings. With bootstrap policy, metadata and directory relay
+fees use its bootstrap group. API/raw relay fees retain their captured API payer.
+Without bootstrap policy, runtime reads use their authenticated endpoint/source's
 payer. Enabling metadata permits paid catalog fallback during ordinary serving and
 explicit non-direct warming. Inspection remains unsigned, `--direct` warming
 bypasses relays, and no warming starts automatically.
@@ -2237,8 +2227,7 @@ A relayed `402` never reaches target signing. Origin HTTP remains no-follow;
 configured relays can follow redirects under the trust boundary below. Accepted
 work retains fetching, validation and cache/source publication after disconnect.
 Shared document cache identities retain the effective document policy and the
-pinned static payer or configured managed routing authority. Deferred routing
-keeps both the destination and bootstrap in the key. Each accepted exchange
+pinned static payer or fixed managed metadata authority. Each accepted exchange
 captures the effective payer. Possible charges survive parsing, publication and
 cleanup errors.
 
@@ -2255,7 +2244,10 @@ counter is added. Local bounds/policy failures are terminal.
 
 A relayed challenge never authorizes target signing.
 
-Without `wallet`, each static source uses an effective assigned wallet profile.
+With bootstrap policy, every eligible static source uses the bootstrap group for
+metadata relay fees, including after destination credit and with an explicit
+`relay_fallback.wallet`. Without that policy or `wallet`, each static source uses
+an effective assigned wallet profile.
 An explicit source wallet takes precedence through normal binding resolution.
 A shared source chooses the highest SHA-256 score of the JSON tuple
 `["discovery-wallet-v1", source_id, wallet_name]`, with wallet name breaking ties.
@@ -2285,7 +2277,7 @@ Ordinary managed serving binds listeners before funding. Static fallback waits
 on existing eligible-payer notifications without allocating funds or consuming
 network attempts. Endpoints with `wait_for_catalogs = false` keep available tools
 callable during discovery. Paid warming opens the resolved relay wallets and the
-bootstrap group when an implicit participant relay can use it. An explicit relay
+bootstrap group when bootstrap policy is enabled. Otherwise an explicit relay
 wallet keeps its selected authority. Warming denies new funding and starts no
 workers. Prepare the chosen payer before warming. `--direct` warming stays
 unsigned and bypasses the relay. Ordinary

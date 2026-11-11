@@ -192,7 +192,11 @@ impl Manager {
                     return Ok(output);
                 }
             };
-            let identity = owned_client.documentation_identity().await.ok();
+            let identity = if owned_client.has_metadata_payer() {
+                None
+            } else {
+                owned_client.documentation_identity().await.ok()
+            };
             // Four in-flight requests bound sockets and document buffers per lookup.
             let probes: Vec<_> = candidates.into_iter().enumerate().map(|(index, (url, kind))| {
                 let identity = identity.as_ref();
@@ -236,7 +240,11 @@ impl std::fmt::Display for RejectedDocument {
 impl std::error::Error for RejectedDocument {}
 
 async fn read_document(client: &PaidClient, url: &str) -> Result<Value> {
-    let identity = client.documentation_identity().await.ok();
+    let identity = if client.has_metadata_payer() {
+        None
+    } else {
+        client.documentation_identity().await.ok()
+    };
     let options = options(
         client,
         identity.as_ref(),

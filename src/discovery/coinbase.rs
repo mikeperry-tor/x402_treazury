@@ -132,13 +132,17 @@ impl Manager {
             }
         };
         import::endpoint(url.as_str()).context("coinbase_search policy rejected")?;
-        let client = self.source_client(owner)?.capture_effective(false).await?;
+        let client = self.source_client(owner)?;
         let manager = self.clone();
         let owned_client = client.clone();
         let listener = owner.to_owned();
         client.run_owned(async move {
             let result = async {
-            let identity = owned_client.documentation_identity().await.map_err(|_| anyhow::anyhow!("coinbase_search identity unavailable"))?;
+            let identity = if owned_client.has_metadata_payer() {
+                network::IsolationId::discovery(url.as_str())?
+            } else {
+                owned_client.documentation_identity().await.map_err(|_| anyhow::anyhow!("coinbase_search identity unavailable"))?
+            };
             let factory = network::global();
             let selected = factory.http_participating(&identity, url.as_str(), import::read_timeout(None), true, owned_client.transport())
                 .map_err(|_| anyhow::anyhow!("coinbase_search transport selection failed"))?;
@@ -150,7 +154,7 @@ impl Manager {
                         return Err(failure.error.context("coinbase_search origin failed; fallback unavailable"));
                     };
                     tracing::info!("Configured paid relay selected as fallback for the Coinbase directory search");
-                    let response = relay.fetch(owned_client, url.as_str(), validate_response, failure.retry_after).await
+                    let response = relay.fetch(owned_client.with_relay_purpose(crate::discovery_relay::Purpose::SourceDiscovery), url.as_str(), validate_response, failure.retry_after).await
                         .context("coinbase_search fallback failed; do not automatically repeat: payment or side effects may have occurred")?;
                     let paid = response.payment_may_have_occurred;
                     let value = crate::payment::with_payment_context(paid, parse_response(&response.body))?;

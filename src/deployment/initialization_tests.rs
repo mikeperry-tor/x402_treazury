@@ -192,6 +192,94 @@ sources=[]
 }
 
 #[tokio::test]
+async fn late_static_wallet_help_uses_bootstrap_metadata_after_catalog_initialization() {
+    use crate::discovery_relay::{self, document};
+    use crate::network::acquisition::{Failure, FallbackPolicy};
+    use crate::rotation::store::AllocationKind;
+    let dir = tempfile::tempdir().unwrap();
+    let owner = crate::treasury::Treasury::create(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        2_000_000,
+        Some(zeroize::Zeroizing::new(SEED.into())),
+    )
+    .await
+    .unwrap();
+    let expected = owner
+        .store_handle()
+        .call(|s| {
+            let pool = s.ensure_capacity_group(
+                "unselected",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                Some(alloy_primitives::U256::from(5_000_000)),
+                0,
+            )?;
+            let id = s
+                .allocate_capacity_kind(&pool, AllocationKind::Small, true)?
+                .unwrap();
+            let job = s.funding_job(&id)?.unwrap();
+            s.record_credit(&job.wallet_id, "1000000", "fixture", 100)?;
+            Ok(job.recipient.to_ascii_lowercase())
+        })
+        .await
+        .unwrap();
+    owner.close().await.unwrap();
+    write_spec(dir.path());
+    let path = dir.path().join("deployment.toml");
+    let provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
+    std::fs::write(&path, format!("{}\n[wallets.late]\nmode='static'\nprivate_key_env='LATE'\n[wallet_bootstrap]\nbootstrap_group='unselected'\ndeferred_groups=['selected']\n[relay_fallback]\nrelays.GET=['{}']\n",
+        managed_config().replace("spec='spec.json'", "spec='spec.json'\nwallet='late'"), provider.display())).unwrap();
+    let mut env = env();
+    env.insert("LATE".into(), format!("{:064x}", 7));
+    let mut deployment =
+        Deployment::load_for_serving_with_relay(&path, &env, FundingRestriction::Ordinary)
+            .await
+            .unwrap();
+    assert!(
+        !deployment
+            .initialized
+            .as_ref()
+            .unwrap()
+            .wallets
+            .contains_key("late")
+    );
+    deployment
+        .complete_reused_wallets(&env, FundingRestriction::Ordinary)
+        .await
+        .unwrap();
+    let initialized = deployment.initialized.take().unwrap();
+    let (client, _) = initialized.wallets["late"].pin_document_authority();
+    assert!(client.shares_profile_with(&initialized.wallets["unselected"]));
+    assert!(!initialized.wallets["late"].shares_profile_with(&initialized.wallets["unselected"]));
+    let target = "https://example.com/help";
+    let (relay, calls, task) = discovery_relay::tests::fixture(serde_json::json!({"url":target,"method":"GET","statusCode":200,"headers":{},"body":"help","redirectChain":[],"error":null}),false,false).await;
+    let client = client.with_document_relay(Some(discovery_relay::tests::search_relay(&relay)));
+    let options = document::Options::new(
+        target,
+        crate::network::IsolationId::discovery(target).unwrap(),
+        4096,
+        "max_help_bytes",
+    );
+    document::fallback(
+        &client,
+        &options,
+        Failure::status(
+            anyhow::anyhow!("fixture origin failed"),
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            &Default::default(),
+            FallbackPolicy::BlockingFailures,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.payers.lock().unwrap().as_slice(), &[expected]);
+    relay.drain().await;
+    task.abort();
+    drop((client, relay, deployment));
+    initialized.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn managed_initialization_restricts_before_selected_pool_setup_and_releases_owner() {
     for (auto_fund, restriction) in [
         (false, FundingRestriction::Ordinary),

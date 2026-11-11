@@ -350,7 +350,7 @@ exit status. Add `--json` for the versioned machine-readable result, including
 `balance_estimate_usdc` fields. The JSON result separates current serving/inventory readiness from
 completion of captured work (see [capacity output](#versioned-capacity-output)).
 Bootstrap allocates its captured vacant claims promptly, without ordinary serving's
-30–120-second opportunities, participant 60–240-second opportunities or proactive
+30–120-second opportunities or proactive
 rotation of captured payers. It observes
 those original obligations without chasing replacement generations.
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
@@ -379,7 +379,7 @@ relay discovery continue under the retained owner; relay discovery
 waits for its assigned payer without allocating wallets itself. Serving does not
 wait for bootstrap completeness. With bootstrap policy, dormant participants wait
 for a validated API invocation, then independently schedule initial opportunities
-at 60–240 seconds; they use the bootstrap group's inventory and cap until their
+at 30–120 seconds; API payments use the bootstrap group's inventory and cap until their
 first positive initial credit. Serving also schedules nonparticipating groups on
 ordinary 30–120-second opportunities, although the explicit setup command selects
 only the bootstrap group. With no table, every declared managed group uses the
@@ -389,8 +389,9 @@ work can extend actual waiting. Exhaustion adds no emergency refill.
 explicit bootstrap fail, while accepted operations remain observed; qualification
 funding restrictions retain their existing lifecycle. `catalog warm` uses
 existing payer capacity and denies new funding for the command. Prepare the
-effective relay payer first. With bootstrap policy, an explicit relay wallet
-outside the bootstrap group needs its own capacity. See
+effective relay payer first. With bootstrap policy, all metadata relay fees stay
+on its bootstrap group, overriding the legacy static relay wallet preference.
+Stopped-server refresh opens only that existing group. See
 [bootstrap wallet policy](configuration.md#bootstrap-wallet-policy).
 
 `wallet sync`, status, preview and offline initialization never activate
