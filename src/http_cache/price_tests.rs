@@ -353,3 +353,106 @@ async fn accepted_replacements_retire_direct_origin_and_relay_variants_together(
     assert!(ordinary.read().await.is_none());
     assert!(direct.read_primary().await.is_none());
 }
+
+// A deferred FK violation permits every statement to succeed, then fails the
+// actual COMMIT. This checks memory publication rather than an early SQL error.
+fn reject_commit(slot: &Slot, event: &str) {
+    open(&slot.directory).unwrap().execute_batch(&format!(
+        "CREATE TABLE commit_parent(id INTEGER PRIMARY KEY);
+         CREATE TABLE commit_failure(id INTEGER REFERENCES commit_parent(id) DEFERRABLE INITIALLY DEFERRED);
+         CREATE TRIGGER reject_commit AFTER {event} ON entries BEGIN INSERT INTO commit_failure VALUES(1); END;"
+    )).unwrap();
+}
+
+#[tokio::test]
+async fn failed_family_commit_preserves_primary_and_sibling_observations() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path());
+    let primary = slot(&cfg);
+    let sibling = primary.clone().relay("fixture");
+    let first = primary.write(Some(entry(b"old"))).await.unwrap();
+    let second = sibling.write(Some(entry(b"sibling"))).await.unwrap();
+    for hints in [&first, &second] {
+        hints
+            .operation("GET", "/read")
+            .learn(U256::from(7), received().unwrap());
+    }
+    reject_commit(&primary, "INSERT");
+    assert!(
+        primary
+            .replacement()
+            .write(Some(entry(b"new")))
+            .await
+            .is_none()
+    );
+    for (slot, hints, data) in [
+        (&primary, &first, b"old".as_slice()),
+        (&sibling, &second, b"sibling".as_slice()),
+    ] {
+        let saved = slot.read_primary().await.unwrap();
+        assert_eq!(saved.data, data);
+        assert!(Arc::ptr_eq(saved.hints.as_ref().unwrap(), hints));
+        assert_eq!(hints.operation("GET", "/read").get(), Some(U256::from(7)));
+    }
+}
+
+#[tokio::test]
+async fn failed_unchanged_commit_does_not_renew_live_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path());
+    let slot = slot(&cfg);
+    let original = entry(b"same");
+    let expiry = original.metadata.expires;
+    let hints = slot.write(Some(original.clone())).await.unwrap();
+    let key = hints.operation("GET", "/read");
+    key.learn(U256::from(7), received().unwrap());
+    reject_commit(&slot, "UPDATE");
+    let mut renewed = original;
+    renewed.metadata.expires -= 100;
+    assert!(slot.write(Some(renewed)).await.is_none());
+    assert_eq!(hints.state.lock().unwrap().metadata.expires, expiry);
+    assert_eq!(key.get(), Some(U256::from(7)));
+    let saved = slot.read().await.unwrap();
+    assert_eq!(saved.metadata.expires, expiry);
+    assert!(Arc::ptr_eq(saved.hints.as_ref().unwrap(), &hints));
+}
+
+#[tokio::test]
+async fn failed_revision_and_oversize_deletions_preserve_live_observations() {
+    for revision in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let mut cfg = config(root.path());
+        cfg.max_spec_bytes = 4;
+        let original = slot(&cfg);
+        let hints = original.write(Some(entry(b"old"))).await.unwrap();
+        let key = hints.operation("GET", "/read");
+        key.learn(U256::from(7), received().unwrap());
+        reject_commit(&original, "DELETE");
+        if revision {
+            cfg.base_url = Some("https://changed.example".into());
+            slot(&cfg).check_revision().await;
+        } else {
+            open(&original.directory)
+                .unwrap()
+                .execute(
+                    "UPDATE entries SET data=?2 WHERE key=?1",
+                    params![original.key, b"oversized".as_slice()],
+                )
+                .unwrap();
+            assert!(original.read().await.is_none());
+        }
+        assert_eq!(key.get(), Some(U256::from(7)));
+        assert!(Arc::ptr_eq(existing(&original).as_ref().unwrap(), &hints));
+        assert_eq!(
+            open(&original.directory)
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM entries WHERE key=?1",
+                    [&original.key],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+    }
+}

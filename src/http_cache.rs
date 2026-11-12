@@ -533,15 +533,16 @@ impl Slot {
             if !slot.directory.exists() { return Ok(()); }
             let mut db = open(&slot.directory)?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let mut retired = Vec::new();
             if let Some((source, revision)) = &slot.revision {
                 let old: Option<String> = tx.query_row("SELECT revision FROM catalog_revisions WHERE key=?1 AND source=?2", params![slot.key, source], |r| r.get(0)).optional()?;
                 if old.as_ref().is_some_and(|old| old != revision) {
                     tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
-                    retire(&slot);
+                    retired.push(slot.key.clone());
                 }
                 tx.execute("INSERT INTO catalog_revisions SELECT key,?2,?3 FROM entries WHERE key=?1 ON CONFLICT(key,source) DO UPDATE SET revision=excluded.revision", params![slot.key, source, revision])?;
             }
-            tx.commit()?;
+            commit_cache(&slot, tx, retired, None, None)?;
             Ok(())
         }).await;
     }
@@ -601,8 +602,7 @@ impl Slot {
                     "HTTP cache entry exceeds resource limit; discarded, fetching origin"
                 );
                 db.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
-                retire(&slot);
-                db.commit()?;
+                commit_cache(&slot, db, vec![slot.key.clone()], None, None)?;
                 return Ok(None);
             }
             let (metadata, data): (String, Vec<u8>) = db.query_row(
@@ -648,32 +648,32 @@ impl Slot {
             ensure!(slot.directory.parent().is_some_and(Path::is_dir), "cache parent missing");
             let mut db = open(&slot.directory)?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            if slot.replace_family { retire_family(&slot, &tx, entry.is_some())?; }
+            let mut retired = if slot.replace_family { delete_family(&slot, &tx, entry.is_some())? } else { Vec::new() };
             let Some(entry) = entry else {
                 tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
-                retire(&slot);
-                tx.commit()?;
+                retired.push(slot.key.clone());
+                commit_cache(&slot, tx, retired, None, None)?;
                 return Ok((false,None));
             };
             let metadata = serde_json::to_string(&entry.metadata)?;
             let size = metadata.len().saturating_add(entry.data.len());
             if entry.data.len() > slot.limit || metadata.len() > METADATA_LIMIT || size > CAPACITY {
                 tx.execute("DELETE FROM entries WHERE key=?1",[&slot.key])?;
-                retire(&slot);
-                tx.commit()?;
+                retired.push(slot.key.clone());
+                commit_cache(&slot, tx, retired, None, None)?;
                 tracing::warn!(limit_bytes = slot.limit.min(CAPACITY), limit_metadata_bytes = METADATA_LIMIT, "HTTP cache entry exceeds resource limit; complete response used without persistence");
                 return Ok((false,None));
             }
             let unchanged = !slot.force_refresh && tx.query_row("SELECT data=?2 AND EXISTS(SELECT 1 FROM catalogs WHERE catalogs.key=entries.key AND expires>?3) FROM entries WHERE key=?1",params![slot.key,entry.data,i64::try_from(now())?],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false);
             if !unchanged {
                 tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
-                retire(&slot);
+                retired.push(slot.key.clone());
             }
             loop {
                 let (bytes, count): (i64, i64) = tx.query_row("SELECT coalesce(sum(length(CAST(metadata AS BLOB))+length(data)),0),count(*) FROM entries WHERE key!=?1", [&slot.key], |r| Ok((r.get(0)?, r.get(1)?)))?;
                 if bytes + size as i64 <= CAPACITY as i64 && count < ENTRIES as i64 { break; }
                 let key: String = tx.query_row("DELETE FROM entries WHERE key=(SELECT key FROM entries WHERE key!=?1 ORDER BY stored,key LIMIT 1) RETURNING key", [&slot.key], |r| r.get(0))?;
-                let mut evicted = slot.clone(); evicted.key = key; retire(&evicted);
+                retired.push(key);
                 tracing::debug!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
             }
             tx.execute("INSERT INTO entries VALUES(?1,?2,?3,?4) ON CONFLICT(key) DO UPDATE SET metadata=excluded.metadata,data=excluded.data,stored=excluded.stored", params![slot.key, metadata, entry.data, i64::try_from(entry.metadata.stored)?])?;
@@ -682,11 +682,10 @@ impl Slot {
             }
             let hints = if slot.resource == "catalog" {
                 tx.execute("INSERT INTO catalogs VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET expires=excluded.expires", params![slot.key, uuid::Uuid::new_v4().to_string(), i64::try_from(entry.metadata.expires)?])?;
-                if let Some(hints) = existing(&slot) { hints.state.lock().expect("catalog hints poisoned").metadata = entry.metadata.clone(); }
-                hydrate(&slot,&tx,&entry.metadata)?
+                prepare_hints(&slot,&tx,&entry.metadata)?
             } else { None };
             if let Some((source,revision)) = &slot.revision { tx.execute("INSERT OR IGNORE INTO catalog_revisions VALUES(?1,?2,?3)",params![slot.key,source,revision])?; }
-            tx.commit()?;
+            let hints = commit_cache(&slot, tx, retired, hints, Some(&entry.metadata))?;
             Ok((true,hints))
         }).await;
         if matches!(result, Ok(Ok((true, _)))) {
@@ -799,9 +798,13 @@ fn open(directory: &Path) -> Result<Connection> {
     Ok(db)
 }
 
-fn retire_family(slot: &Slot, tx: &rusqlite::Transaction<'_>, keep_primary: bool) -> Result<()> {
+fn delete_family(
+    slot: &Slot,
+    tx: &rusqlite::Transaction<'_>,
+    keep_primary: bool,
+) -> Result<Vec<String>> {
     let Some(family) = &slot.family else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let keys = tx
         .prepare("SELECT key FROM catalog_families WHERE family=?1 AND (?2=0 OR key!=?3)")?
@@ -809,13 +812,10 @@ fn retire_family(slot: &Slot, tx: &rusqlite::Transaction<'_>, keep_primary: bool
             row.get::<_, String>(0)
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for key in keys {
-        tx.execute("DELETE FROM entries WHERE key=?1", [&key])?;
-        let mut sibling = slot.clone();
-        sibling.key = key;
-        retire(&sibling);
+    for key in &keys {
+        tx.execute("DELETE FROM entries WHERE key=?1", [key])?;
     }
-    Ok(())
+    Ok(keys)
 }
 
 #[cfg(test)]
@@ -841,14 +841,58 @@ fn existing(slot: &Slot) -> Option<std::sync::Arc<crate::pricing::runtime::Catal
         .and_then(std::sync::Weak::upgrade)
 }
 fn retire(slot: &Slot) {
-    if let Some(hints) = registry()
-        .lock()
-        .expect("catalog registry poisoned")
-        .remove(&(slot.directory.clone(), slot.key.clone()))
+    retire_locked(
+        slot,
+        &slot.key,
+        &mut registry().lock().expect("catalog registry poisoned"),
+    );
+}
+fn retire_locked(slot: &Slot, key: &str, registry: &mut Registry) {
+    if let Some(hints) = registry
+        .remove(&(slot.directory.clone(), key.to_owned()))
         .and_then(|h| h.upgrade())
     {
         hints.invalidate();
     }
+}
+
+// SQLite owns mutation ordering. Take the registry only after BEGIN IMMEDIATE;
+// keep it through commit and memory publication so a later writer cannot publish
+// first. No fallible SQL or filesystem work follows a successful commit.
+fn commit_cache(
+    slot: &Slot,
+    tx: rusqlite::Transaction<'_>,
+    retired: Vec<String>,
+    hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
+    metadata: Option<&Metadata>,
+) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
+    let mut registry = registry().lock().expect("catalog registry poisoned");
+    tx.commit()?;
+    for key in retired {
+        retire_locked(slot, &key, &mut registry);
+    }
+    // An expired entry has no new attachment, but its committed expiry still
+    // applies to handles already attached to this unchanged generation.
+    if hints.is_none()
+        && let Some(metadata) = metadata
+        && let Some(previous) = registry
+            .get(&(slot.directory.clone(), slot.key.clone()))
+            .and_then(std::sync::Weak::upgrade)
+    {
+        previous
+            .state
+            .lock()
+            .expect("catalog hints poisoned")
+            .metadata = metadata.clone();
+    }
+    Ok(hints.map(|hints| {
+        publish_hints(
+            slot,
+            hints,
+            metadata.expect("catalog metadata"),
+            &mut registry,
+        )
+    }))
 }
 impl Slot {
     pub(crate) async fn persist_price(
@@ -879,6 +923,16 @@ fn hydrate(
     db: &Connection,
     metadata: &Metadata,
 ) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
+    let hints = prepare_hints(slot, db, metadata)?;
+    let mut registry = registry().lock().expect("catalog registry poisoned");
+    Ok(hints.map(|hints| publish_hints(slot, hints, metadata, &mut registry)))
+}
+
+fn prepare_hints(
+    slot: &Slot,
+    db: &Connection,
+    metadata: &Metadata,
+) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
     use crate::pricing::runtime::{CatalogHints, Hint, State};
     let row: Option<(String, i64)> = db
         .query_row(
@@ -893,14 +947,10 @@ fn hydrate(
     if !metadata.fresh() {
         return Ok(None);
     }
-    let mut registry = registry().lock().expect("catalog registry poisoned");
-    registry.retain(|_, value| value.strong_count() != 0);
-    let identity = (slot.directory.clone(), slot.key.clone());
-    if let Some(hints) = registry.get(&identity).and_then(std::sync::Weak::upgrade) {
-        if hints.generation == generation {
-            return Ok(Some(hints));
-        }
-        hints.invalidate();
+    if let Some(hints) = existing(slot)
+        && hints.generation == generation
+    {
+        return Ok(Some(hints));
     }
     let mut prices = std::collections::BTreeMap::new();
     let mut statement = db.prepare("SELECT operation,amount,version FROM prices WHERE key=?1")?;
@@ -932,8 +982,30 @@ fn hydrate(
             prices,
         }),
     });
-    registry.insert(identity, std::sync::Arc::downgrade(&hints));
     Ok(Some(hints))
+}
+
+fn publish_hints(
+    slot: &Slot,
+    hints: std::sync::Arc<crate::pricing::runtime::CatalogHints>,
+    metadata: &Metadata,
+    registry: &mut Registry,
+) -> std::sync::Arc<crate::pricing::runtime::CatalogHints> {
+    registry.retain(|_, value| value.strong_count() != 0);
+    let identity = (slot.directory.clone(), slot.key.clone());
+    if let Some(previous) = registry.get(&identity).and_then(std::sync::Weak::upgrade) {
+        if previous.generation == hints.generation {
+            previous
+                .state
+                .lock()
+                .expect("catalog hints poisoned")
+                .metadata = metadata.clone();
+            return previous;
+        }
+        previous.invalidate();
+    }
+    registry.insert(identity, std::sync::Arc::downgrade(&hints));
+    hints
 }
 
 pub(crate) fn configuration_revision(cfg: &crate::catalog::Config) -> String {

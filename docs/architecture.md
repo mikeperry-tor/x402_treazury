@@ -736,6 +736,11 @@ one catalog family. Accepted replacement retires older sibling variants in the
 same SQLite transaction, retaining the replacement's distinct provenance. This
 also applies to successful uncacheable responses; failed staging leaves the old
 family intact.
+Cache mutations publish hint invalidation, metadata renewal and replacement only
+after SQLite commits. A failed transaction preserves both durable entries and
+their live observations. The existing in-process registry orders memory publication
+with committed writers; database opening and transaction acquisition do not hold
+that registry. Only final commit and memory publication share the lock.
 Ordinary startup and explicit warm stage downloads and HTTP 304 revalidations
 until source generation, source routing and required completeness succeed.
 Optional pricing commits only after metadata format validation. The generic JSON

@@ -49,6 +49,10 @@ winning scope's actual fixture disclosure. Existing promotion/key/eviction tests
 retain their separate ownership contracts; these fixtures add no production
 coalescing, timeout or scope-history framework.
 
+Deferred-constraint commit failures cover family replacement, unchanged metadata
+renewal, revision deletion and oversized-entry deletion: rollback retains durable
+rows, live observation identity and the original expiry.
+
 ## Provider regressions
 
 Shared provider-update capture/comparison/candidate regressions live in the
