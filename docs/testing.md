@@ -30,8 +30,12 @@ qualify privacy, recovery or power-loss behavior.
 
 The shared Linux/macOS private-storage boundary has native fixtures for atomic
 creation under inherited ACLs, descriptor reopen rejection, SQLite sidecars and
-private preflight cleanup. Source review alone does not qualify these native
-contracts: execute the host-specific controls, including a denied-read control.
+private preflight cleanup. A held journal descriptor is unlinked before sidecar
+inspection validation to reproduce concurrent SQLite removal deterministically;
+ordinary file validation still rejects it, and sidecar inspection retains
+symlink, hardlink, mode and macOS ACL rejection. Source review alone does not
+qualify these native contracts: execute the host-specific controls, including a
+denied-read control.
 The [storage assessment](plans/portability_fixes.md) retains the separate Unix
 namespace-authority question. Normal Unix financial, lifecycle and compiler checks
 remain required. Record exact source/executable/features, commands, diagnostics and

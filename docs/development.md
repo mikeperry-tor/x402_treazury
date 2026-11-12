@@ -31,6 +31,12 @@ ACLs. Inspection errors and
 unsupported privacy operations fail explicitly. The [storage assessment](plans/portability_fixes.md)
 retains the separate Unix namespace-authority question; privacy checks do not prove
 configured-name authority or detect authenticated-state rollback.
+The disposable HTTP cache inspects SQLite sidecars without consuming their
+descriptors. A sidecar unlinked by SQLite between open and descriptor validation
+may have zero links; this inspection still checks ordinary-file type, private
+mode and macOS ACLs, and rejects multiple links. Ordinary private-file opens and
+validation continue to require exactly one link. No retry or cache-wide lock is
+needed for journal removal.
 Ordinary application support and optional qualification are separate:
 [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) have macOS-specific evidence.

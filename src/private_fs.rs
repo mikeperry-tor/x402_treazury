@@ -58,6 +58,34 @@ pub(crate) fn open_file(path: &Path, write: bool) -> Result<File> {
 }
 
 pub(crate) fn validate_file(file: &File) -> Result<()> {
+    validate_file_links(file, false)
+}
+
+/// Inspect a disposable sidecar without retaining a descriptor for SQLite I/O.
+/// SQLite may unlink its rollback journal between this open and validation.
+pub(crate) fn check_sqlite_sidecar(path: &Path) -> Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        validate_file_links(&file, true)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = path;
+        Err(unsupported())
+    }
+}
+
+fn validate_file_links(file: &File, allow_unlinked: bool) -> Result<()> {
     let metadata = file.metadata()?;
     ensure!(
         metadata.is_file(),
@@ -67,7 +95,8 @@ pub(crate) fn validate_file(file: &File) -> Result<()> {
     {
         use std::os::unix::fs::MetadataExt;
         ensure!(
-            metadata.nlink() == 1 && metadata.mode() & 0o077 == 0,
+            (metadata.nlink() == 1 || (allow_unlinked && metadata.nlink() == 0))
+                && metadata.mode() & 0o077 == 0,
             "private storage must be owner-only and singly linked"
         );
         #[cfg(target_os = "macos")]
@@ -76,6 +105,7 @@ pub(crate) fn validate_file(file: &File) -> Result<()> {
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
+        let _ = allow_unlinked;
         Err(unsupported())
     }
 }
@@ -365,16 +395,38 @@ mod tests {
             .write_all(b"public synthetic bytes")
             .unwrap();
         open_file(&path, false).unwrap();
+        check_sqlite_sidecar(&path).unwrap();
         let alias = temporary.path().join("alias");
         symlink(&path, &alias).unwrap();
         assert!(open_file(&alias, false).is_err());
+        assert!(check_sqlite_sidecar(&alias).is_err());
         std::fs::remove_file(alias).unwrap();
         let link = temporary.path().join("hardlink");
         std::fs::hard_link(&path, &link).unwrap();
         assert!(open_file(&path, false).is_err());
+        assert!(check_sqlite_sidecar(&path).is_err());
         std::fs::remove_file(link).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(open_file(&path, false).is_err());
+        assert!(check_sqlite_sidecar(&path).is_err());
+        assert!(check_sqlite_sidecar(temporary.path()).is_err());
+    }
+
+    #[test]
+    fn sqlite_sidecar_removal_preserves_strict_private_file_validation() {
+        let temporary = tempdir().unwrap();
+        let path = temporary.path().join("state.sqlite-journal");
+        let file = create_file(&path).unwrap();
+        check_sqlite_sidecar(&path).unwrap();
+        // Reproduce SQLite unlinking a journal after the inspector opens it.
+        std::fs::remove_file(&path).unwrap();
+        validate_file_links(&file, true).unwrap();
+        assert!(validate_file(&file).is_err());
+        check_sqlite_sidecar(&path).unwrap();
+        // Removal does not excuse unsafe permissions on the inspected descriptor.
+        file.set_permissions(std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        assert!(validate_file_links(&file, true).is_err());
     }
 
     #[test]
@@ -552,6 +604,7 @@ mod tests {
                 "actual inherited SQLite ACL positive control"
             );
             assert!(open_file(&path, false).is_err());
+            assert!(check_sqlite_sidecar(&path).is_err());
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
         drop(db);

@@ -786,14 +786,7 @@ fn open(directory: &Path) -> Result<Connection> {
     }
     for suffix in ["-journal", "-wal", "-shm"] {
         let sidecar = directory.join(format!("discovery-v1.sqlite{suffix}"));
-        match crate::private_fs::open_file(&sidecar, false) {
-            Ok(_) => (),
-            Err(error)
-                if error
-                    .downcast_ref::<std::io::Error>()
-                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => {}
-            Err(error) => return Err(error),
-        }
+        crate::private_fs::check_sqlite_sidecar(&sidecar)?;
     }
     let db = Connection::open(path)?;
     db.busy_timeout(Duration::from_secs(2))?;
