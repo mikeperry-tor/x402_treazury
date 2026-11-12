@@ -1380,10 +1380,8 @@ instructions_text = "Threat, breach, network, compliance and public-wallet risk 
 discovery_search_tool_instructions_text = "Security keywords: wallet audit, EVM wallet flows, wallet counterparties, token exposure, breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, OFAC SDN, OFAC address screening, crypto address sanctions, wallet sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, static code audit, AI skill safety."
 
 # Optional treasury tools: enable each direction deliberately, then restart.
-# Native ZEC needs [treasury]; foreign asset swaps additionally need [funding].
-# Provider registration and the general Base wallet do not grant payout authority.
 # [servers.toolbox.swap_control]
 # receive = true
 # send = true
-# max_send_zec = "0.5" # Optional per-send principal plus actual network fee.
 # Omit max_send_zec or use "none" for no toolset total-debit preference.
+# max_send_zec = "0.5" # Optional per-send principal plus actual network fee.
