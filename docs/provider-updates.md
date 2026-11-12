@@ -130,12 +130,19 @@ upstream projection are labeled separately; a projection does not recreate an
 authored catalog. With a prior capture, `previous_runtime` and `runtime_changes`
 compare the actual frozen runtime inputs and configurations independently of
 `previous_upstream` and `tool_changes`. A comparison with no upstream source,
-pricing, asset or removed-source differences reports `no upstream evidence change`;
+pricing, asset or removed upstream-source differences reports `no upstream evidence change`;
 local provider TOML, maintenance-guidance and projection/config differences remain
-visible in `runtime_changes` and `tool_changes` but do not create upstream drift. `asset_changes` reports raw local-asset
+visible in `runtime_changes` and `tool_changes` but do not create upstream drift.
+Removed local input paths remain visible in `removed_sources` without implying
+upstream drift. `asset_changes` reports raw local-asset
 changes, including asset addition/removal; absent history is `null`. Authored-only
 or multiple-authority providers still receive runtime comparisons without an
 invented upstream union. No packet is marked accepted automatically.
+Baseline classification follows comparable source, pricing or asset evidence,
+independently of whether a single-schema tool projection exists. Registry-only
+and multiple-schema captures can report changed or unchanged evidence against
+history; adding or recovering an authority still calls for baseline review when
+no other evidence changed. Source removals are historical comparisons too.
 
 A complete vendor-copy download that is semantically identical to the committed
 asset produces `committed asset unchanged; no candidate` and no numbered candidate.
@@ -212,7 +219,9 @@ not mean free.
   Config changes also remain visible in the normal runtime/config differences.
 - `pricing.relocation` flags a configured catalog key with no operations carrying
   pricing metadata and a changed, added or removed external source. These are
-  review prompts, not errors; many operations legitimately omit pricing.
+  review prompts, not errors; many operations legitimately omit pricing. An
+  absent catalog key alone does not imply upstream drift; historical source-body
+  differences and external-source changes determine that comparison.
 - `pricing.signals` lists sorted JSON key pointers whose names look pricing-related
   (`price`, `pricing`, `payment`, `tariff`, `billing`, `cost`, `credit`, `x402`
   other than `x402Version`) across remote schema, registry, discovery, guide, help,
@@ -291,10 +300,14 @@ Read the packet outcome as a workflow state, not a drift verdict:
   transient failures, then treat the authority as unresolved rather than guessing a
   source.
 - `baseline established` / `authored baseline established`: no prior capture of the
-  authoritative source exists. Review the current remote evidence against the
-  authored asset once; this is not evidence of a change.
+  authoritative source exists, or newly available source/pricing evidence has no
+  usable prior comparison. This includes a newly added guide or a recovered read,
+  even when the schema is unchanged. Review the current evidence for consistency;
+  this is not evidence of a change. Known differences in comparable evidence still
+  retain a comparison-ready outcome.
 - `no upstream evidence change` / `authored no upstream evidence change`: prior
-  source, pricing and committed-asset evidence is unchanged. Local TOML, override
+  comparable source, pricing and committed-asset evidence is unchanged. Unavailable
+  optional pricing stays advisory and cannot establish a new baseline. Local TOML, override
   and maintenance-guidance edits may still appear in `runtime_changes` or
   `tool_changes`.
 - `authored comparison ready; human review pending`: an upstream source, pricing or
@@ -310,7 +323,7 @@ Authored providers are routed to manual review because `provider.asset.is_some()
 means their catalog is a local authored projection, not because a change was
 detected. Use the projection/tool changes, source diffs, registry/guide evidence and
 pricing relocation fields to decide whether edits are needed. A first authored
-capture or a source that lacks a schema projection remains a baseline review; do not
+capture or evidence without comparable history remains a baseline review; do not
 infer drift from the label alone.
 
 For an authored baseline or comparison, reconcile the actual captured authorities:

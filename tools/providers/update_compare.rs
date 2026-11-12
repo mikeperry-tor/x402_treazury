@@ -190,6 +190,9 @@ fn remote_purpose(purpose: &str) -> bool {
         "schema" | "registry" | "discovery" | "guide" | "help" | "pricing" | "source"
     )
 }
+fn local_input(purpose: &str) -> bool {
+    matches!(purpose, "provider TOML" | "maintenance guidance")
+}
 // Advisory key-name discovery only: pointers identify where pricing-like fields
 // exist, never what they mean or whether an adapter supports the shape.
 fn pricing_signals(run: &Path, provider: &Provider) -> Vec<Value> {
@@ -216,8 +219,19 @@ fn pricing_signals(run: &Path, provider: &Provider) -> Vec<Value> {
     });
     sources
 }
-fn pricing_sources(run: &Path, provider: &Provider, prior: Option<(&Path, &Provider)>) -> Value {
+#[derive(Default)]
+struct ComparisonFacts {
+    changed: bool,
+    baseline: bool,
+    compared: bool,
+}
+fn pricing_sources(
+    run: &Path,
+    provider: &Provider,
+    prior: Option<(&Path, &Provider)>,
+) -> (Value, ComparisonFacts) {
     let mut sources = vec![];
+    let mut facts = ComparisonFacts::default();
     for read in &provider.pricing {
         let raw = read.hash.as_ref().and_then(|_| bytes(run, read).ok());
         let (outcome, captured) = match (&read.hash, raw.as_ref()) {
@@ -231,6 +245,7 @@ fn pricing_sources(run: &Path, provider: &Provider, prior: Option<(&Path, &Provi
                     .map(|root| root.keys().cloned().collect::<Vec<_>>())
             })
         });
+        let mut compared = false;
         let comparison = prior
             .and_then(|(path, provider)| {
                 provider
@@ -242,17 +257,24 @@ fn pricing_sources(run: &Path, provider: &Provider, prior: Option<(&Path, &Provi
             .map(|(path, old)| {
                 let previous = old.hash.as_ref().and_then(|_| bytes(path, old).ok());
                 match (raw.as_ref(), previous.as_ref()) {
-                    (Some(current), Some(previous)) => json!({
-                        "basis":"prior capture",
-                        "previous_response":old.response,
-                        "changes":diff(&document(previous), &document(current)),
-                    }),
+                    (Some(current), Some(previous)) => {
+                        let changes = diff(&document(previous), &document(current));
+                        facts.changed |= !changes.is_empty();
+                        compared = true;
+                        json!({
+                            "basis":"prior capture",
+                            "previous_response":old.response,
+                            "changes":changes,
+                        })
+                    }
                     _ => json!({"basis":"comparison unavailable: current or previous pricing bytes unavailable"}),
                 }
             })
             .unwrap_or_else(|| {
                 json!({"basis":if captured {"baseline established; no historical pricing capture"} else {"source unavailable"}})
             });
+        facts.baseline |= captured && !compared;
+        facts.compared |= compared;
         sources.push(json!({
             "source":read.source,
             "purpose":read.purpose,
@@ -276,14 +298,16 @@ fn pricing_sources(run: &Path, provider: &Provider, prior: Option<(&Path, &Provi
             json!({"source":old.source,"purpose":old.purpose,"outcome":"pricing source declaration removed; review relocation"})
         })
         .collect();
-    json!({"sources":sources,"removed_sources":removed})
+    facts.changed |= !removed.is_empty();
+    facts.compared |= !removed.is_empty();
+    (json!({"sources":sources,"removed_sources":removed}), facts)
 }
 fn pricing_section(
     run: &Path,
     provider: &Provider,
     prior: Option<(&Path, &Provider)>,
     runtime: &Value,
-) -> Value {
+) -> (Value, ComparisonFacts) {
     let current = provider
         .config
         .as_ref()
@@ -304,14 +328,17 @@ fn pricing_section(
         .as_u64()
         .unwrap_or(0);
     let total = runtime["pricing"]["total_operations"].as_u64().unwrap_or(0);
-    let evidence = pricing_sources(run, provider, prior);
-    json!({
+    let (evidence, mut facts) = pricing_sources(run, provider, prior);
+    let catalog_key_absent = catalog_key.is_some() && total > 0 && priced == 0;
+    let source_changed = prior.is_some() && previous_external != external_source;
+    facts.changed |= source_changed;
+    let packet = json!({
         "catalog_key": catalog_key,
         "external_source": external_source,
         "evidence": evidence["sources"],
         "relocation": {
-            "catalog_key_absent": catalog_key.is_some() && total > 0 && priced == 0,
-            "source_changed": prior.is_some() && previous_external != external_source,
+            "catalog_key_absent": catalog_key_absent,
+            "source_changed": source_changed,
             "previous_external_source": previous_external,
             "removed_sources": evidence["removed_sources"],
         },
@@ -320,7 +347,8 @@ fn pricing_section(
             "limit_per_source": PRICING_SIGNAL_LIMIT,
             "advisory": "key-name discovery only; not price authority",
         },
-    })
+    });
+    (packet, facts)
 }
 fn compare_provider(
     run: &Path,
@@ -335,6 +363,7 @@ fn compare_provider(
         .count()
         > 1;
     let mut sources = vec![];
+    let mut facts = ComparisonFacts::default();
     for read in &provider.inputs {
         let basis = prior
             .and_then(|(path, p)| {
@@ -357,13 +386,19 @@ fn compare_provider(
             });
         let comparison = match (read.hash.as_ref(), basis) {
             (Some(_), Some((path, old, label))) if old.hash.is_some() => {
+                let changes = diff(&document(&bytes(path, old)?), &document(&bytes(run, read)?));
+                facts.changed |= !local_input(&read.purpose) && !changes.is_empty();
+                facts.compared |= !local_input(&read.purpose);
                 json!({
                     "basis":label,
                     "previous_response":old.response,
-                    "changes":diff(&document(&bytes(path,old)?),&document(&bytes(run,read)?)),
+                    "changes":changes,
                 })
             }
-            (Some(_), _) => json!({"basis":"baseline established; no historical upstream capture"}),
+            (Some(_), _) => {
+                facts.baseline |= !local_input(&read.purpose);
+                json!({"basis":"baseline established; no historical upstream capture"})
+            }
             _ => json!({"basis":"source unavailable","outcome":read.outcome}),
         };
         let projection = match (
@@ -378,7 +413,22 @@ fn compare_provider(
         sources.push(json!({"source":read.source,"purpose":read.purpose,"response":read.response,"comparison":comparison,"projection":projection}));
     }
 
-    let removed_sources:Vec<_>=prior.into_iter().flat_map(|(_,p)|p.inputs.iter()).filter(|old|old.purpose!="pricing"&&!provider.inputs.iter().any(|new|new.source==old.source && new.purpose==old.purpose)).map(|read|json!({"source":read.source,"purpose":read.purpose,"outcome":"source declaration removed; review authority change"})).collect();
+    let removed_sources: Vec<_> = prior
+        .into_iter()
+        .flat_map(|(_, p)| p.inputs.iter())
+        .filter(|old| {
+            old.purpose != "pricing"
+                && !provider
+                    .inputs
+                    .iter()
+                    .any(|new| new.source == old.source && new.purpose == old.purpose)
+        })
+        .map(|read| {
+            facts.changed |= !local_input(&read.purpose);
+            facts.compared |= !local_input(&read.purpose);
+            json!({"source":read.source,"purpose":read.purpose,"outcome":"source declaration removed; review authority change"})
+        })
+        .collect();
     // Runtime history and authority history answer different questions. An authored
     // asset is runtime evidence, never a substitute for historical upstream input.
     let runtime = projected_input(run, provider, runtime_input(provider))?;
@@ -413,44 +463,33 @@ fn compare_provider(
             ))
         })
         .transpose()?;
-    let pricing = pricing_section(run, provider, prior, &runtime);
-    let nonempty = |value: &Value| value.as_array().is_some_and(|items| !items.is_empty());
-    let upstream_source_changed = sources.iter().any(|source| {
-        !matches!(
-            source["purpose"].as_str().unwrap_or(""),
-            "provider TOML" | "maintenance guidance"
-        ) && nonempty(&source["comparison"]["changes"])
-    });
-    let relocation = &pricing["relocation"];
-    let pricing_changed = pricing["evidence"].as_array().is_some_and(|items| {
-        items
-            .iter()
-            .any(|item| nonempty(&item["comparison"]["changes"]))
-    }) || relocation["catalog_key_absent"] == true
-        || relocation["source_changed"] == true
-        || nonempty(&relocation["removed_sources"]);
+    let (pricing, pricing_facts) = pricing_section(run, provider, prior, &runtime);
     // Local provider TOML, override and maintenance-guidance edits surface in
     // runtime/tool projections; only source, pricing or committed-asset evidence
     // establishes upstream drift for this outcome label.
-    let changed = upstream_source_changed
-        || pricing_changed
+    let changed = facts.changed
+        || pricing_facts.changed
         || asset_changes
             .as_ref()
-            .is_some_and(|changes| !changes.is_empty())
-        || !removed_sources.is_empty();
+            .is_some_and(|changes| !changes.is_empty());
+    let compared = facts.compared
+        || pricing_facts.compared
+        || prior.is_some_and(|(_, old)| old.asset.is_some() || provider.asset.is_some());
+    let needs_baseline_review =
+        !compared || (!changed && (facts.baseline || pricing_facts.baseline));
     let outcome = if provider.config.is_none() {
         provider.outcome.as_str()
     } else if provider.inputs.iter().any(|r| r.hash.is_none()) {
         "source unavailable"
     } else if provider.asset.is_some() && provider.evidence.is_none() {
         "missing maintenance metadata; authored review needed"
-    } else if provider.asset.is_some() && previous.is_null() {
+    } else if provider.asset.is_some() && needs_baseline_review {
         "authored baseline established; manual consistency review needed"
     } else if provider.asset.is_some() && !changed {
         "authored no upstream evidence change"
     } else if provider.asset.is_some() {
         "authored comparison ready; human review pending"
-    } else if previous.is_null() {
+    } else if needs_baseline_review {
         "baseline established; current consistency review needed"
     } else if !changed {
         "no upstream evidence change"
@@ -658,6 +697,69 @@ mod tests {
         }
     }
     #[test]
+    fn authored_evidence_outcomes_do_not_require_one_schema_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        for (purpose, count) in [("registry", 1), ("schema", 2)] {
+            let mut old = provider(run, &raw);
+            old.asset = Some(captured(run, "authored.json", "committed asset", &raw));
+            old.evidence = Some(Evidence {
+                intent: Intent::Authored,
+                guidance: "guide".into(),
+                sources: vec![],
+            });
+            old.inputs = (0..count)
+                .map(|index| {
+                    captured(
+                        run,
+                        &format!("https://example.com/{index}.json"),
+                        purpose,
+                        &raw,
+                    )
+                })
+                .collect();
+            let first = compare_provider(run, &old, None).unwrap();
+            assert!(first["upstream"].is_null());
+            assert_eq!(
+                first["outcome"],
+                "authored baseline established; manual consistency review needed"
+            );
+            let unchanged = compare_provider(run, &old, Some((run, &old))).unwrap();
+            assert_eq!(unchanged["outcome"], "authored no upstream evidence change");
+            let mut new = old.clone();
+            let mut changed = spec();
+            changed["paths"]["/one"]["get"]["description"] = json!("updated contract");
+            new.inputs[0] = captured(
+                run,
+                &old.inputs[0].source,
+                purpose,
+                &serde_json::to_vec(&changed).unwrap(),
+            );
+            let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+            assert!(packet["previous_upstream"].is_null());
+            assert!(
+                !packet["sources"][0]["comparison"]["changes"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                packet["outcome"],
+                "authored comparison ready; human review pending"
+            );
+            // A removed authority remains comparable even without any current source.
+            new.inputs.clear();
+            let removed = compare_provider(run, &new, Some((run, &old))).unwrap();
+            assert_eq!(
+                removed["outcome"],
+                "authored comparison ready; human review pending"
+            );
+            assert_eq!(removed["removed_sources"].as_array().unwrap().len(), count);
+        }
+    }
+
+    #[test]
     fn authored_runtime_history_is_independent_of_upstream_history() {
         let dir = tempfile::tempdir().unwrap();
         let run = dir.path();
@@ -692,6 +794,10 @@ mod tests {
                 new.inputs.push(read);
             }
             let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+            assert_eq!(
+                packet["outcome"],
+                "authored comparison ready; human review pending"
+            );
             assert!(!packet["runtime_changes"].as_array().unwrap().is_empty());
             assert!(
                 packet["asset_changes"]
@@ -784,6 +890,216 @@ mod tests {
         let pinned = compare_provider(run, &new, None).unwrap();
         assert_eq!(pinned["tool_basis"], "committed full-copy asset");
         assert!(!pinned["tool_changes"].as_array().unwrap().is_empty());
+    }
+    #[test]
+    fn new_or_recovered_authorities_need_baseline_review_without_claiming_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        for (purpose, authored) in [("help", false), ("custom authority", false), ("help", true)] {
+            let mut old = provider(run, &raw);
+            if authored {
+                old.asset = Some(captured(run, "authored.json", "committed asset", &raw));
+                old.evidence = Some(Evidence {
+                    intent: Intent::Authored,
+                    guidance: "guide".into(),
+                    sources: vec![],
+                });
+            }
+            let baseline = if authored {
+                "authored baseline established; manual consistency review needed"
+            } else {
+                "baseline established; current consistency review needed"
+            };
+            let unchanged = if authored {
+                "authored no upstream evidence change"
+            } else {
+                "no upstream evidence change"
+            };
+            let changed_outcome = if authored {
+                "authored comparison ready; human review pending"
+            } else {
+                "comparison ready; human review pending"
+            };
+            let mut new = old.clone();
+            let guide = captured(run, "https://example.com/guide", purpose, b"guide");
+            new.inputs.push(guide.clone());
+            for recovered in [false, true] {
+                if recovered {
+                    let mut failed = guide.clone();
+                    failed.hash = None;
+                    failed.outcome = "source unavailable".into();
+                    old.inputs.push(failed);
+                }
+                let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+                assert_eq!(packet["outcome"], baseline);
+                assert!(packet["tool_changes"].as_array().unwrap().is_empty());
+                assert!(packet["sources"][1]["comparison"]["changes"].is_null());
+            }
+            assert_eq!(
+                compare_provider(run, &new, Some((run, &new))).unwrap()["outcome"],
+                unchanged
+            );
+            let mut changed = new.clone();
+            let mut changed_spec = spec();
+            changed_spec["paths"]["/one"]["get"]["description"] = json!("changed conditions");
+            changed.inputs[0] = captured(
+                run,
+                &new.inputs[0].source,
+                "schema",
+                &serde_json::to_vec(&changed_spec).unwrap(),
+            );
+            assert_eq!(
+                compare_provider(run, &changed, Some((run, &old))).unwrap()["outcome"],
+                changed_outcome
+            );
+        }
+        let old = provider(run, &raw);
+        let mut local_only = old.clone();
+        local_only.inputs.push(captured(
+            run,
+            "guide.md",
+            "maintenance guidance",
+            b"new local guidance",
+        ));
+        local_only.inputs.push(captured(
+            run,
+            "provider.toml",
+            "provider TOML",
+            b"new local configuration",
+        ));
+        assert_eq!(
+            compare_provider(run, &local_only, Some((run, &old))).unwrap()["outcome"],
+            "no upstream evidence change"
+        );
+        let removed_local = compare_provider(run, &old, Some((run, &local_only))).unwrap();
+        assert_eq!(removed_local["outcome"], "no upstream evidence change");
+        assert_eq!(
+            removed_local["removed_sources"].as_array().unwrap().len(),
+            2
+        );
+        let mut remote = old.clone();
+        remote.inputs.push(captured(
+            run,
+            "https://example.com/guide",
+            "help",
+            b"upstream guide",
+        ));
+        let removed_remote = compare_provider(run, &old, Some((run, &remote))).unwrap();
+        assert_eq!(
+            removed_remote["outcome"],
+            "comparison ready; human review pending"
+        );
+        assert_eq!(
+            removed_remote["removed_sources"].as_array().unwrap().len(),
+            1
+        );
+    }
+    #[test]
+    fn recovered_pricing_needs_baseline_review_but_unavailable_pricing_stays_advisory() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        let mut old = provider(run, &raw);
+        let mut new = old.clone();
+        let prices = captured(
+            run,
+            "https://example.com/prices",
+            "pricing",
+            br#"{"price":1}"#,
+        );
+        new.pricing.push(prices.clone());
+        for history in ["absent", "failed", "missing blob"] {
+            old.pricing.clear();
+            if history != "absent" {
+                let mut prior = prices.clone();
+                prior.hash = if history == "failed" {
+                    None
+                } else {
+                    Some("0".repeat(64))
+                };
+                prior.outcome = "source unavailable".into();
+                old.pricing.push(prior);
+            }
+            let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+            assert_eq!(
+                packet["outcome"], "baseline established; current consistency review needed",
+                "{history}"
+            );
+            assert_eq!(packet["pricing"]["evidence"][0]["captured"], true);
+        }
+        assert_eq!(
+            compare_provider(run, &new, Some((run, &new))).unwrap()["outcome"],
+            "no upstream evidence change"
+        );
+        let mut unavailable = new.clone();
+        unavailable.pricing[0].hash = None;
+        unavailable.pricing[0].outcome = "source unavailable".into();
+        assert_eq!(
+            compare_provider(run, &unavailable, Some((run, &new))).unwrap()["outcome"],
+            "no upstream evidence change"
+        );
+        // Authored providers use the same evidence classification with manual review.
+        old.pricing.clear();
+        for provider in [&mut old, &mut new] {
+            provider.asset = Some(captured(run, "authored.json", "committed asset", &raw));
+            provider.evidence = Some(Evidence {
+                intent: Intent::Authored,
+                guidance: "guide".into(),
+                sources: vec![],
+            });
+        }
+        assert_eq!(
+            compare_provider(run, &new, Some((run, &old))).unwrap()["outcome"],
+            "authored baseline established; manual consistency review needed"
+        );
+    }
+    #[test]
+    fn mixed_pricing_evidence_preserves_change_baseline_and_unavailable_precedence() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        let mut old = provider(run, &raw);
+        old.pricing.push(captured(
+            run,
+            "https://example.com/prices",
+            "pricing",
+            br#"{"price":1}"#,
+        ));
+        let mut new = old.clone();
+        new.pricing[0].hash = Some(store(run, br#"{"price":2}"#).unwrap());
+        new.pricing.push(captured(
+            run,
+            "https://example.com/new-prices",
+            "pricing",
+            br#"{"price":3}"#,
+        ));
+        let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+        assert_eq!(packet["outcome"], "comparison ready; human review pending");
+        assert_eq!(
+            packet["pricing"]["evidence"][0]["comparison"]["changes"],
+            json!([{"pointer":"/price","before":1,"after":2,"kind":"changed"}])
+        );
+        assert_eq!(packet["pricing"]["evidence"][1]["captured"], true);
+
+        new.pricing[0] = old.pricing[0].clone();
+        assert_eq!(
+            compare_provider(run, &new, Some((run, &old))).unwrap()["outcome"],
+            "baseline established; current consistency review needed"
+        );
+        new.pricing[1].hash = None;
+        new.pricing[1].outcome = "source unavailable".into();
+        let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+        assert_eq!(packet["outcome"], "no upstream evidence change");
+        assert_eq!(packet["pricing"]["evidence"][1]["captured"], false);
+
+        new.pricing.remove(0);
+        let packet = compare_provider(run, &new, Some((run, &old))).unwrap();
+        assert_eq!(packet["outcome"], "comparison ready; human review pending");
+        assert_eq!(
+            packet["pricing"]["relocation"]["removed_sources"][0]["source"],
+            "https://example.com/prices"
+        );
     }
     #[test]
     fn unchanged_second_capture_is_not_review_ready() {
@@ -987,6 +1303,58 @@ mod tests {
                 .iter()
                 .any(|pointer| pointer.as_str().unwrap().contains("x-payment-info"))
         );
+    }
+
+    #[test]
+    fn repeated_absent_catalog_key_does_not_create_upstream_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let raw = serde_json::to_vec(&spec()).unwrap();
+        for authored in [false, true] {
+            let mut previous = provider(run, &raw);
+            previous.config.as_mut().unwrap().pricing_key = Some("x-payment-info".into());
+            if authored {
+                previous.asset = Some(captured(run, "authored.json", "committed asset", &raw));
+                previous.evidence = Some(Evidence {
+                    intent: Intent::Authored,
+                    guidance: "guide".into(),
+                    sources: vec![],
+                });
+            }
+            // An absent configured key remains useful advice on every capture,
+            // but identical evidence is unchanged regardless of asset ownership.
+            let current = previous.clone();
+            let packet = compare_provider(run, &current, Some((run, &previous))).unwrap();
+            assert_eq!(packet["pricing"]["relocation"]["catalog_key_absent"], true);
+            assert_eq!(packet["pricing"]["relocation"]["source_changed"], false);
+            assert_eq!(
+                packet["outcome"],
+                if authored {
+                    "authored no upstream evidence change"
+                } else {
+                    "no upstream evidence change"
+                }
+            );
+            // Actual loss of metadata is still a historical source-body change.
+            let mut priced_schema = spec();
+            priced_schema["paths"]["/one"]["get"]["x-payment-info"] =
+                json!({"amount":"0.01","currency":"USD"});
+            previous.inputs[0] = captured(
+                run,
+                "https://example.com/openapi.json",
+                "schema",
+                &serde_json::to_vec(&priced_schema).unwrap(),
+            );
+            let changed = compare_provider(run, &current, Some((run, &previous))).unwrap();
+            assert_eq!(
+                changed["outcome"],
+                if authored {
+                    "authored comparison ready; human review pending"
+                } else {
+                    "comparison ready; human review pending"
+                }
+            );
+        }
     }
 
     #[tokio::test]

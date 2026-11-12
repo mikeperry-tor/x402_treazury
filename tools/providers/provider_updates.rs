@@ -457,14 +457,11 @@ async fn capture_completions(
             if cfg.allow_http1 != http1 || cfg.allow_tls12 != tls12 {
                 continue;
             }
-            for read in &mut provider.inputs {
-                if read.hash.is_none() && read.source == url {
-                    read.hash = captured.hash.clone();
-                    read.outcome = captured.outcome.clone();
-                    read.response = captured.response.clone();
-                }
-            }
-            for read in &mut provider.pricing {
+            for read in provider
+                .inputs
+                .iter_mut()
+                .chain(provider.pricing.iter_mut())
+            {
                 if read.hash.is_none() && read.source == url {
                     read.hash = captured.hash.clone();
                     read.outcome = captured.outcome.clone();
