@@ -83,22 +83,25 @@ actual period and US-GAAP scope; quarterly, year-to-date and annual flows differ
 The research desk prefers Exa for general/news search and retains Otto's topical
 crypto news and linked market recaps as complementary coverage. Topical reports
 lack citations; recap generation time can be newer than the underlying news window.
-Otto and StableEnrich supply rendered page reads and cited answers. NetIntel's
-page reader is excluded because it did not retrieve JavaScript-generated content.
+StableEnrich Firecrawl supplies rendered page and PDF reads; AGProxy adds raw
+residential fetches for non-JavaScript pages; Exa supplies cited answer synthesis. NetIntel's page reader is excluded because it did not
+retrieve JavaScript-generated content.
 AgentUtility supplies static HTML links and schema-based static-page JSON, with
 Botsmith X search shared across web/social. Otto DNS, WHOIS and domain age remain
 available alongside NetIntel DNS/RDAP on security; matching sampled data did not
 establish an advantage from removing Otto. NetIntel's DKIM field is nullable and
 does not establish complete selector discovery.
-Exa retains explicit freshness/history controls. Vaaya and SocialFetch are fully
-excluded in this deployment after cross-family settlement/lookup failures. On
-2026-10-28, the latest Base settlements listed by
+Exa retains explicit freshness/history controls. SocialFetch and Vaaya remain
+fully excluded in this deployment. Vaaya's 2026-11-12 Firecrawl retest succeeded,
+but StableEnrich's Firecrawl scrape remains the selected Firecrawl reader;
+Vaaya's richer parameters come with the deprecated Firecrawl API and
+non-functional options. On 2026-10-28, the latest Base settlements listed by
 [402radar for Vaaya](https://402radar.io/vaaya.ai) were 18 days old and
 [SocialFetch](https://402radar.io/api.socialfetch.dev) three days old. The operator
-had observed at least 14 days without Vaaya payments. These are dated external
-observations, not proof of universal outage or the settlement outcome of our
-calls. Reusable provider definitions remain available for deliberate retesting.
-Selections belong here, not in the reusable providers.
+had observed at least 14 days without Vaaya payments. Those dated external
+observations did not establish a universal outage, and later paid calls returned
+successful responses. Reusable provider definitions remain available for
+deliberate retesting. Selections belong here, not in the reusable providers.
 
 Horizon Pulse and 2s company-facts reads are shared by business and finance.
 Both use SEC EDGAR; they add gateway choices rather than independent underlying
@@ -134,10 +137,11 @@ pages use before/nextBefore and preserve response cadence; older bulk exports us
 daily aggregates and remain a documented alternative. These choices preserve source
 coverage and resolution rather than relying on tool names alone.
 
-APEX's two rendered readers retrieved the JavaScript test page, and its research
-search returned credited OpenAlex and Hacker News results. Research search is
-shared with science/social; it does not replace full paper retrieval or discussion
-threads. AgData company enrichment returned the requested LinkedIn company; Instagram posts,
+APEX's page_markdown rendered reader retrieved the JavaScript test page, and its
+research search returned credited OpenAlex and Hacker News results. Research search
+is shared with science/social; it does not replace full paper retrieval or
+discussion threads. AgData company enrichment returned the requested LinkedIn
+company; Instagram posts,
 TikTok videos, YouTube channel videos and Facebook page details also delivered
 records. These narrow platform operations are enabled; separate comments,
 transcripts and personal-profile modes remain unqualified.
@@ -147,7 +151,7 @@ per-source errors. These narrow workflows are enabled, rather than whole catalog
 
 | Excluded research | Selected alternatives | Coverage limits |
 | --- | --- | --- |
-| Web/news and rendering | Exa, Otto, StableEnrich, APEX; AgentUtility JSON/links | Preserve source dates, final destination and partial results. |
+| Web/news and rendering | Exa, StableEnrich, APEX page_markdown, AGProxy raw fetch | Preserve source dates, final destination and partial results. |
 | Papers | 2s scholarly search/citations, APEX OpenAlex search, existing science tools | No complete OpenAlex author/work API or guaranteed full text. |
 | SEC, court records, rules, nonprofits and recalls | Existing x402stock and 2s APIs | Different query/pagination contracts; US recalls do not replace six-authority international coverage. |
 | Archives | AgentUtility `archive_snapshot` | Closest snapshot lookup; no full CDX inventory or qualified archived-text read. |
@@ -330,8 +334,10 @@ weather stays on world. Maxwell bulk prices/trip bundles repeat selected compone
 data and remain omitted. Non-travel namespace operations remain omitted as well.
 The full local-catalog inventory is not an exhaustive paid test of provider health.
 
-Otto's browser-dependent JSON/link tools remain available because static HTML
-alternatives do not establish equivalent JavaScript coverage. Inspect freshness,
+Otto's browser-dependent extraction returned incomplete JavaScript content and
+treated a challenge page as success in the same tests. Its JSON/link tools are
+excluded in favor of the selected Markdown readers and caller-side structuring;
+structured extraction coverage is correspondingly narrower. Inspect freshness,
 degradation, truncation and final destination before relying on a result; a
 successful extraction or quality grade does not prove the intended page was read.
 AgentUtility browser rendering and Strale structured extraction did not qualify;

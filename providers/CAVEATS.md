@@ -1254,11 +1254,11 @@ Apollo has no active provider definition. Request-ID retry/recovery semantics
 require independent verification before integration; catalog/quote availability
 does not resolve that uncertainty.
 
-## Reviewed and rejected: x402node and openverbs
+## Reviewed and rejected: x402node
 
-Both were investigated on 2026-11-11 for possible `research_desk` use or reserve
-coverage; neither has an enabled provider definition. Recording them here avoids
-repeating the same wide-catalog review on a later topic.
+Investigated on 2026-11-11 for possible `research_desk` use or reserve coverage;
+it has no enabled provider definition. Recording it here avoids repeating the same
+wide-catalog review on a later topic.
 
 **x402node (`api.x402node.dev`).** The catalog is large and broad, but payment is
 currently unusable. Every sampled paid call returned `402 Payment Required:
@@ -1279,18 +1279,48 @@ depth, an aggregate DEX-volume ranking, and Amazon reviews/seller profiles; none
 was purchasable. Revisit only after the payment challenge and settlement resume,
 and then as a narrow curated subset.
 
-**openverbs (`openverbs.com`).** This is 93 independent service subdomains, each
-with its own `openapi.json`; the apex is a catalog and does not expose a combined
-spec (`/openapi.json` is 404). One provider definition has one `spec` and one
-`base_url`, so a backup would require roughly 93 tiny provider files (or 93 pinned
-catalogs) rather than one. Payment worked (x402, with an MPP alternative), but
-overlapping endpoints were more expensive and often thinner: OpenAlex
-`/v1/scholar` at $0.006 without abstracts versus APEX $0.003; Amazon search at
-$0.006 versus OpenWeb Ninja $0.003; Google Shopping at $0.006 with a weaker
-sample than OpenWeb Ninja. Its `science` family is astro/chemistry/physics
-calculators, not literature, so it is not a papers fallback. Rejected as a
-research-desk source or reserve; a specific service can still be registered
-dynamically if a future need justifies it.
+## openverbs.toml — OpenVerbs combined catalog
+
+`openverbs.com` exposes a combined [catalog](https://openverbs.com/openapi.json)
+as a direct `200` (no redirect) OpenAPI 3.1 document with one
+`https://openverbs.com` server and 418 POST operations at
+`/api/<verb>/v1/<operation>` across 93 verb families. It has no
+`$ref`/components, path parameters, per-operation servers or non-JSON contracts,
+so the generic import path handles it.
+
+The 93 service subdomain specs also remain live; their union equals these 418
+operations plus one `/health` per service, and `/health` is omitted here. Use the
+combined apex catalog. A registration using a service subdomain uses `/v1/...` on
+`<verb>.openverbs.com` instead. `include = ["/api", ""]` strips `/api` for names
+(`openverbs_crypto_v1_price`) and preserves a root fallback for future non-API
+routes; the 418 names have no slug collisions.
+
+All 418 operations advertise a fixed USD `x-payment-info.price`, and sampled
+unsigned x402 challenges matched the spec with the correct `USD Coin` EIP-712
+domain on Base USDC. The block's root rail is the preferred MPP/Tempo offer
+(`network: "4217"`); the compatible x402 Base USDC entry appears only under
+`protocols`. The standard `payment-info` parser treats that explicit contrary root
+rail as incompatible, so `[pricing]` renders the display tariff but supplies no
+advisory wallet-ranking selection estimate. `unit = "call"` and
+`usd_as_usdc = true` are retained for consistency and future parser support, not
+because they currently enable selection. This does not affect signing authority or
+payment: the live x402 challenge remains authoritative. The same metadata also
+offers MPP/EVM and MPP/Tempo alternatives. Do not configure the apex
+`.well-known/x402` as `x402-resources`: its 418 resource URLs use subdomain origins
+while this provider calls `openverbs.com/api/...`, so external origin/path matching
+cannot bind them.
+
+`x-service-info.categories` lists 17 broad categories, but the OpenAPI `tags`
+array mixes the 93 verb tags with 11 category names, and operation tags are
+keyword-heavy (2,563 distinct values, 2,459 undeclared at the document root). Do
+not derive categories or filters from tags; use the path verb segment. There is no
+`llms.txt` or `llms-full.txt` (404), so no help tool is exposed;
+`openverbs.com/catalog` is a JSON directory rather than operational help.
+
+Some operations overlap with existing research-desk sources and may be more
+expensive or thinner, so this is a reusable catalog rather than a default
+recommendation. Schema construction and unsigned challenges were verified; a new
+paid settlement was not sampled.
 
 ## Payment extension and offer boundaries
 
@@ -1473,6 +1503,13 @@ Firecrawl crawl/extract declare successful JSON wrappers; the underlying vendor
 lifecycle alone does not establish that Vaaya returns an asynchronous handoff.
 These remain exposed with service-specific result uncertainty and no automatic
 follow-up, polling route, completeness promise or paid replay.
+
+The research desk does not select Vaaya: `stableenrich_firecrawl_scrape` is the
+selected Firecrawl reader. Vaaya's Firecrawl route offers richer parameters, but
+it uses the deprecated Firecrawl `/v1/scrape` API and some options are
+non-functional; the `proxy=stealth` call timed out in the 2026-11-12 sample.
+JavaScript, PDF and `proxy=enhanced` Cloudflare reads succeeded at $0.01 per call
+but did not displace the StableEnrich route. Other Vaaya tools remain unselected.
 
 Excluded families require unsupported async result retrieval, uploads, persistent
 account/memory/sandbox ownership, message/purchase authority, or payment
@@ -2524,14 +2561,21 @@ returned four-list metadata and a signed receipt for $0.015.
 
 ## Research-desk upstream failures
 
-The deployment excludes Vaaya and SocialFetch after the 2026-10-28 probes and
-cited activity observations in [the example guide](../examples/README.md). This is
-an operator selection, not a reusable compatibility restriction. Paid 402 receipts
+The deployment initially excluded Vaaya and SocialFetch after the 2026-10-28
+probes and cited activity observations in [the example guide](../examples/README.md).
+This is an operator selection, not a reusable compatibility restriction. Paid 402 receipts
 from both vendors reported facilitator settlement failure with CDP's
 `payment-method-required`; SocialFetch page readers instead returned generic 503
 `temporarily_unavailable`, without a settlement receipt. Neither confirms the
 on-chain outcome. Missing advertised extensions did not explain all failures:
 Vaaya Firecrawl failed with none omitted.
+
+Vaaya Firecrawl was retested on 2026-11-12. JavaScript and PDF Markdown succeeded
+with the default proxy, and a Cloudflare challenge was bypassed with
+`proxy=enhanced`, at $0.01 per call. The deployment keeps Vaaya unselected:
+StableEnrich's Firecrawl scrape is the selected Firecrawl reader, and Vaaya's
+richer parameters use the deprecated Firecrawl API with some non-functional options.
+SocialFetch remains excluded.
 
 Replacement qualification also exposed 2s GitHub repository lookup returning 502
 `UPSTREAM_UNAVAILABLE` with upstream GitHub 401, and AgentUtility patent search

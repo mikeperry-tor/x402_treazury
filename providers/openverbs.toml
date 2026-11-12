@@ -1,0 +1,15 @@
+description = "Single-purpose utility APIs across 93 verb families: crypto, finance, network, geospatial, text, encoding, web and reference checks."
+spec = "https://openverbs.com/openapi.json"
+name = "OpenVerbs"
+base_url = "https://openverbs.com"
+prefix = "openverbs"
+# Strip the shared /api anchor for names; preserve a root fallback for later routes.
+include = ["/api", ""]
+instructions_text = "All operations are POST with JSON bodies and JSON responses. QR and barcode PNG output is a data URL inside JSON, not an MCP image attachment."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+key = "x-payment-info"
+unit = "call"
+usd_as_usdc = true

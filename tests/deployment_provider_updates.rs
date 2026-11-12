@@ -53,7 +53,7 @@ async fn research_source(source: &str, schema: &str) -> Vec<Inventory> {
 }
 
 #[tokio::test]
-async fn otto_removed_generative_routes_preserve_all_research_destinations() {
+async fn otto_removed_generative_routes_preserve_remaining_research_destinations() {
     let doc = include_str!("fixtures/otto_routing_openapi.json");
     let parsed: Value = serde_json::from_str(doc).unwrap();
     assert!(parsed["paths"].get("/generate-meme").is_none());
@@ -65,11 +65,10 @@ async fn otto_removed_generative_routes_preserve_all_research_destinations() {
         .collect();
     assert_eq!(
         names,
-        BTreeSet::from(["business", "finance", "security", "social", "web", "world"])
+        BTreeSet::from(["business", "finance", "security", "social", "world"])
     );
     for (server, tool) in [
         ("world", "otto_weather"),
-        ("web", "otto_web_extract"),
         ("finance", "otto_funding_rates"),
         ("security", "otto_dns_lookup"),
     ] {
@@ -84,6 +83,20 @@ async fn otto_removed_generative_routes_preserve_all_research_destinations() {
             "{server}: {tool}"
         );
     }
+}
+
+#[tokio::test]
+async fn agproxy_selects_only_raw_fetch_on_web() {
+    let inventory =
+        research_source("agproxy", include_str!("../providers/agproxy-openapi.json")).await;
+    assert_eq!(inventory.len(), 1);
+    assert_eq!(inventory[0].server, "web");
+    let names: BTreeSet<_> = inventory[0]
+        .tools
+        .iter()
+        .map(|entry| entry.tool.name.as_str())
+        .collect();
+    assert_eq!(names, BTreeSet::from(["agproxy_fetch"]));
 }
 
 #[tokio::test]
