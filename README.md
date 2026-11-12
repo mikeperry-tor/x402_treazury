@@ -58,7 +58,7 @@ help. See the [command reference](docs/configuration.md).
 
 | Path | Best for | Network | Starting cost |
 | --- | --- | --- | --- |
-| [Managed starter](examples/deployments/managed.toml) | Learning the model and making a first paid call | Direct | One $5 ZEC allocation plus fees and bridge costs |
+| [Managed starter](examples/deployments/managed.toml) | Learning the model and making a first paid call | Direct | One $5 ZEC allocation |
 | [Research desk](examples/deployments/research_desk.toml) | Multi-domain research with task-oriented endpoints | Tor | One $5 ZEC allocation to start; fully funding all four independent wallet groups takes ~$20. |
 | [Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) | A complete packaged private Hermes Agent stack | Tor-routed TEE-verified private agent use | Same as Research Desk (uses this config by default) |
 
