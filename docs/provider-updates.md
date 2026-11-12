@@ -16,9 +16,10 @@ Commands write a compact JSON result to stdout (`run` for capture; `run`,
 
 Capture accepts `--network-config FILE` and uses the shared network factory,
 public destinations, discovery identities and the provider's HTTP compatibility
-settings. Tor retains remote DNS and no direct fallback. Public reads send an
-identifying `x402_treazury-provider_updates/<version>` User-Agent and never follow
-redirects; declare a redirecting authority at its final public URL. Local inputs are
+settings. Tor retains remote DNS and no direct fallback. Public reads send no
+User-Agent and never follow redirects; declare a redirecting authority at its final
+public URL. CoinMarketCap's documentation URLs require a User-Agent, so those
+declared sources are disabled rather than advertising one. Local inputs are
 frozen first; independent public reads then run concurrently.
 Reads with identical URLs and compatibility settings share a capture, including
 failed reads. No whole-sweep
@@ -282,10 +283,10 @@ Read the packet outcome as a workflow state, not a drift verdict:
 - `source unavailable`: at least one required public read failed. For `ax1`, the
   canonical `www` host returned a 307 redirect to `console.ax1.vc`; capture never
   follows redirects, so the declared source was updated to the final public URL.
-  For `coinmarketcap`, the documentation origins returned 403 to requests without a
-  `User-Agent`; capture now sends an identifying
-  `x402_treazury-provider_updates/<version>` header and the same origins return 200.
-  A wallet receiving payments does not prove documentation acquisition works, and a
+  For `coinmarketcap`, the documentation origins return 403 to requests without a
+  `User-Agent`. The project intentionally does not advertise one at this stage, so
+  its declared documentation sources are disabled and remain unresolved. A wallet
+  receiving payments does not prove documentation acquisition works, and a
   documentation 403 does not establish payment or API failure. Retry once for
   transient failures, then treat the authority as unresolved rather than guessing a
   source.

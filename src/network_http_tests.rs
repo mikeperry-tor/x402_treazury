@@ -594,3 +594,36 @@ async fn participating_candidates_use_distinct_socks_pools_and_promote_without_i
     held_stream.await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn outbound_requests_do_not_advertise_a_product_user_agent() {
+    let app = axum::Router::new().route(
+        "/ua",
+        axum::routing::get(|headers: axum::http::HeaderMap| async move {
+            headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("none")
+                .to_owned()
+        }),
+    );
+    let (address, server) =
+        crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+    let socks = Socks::start(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let ctx = context(&socks);
+    let response = client(
+        &ctx,
+        &IsolationId::discovery("https://api.example.com").unwrap(),
+        HttpPolicy::default(),
+    )
+    .get("https://api.example.com/ua")
+    .send()
+    .await
+    .unwrap();
+    assert_eq!(response.text().await.unwrap(), "none");
+    drop(server);
+}

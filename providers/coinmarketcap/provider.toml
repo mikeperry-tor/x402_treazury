@@ -6,7 +6,10 @@ base_url = "https://pro-api.coinmarketcap.com"
 prefix = "coinmarketcap"
 include = ["/x402", ""]
 pricing_key = "x-payment-info"
-help_url = "https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api.md"
+# Disabled: CoinMarketCap documentation URLs return 403 without a User-Agent.
+# We intentionally do not advertise a product User-Agent at this stage, so the
+# help tool is unavailable. Re-enable only with an explicit User-Agent decision.
+# help_url = "https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api.md"
 instructions_text = "Prefer public-api counterparts when their coverage meets the request. Preserve status.error_code, source timestamps and pagination; HTTP success alone does not prove a successful data result. CoinMarketCap IDs disambiguate duplicate symbols. Comma-separated selectors are strings, not arrays."
 
 [overrides.coinmarketcap_v4_dex_pairs_quotes_latest]

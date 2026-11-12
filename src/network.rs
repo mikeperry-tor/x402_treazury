@@ -1,4 +1,8 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
+// Do not send a User-Agent. Only CoinMarketCap's documentation URLs required one
+// (403 without it), and x402_treazury's userbase is too small to advertise a
+// product identity. The documentation URL is disabled rather than sending a header;
+// ordinary API requests keep their previous header-free behavior.
 pub(crate) mod acquisition;
 mod discovery_capacity;
 pub use discovery_capacity::DiscoveryCapacity;
@@ -770,8 +774,7 @@ impl NetworkContext {
             .retry(reqwest::retry::never())
             .read_timeout(key.read_timeout)
             .connect_timeout(self.policy.connect_timeout())
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("x402_treazury/", env!("CARGO_PKG_VERSION")));
+            .redirect(reqwest::redirect::Policy::none());
         if key.origin.starts_with("https://") {
             if !key.transport.allow_http1 {
                 builder = builder.http2_prior_knowledge();

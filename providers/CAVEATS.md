@@ -1909,7 +1909,11 @@ prevent ordinary x402 calls.
 [keyless OpenAPI](https://coinmarketcap.com/api/documentation/openapi-keyless.json),
 [standard OpenAPI](https://coinmarketcap.com/api/documentation/openapi.json) and
 [x402 route guide](https://coinmarketcap.com/api/documentation/ai-agent-hub/x402.md).
-The API host itself does not publish `/openapi.json` or `/llms.txt`.
+Those documentation URLs return 403 without a User-Agent. The project does not
+advertise a product User-Agent at this stage, so `help_url` and the maintenance
+evidence sources are disabled; the local asset still serves the catalog. Re-enable
+them only with an explicit User-Agent decision. The API host itself does not
+publish `/openapi.json` or `/llms.txt`.
 All public-schema paths receive the `/public-api` prefix from their declared
 server URL. The four documented paid counterparts copy complete standard
 parameter/response contracts to `/x402/v3/cryptocurrency/quotes/latest`,

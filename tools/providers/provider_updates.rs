@@ -193,14 +193,10 @@ async fn download(source: &str, cfg: &Config) -> Result<(Vec<u8>, ResponseMeta)>
         true,
         cfg.transport(),
     )?;
-    let response = http
-        .get(source)
-        .header(
-            reqwest::header::USER_AGENT,
-            concat!("x402_treazury-provider_updates/", env!("CARGO_PKG_VERSION")),
-        )
-        .send()
-        .await?;
+    // No User-Agent: only CoinMarketCap's documentation URLs required one, and
+    // advertising a product identity is not desired at this stage. Those declared
+    // sources remain unavailable rather than sending a header.
+    let response = http.get(source).send().await?;
     complete_response(
         response.status().as_u16(),
         response

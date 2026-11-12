@@ -90,11 +90,11 @@ sources = [{ url = "https://banking-compliance-production.up.railway.app/", purp
 [coinmarketcap]
 intent = "authored"
 guidance = "providers/CAVEATS.md#coinmarketcap"
-sources = [
-    { url = "https://coinmarketcap.com/api/documentation/openapi-keyless.json", purpose = "schema" },
-    { url = "https://coinmarketcap.com/api/documentation/openapi.json", purpose = "schema" },
-    { url = "https://coinmarketcap.com/api/documentation/ai-agent-hub/x402.md", purpose = "guide" },
-]
+# Disabled: these documentation URLs return 403 without a User-Agent. We
+# intentionally do not advertise a product User-Agent at this stage, so the
+# sources stay unavailable instead of sending a header. Re-enable only with an
+# explicit User-Agent decision.
+sources = []
 
 [concordance]
 intent = "authored"
