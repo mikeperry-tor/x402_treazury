@@ -955,10 +955,29 @@ pub(crate) mod tests {
         assert_eq!(f.signed.load(Ordering::SeqCst), 1);
         task.abort();
     }
+    // These tests own a small wallet/source graph; deployment example renames
+    // and distribution rules must not replace their ownership assertions.
+    fn relay_wallet_fixture() -> crate::deployment::MetaConfig {
+        serde_json::from_value(json!({
+            "version":1,
+            "wallets": {
+                "web":{"mode":"zcash_rotation","max_api_payment_usdc":"0.50"},
+                "company":{"mode":"zcash_rotation","max_api_payment_usdc":"0.50"}
+            },
+            "sources": {
+                "social_botsmith":{"spec":"unused.json"}, "company_otto":{"spec":"unused.json"},
+                "exa":{"spec":"unused.json"}, "googletrends":{"spec":"unused.json"}
+            },
+            "servers": {
+                "company":{"listen":"127.0.0.1:0","wallet":"company","sources":["social_botsmith","company_otto"]},
+                "web":{"listen":"127.0.0.1:0","wallet":"web","sources":["exa","googletrends"]}
+            },
+            "relay_fallback":{"relays":{"GET":["../../providers/curl/provider.toml"]}}
+        })).unwrap()
+    }
     #[tokio::test]
     async fn built_relays_share_wallet_clients_and_one_global_breaker() {
-        let mut config: crate::deployment::MetaConfig =
-            toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
+        let mut config = relay_wallet_fixture();
         config.wallet_bootstrap = None;
         let policy = config.relay_fallback.as_ref().unwrap();
         let bindings = resolve_wallets(
@@ -976,14 +995,20 @@ pub(crate) mod tests {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/comprehensive.toml");
         let relays = build(policy, &path, &bindings, &clients).await.unwrap();
-        assert!(Arc::ptr_eq(&relays["social"], &relays["company_otto"]));
-        assert!(Arc::ptr_eq(&relays["exa"], &relays["webinfo"]));
-        assert!(!Arc::ptr_eq(&relays["social"], &relays["webinfo"]));
         assert!(Arc::ptr_eq(
-            &relays["social"].state,
-            &relays["webinfo"].state
+            &relays["social_botsmith"],
+            &relays["company_otto"]
         ));
-        assert_ne!(relays["social"].key, relays["webinfo"].key);
+        assert!(Arc::ptr_eq(&relays["exa"], &relays["googletrends"]));
+        assert!(!Arc::ptr_eq(
+            &relays["social_botsmith"],
+            &relays["googletrends"]
+        ));
+        assert!(Arc::ptr_eq(
+            &relays["social_botsmith"].state,
+            &relays["googletrends"].state
+        ));
+        assert_ne!(relays["social_botsmith"].key, relays["googletrends"].key);
     }
     #[test]
     fn absent_get_list_does_not_select_static_discovery_wallets() {
@@ -1007,8 +1032,7 @@ pub(crate) mod tests {
     }
     #[test]
     fn default_wallet_selection_is_stable_scoped_and_honors_overrides() {
-        let mut config: crate::deployment::MetaConfig =
-            toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
+        let mut config = relay_wallet_fixture();
         config.wallet_bootstrap = None;
         let policy = config.relay_fallback.clone().unwrap();
         assert!(
@@ -1028,10 +1052,10 @@ pub(crate) mod tests {
         };
         let first = resolve(&config, &policy);
         assert_eq!(first["exa"], "web");
-        // The authored example deliberately shares social/company identities,
+        // The fixture shares social/company identities,
         // while the web listener uses a separate payer and Tor scope.
-        assert_eq!(first["social"], "company");
-        assert_eq!(first["webinfo"], "web");
+        assert_eq!(first["social_botsmith"], "company");
+        assert_eq!(first["googletrends"], "web");
         let assignment = crate::rotation::assignment::resolve(&config).unwrap();
         for (source, wallet) in &first {
             assert!(assignment.wallets.contains_key(wallet));
