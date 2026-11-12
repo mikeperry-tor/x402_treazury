@@ -103,8 +103,8 @@ Design review must choose names and exact semantics before implementation:
 
 Add the catalog-only scalar format, configuration validation, selection gating on
 `usd_as_usdc`, display normalization and synthetic tests. Migrate only providers
-whose evidence was reviewed: `degenscan`, `daedalus` and the `relayshield` fallback
-case. Update [pricing configuration](../configuration.md#pricing-metadata-and-runtime-hints)
+whose evidence was reviewed: `degenscan` and `daedalus`.
+Update [pricing configuration](../configuration.md#pricing-metadata-and-runtime-hints)
 and the affected provider caveats. Acceptance: focused pricing unit tests, catalog
 projection counts before/after, provider configuration/replay tests and unchanged
 tool selection.
@@ -113,8 +113,10 @@ tool selection.
 
 Accept a dollar-prefixed string in the payment-info `price` field. Add ordered catalog
 fallback keys with first-present precedence, no external-source use and validation
-errors for malformed/duplicate entries. Migrate `nansen` and `horizonpulse` only
-after exact evidence review. Acceptance: synthetic string/secondary-key tests,
+errors for malformed/duplicate entries. After exact evidence review, migrate
+`nansen` and the `relayshield` scalar fallback, using CP1's scalar format for the
+latter. Horizon Pulse's pricing declaration follows in CP3 with its required
+normalization support. Acceptance: synthetic string/secondary-key tests,
 existing x402 string parity, and no change to signing or caps.
 
 ### CP3 — Atomic amount and premium records
