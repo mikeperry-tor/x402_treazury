@@ -2,6 +2,8 @@
 #[cfg(test)]
 use axum::serve::Listener as _;
 #[cfg(test)]
+mod metadata_shutdown_tests;
+#[cfg(test)]
 mod readiness_tests;
 #[cfg(test)]
 mod refresh_tests;

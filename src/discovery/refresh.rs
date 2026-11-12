@@ -48,10 +48,12 @@ impl Manager {
         binding
     }
 
-    /// Call after listener work drains: every final-outcome callback is now tracked.
-    pub(crate) async fn drain_refreshes(&self) {
+    /// After listener work drains, finish refresh publication, then close payer
+    /// admission and retain accepted background metadata payments through completion.
+    pub(crate) async fn drain_owned_work(&self) {
         self.refresh_tasks.close();
         self.refresh_tasks.wait().await;
+        futures_util::future::join_all(self.payers.values().map(PaidClient::drain)).await;
     }
 
     async fn refresh_registered(self: &Arc<Self>, id: &str, revision: u64) -> Result<()> {
@@ -453,7 +455,7 @@ mod tests {
                 }).await.unwrap();
                 assert_eq!(prices.load(Ordering::SeqCst), 0, "{refusal}: unpublished pricing must perform no requests or enter relay fallback");
                 assert!(Arc::ptr_eq(&previous, &manager.catalog.read()));
-                manager.drain_refreshes().await;
+                manager.drain_owned_work().await;
             }
             for retire_before_completion in [false, true] {
                 prices.store(0, Ordering::SeqCst);
@@ -501,7 +503,7 @@ mod tests {
                 }
                 assert_eq!(downloads.load(Ordering::SeqCst), if retire_before_completion {2} else {1});
                 assert_eq!(prices.load(Ordering::SeqCst), if retire_before_completion {2} else {1});
-                manager.drain_refreshes().await;
+                manager.drain_owned_work().await;
                 manager.document_client("owner").unwrap().drain().await;
             }
             http.abort();
@@ -662,7 +664,7 @@ mod tests {
         entered.notified().await;
         // This handle is retained independently of any static publisher task.
         let drain_owner = manager.clone();
-        let drain = tokio::spawn(async move { drain_owner.drain_refreshes().await });
+        let drain = tokio::spawn(async move { drain_owner.drain_owned_work().await });
         tokio::task::yield_now().await;
         assert!(!drain.is_finished());
         release.notify_one();

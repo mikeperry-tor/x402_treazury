@@ -517,6 +517,10 @@ when their waiter is canceled, and reuse an enclosing MCP owner when present.
 Output validation and conditional unsigned transport promotion finish inside
 that owner before result delivery, including after the waiter disconnects.
 `PaidClient::drain` closes clone-shared admission and waits for accepted work.
+Deployment shutdown drains source refresh publication before concurrently closing
+and draining the source manager's payer clients, then stops financial services.
+This includes detached optional pricing that has entered paid relay fallback;
+late enrichment cannot begin another payment after its payer admission closes.
 `Work` tracks accepted direct tasks and nested managed signing through output
 conversion, disconnect and shutdown drain. There is no aggregate foreground count
 bound on retained tasks or response memory and no replacement admission gate;

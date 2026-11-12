@@ -2470,7 +2470,7 @@ impl RunningDeployment {
             ),
         };
         if let Some(manager) = refresh_manager {
-            manager.drain_refreshes().await;
+            manager.drain_owned_work().await;
         }
         for relay in deferred_relays {
             relay.drain().await;
