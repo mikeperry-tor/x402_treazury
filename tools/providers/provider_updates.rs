@@ -193,9 +193,8 @@ async fn download(source: &str, cfg: &Config) -> Result<(Vec<u8>, ResponseMeta)>
         true,
         cfg.transport(),
     )?;
-    // No User-Agent: only CoinMarketCap's documentation URLs required one, and
-    // advertising a product identity is not desired at this stage. Those declared
-    // sources remain unavailable rather than sending a header.
+    // No User-Agent: advertising a product identity is not desired at this stage.
+    // Attempt every declared source; rejected reads remain unavailable evidence.
     let response = http.get(source).send().await?;
     complete_response(
         response.status().as_u16(),
@@ -552,6 +551,87 @@ mod tests {
         let stored = local(&run, spec.to_str().unwrap(), "test").unwrap();
         std::fs::write(run.join(stored.hash.as_ref().unwrap()), "corrupt").unwrap();
         assert!(bytes(&run, &stored).is_err());
+    }
+    #[tokio::test]
+    async fn coinmarketcap_declared_authorities_remain_explicit_when_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path();
+        let metadata: BTreeMap<String, Evidence> =
+            toml::from_str(include_str!("evidence.toml")).unwrap();
+        let evidence = metadata["coinmarketcap"].clone();
+        let expected = [
+            (
+                "https://coinmarketcap.com/api/documentation/openapi-keyless.json",
+                "schema",
+            ),
+            (
+                "https://coinmarketcap.com/api/documentation/openapi.json",
+                "schema",
+            ),
+            (
+                "https://coinmarketcap.com/api/documentation/ai-agent-hub/x402.md",
+                "guide",
+            ),
+        ];
+        assert_eq!(
+            evidence
+                .sources
+                .iter()
+                .map(|s| (s.url.as_str(), s.purpose.as_str()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let provider = capture_provider(
+            run,
+            "coinmarketcap",
+            "providers/coinmarketcap/provider.toml",
+            Some(evidence),
+        )
+        .await
+        .unwrap();
+        assert!(provider.config.as_ref().unwrap().help_url.is_none());
+        assert_eq!(provider.outcome, "source unavailable");
+        let mut report = Run {
+            format: 1,
+            version: "test".into(),
+            tool_hash: "test".into(),
+            baseline: "test".into(),
+            dirty: String::new(),
+            network: serde_json::json!({}),
+            metadata: local(run, "tools/providers/evidence.toml", "metadata").unwrap(),
+            selected: BTreeMap::from([("coinmarketcap".into(), provider.path.clone())]),
+            providers: vec![provider],
+        };
+        let pending = pending_reads(&report.providers);
+        assert_eq!(pending.len(), expected.len());
+        let failed = pending.into_iter().map(|(key, (source, _))| {
+            let mut read = pending_read(&source);
+            read.outcome = "source unavailable: public read failed (no payment attempted)".into();
+            Ok((key, read))
+        });
+        capture_completions(run, &mut report, futures_util::stream::iter(failed))
+            .await
+            .unwrap();
+        let captured = replay(run).unwrap();
+        assert_eq!(captured.providers[0].outcome, "source unavailable");
+        for (url, purpose) in expected {
+            let read = captured.providers[0]
+                .inputs
+                .iter()
+                .find(|read| read.source == url)
+                .unwrap();
+            assert_eq!(read.purpose, purpose);
+            assert_eq!(
+                read.outcome,
+                "source unavailable: public read failed (no payment attempted)"
+            );
+            assert!(read.hash.is_none());
+        }
+        compare::review(run, None).unwrap();
+        let summary: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(run.join("review.json")).unwrap()).unwrap();
+        assert_eq!(summary["providers"][0]["outcome"], "source unavailable");
+        assert!(!run.join("candidate-0.json").exists());
     }
     #[test]
     fn complete_capture_rejects_partial_and_payment_responses() {

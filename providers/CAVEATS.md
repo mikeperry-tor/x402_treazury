@@ -1920,9 +1920,11 @@ prevent ordinary x402 calls.
 [standard OpenAPI](https://coinmarketcap.com/api/documentation/openapi.json) and
 [x402 route guide](https://coinmarketcap.com/api/documentation/ai-agent-hub/x402.md).
 Those documentation URLs return 403 without a User-Agent. The project does not
-advertise a product User-Agent at this stage, so `help_url` and the maintenance
-evidence sources are disabled; the local asset still serves the catalog. Re-enable
-them only with an explicit User-Agent decision. The API host itself does not
+advertise a product User-Agent at this stage. Maintenance capture still attempts
+all three declared authorities without that header and reports failed reads as
+explicit unavailable evidence. Runtime `help_url` remains disabled; the local
+asset serves the catalog. Re-enable runtime help only with an explicit User-Agent
+decision. The API host itself does not
 publish `/openapi.json` or `/llms.txt`.
 All public-schema paths receive the `/public-api` prefix from their declared
 server URL. The four documented paid counterparts copy complete standard
