@@ -759,8 +759,10 @@ within an hour; unresolved provider work remains owned.
 ### Reserve sizing and fragmentation
 
 Size large to at least twice the largest expected payment, preferably four times
-when prices vary. This is guidance, never an admission restriction. Larger sizes
-reduce some remainders but can keep more calls on one payer address. Small-funded
+when prices vary. This is guidance, never an admission restriction. Prefer a
+separate large reserve over enlarging the small slot for expensive calls: both
+wallets then rotate after fewer calls, reducing usage tracking and linkability.
+Larger sizes reduce some remainders but can keep more calls on one payer address. Small-funded
 wallets provide more frequent rotation opportunities for cheap calls while a large
 reserve supports occasional expensive calls. Selection may still use large-funded
 wallets for cheap calls; retained reuse, request content, funding and network
