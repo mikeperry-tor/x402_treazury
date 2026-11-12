@@ -235,7 +235,12 @@ async fn external_advertisements_keep_parent_expiry_on_initial_load_and_restore(
         if restore {
             record = serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
         }
-        record.prepare_with_client(PaidClient::unsigned()).unwrap();
+        record
+            .prepare_pricing(PaidClient::unsigned())
+            .unwrap()
+            .unwrap()
+            .send(())
+            .unwrap();
         let tool = record.built.as_ref().unwrap().tools[0].clone();
         entered.notified().await;
         assert!(tool.advertised_pricing.amount().is_none());

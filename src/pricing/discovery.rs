@@ -236,6 +236,7 @@ fn static_task(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn attach_dynamic(
     cfg: &Config,
     root: &Arc<Value>,

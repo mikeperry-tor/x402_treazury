@@ -740,6 +740,9 @@ Optional pricing cache commits use the advertisement's existing terminal lock;
 retirement fences dispatched writes as well as presentation. Static and dynamic replacement pricing
 starts after the prior generation retires, while its task ownership is attached
 to tools before publication. Unpublished replacement tasks perform no pricing I/O.
+Dynamic registration and restore share that preparation path: pricing starts only
+for sources in the successfully published, enabled snapshot. Rejected registration
+or restore-conflict fallback cannot start optional metadata payments.
 Per-source revision bookkeeping
 runs before shared acquisition and records every alias after acquisition, including
 the first cache creation. Revision records disappear with their catalog.

@@ -65,34 +65,37 @@ struct Record {
     built: Option<Arc<import::Built>>,
 }
 impl Record {
-    fn prepare_with_client(&mut self, client: PaidClient) -> Result<()> {
+    fn prepare_pricing(
+        &mut self,
+        client: PaidClient,
+    ) -> Result<Option<tokio::sync::oneshot::Sender<()>>> {
         if self.built.is_some() {
-            return Ok(());
+            return Ok(None);
         }
         self.prepare()?;
         let expires = self.advertised_expires();
-        if let Some(provider) = &self.candidate.provider {
-            if provider
-                .settings
-                .effective_pricing()?
-                .is_none_or(|pricing| pricing.source == "catalog")
-            {
-                return Ok(());
-            }
-            let root = Arc::new(crate::catalog::parse_document(self.document.as_bytes())?);
-            let built = Arc::get_mut(self.built.as_mut().expect("prepared source"))
-                .expect("newly prepared source");
-            let mut settings = provider.settings.clone();
-            settings.catalog_pricing_expires = expires;
-            crate::pricing::discovery::attach_dynamic(
-                &settings,
-                &root,
-                &built.base,
-                &mut built.tools,
-                client,
-            );
+        let Some(provider) = &self.candidate.provider else {
+            return Ok(None);
+        };
+        if provider
+            .settings
+            .effective_pricing()?
+            .is_none_or(|pricing| pricing.source == "catalog")
+        {
+            return Ok(None);
         }
-        Ok(())
+        let root = Arc::new(crate::catalog::parse_document(self.document.as_bytes())?);
+        let built = Arc::get_mut(self.built.as_mut().expect("prepared source"))
+            .expect("newly prepared source");
+        let mut settings = provider.settings.clone();
+        settings.catalog_pricing_expires = expires;
+        Ok(crate::pricing::discovery::prepare_dynamic(
+            &settings,
+            &root,
+            &built.base,
+            &mut built.tools,
+            client,
+        ))
     }
     // Candidate/document setters invalidate this process-local result before reuse.
     fn prepare(&mut self) -> Result<()> {
@@ -207,7 +210,7 @@ pub struct Manager {
     #[cfg(test)]
     fixture_endpoint: Mutex<Option<String>>,
     #[cfg(test)]
-    refresh_prepared: Mutex<Option<tokio::sync::oneshot::Sender<Vec<crate::catalog::ToolSpec>>>>,
+    pricing_prepared: Mutex<Option<tokio::sync::oneshot::Sender<Vec<crate::catalog::ToolSpec>>>>,
     #[cfg(test)]
     fixture_directory: Mutex<Option<DirectoryFixture>>,
     #[cfg(test)]
@@ -428,7 +431,7 @@ impl Manager {
             #[cfg(test)]
             fixture_endpoint: Mutex::new(None),
             #[cfg(test)]
-            refresh_prepared: Mutex::new(None),
+            pricing_prepared: Mutex::new(None),
             #[cfg(test)]
             fixture_directory: Mutex::new(None),
             #[cfg(test)]
@@ -459,6 +462,7 @@ impl Manager {
     fn restore(&self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         let mut state = inner.state.clone();
+        let mut pricing = Vec::new();
         for record in state.records.values_mut().filter(|r| !r.removed) {
             let c = record.candidate.clone();
             record.built = None;
@@ -478,7 +482,12 @@ impl Manager {
                         let client = self
                             .document_client(&record.owner)
                             .unwrap_or_else(|_| PaidClient::unsigned());
-                        record.prepare_with_client(client)
+                        if let Some(ready) = record.prepare_pricing(client)? {
+                            pricing.push((record.id.clone(), ready));
+                        }
+                        #[cfg(test)]
+                        self.observe_pricing_prepared(record);
+                        Ok(())
                     })
                     .err()
                     .map(|_| "policy_or_catalog_invalid".into())
@@ -496,7 +505,18 @@ impl Manager {
         };
         inner.state = state;
         self.catalog.publish(snapshot);
+        for (id, ready) in pricing {
+            if inner.state.records[&id].disabled.is_none() {
+                let _ = ready.send(());
+            }
+        }
         Ok(())
+    }
+    #[cfg(test)]
+    fn observe_pricing_prepared(&self, record: &Record) {
+        if let Some(prepared) = self.pricing_prepared.lock().unwrap().take() {
+            let _ = prepared.send(record.built.as_ref().unwrap().tools.clone());
+        }
     }
     fn snapshot(
         &self,
@@ -1101,7 +1121,9 @@ impl Manager {
             let client = this
                 .document_client(&owner)
                 .unwrap_or_else(|_| PaidClient::unsigned());
-            record.prepare_with_client(client)?;
+            let pricing = record.prepare_pricing(client)?;
+            #[cfg(test)]
+            this.observe_pricing_prepared(&record);
             let id = record.id.clone();
             state.records.insert(id.clone(), record);
             state.generation = state
@@ -1140,6 +1162,9 @@ impl Manager {
             );
             inner.state = state;
             this.catalog.publish(snapshot);
+            if let Some(pricing) = pricing {
+                let _ = pricing.send(());
+            }
             Ok(result)
         })
         .await?

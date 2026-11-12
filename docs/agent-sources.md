@@ -883,6 +883,9 @@ obsolete publication. Static clients may need to reload cached schemas.
 Initial and restored dynamic sources bind external price hints to the saved
 catalog acquisition expiry too; optional metadata acquisition cannot renew that
 expiry or restore estimates after it has elapsed.
+Their optional pricing task is prepared with the tools and starts only after an
+enabled source is published. Failed registration persistence or restore conflicts
+do not start optional pricing acquisition.
 
 ## Persistence and operator maintenance
 

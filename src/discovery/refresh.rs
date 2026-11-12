@@ -111,36 +111,15 @@ impl Manager {
             record.disabled = None;
             record.built = None;
             advance_record(&mut record)?;
-            let mut record = tokio::task::spawn_blocking(move || {
-                record
-                    .prepare()
+            let (record, pricing) = tokio::task::spawn_blocking(move || {
+                let pricing = record
+                    .prepare_pricing(client)
                     .context(crate::catalog::LoadStage::Generation)?;
-                Ok::<_, anyhow::Error>(record)
+                Ok::<_, anyhow::Error>((record, pricing))
             })
             .await??;
-            // Optional pricing enriches this generation without delaying publication.
-            let expires = record.advertised_expires();
-            let pricing = if let Some(provider) = &record.candidate.provider {
-                let root = Arc::new(crate::catalog::parse_document(record.document.as_bytes())?);
-                let built = Arc::get_mut(record.built.as_mut().context("source_not_prepared")?)
-                    .context("source_preparation_shared")?;
-                let mut settings = provider.settings.clone();
-                settings.catalog_pricing_refresh = true;
-                settings.catalog_pricing_expires = expires;
-                crate::pricing::discovery::prepare_dynamic(
-                    &settings,
-                    &root,
-                    &built.base,
-                    &mut built.tools,
-                    client,
-                )
-            } else {
-                None
-            };
             #[cfg(test)]
-            if let Some(prepared) = self.refresh_prepared.lock().unwrap().take() {
-                let _ = prepared.send(record.built.as_ref().unwrap().tools.clone());
-            }
+            self.observe_pricing_prepared(&record);
             let permit = crate::limits::acquire_owned_capacity(
                 self.mutations.clone(),
                 "mutation_queue_full",
@@ -429,7 +408,7 @@ mod tests {
                 let previous = manager.catalog.read();
                 let held = manager.mutations.acquire_many(16).await.unwrap();
                 let (prepared, ready) = tokio::sync::oneshot::channel();
-                *manager.refresh_prepared.lock().unwrap() = Some(prepared);
+                *manager.pricing_prepared.lock().unwrap() = Some(prepared);
                 let owner = manager.clone();
                 let identity = id.clone();
                 let refresh = tokio::spawn(async move { owner.refresh_registered(&identity, 1).await });
@@ -455,6 +434,88 @@ mod tests {
                 }).await.unwrap();
                 assert_eq!(prices.load(Ordering::SeqCst), 0, "{refusal}: unpublished pricing must perform no requests or enter relay fallback");
                 assert!(Arc::ptr_eq(&previous, &manager.catalog.read()));
+                manager.drain_owned_work().await;
+            }
+            // Registration and restore use the same prepared task. Refusal must
+            // drop its start gate even while proposed tools remain retained.
+            for refusal in ["registration_snapshot", "registration_save", "restore_conflict"] {
+                let directory = tempfile::tempdir().unwrap();
+                let (manager, id) = manager(Some(directory.path().join("sources.sqlite"))).await;
+                configure_external_pricing(&manager, &id);
+                let previous = manager.catalog.read();
+                let mut record = manager.inner.lock().unwrap().state.records[&id].clone();
+                record.built = None;
+                {
+                    let mut inner = manager.inner.lock().unwrap();
+                    match refusal {
+                        "registration_snapshot" => {
+                            inner.state.records.clear();
+                            inner.base.views.clear();
+                        }
+                        "registration_save" => {
+                            inner.state.records.clear();
+                            inner.stores["owner"].reject_writes();
+                        }
+                        "restore_conflict" => {
+                            inner.base.views = previous.views.clone();
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                let (prepared, ready) = tokio::sync::oneshot::channel();
+                *manager.pricing_prepared.lock().unwrap() = Some(prepared);
+                if refusal == "restore_conflict" {
+                    let owner = manager.clone();
+                    tokio::task::spawn_blocking(move || owner.restore()).await.unwrap().unwrap();
+                    assert!(manager.inner.lock().unwrap().state.records[&id].disabled.is_some());
+                } else {
+                    assert!(manager.commit("owner".into(), false, record).await.is_err());
+                    assert!(Arc::ptr_eq(&previous, &manager.catalog.read()));
+                }
+                let proposed = ready.await.unwrap();
+                assert!(proposed[0].advertised_pricing.has_acquisition_owner());
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while !proposed[0].advertised_pricing.acquisition_finished() {
+                        tokio::task::yield_now().await;
+                    }
+                }).await.unwrap();
+                assert_eq!(prices.load(Ordering::SeqCst), 0, "{refusal}: unpublished pricing must not start");
+                manager.drain_owned_work().await;
+            }
+            // A real restored publication releases enrichment, retaining the
+            // saved catalog acquisition expiry rather than renewing its hints.
+            {
+                let (manager, id) = manager(None).await;
+                configure_external_pricing(&manager, &id);
+                {
+                    let mut inner = manager.inner.lock().unwrap();
+                    let record = inner.state.records.get_mut(&id).unwrap();
+                    record.document = document.lock().unwrap().to_string();
+                    record.hash = hash(record.document.as_bytes());
+                    record.updated_at = 0;
+                    record.candidate.provider.as_mut().unwrap().settings.catalog_cache_ttl_seconds = 120.into();
+                }
+                let observed_prices = prices.clone();
+                *manager.catalog.before_publish.lock().unwrap() = Some(Arc::new(move || {
+                    assert_eq!(observed_prices.load(Ordering::SeqCst), 0);
+                }));
+                let owner = manager.clone();
+                tokio::task::spawn_blocking(move || owner.restore()).await.unwrap().unwrap();
+                entered.notified().await;
+                manager.catalog.before_publish.lock().unwrap().take();
+                let current = manager.catalog.read().views["owner"][0].clone();
+                assert_eq!(current.tool.path, "/new");
+                assert_eq!(current.invoke_output(&Default::default()).await.unwrap().text, "repaired");
+                release.notify_one();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while !current.tool.advertised_pricing.acquisition_finished() {
+                        tokio::task::yield_now().await;
+                    }
+                }).await.unwrap();
+                assert!(current.tool.advertised_pricing.external_description().is_none());
+                assert!(current.tool.advertised_pricing.amount().is_none());
+                assert_eq!(current.tool.advertised_pricing.source().as_deref(), Some("https://api.example.com/prices"));
+                assert_eq!(manager.inner.lock().unwrap().state.records[&id].updated_at, 0);
                 manager.drain_owned_work().await;
             }
             for retire_before_completion in [false, true] {

@@ -71,6 +71,9 @@ not poll its loader if publication is discarded.
 Dynamic refresh fixtures retain proposed tools across removal, revision replacement,
 snapshot rejection and persistence refusal; none starts optional pricing I/O.
 Successful replacement publishes before optional pricing completes.
+Registration snapshot/save refusal and restore-conflict fixtures retain proposed
+tools while verifying zero optional pricing requests. Successful restore publishes
+before enrichment and retains the saved acquisition expiry.
 
 Catalog refresh publication regressions observe the final visibility boundary for
 static publishers with and without a dynamic registry, and for registered-source
