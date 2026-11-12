@@ -61,9 +61,11 @@ Each completed remote read records only `etag`, `last_modified` and `date` respo
 metadata. Packets expose current `response` and, when a prior capture exists,
 `previous_response` beside the source comparison so two sweeps can distinguish a
 changed validator, a changed body with a stable validator, or a changed validator
-with identical bytes. These are cache/refresh indicators, not proof that an operation was
-removed or its schema changed. The
-[stale cache expiry plan](plans/stale_cache_expiry.md) owns corroboration rules.
+with identical bytes. These are comparison evidence, not runtime expiry triggers.
+[Runtime source refresh](configuration.md#runtime-source-refresh) owns the hard
+signals and publication behavior. Operation identity or authored-target drift
+found by maintenance requires an explicit catalog warm or provider edit; the sweep
+does not invalidate a running server's snapshot.
 
 The existing specialized AgentUtility registry join and Daedalus identity-header
 repair retain their current consumers and explicit invocation; the sweep never

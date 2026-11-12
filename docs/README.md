@@ -26,7 +26,6 @@ financial tools and listener ownership. The [Ironwood-only policy](zingo-integra
 owns allowed Zcash pools, the narrow NEAR deposit exception and unavoidable SDK activity.
 
 [Plans](plans/) describe unfinished work, including artifact storage,
-[stale cache expiry](plans/stale_cache_expiry.md),
 [custom pricing adapters](plans/custom-pricing-adapters.md),
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
