@@ -62,7 +62,8 @@ Follow the [provider policy](providers/README.md#provider-policy),
 [selection semantics](docs/configuration.md) and
 [test policy](docs/testing.md#provider-regressions). Provider oddities,
 quirks, workarounds, and compatibility exemptions are documented in
-[provider caveats](providers/CAVEATS.md).
+[provider caveats](providers/CAVEATS.md) as current support boundaries and
+explicit uncertainty, without dated probe or sample journals.
 
 ## Financial and execution boundaries
 
@@ -358,10 +359,28 @@ make fmt-check
   justify adding a limit; see [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
 - Maintain current rules in place. Keep detailed contracts in their owning guides,
   not appended migration notes or duplicate checklists.
+- Maintained guides, example/deployment READMEs and provider caveat files state
+  current behavior, current support boundaries and durable limitations. Do not add
+  change logs, dated test journals, probe or sample narratives, "what was true
+  before" history, or "initially/later/retested" discovery sequences. Git history
+  and private `target/` reports carry chronology. Plans may record the evidence
+  and decisions needed for unfinished work; they are not journals or archives of
+  completed history.
+  Runtime sequencing such as "first use activates X; a later replacement" remains
+  valid, as do dates that are part of a fact, including data-as-of dates, legal
+  dates, version or commit pins and captured-evidence identifiers.
+- Provider caveats state each provider's current support boundary and explicit
+  uncertainty, not the sequence of probes that discovered it. Shared contracts may
+  use cross-provider sections. Keep deployment-specific selections, exclusions and
+  curated alternatives in the example guide; a selection note may briefly justify
+  a choice and link to the owning provider caveat, but must not restate the full
+  provider contract in both locations.
 - Follow the [documentation policy](docs/README.md): generated metrics/reports go
   under ignored `target/` or private external storage, and completed plans yield
   maintained guidance plus focused unfinished work. Do not add implemented-plan
   archives or dated handoffs.
-- Documentation/Git cleanup never erases financial evidence or grants replay authority.
+- Documentation/Git cleanup never erases financial evidence or grants replay
+  authority. Move qualification evidence to its owning private report before
+  removing narrative detail from maintained documentation.
 - Preserve stable state formats, generated `auto_v1_` pool names, Tor token domains
   and `X402_*` environment contracts when renaming files or product labels.
