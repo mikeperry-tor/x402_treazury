@@ -2019,17 +2019,21 @@ catalog load.
 Catalogs are local snapshots, using a provider/source setting:
 
 ```toml
-catalog_cache_ttl_seconds = 604800 # default: seven days; 0 disables catalog disk caching
+catalog_cache_ttl_seconds = "indefinite" # default; 0 disables disk caching; positive seconds set expiry
 ```
 
 Catalogs and their operation estimates have one lifetime. Reads, restart and price
-observations do not renew it. Successful revalidation, including HTTP 304 or an
-unchanged download, renews the catalog and retains its estimates. Changed catalog
-bytes or a previously loaded source's configuration update discard both together.
+observations do not renew it. The default is indefinite; a positive seconds override
+expires on the next acquisition, without a background timer. Expiry, forced refresh,
+changed bytes or a previously loaded source's configuration update discard cached
+challenge estimates together. A forced refresh also resets estimates when bytes are
+identical. Accepted in-flight work retains its validated offer.
+Standalone serving also binds external price hints to the loaded catalog expiry;
+slow metadata acquisition cannot extend a finite catalog lifetime.
 Alias selection and listener publication preserve prices; configuration revisions
 are recorded per source alongside the shared entry, without partitioning lookup.
 
-A deployment source can override its provider's value. Any positive integer sets
+A deployment source can override its provider's value. `"indefinite"` or any positive integer sets
 local retention regardless of upstream `Cache-Control` or `Expires`, including
 `no-store`, `no-cache` and `max-age=0`. DEBUG logs record
 `cache_policy="local_override"`, `ttl_seconds`, and a fixed `origin_policy` label.
@@ -2039,7 +2043,18 @@ Caching uses the normal unsigned GET; there are no extra HEAD probes. The TTL
 starts after a complete catalog download. Once expired, catalogs with `ETag` or
 `Last-Modified` use one conditional GET; a matching 304 reuses the body and starts
 a new local lifetime. Without validators, the catalog is downloaded again.
-Failed refreshes never fall back to expired documents.
+Failed refreshes retain the previous complete disk snapshot but return the refresh
+error; they never serve an expired document as a successful refresh. Ordinary
+startup, explicit warm and runtime refresh stage downloaded or revalidated bytes
+until source generation and source tool routing validate (including strict
+completeness for inspection and warm). A rejected response cannot create an
+indefinite snapshot or renew a previous one. Optional pricing documents are
+persisted only after their configured format is validated. Generic library JSON
+loaders accept parsed JSON; callers of `load_json_discovery_bounded` must explicitly
+commit after validating content for their intended use.
+If an older version cached semantically invalid JSON, replace it with explicit
+`catalog warm` or clear the stopped application's disposable cache. Ordinary source
+validation errors do not evict shared entries: another alias may still accept them.
 
 This owner-only private cache permits `private` responses and responses carrying
 `Set-Cookie`; cookies are neither saved nor sent. Ordinary `Vary` is supported by
@@ -2051,8 +2066,8 @@ request headers are not established by origin transport, so relay responses with
 Relay catalogs use the same local TTL, measured from the original completed relay
 response so sharing it cannot renew its lifetime.
 
-The local-policy cache key causes one initial miss for catalogs written by older
-versions; those disposable entries are left for eviction. Missing or incompatible
+The lifetime-aware cache key causes one initial miss and re-download after this
+upgrade, including for catalogs written with the old seven-day default; those disposable entries are left for eviction. Missing or incompatible
 current cache metadata also causes a quiet miss and a fresh origin request, without
 reusing saved validators.
 
@@ -2091,17 +2106,26 @@ x402_treazury catalog warm --config deployment.toml --source provider_id --direc
 
 `--source` selects authored source IDs from the deployment, not provider file paths;
 repeat it or use a comma-separated list. Omitting it selects every declared source.
-Only selected catalogs are fetched. The command requires an existing treasury state directory and rejects
+Every selected catalog and its configured pricing hint document is downloaded
+unconditionally, including with a fresh cache entry or saved validators. It adds no
+conditional GET or API replay. The command requires an existing treasury state directory and rejects
 `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on a selected source. Without `--direct`, it uses the
 deployment's network policy, replaced by `--network-config` when supplied. It starts
 no listeners or funding workers. It opens
 only the resolved discovery wallets when paid relay warming is enabled below;
-otherwise it remains unsigned and opens no wallet.
+otherwise it remains unsigned and opens no wallet. Optional pricing failure leaves
+prices unknown and does not make usable API definitions unavailable. Warm updates
+the shared SQLite cache; a running server keeps its in-memory snapshot until its
+runtime source refresh or a restart. Serving and ordinary startup never force a
+refresh.
 
 `--direct` is an explicit exception for this dedicated warming process. Its
 unsigned discovery requests use direct egress through the normal network factory,
 so those providers can observe the machine's direct IP address. The deployment
-file and serving policy remain unchanged. Entries have separate direct-warm
+file and serving policy remain unchanged. Successful accepted replacement retires older compatible origin, direct-warm and
+relay disk variants together, so eviction cannot uncover obsolete definitions.
+An accepted response that cannot be persisted also retires those variants; failed
+acquisition or validation retains them. Entries have separate direct-warm
 provenance and are bound to the original configured network/isolation policy,
 URL, transport flags, timeouts and limits. Ordinary direct-mode cache entries do
 not gain this cross-policy permission.
@@ -2118,7 +2142,11 @@ The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
 `fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`. Catalogs use the configured local TTL,
 including when upstream requests no storage or immediate revalidation. Variant,
 size and provenance restrictions still apply; `--direct` does not override them
-or extend lifetimes. A failed multi-source warm can leave completed disposable entries.
+or extend lifetimes. Warm validates each source's generation, completeness and
+`send_tools` routing before its write; it does not validate combined listener
+selection. A removed exact listener selector can therefore make its endpoint
+unavailable after restart even when warm succeeds. A failed multi-source warm can
+leave completed disposable entries.
 
 ## Relay fallback
 
@@ -2367,9 +2395,10 @@ published tools remain usable. Direct acquisition bypasses that capacity; there
 is no additional pricing gate or deadline.
 It uses the source catalog's retry policy and configured paid relay fallbacks,
 with the same payer authority and payment limits. Source refreshes also refresh
-the configured pricing document; unchanged/304 OpenAPI data does not skip that
-acquisition. Existing fresh pricing cache data may be reused. Each document keeps
-its own acquisition expiry under the same configured lifetime.
+the configured pricing document; a newly downloaded or revalidated catalog forces
+that document to download again, including unchanged bytes or HTTP 304. Reusing a
+cached catalog may reuse cached pricing data. Advertisements inherit the parent
+catalog's acquisition expiry; reading pricing data does not renew it.
 Stopped-server maintenance refreshes save accepted catalog bytes; external runtime
 enrichment starts when those sources are next loaded. It does not buy transient
 pricing data for a source with no running tools.
@@ -2395,9 +2424,10 @@ The normalized amount is advisory: valid observed offers take precedence, then
 fresh advertisements, then unknown-price selection. Each invocation still obtains
 and validates its own challenge. Advertised metadata is separate from the observed
 price cache, so a local catalog can supply its first hint without a cache row or
-previous API request. Remote advertisements use the existing configured catalog lifetime (seven days
-by default) measured from their own acquisition; unrelated catalog reads do not
-renew external metadata. Storage success is not a prerequisite. Loading a replacement source creates new
+previous API request. Remote advertisements share the acquired catalog lifetime
+(indefinite by default), including configured external hint documents. A new
+catalog acquisition forces its external hints to download again; unrelated reads
+do not renew their expiry. Storage success is not a prerequisite. Loading a replacement source creates new
 advertisement handles.
 
 Pricing suffixes use compact provenance labels:

@@ -129,8 +129,7 @@ async fn local_and_cache_admission_reject_expansion_and_304_cannot_refresh_it() 
     };
     slot.write(Some(good)).await;
     assert!(
-        revalidate_cached_catalog(&headers, Some(&entry), Some(&slot))
-            .await
+        revalidate_cached_catalog(&headers, Some(&entry), Some(&slot), 0)
             .unwrap_err()
             .is::<expansion::ComplexityLimit>()
     );

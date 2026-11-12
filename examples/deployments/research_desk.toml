@@ -156,6 +156,9 @@ max_api_payment_usdc = "1.00"
 # A provider shared across categories is still downloaded only once.
 
 [sources.banking_compliance]
+# Catalogs and price hints persist indefinitely; use positive seconds to expire,
+# or 0 to disable disk caching. Explicit catalog warm always re-downloads.
+catalog_cache_ttl_seconds = "indefinite"
 extends = "../../providers/banking-compliance/provider.toml"
 send_tools = [
   # Advisory rule summaries complement business's authoritative 2s eCFR text.

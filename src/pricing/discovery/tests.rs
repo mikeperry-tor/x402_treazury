@@ -52,6 +52,8 @@ fn loaded(document: Value) -> crate::catalog::LoadedCatalog {
     crate::catalog::LoadedCatalog {
         document: Arc::new(document),
         hints: None,
+        pending: None,
+        refresh_pricing: false,
         advertised_expires: Some(crate::http_cache::now() + 120),
     }
 }
@@ -405,7 +407,7 @@ async fn static_external_acquisition_is_optional_cached_and_refreshes_independen
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = config(&format!("{base}/prices"));
     cfg.http_cache_directory = Some(dir.path().join("cache"));
-    cfg.catalog_cache_ttl_seconds = 120;
+    cfg.catalog_cache_ttl_seconds = 120.into();
     let mut first = tools(&cfg, &root);
     attach_static(&cfg, &root, &base, &mut first, None);
     state.arrived.notified().await;
@@ -438,6 +440,117 @@ async fn static_external_acquisition_is_optional_cached_and_refreshes_independen
     assert_eq!(first[0].advertised_pricing.amount(), Some(U256::from(1000)));
     assert_eq!(state.calls.load(Ordering::SeqCst), 2);
     task.abort();
+}
+
+#[tokio::test]
+async fn acquired_catalog_pricing_uses_parent_refresh_and_expiry() {
+    let (base, state, server) = fixture(false).await;
+    let directory = tempfile::tempdir().unwrap();
+    let mut cfg = config(&format!("{base}/prices"));
+    cfg.http_cache_directory = Some(directory.path().join("cache"));
+    let mut parent = loaded(schema());
+    let mut first = tools(&cfg, &parent);
+    refresh_static(&cfg, &parent.document, &base, &mut first, None).await;
+    assert_eq!(first[0].advertised_pricing.amount(), Some(U256::from(1000)));
+    assert_eq!(state.calls.load(Ordering::SeqCst), 1);
+
+    // The same handoff is used by deployment sources and standalone serving.
+    // A new parent acquisition forces fresh metadata despite its fresh cache;
+    // an already expired parent cannot gain a later price lifetime.
+    parent.refresh_pricing = true;
+    parent.advertised_expires = Some(0);
+    parent.configure_pricing(&mut cfg);
+    *state.price.lock().unwrap() = 3000;
+    let mut expired = tools(&cfg, &parent);
+    refresh_static(&cfg, &parent.document, &base, &mut expired, None).await;
+    assert_eq!(state.calls.load(Ordering::SeqCst), 2);
+    assert!(expired[0].advertised_pricing.amount().is_none());
+    assert!(
+        expired[0]
+            .advertised_pricing
+            .external_description()
+            .is_none()
+    );
+
+    parent.advertised_expires = Some(crate::http_cache::now() + 120);
+    parent.configure_pricing(&mut cfg);
+    let mut current = tools(&cfg, &parent);
+    refresh_static(&cfg, &parent.document, &base, &mut current, None).await;
+    assert_eq!(
+        current[0].advertised_pricing.amount(),
+        Some(U256::from(3000))
+    );
+    assert_eq!(state.calls.load(Ordering::SeqCst), 3);
+    server.abort();
+}
+
+#[tokio::test]
+async fn invalid_external_pricing_never_replaces_accepted_cache() {
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
+    let response = Arc::new(Mutex::new(json!({"error":"maintenance"})));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let server = tokio::spawn(
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/prices",
+                any({
+                    let response = response.clone();
+                    let calls = calls.clone();
+                    move || {
+                        let response = response.clone();
+                        let calls = calls.clone();
+                        async move {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            axum::Json(response.lock().unwrap().clone())
+                        }
+                    }
+                }),
+            ),
+        )
+        .into_future(),
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let mut cfg = config(&format!("{base}/prices"));
+    cfg.http_cache_directory = Some(directory.path().join("cache"));
+    let root = Arc::new(schema());
+    let slot = crate::http_cache::Slot::new(
+        &cfg,
+        &cfg.pricing.as_ref().unwrap().source,
+        "catalog",
+        cfg.max_spec_bytes,
+    )
+    .unwrap();
+    let mut rejected = tools(&cfg, &root);
+    refresh_static(&cfg, &root, &base, &mut rejected, None).await;
+    assert!(rejected[0].advertised_pricing.amount().is_none());
+    assert!(slot.read().await.is_none());
+
+    *response.lock().unwrap() = document(&format!("{base}/read"), 1000);
+    let mut accepted = tools(&cfg, &root);
+    refresh_static(&cfg, &root, &base, &mut accepted, None).await;
+    assert_eq!(
+        accepted[0].advertised_pricing.amount(),
+        Some(U256::from(1000))
+    );
+    let previous = slot.read().await.unwrap();
+    let hints = previous.hints.as_ref().unwrap();
+    let observation = hints.operation("GET", "/read");
+    observation.learn(U256::from(7), crate::pricing::runtime::received().unwrap());
+
+    cfg.catalog_cache_force_refresh = true;
+    *response.lock().unwrap() = json!({"error":"maintenance"});
+    let mut replacement = tools(&cfg, &root);
+    refresh_static(&cfg, &root, &base, &mut replacement, None).await;
+    assert!(replacement[0].advertised_pricing.amount().is_none());
+    let retained = slot.read().await.unwrap();
+    assert_eq!(retained.data, previous.data);
+    assert_eq!(retained.metadata.expires, previous.metadata.expires);
+    assert_eq!(retained.hints.unwrap().generation, hints.generation);
+    assert_eq!(observation.get(), Some(U256::from(7)));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    server.abort();
 }
 
 #[test]

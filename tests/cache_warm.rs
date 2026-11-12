@@ -285,6 +285,8 @@ async fn warming_sorts_local_and_shared_remote_catalogs_without_endpoint_reads()
         assert_eq!(req.method(), "GET");
         assert!(!req.headers().contains_key("payment-signature"));
         assert!(!req.headers().contains_key("x-payment"));
+        assert!(!req.headers().contains_key("if-none-match"));
+        assert!(!req.headers().contains_key("if-modified-since"));
         match req.uri().path() {
             "/spec" => {
                 catalog.fetch_add(1, Ordering::SeqCst);
@@ -396,7 +398,7 @@ sources=['z_remote','m_local','a_remote']
     );
     assert_eq!(price_calls.load(Ordering::SeqCst), 0);
 
-    for _ in 0..2 {
+    for expected_calls in 2..=3 {
         let repeated = run().await;
         assert_eq!(
             repeated["sources"]
@@ -409,7 +411,7 @@ sources=['z_remote','m_local','a_remote']
                 .map(|row| (&row["source"], &row["catalog_cache"]))
                 .collect::<Vec<_>>()
         );
-        assert_eq!(catalog_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(catalog_calls.load(Ordering::SeqCst), expected_calls);
         assert_eq!(
             price_calls.load(Ordering::SeqCst),
             0,
@@ -418,8 +420,7 @@ sources=['z_remote','m_local','a_remote']
     }
     let db = rusqlite::Connection::open(dir.path().join("state/http-cache/discovery-v1.sqlite"))
         .unwrap();
-    // Expire cached catalogs; the next explicit warm refreshes the shared document
-    // while the local source stays local.
+    // An expired entry also takes the unconditional warm path, while the local source stays local.
     db.execute(
         "UPDATE entries SET metadata=json_set(metadata,'$.expires',0)",
         [],
@@ -433,7 +434,7 @@ sources=['z_remote','m_local','a_remote']
             .iter()
             .all(|r| r.get("fresh_pricing_entries").is_none() && r.get("pricing").is_none())
     );
-    assert_eq!(catalog_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(catalog_calls.load(Ordering::SeqCst), 4);
     assert_eq!(price_calls.load(Ordering::SeqCst), 0);
     assert!(!dir.path().join("state/state.sqlite").exists());
     assert!(!dir.path().join("state/wallet.key").exists());

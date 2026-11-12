@@ -22,7 +22,7 @@ type DownloadKey = (
     crate::network::HttpPolicy,
     Option<std::path::PathBuf>,
     bool,
-    u64,
+    catalog::CacheLifetime,
     Option<String>,
 );
 type Document = Arc<catalog::LoadedCatalog>;
@@ -96,11 +96,16 @@ impl PendingSource {
         readiness: crate::discovery_relay::CatalogReadiness,
     ) -> Result<Source> {
         let document = self.document.resume(gate.clone(), readiness).await?;
-        if let Some(hints) = &document.hints {
-            hints.slot.record_configuration(&self.config).await;
-        }
+        let mut acquired = (*document).clone();
         let mut source = Source::from_document(id, self.config.clone(), document)?
             .with_send_tools(id, self.send_tools.clone())?;
+        acquired.commit().await;
+        if let Some(hints) = &acquired.hints {
+            hints.slot.record_configuration(&source.config).await;
+        }
+        for tool in &mut source.tools {
+            tool.catalog_hints = acquired.hints.clone();
+        }
         source.enrich_pricing(Some(gate));
         Ok(source)
     }
@@ -171,6 +176,7 @@ struct Downloads {
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
     direct_warm_target: Option<crate::network::NetworkPolicy>,
+    force_refresh: bool,
     gate: Option<Arc<crate::network::DiscoveryCapacity>>,
 }
 impl Downloads {
@@ -193,6 +199,7 @@ impl Downloads {
         cfg.relay_fallback = self.relay.get(id).cloned();
         cfg.http_cache_directory = self.cache_directory.clone();
         cfg.http_cache_direct_warm_target = self.direct_warm_target.clone();
+        cfg.catalog_cache_force_refresh = self.force_refresh;
         if warn {
             crate::provider_status::warn(id, &cfg);
         }
@@ -351,6 +358,7 @@ pub(super) async fn load(
         relay,
         gate: Some(capacity),
         direct_warm_target: None,
+        force_refresh: false,
         entries: Mutex::default(),
         cache_directory: config
             .treasury
@@ -458,16 +466,7 @@ async fn load_one(
     let result = match cfg {
         Ok(cfg) => Source::load(id, source, cfg, &mut progress, downloads).await,
         Err(error) => Err(error),
-    }
-    .and_then(|loaded| {
-        if downloads.purpose != CatalogPurpose::Serving
-            && let SourceLoad::Ready(source) = &loaded
-            && !source.issues.is_empty()
-        {
-            return Err(catalog::IncompleteCatalog(source.issues.clone()).into());
-        }
-        Ok(loaded)
-    });
+    };
     progress.finished = true;
     if let Err(error) = &result {
         let failure = catalog_failure(error, progress.phase);
@@ -524,11 +523,19 @@ impl Source {
         tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
-        if let Some(hints) = &document.hints {
-            hints.slot.record_configuration(&cfg).await;
-        }
+        let mut acquired = (*document).clone();
         let mut source = Self::from_document(id, cfg, document)?
             .with_send_tools(id, source.send_tools.clone())?;
+        if downloads.purpose != CatalogPurpose::Serving && !source.issues.is_empty() {
+            return Err(catalog::IncompleteCatalog(source.issues.clone()).into());
+        }
+        acquired.commit().await;
+        if let Some(hints) = &acquired.hints {
+            hints.slot.record_configuration(&source.config).await;
+        }
+        for tool in &mut source.tools {
+            tool.catalog_hints = acquired.hints.clone();
+        }
         if downloads.purpose.for_current_operation() == CatalogPurpose::Serving {
             source.enrich_pricing(downloads.gate.clone());
         }
@@ -552,6 +559,7 @@ impl Source {
         document: impl Into<catalog::LoadedCatalog>,
     ) -> Result<Self> {
         let document = document.into();
+        document.configure_pricing(&mut cfg);
         let generation_started = Instant::now();
         let base_url: Result<String> = (|| {
             let base_url = cfg
@@ -667,6 +675,7 @@ pub(super) async fn warm(
             .as_ref()
             .map(|t| t.state_dir.join("http-cache")),
         direct_warm_target: direct.then(|| config.network.clone()),
+        force_refresh: true,
     };
     let mut loads = Vec::with_capacity(selected.len());
     for id in selected {
@@ -680,6 +689,15 @@ pub(super) async fn warm(
             else {
                 anyhow::bail!("cache warming cannot defer catalog discovery");
             };
+            let mut source = source;
+            crate::pricing::discovery::refresh_static(
+                &source.config,
+                &source.document,
+                &source.base_url,
+                &mut source.tools,
+                downloads.gate.clone(),
+            )
+            .await;
             let catalog_cache = catalog_cache_status(&source.config).await;
             Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
                 source: id.clone(),
@@ -696,6 +714,8 @@ pub(super) async fn warm(
     Ok(results)
 }
 
+#[cfg(test)]
+mod cache_acceptance_tests;
 #[cfg(test)]
 mod warm_tests;
 
@@ -734,6 +754,8 @@ mod deferred_tests {
                 catalog::LoadedCatalog {
                     document: document.clone(),
                     hints: None,
+                    pending: None,
+                    refresh_pricing: false,
                     advertised_expires: Some(expires),
                 },
             )
@@ -1442,7 +1464,7 @@ mod external_pricing_refresh_tests {
         );
         assert_eq!(catalogs.load(Ordering::SeqCst), 2);
         assert_eq!(metadata.load(Ordering::SeqCst), 2);
-        assert_eq!(metadata_validations.load(Ordering::SeqCst), 1);
+        assert_eq!(metadata_validations.load(Ordering::SeqCst), 0);
         client.drain().await;
         drop(bound);
         drop(client);

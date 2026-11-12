@@ -27,16 +27,17 @@ source-level pricing acquisition/format failures use INFO without upstream prose
 Cancelling enrichment stops its publication waiter; existing retained relay work
 still finishes journaled financial obligations and cache publication.
 
-Each serving source build/refresh also acquires or revalidates its configured pricing URL,
-including when an expired OpenAPI document returns unchanged bytes or HTTP 304.
-The pricing document uses the same configured catalog lifetime (seven days by
-default) measured from its own acquisition. A fresh independent cache hit is
-reusable; refreshing OpenAPI alone cannot renew external pricing. There is no
-pricing poller or readiness gate.
-Inspection and qualification catalog loading do not start optional pricing
-acquisition. For stopped-server dynamic maintenance, the next source load starts enrichment
-from the newly accepted catalog; there is no detached pricing fetch on the CLI's
-behalf after it exits.
+Each serving source build also acquires its configured pricing URL. A newly
+downloaded or revalidated catalog forces that hint document to download again,
+including unchanged catalog bytes or HTTP 304. Cache reuse preserves the parent
+catalog expiry; pricing has no separate lifetime (the default is indefinite).
+Ordinary startup enrichment remains asynchronous. Runtime refresh waits for this
+optional acquisition before publishing the replacement source; failure publishes
+unknown prices. There is no pricing poller or universal readiness gate.
+Inspection and qualification do not start optional pricing enrichment. Explicit
+`catalog warm` downloads selected catalogs and configured hints unconditionally,
+then exits without detached pricing work. A running server keeps its in-memory
+snapshot until runtime refresh or restart.
 
 See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
 for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
@@ -917,7 +918,7 @@ financial or qualification authority.
 | Store/treasury command queues: 32 / 8 | Full-queue submission emits DEBUG `store_queue_full` / `treasury_queue_full` and waits with the original command; no new timeout, replay or authority. Accepted work retains its existing cancellation/shutdown contract. |
 | Advisory and retirement maintenance: four wallet acquisitions per group | One finite startup inventory pass, requested scalar refreshes and eligible retained-candidate retirement work. Shared per-wallet acquisitions retain the 60-second completion floor and independent error backoff up to 300 seconds; scalar success and retirement completion remain separate. Candidate authorization pages contain at most 64 rows each without a total-history cap. Store-lifetime eligibility/pending markers survive disposable result/cache eviction; latest above tolerance finishes demand even with a low saved minimum. Confirmed-high/latest-low, valid unused authorizations and transient failures retain scoped work. Ineligible candidates and unrecoverable original-record corruption stop locally; canonical-history changes retain scoped reconstruction work without a new lane or timer. Unrelated wakes do not recreate completed demand. Accepted acquisition/publication owners survive waiter cancellation. Local metadata pages discover relevant eligibility changes; the five-second scheduler cadence grants no faster network reads. Startup follows the SOCKS prerequisite; explicit sync makes one finite attempt. Actual capacity deferral logs DEBUG; ordinary cooldown does not warn. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
-| Catalog/price retention: seven days by default | `catalog_cache_ttl_seconds` controls catalog/observed-price sharing; zero disables disk caching. Advertised estimates retain the source acquisition expiry independently of persistence, using the configured lifetime or the existing seven-day in-memory default when zero. Local authored prices follow their loaded generation. Reads, restart and observations never renew expiry. Successful unchanged catalog revalidation renews its joint entry; changed bytes/configuration or eviction discard observed hints. SQLite writes remain disposable and generation-conditional. No independent price timer, capacity, probe or polling scheduler. See [local resource limits](local-resource-limits.md). |
+| Catalog/price retention: indefinite by default | `catalog_cache_ttl_seconds="indefinite"` controls catalog/observed-price sharing; positive seconds set expiry and zero disables disk caching. Advertised estimates share source acquisition expiry independently of persistence; disk opt-out keeps them bound to the loaded generation. Local authored prices follow their generation. Reads/restart/observations never renew expiry. Expiry, forced refresh, changed bytes/configuration or eviction discard observed hints. Configured external pricing is re-downloaded with catalog acquisition. SQLite writes remain disposable and generation-conditional. No independent price timer, capacity, probe or polling scheduler. See [local resource limits](local-resource-limits.md). |
 | NEAR sizing retries | No independent attempt cutoff. Each recognized USDC minimum must strictly raise the floor within the authorized nominal ceiling; every replacement draw persists before the next request. The original quote deadline is checked before each request and never renewed by retries. Existing response-inactivity guards and scheduler backoff remain independent. |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to 30 minutes (1,800 seconds) and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund assessment is owned by [deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md). Broadcast acceptance is not settlement. |
 | x402 authorization validity | New static v1/v2 exact/upto and managed exact signatures expire at the shorter of the provider's requested lifetime or 300 seconds after signing. This bounds transfer authority, independently of HTTP progress. Original accepted offers, actual journaled expiries and existing signatures are preserved; expiry never grants replay. |

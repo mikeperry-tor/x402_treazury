@@ -555,11 +555,12 @@ checked by payment preparation and the authorization journal; balances are not
 spending permission. No additional hint or authority state is maintained.
 
 Runtime hints belong to the acquired remote catalog cache entry and its configured
-lifetime (seven days by default). Method and original path template identify the
+lifetime (indefinite by default). Method and original path template identify the
 operation; wallet groups, listeners, payers and store lifetimes do not partition
 lookup. Receipt order controls in-process updates, including lower prices.
 SQLite storage restores estimates across restart without renewing catalog expiry.
-Catalog replacement, configuration invalidation and eviction discard estimates;
+Catalog expiry, forced refresh (including identical bytes), replacement,
+configuration invalidation and eviction discard estimates;
 reads and payment observations do not renew lifetime. These operations cause no
 probe, cached-challenge reuse or new payment authority. See
 [shared cache behavior](architecture.md#wallet-selection-and-network-isolation).

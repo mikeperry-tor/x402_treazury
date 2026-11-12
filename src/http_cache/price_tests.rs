@@ -17,8 +17,13 @@ fn slot(cfg: &crate::catalog::Config) -> Slot {
 fn entry(data: &[u8]) -> Entry {
     Entry {
         hints: None,
-        metadata: Metadata::from_catalog_headers(&HeaderMap::new(), Duration::ZERO, None, 604800)
-            .unwrap(),
+        metadata: Metadata::from_catalog_headers(
+            &HeaderMap::new(),
+            Duration::ZERO,
+            None,
+            crate::catalog::CacheLifetime::Indefinite,
+        )
+        .unwrap(),
         data: data.to_vec(),
     }
 }
@@ -45,7 +50,10 @@ async fn prices_restore_share_expire_and_never_renew_catalogs() {
     let root = tempfile::tempdir().unwrap();
     let cfg = config(root.path());
     let slot = slot(&cfg);
-    assert_eq!(cfg.catalog_cache_ttl_seconds, 604800);
+    assert_eq!(
+        cfg.catalog_cache_ttl_seconds,
+        crate::catalog::CacheLifetime::Indefinite
+    );
     let raw = b"{ \"paths\": {} }\n";
     let hints = slot.write(Some(entry(raw))).await.unwrap();
     let key = hints.operation("get", "/items/{id}");
@@ -231,9 +239,9 @@ async fn absent_evicted_and_failed_storage_never_recreate_observations() {
     disabled.http_cache_enabled = false;
     assert!(Slot::new(&disabled, &cfg.spec, "catalog", cfg.max_spec_bytes).is_none());
     disabled.http_cache_enabled = true;
-    disabled.catalog_cache_ttl_seconds = 0;
+    disabled.catalog_cache_ttl_seconds = 0.into();
     assert!(Slot::new(&disabled, &cfg.spec, "catalog", cfg.max_spec_bytes).is_none());
-    disabled.catalog_cache_ttl_seconds = 604800;
+    disabled.catalog_cache_ttl_seconds = 604800.into();
     disabled.http_cache_directory = None;
     assert!(Slot::new(&disabled, &cfg.spec, "catalog", cfg.max_spec_bytes).is_none());
 }
@@ -289,4 +297,59 @@ async fn oversized_disposable_catalog_eviction_retires_published_hints() {
     slot.persist_price(&hints.generation, &key.operation, U256::from(9), 99)
         .await;
     assert!(slot.read().await.is_none());
+}
+
+#[tokio::test]
+async fn accepted_replacements_retire_direct_origin_and_relay_variants_together() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path());
+    let ordinary = slot(&cfg);
+    let mut warm_cfg = cfg.clone();
+    warm_cfg.http_cache_direct_warm_target = Some(crate::network::global().policy.clone());
+    let direct = slot(&warm_cfg);
+    let relay = ordinary.clone().relay("synthetic-relay-position");
+    assert_ne!(ordinary.key, direct.key);
+    assert_eq!(ordinary.family, direct.family);
+    assert_eq!(ordinary.family, relay.family);
+    let first = ordinary.write(Some(entry(b"{\"old\":1}"))).await.unwrap();
+    let direct_old = direct.write(Some(entry(b"{\"old\":2}"))).await.unwrap();
+    let relay_old = relay.write(Some(entry(b"{\"old\":3}"))).await.unwrap();
+    for hints in [&first, &direct_old, &relay_old] {
+        hints
+            .operation("GET", "/read")
+            .learn(U256::from(1), received().unwrap());
+    }
+    let mut force_cfg = cfg.clone();
+    force_cfg.catalog_cache_force_refresh = true;
+    let replacement = slot(&force_cfg).replacement();
+    replacement
+        .write(Some(entry(b"{\"new\":1}")))
+        .await
+        .unwrap();
+    assert!(direct.read_primary().await.is_none());
+    assert!(relay.read_primary().await.is_none());
+    assert_eq!(ordinary.read().await.unwrap().data, b"{\"new\":1}");
+    for hints in [&first, &direct_old, &relay_old] {
+        assert!(hints.operation("GET", "/read").get().is_none());
+    }
+    ordinary.write(None).await; // Eviction cannot uncover an obsolete direct entry.
+    assert!(ordinary.read().await.is_none());
+
+    ordinary.write(Some(entry(b"{\"old\":4}"))).await.unwrap();
+    relay.write(Some(entry(b"{\"old\":5}"))).await.unwrap();
+    direct
+        .replacement()
+        .write(Some(entry(b"{\"new\":2}")))
+        .await
+        .unwrap();
+    assert!(ordinary.read_primary().await.is_none());
+    assert!(relay.read_primary().await.is_none());
+    let warmed = ordinary.read().await.unwrap();
+    assert_eq!(warmed.data, b"{\"new\":2}");
+    assert!(warmed.metadata.direct_reuse);
+
+    // A successfully accepted uncacheable response retires old variants too.
+    ordinary.replacement().write(None).await;
+    assert!(ordinary.read().await.is_none());
+    assert!(direct.read_primary().await.is_none());
 }

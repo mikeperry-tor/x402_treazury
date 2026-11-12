@@ -764,6 +764,7 @@ impl Entry {
 
 /// Static discovery owns one scoped cache outcome, including failed accepted work.
 pub(super) struct StaticRequest<'a> {
+    after: Option<Instant>,
     state: Arc<tokio::sync::Mutex<State>>,
     scope: &'a str,
     url: String,
@@ -780,17 +781,34 @@ impl<'a> StaticRequest<'a> {
         target: &TargetRequest,
     ) -> Self {
         Self {
+            after: None,
             state,
             scope,
             url: target.url.to_string(),
         }
+    }
+    pub(super) fn since(mut self, after: Option<Instant>) -> Self {
+        self.after = after;
+        self
     }
     fn key(&self, entry: &Entry) -> (String, String) {
         (cache_key(self.scope, entry), self.url.clone())
     }
     async fn admit(&self, entry: &Entry) -> Admission {
         let key = self.key(entry);
-        let retained = |state: &State| state.outcomes.get(&key).cloned();
+        let retained = |state: &State| {
+            state
+                .outcomes
+                .get(&key)
+                .filter(|outcome| {
+                    // An uncertain accepted failure retains its existing no-repeat authority.
+                    match outcome {
+                        Ok(response) => self.after.is_none_or(|at| response.received >= at),
+                        Err(failure) => self.after.is_none() || !failure.definitive,
+                    }
+                })
+                .cloned()
+        };
         let gate = {
             let mut state = self.state.lock().await;
             if let Some(outcome) = retained(&state) {
@@ -829,12 +847,15 @@ impl<'a> StaticRequest<'a> {
     async fn publish(
         &self,
         entry: &Entry,
-        outcome: std::result::Result<Arc<Response>, TargetFailure>,
+        mut outcome: std::result::Result<Arc<Response>, TargetFailure>,
         definitive: bool,
     ) {
         let mut state = self.state.lock().await;
         if definitive {
             state.stopped.remove(&entry.provider_key);
+        }
+        if let Err(failure) = &mut outcome {
+            failure.definitive = definitive;
         }
         state.outcomes.insert(self.key(entry), outcome);
         state.changes.notify_waiters();

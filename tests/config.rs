@@ -42,7 +42,10 @@ description = "New"
     let resolved = config::resolve(source, &deployment).await.unwrap();
     assert!(!resolved.settings.allow_http1);
     assert!(!resolved.settings.http_cache_enabled);
-    assert_eq!(resolved.settings.catalog_cache_ttl_seconds, 0);
+    assert_eq!(
+        resolved.settings.catalog_cache_ttl_seconds,
+        x402_treazury::catalog::CacheLifetime::Seconds(0)
+    );
     assert_eq!(
         resolved.origins["catalog_cache_ttl_seconds"],
         deployment.display().to_string()
@@ -92,7 +95,10 @@ description = "New"
     )
     .await
     .unwrap();
-    assert_eq!(resolved.settings.catalog_cache_ttl_seconds, 123);
+    assert_eq!(
+        resolved.settings.catalog_cache_ttl_seconds,
+        x402_treazury::catalog::CacheLifetime::Seconds(123)
+    );
     assert_eq!(
         resolved.settings.spec,
         deployment
@@ -926,5 +932,31 @@ async fn pricing_composition_replaces_legacy_and_typed_declarations_atomically()
         config::resolve(toml::from_str(&body).unwrap(), &source)
             .await
             .unwrap();
+    }
+}
+
+#[test]
+fn catalog_lifetime_accepts_indefinite_seconds_and_zero() {
+    use x402_treazury::catalog::{CacheLifetime, Config};
+    for (text, expected) in [
+        ("", CacheLifetime::Indefinite),
+        (
+            "catalog_cache_ttl_seconds='indefinite'",
+            CacheLifetime::Indefinite,
+        ),
+        ("catalog_cache_ttl_seconds=0", CacheLifetime::Seconds(0)),
+        ("catalog_cache_ttl_seconds=120", CacheLifetime::Seconds(120)),
+    ] {
+        let cfg: Config = toml::from_str(text).unwrap();
+        assert_eq!(cfg.catalog_cache_ttl_seconds, expected);
+        let roundtrip: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(roundtrip.catalog_cache_ttl_seconds, expected);
+    }
+    for text in [
+        "catalog_cache_ttl_seconds='forever'",
+        "catalog_cache_ttl_seconds=-1",
+        "catalog_cache_ttl_seconds=1.5",
+    ] {
+        assert!(toml::from_str::<Config>(text).is_err());
     }
 }

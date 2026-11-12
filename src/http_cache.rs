@@ -24,7 +24,7 @@ pub(crate) struct Metadata {
     #[serde(skip)]
     direct_reuse: bool,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Entry {
     pub hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
     pub metadata: Metadata,
@@ -36,13 +36,25 @@ pub(crate) fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
-/// Disabling persistence does not make newly acquired advertisements timeless.
-pub(crate) fn advertised_ttl(ttl_seconds: u64) -> u64 {
-    if ttl_seconds == 0 {
-        crate::limits::API_CACHE_TTL_SECONDS
+pub(crate) const INDEFINITE_EXPIRY: u64 = i64::MAX as u64;
+/// Disk opt-out leaves advertisements bound to the loaded source generation.
+pub(crate) fn advertised_expiry(lifetime: crate::catalog::CacheLifetime, delay: Duration) -> u64 {
+    if lifetime.disabled() {
+        INDEFINITE_EXPIRY
     } else {
-        ttl_seconds
+        lifetime.expires(now(), delay)
     }
+}
+/// Indefinite lifetimes never enter platform clock arithmetic.
+pub(crate) fn advertised_until(expires: u64) -> Option<std::time::Instant> {
+    if expires == INDEFINITE_EXPIRY {
+        return None;
+    }
+    let now = std::time::Instant::now();
+    Some(
+        now.checked_add(Duration::from_secs(expires.saturating_sub(self::now())))
+            .unwrap_or(now),
+    )
 }
 fn date(value: &str) -> Option<u64> {
     httpdate::parse_http_date(value)
@@ -172,9 +184,10 @@ impl Metadata {
         headers: &HeaderMap,
         delay: Duration,
         old: Option<&Self>,
-        ttl_seconds: u64,
+        ttl_seconds: impl Into<crate::catalog::CacheLifetime>,
     ) -> Option<Self> {
-        if ttl_seconds == 0 {
+        let ttl_seconds = ttl_seconds.into();
+        if ttl_seconds.disabled() {
             return None;
         }
         // Catalog snapshots use local retention, independently of HTTP freshness.
@@ -194,12 +207,10 @@ impl Metadata {
         selected.insert("cache-control", "max-age=1".parse().ok()?);
         let mut metadata = Self::parse(&selected, Duration::ZERO, None)?;
         metadata.local_override = true;
-        metadata.expires = metadata
-            .stored
-            .saturating_add(ttl_seconds.saturating_sub(delay.as_secs()));
+        metadata.expires = ttl_seconds.expires(metadata.stored, delay);
         tracing::debug!(
             cache_policy = "local_override",
-            ttl_seconds,
+            ttl_seconds = ?ttl_seconds,
             origin_policy =
                 Self::policy_label(headers, Self::from_headers(headers, delay, None).as_ref()),
             "Catalog uses configured local cache lifetime instead of origin freshness"
@@ -210,7 +221,7 @@ impl Metadata {
     pub fn from_relay_headers(
         headers: &HeaderMap,
         delay: Duration,
-        catalog_ttl: Option<u64>,
+        catalog_ttl: Option<crate::catalog::CacheLifetime>,
     ) -> Option<Self> {
         if headers.contains_key("vary") {
             return None;
@@ -388,7 +399,7 @@ impl<T> TransposeOption<T> for Option<Option<T>> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Slot {
     directory: PathBuf,
     key: String,
@@ -396,14 +407,17 @@ pub(crate) struct Slot {
     resource: String,
     source: String,
     limit: usize,
-    pub catalog_ttl: u64,
+    pub catalog_ttl: crate::catalog::CacheLifetime,
     revision: Option<(String, String)>,
+    force_refresh: bool,
+    family: Option<String>,
+    replace_family: bool,
 }
 impl Slot {
     pub fn availability(cfg: &crate::catalog::Config, kind: &str) -> &'static str {
         if !cfg.http_cache_enabled {
             "disabled_by_config"
-        } else if kind == "catalog" && cfg.catalog_cache_ttl_seconds == 0 {
+        } else if kind == "catalog" && cfg.catalog_cache_ttl_seconds.disabled() {
             "disabled_by_catalog_ttl"
         } else if crate::qualification::active() {
             "disabled_for_qualification"
@@ -416,7 +430,7 @@ impl Slot {
     pub fn new(cfg: &crate::catalog::Config, url: &str, kind: &str, limit: usize) -> Option<Self> {
         if !cfg.http_cache_enabled
             || crate::qualification::active()
-            || (kind == "catalog" && cfg.catalog_cache_ttl_seconds == 0)
+            || (kind == "catalog" && cfg.catalog_cache_ttl_seconds.disabled())
         {
             return None;
         }
@@ -446,12 +460,13 @@ impl Slot {
         ));
         let key = if kind == "catalog" {
             alloy_primitives::hex::encode(Sha256::digest(format!(
-                "local-catalog-v1:{}:{key}",
+                "local-catalog-v3:{:?}:{key}",
                 cfg.catalog_cache_ttl_seconds
             )))
         } else {
             key
         };
+        let family = (kind == "catalog").then(|| key.clone());
         // Separate provenance: an ordinary direct-mode cache never crosses policy
         // boundaries. Only explicitly warmed entries target another configured policy.
         let direct_key =
@@ -475,6 +490,9 @@ impl Slot {
                 .unwrap_or_else(|| "standalone".into()),
             limit,
             catalog_ttl: cfg.catalog_cache_ttl_seconds,
+            force_refresh: cfg.catalog_cache_force_refresh,
+            family,
+            replace_family: false,
             revision: (kind == "catalog").then(|| {
                 (
                     cfg.discovery_source
@@ -486,6 +504,12 @@ impl Slot {
                 )
             }),
         })
+    }
+    /// An accepted replacement supersedes provenance variants, never their active I/O.
+    pub(crate) fn replacement(&self) -> Self {
+        let mut slot = self.clone();
+        slot.replace_family = true;
+        slot
     }
     pub(crate) fn relay(mut self, identity: &str) -> Self {
         self.key = alloy_primitives::hex::encode(Sha256::digest(format!(
@@ -624,6 +648,7 @@ impl Slot {
             ensure!(slot.directory.parent().is_some_and(Path::is_dir), "cache parent missing");
             let mut db = open(&slot.directory)?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if slot.replace_family { retire_family(&slot, &tx, entry.is_some())?; }
             let Some(entry) = entry else {
                 tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
                 retire(&slot);
@@ -639,7 +664,7 @@ impl Slot {
                 tracing::warn!(limit_bytes = slot.limit.min(CAPACITY), limit_metadata_bytes = METADATA_LIMIT, "HTTP cache entry exceeds resource limit; complete response used without persistence");
                 return Ok((false,None));
             }
-            let unchanged = tx.query_row("SELECT data=?2 FROM entries WHERE key=?1",params![slot.key,entry.data],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false);
+            let unchanged = !slot.force_refresh && tx.query_row("SELECT data=?2 AND EXISTS(SELECT 1 FROM catalogs WHERE catalogs.key=entries.key AND expires>?3) FROM entries WHERE key=?1",params![slot.key,entry.data,i64::try_from(now())?],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false);
             if !unchanged {
                 tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
                 retire(&slot);
@@ -652,6 +677,9 @@ impl Slot {
                 tracing::debug!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
             }
             tx.execute("INSERT INTO entries VALUES(?1,?2,?3,?4) ON CONFLICT(key) DO UPDATE SET metadata=excluded.metadata,data=excluded.data,stored=excluded.stored", params![slot.key, metadata, entry.data, i64::try_from(entry.metadata.stored)?])?;
+            if let Some(family) = &slot.family {
+                tx.execute("INSERT INTO catalog_families VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET family=excluded.family", params![slot.key, family])?;
+            }
             let hints = if slot.resource == "catalog" {
                 tx.execute("INSERT INTO catalogs VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET expires=excluded.expires", params![slot.key, uuid::Uuid::new_v4().to_string(), i64::try_from(entry.metadata.expires)?])?;
                 if let Some(hints) = existing(&slot) { hints.state.lock().expect("catalog hints poisoned").metadata = entry.metadata.clone(); }
@@ -767,8 +795,27 @@ fn open(directory: &Path) -> Result<Connection> {
         "cache database exceeds storage limit"
     );
     db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA max_page_count=36864; CREATE TABLE IF NOT EXISTS entries(key TEXT PRIMARY KEY,metadata TEXT NOT NULL,data BLOB NOT NULL,stored INTEGER NOT NULL);")?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS catalogs(key TEXT PRIMARY KEY REFERENCES entries(key) ON DELETE CASCADE,generation TEXT NOT NULL,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS prices(key TEXT NOT NULL REFERENCES catalogs(key) ON DELETE CASCADE,operation TEXT NOT NULL,amount TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(key,operation)); CREATE TABLE IF NOT EXISTS catalog_revisions(key TEXT NOT NULL REFERENCES entries(key) ON DELETE CASCADE,source TEXT NOT NULL,revision TEXT NOT NULL,PRIMARY KEY(key,source));")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS catalogs(key TEXT PRIMARY KEY REFERENCES entries(key) ON DELETE CASCADE,generation TEXT NOT NULL,expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS prices(key TEXT NOT NULL REFERENCES catalogs(key) ON DELETE CASCADE,operation TEXT NOT NULL,amount TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(key,operation)); CREATE TABLE IF NOT EXISTS catalog_revisions(key TEXT NOT NULL REFERENCES entries(key) ON DELETE CASCADE,source TEXT NOT NULL,revision TEXT NOT NULL,PRIMARY KEY(key,source)); CREATE TABLE IF NOT EXISTS catalog_families(key TEXT PRIMARY KEY REFERENCES entries(key) ON DELETE CASCADE,family TEXT NOT NULL); CREATE INDEX IF NOT EXISTS catalog_family ON catalog_families(family);")?;
     Ok(db)
+}
+
+fn retire_family(slot: &Slot, tx: &rusqlite::Transaction<'_>, keep_primary: bool) -> Result<()> {
+    let Some(family) = &slot.family else {
+        return Ok(());
+    };
+    let keys = tx
+        .prepare("SELECT key FROM catalog_families WHERE family=?1 AND (?2=0 OR key!=?3)")?
+        .query_map(params![family, keep_primary, slot.key], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for key in keys {
+        tx.execute("DELETE FROM entries WHERE key=?1", [&key])?;
+        let mut sibling = slot.clone();
+        sibling.key = key;
+        retire(&sibling);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

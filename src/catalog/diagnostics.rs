@@ -293,9 +293,8 @@ mod tests {
             (None, "there is no cached document"),
             (Some(&entry), "does not match the cached document"),
         ] {
-            let error = super::super::revalidate_cached_catalog(&changed, cached, None)
-                .await
-                .unwrap_err();
+            let error =
+                super::super::revalidate_cached_catalog(&changed, cached, None, 0).unwrap_err();
             let failure = Failure::from_error(&error, "fetch_parse");
             assert_eq!(failure.stage, "headers");
             assert!(failure.reason.contains(expected));

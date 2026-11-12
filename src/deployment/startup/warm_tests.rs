@@ -3,10 +3,39 @@ use crate::http_cache::{Entry, Metadata, Slot};
 use std::sync::atomic::Ordering;
 
 #[tokio::test]
-async fn warm_prefers_fresh_relay_catalog_without_endpoint_requests() {
+async fn warm_bypasses_fresh_origin_and_relay_catalogs() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::startup::warm_tests::warm_bypasses_fresh_origin_and_relay_catalogs",
+    ) {
+        return;
+    }
+    let (origin_address, origin) = crate::test_tls::serve(axum::Router::new().route(
+        "/spec",
+        axum::routing::get(|| async { axum::http::StatusCode::FORBIDDEN }),
+    ))
+    .await;
+    let socks = crate::test_socks::Socks::start(
+        BTreeMap::from([
+            ("api.example.com".into(), origin_address),
+            ("loopback".into(), origin_address),
+        ]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    crate::network::install_test_context(
+        crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some(socks.address.into()),
+            tor_isolation_retries: Some(0),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
+    );
     let dir = tempfile::tempdir().unwrap();
     let (relay, fixture, task) =
-        crate::discovery_relay::tests::fixture(serde_json::json!({}), false, false).await;
+        crate::discovery_relay::tests::fixture(serde_json::json!({"url":"https://api.example.com/spec","method":"GET","statusCode":200,"headers":{},"body":serde_json::json!({"openapi":"3.0.3","paths":{"/read":{"get":{}}}}).to_string(),"redirectChain":[],"error":null}), false, false).await;
     let mut config: MetaConfig = toml::from_str(
         r#"
 version=1
@@ -17,8 +46,8 @@ mode='static'
 private_key_env='UNUSED'
 max_api_payment_usdc='0.01'
 [sources.api]
-spec='https://127.0.0.1:1/spec'
-base_url='https://127.0.0.1:1'
+spec='https://api.example.com/spec'
+base_url='https://api.example.com'
 [servers.test]
 listen='127.0.0.1:0'
 bearer_token_env='UNUSED'
@@ -65,18 +94,18 @@ sources=['api']
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
+        assert_eq!(results[0].catalog_cache, "fresh_via_relay");
         assert_eq!(
-            results[0].catalog_cache,
-            if relay_catalog_fresh {
-                "fresh_via_relay"
-            } else {
-                "fresh"
-            }
+            fixture.calls.load(Ordering::SeqCst),
+            if relay_catalog_fresh { 2 } else { 4 }
         );
-        assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
-        assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            fixture.signed.load(Ordering::SeqCst),
+            if relay_catalog_fresh { 1 } else { 2 }
+        );
     }
     task.abort();
+    origin.abort();
 }
 
 #[test]
@@ -381,4 +410,229 @@ sources=['api']
     drop(reopened);
     origin_task.abort();
     relay_task.abort();
+}
+
+#[tokio::test]
+async fn warm_generation_failure_retains_complete_previous_snapshot() {
+    use axum::serve::Listener as _;
+    use axum::{Router, routing::get};
+    let dir = tempfile::tempdir().unwrap();
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_calls = calls.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/spec",
+                get(move || {
+                    let calls = calls.clone();
+                    async move {
+                        let document = if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                            serde_json::json!({"openapi":"3.0.3","paths":{}})
+                        } else {
+                            serde_json::json!({"openapi":"3.0.3","paths":{
+                                "/read":{"get":{"operationId":"read"}},
+                                "/unsupported":{"post":{"parameters":[{"name":"session","in":"cookie","schema":{"type":"string"}}]}}
+                            }})
+                        };
+                        axum::Json(document)
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let config: MetaConfig = toml::from_str(&format!(
+        r#"
+version=1
+[treasury]
+state_dir='{}'
+[wallets.w]
+mode='static'
+private_key_env='UNUSED'
+max_api_payment_usdc='0.01'
+[sources.api]
+spec='{base}/spec'
+base_url='{base}'
+include_tools=['api_read']
+[servers.test]
+listen='127.0.0.1:0'
+bearer_token_env='UNUSED'
+wallet='w'
+sources=['api']
+"#,
+        dir.path().display()
+    ))
+    .unwrap();
+    let path = dir.path().join("deployment.toml");
+    let downloads = Downloads {
+        cache_directory: Some(dir.path().join("http-cache")),
+        ..Default::default()
+    };
+    let cfg = downloads
+        .configure("api", &config.sources["api"], &path, false)
+        .await
+        .unwrap();
+    let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+    let previous = br#"{"operations":[{"name":"read","method":"GET","path":"/read"}]}"#.to_vec();
+    // The existing snapshot is a complete generation accepted under this configuration.
+    assert!(
+        Source::from_document(
+            "api",
+            cfg.clone(),
+            Arc::new(catalog::parse_document(&previous).unwrap())
+        )
+        .is_ok()
+    );
+    let hints = slot
+        .write(Some(Entry {
+            hints: None,
+            metadata: Metadata::from_catalog_headers(
+                &Default::default(),
+                Duration::ZERO,
+                None,
+                cfg.catalog_cache_ttl_seconds,
+            )
+            .unwrap(),
+            data: previous.clone(),
+        }))
+        .await
+        .unwrap();
+    let operation = hints.operation("GET", "/read");
+    let price = alloy_primitives::U256::from(99);
+    operation.learn(price, crate::pricing::runtime::received().unwrap());
+    slot.persist_price(&hints.generation, &operation.operation, price, 1)
+        .await;
+    let selected = ["api".to_owned()].into_iter().collect();
+    for attempt in 0..2 {
+        let error = warm(&config, &path, &selected, false, Default::default())
+            .await
+            .err()
+            .unwrap();
+        if attempt == 1 {
+            assert!(
+                error.is::<catalog::IncompleteCatalog>(),
+                "mixed supported/unsupported catalog must reach strict completeness rejection: {error:#}"
+            );
+        }
+        let retained = slot.read().await.unwrap();
+        assert_eq!(retained.data, previous);
+        assert_eq!(
+            retained.hints.as_ref().unwrap().generation,
+            hints.generation
+        );
+        assert_eq!(operation.get(), Some(price));
+        assert_eq!(
+            retained.hints.unwrap().operation("GET", "/read").get(),
+            Some(price)
+        );
+    }
+    assert_eq!(observed_calls.load(Ordering::SeqCst), 2);
+    server.abort();
+}
+
+#[tokio::test]
+async fn warm_refreshes_catalog_and_external_prices_unconditionally_while_serving_reuses_both() {
+    use axum::serve::Listener as _;
+    use axum::{Json, Router, response::IntoResponse, routing::get};
+    use serde_json::json;
+    let directory = tempfile::tempdir().unwrap();
+    let listener = crate::test_tls::listener().await;
+    let base = format!("https://{}", listener.local_addr().unwrap());
+    let calls = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
+    let handler_calls = calls.clone();
+    let handler_base = base.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, Router::new().fallback(get(move |request: axum::extract::Request| {
+            let calls = handler_calls.clone();
+            let base = handler_base.clone();
+            async move {
+                assert!(!request.headers().contains_key("if-none-match"));
+                assert!(!request.headers().contains_key("if-modified-since"));
+                assert!(!request.headers().contains_key("payment-signature"));
+                assert!(!request.headers().contains_key("x-payment"));
+                assert!(!request.headers().contains_key("authorization"));
+                let path = request.uri().path();
+                *calls.lock().unwrap().entry(path.to_owned()).or_default() += 1;
+                let document = match path {
+                    "/spec" => json!({"paths":{"/read":{"get":{"operationId":"read"}}}}),
+                    "/prices" => json!({"x402Version":2,"items":[{
+                        "resource":format!("{base}/read"),"method":"GET",
+                        "accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"1000"}]
+                    }]}),
+                    other => panic!("unexpected request: {other}"),
+                };
+                ([("etag", "\"unchanged\"")], Json(document)).into_response()
+            }
+        }))).await.unwrap();
+    });
+    let config: MetaConfig = toml::from_str(&format!(
+        r#"
+version=1
+[treasury]
+state_dir='{}'
+[wallets.w]
+mode='static'
+private_key_env='UNUSED'
+[sources.api]
+spec='{base}/spec'
+base_url='{base}'
+[sources.api.pricing]
+source='{base}/prices'
+format='x402-discovery'
+[servers.test]
+listen='127.0.0.1:0'
+bearer_token_env='UNUSED'
+wallet='w'
+sources=['api']
+"#,
+        directory.path().display()
+    ))
+    .unwrap();
+    let path = directory.path().join("deployment.toml");
+    let selected = ["api".to_owned()].into_iter().collect();
+    for expected in 1..=2 {
+        warm(&config, &path, &selected, false, Default::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            *calls.lock().unwrap(),
+            BTreeMap::from([
+                ("/spec".to_owned(), expected),
+                ("/prices".to_owned(), expected),
+            ])
+        );
+    }
+    let downloads = Downloads {
+        purpose: CatalogPurpose::Serving,
+        cache_directory: Some(directory.path().join("http-cache")),
+        ..Default::default()
+    };
+    let cfg = downloads
+        .configure("api", &config.sources["api"], &path, false)
+        .await;
+    assert!(!cfg.as_ref().unwrap().catalog_cache_force_refresh);
+    let SourceLoad::Ready(source) = load_one("api", &config.sources["api"], cfg, &downloads)
+        .await
+        .unwrap()
+    else {
+        panic!("cached source must be immediately ready");
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while source.tools[0].advertised_pricing.amount()
+            != Some(alloy_primitives::U256::from(1000))
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        *calls.lock().unwrap(),
+        BTreeMap::from([("/spec".to_owned(), 2), ("/prices".to_owned(), 2),])
+    );
+    server.abort();
 }

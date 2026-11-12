@@ -287,6 +287,7 @@ pub(crate) struct State {
 /// Redacted definitive target/provider facts retained by the static acquisition owner.
 #[derive(Clone, Copy, Debug)]
 struct TargetFailure {
+    definitive: bool,
     reason: &'static str,
     status: Option<u16>,
     limit: Option<(&'static str, usize)>,
@@ -300,6 +301,7 @@ struct TargetFailure {
 impl TargetFailure {
     fn new(reason: &'static str, status: Option<u16>, advance: bool) -> Self {
         Self {
+            definitive: true,
             reason,
             status,
             limit: None,
@@ -480,6 +482,7 @@ impl Relay {
                     setting,
                     gate.iter().cloned().collect(),
                     retry_after,
+                    None,
                 )
                 .await;
             match result {
@@ -549,9 +552,28 @@ impl Relay {
         capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
         retry_after: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
-        self.fetch_static(url, limit, setting, capacity, retry_after)
+        self.fetch_static(url, limit, setting, capacity, retry_after, None)
             .await
     }
+    pub(crate) async fn fetch_fresh(
+        &self,
+        url: &str,
+        limit: usize,
+        setting: &'static str,
+        capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
+        retry_after: Option<crate::network::RetryAfter>,
+    ) -> Result<Arc<Response>> {
+        self.fetch_static(
+            url,
+            limit,
+            setting,
+            capacity,
+            retry_after,
+            Some(Instant::now()),
+        )
+        .await
+    }
+    #[allow(clippy::too_many_arguments)]
     async fn fetch_static(
         &self,
         url: &str,
@@ -559,6 +581,7 @@ impl Relay {
         setting: &'static str,
         capacity: Vec<Arc<crate::network::DiscoveryCapacity>>,
         retry_after: Option<crate::network::RetryAfter>,
+        after: Option<Instant>,
     ) -> Result<Arc<Response>> {
         let target = adapters::TargetRequest {
             method: reqwest::Method::GET,
@@ -573,17 +596,19 @@ impl Relay {
             limit,
             setting,
             scope: static_scope(&self.key, "catalog"),
+            after,
         };
-        if let Some(cached) = request
-            .prepared
-            .cached(
-                self.state.clone(),
-                &request.scope,
-                &request.target,
-                limit,
-                setting,
-            )
-            .await
+        if after.is_none()
+            && let Some(cached) = request
+                .prepared
+                .cached(
+                    self.state.clone(),
+                    &request.scope,
+                    &request.target,
+                    limit,
+                    setting,
+                )
+                .await
         {
             return cached;
         }
@@ -621,17 +646,21 @@ impl Relay {
                 crate::limits::HELP_BYTES,
                 None,
                 &capacity,
-                Some(sequence::StaticRequest::new(
-                    self.state.clone(),
-                    &request.scope,
-                    &request.target,
-                )),
+                Some(
+                    sequence::StaticRequest::new(
+                        self.state.clone(),
+                        &request.scope,
+                        &request.target,
+                    )
+                    .since(request.after),
+                ),
                 None,
             )
             .await
     }
 }
 struct StaticFetch {
+    after: Option<Instant>,
     prepared: sequence::Prepared,
     target: adapters::TargetRequest,
     scope: String,
@@ -1102,6 +1131,68 @@ pub(crate) mod tests {
         }
     }
     #[tokio::test]
+    async fn forced_relay_retries_completed_unpaid_failure_but_retains_uncertainty() {
+        let (mut relay, relay_fixture, unused) = fixture(envelope(TARGET), false, false).await;
+        let outage = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let hits = Arc::new(AtomicUsize::new(0));
+        let (address, server) = crate::test_tls::serve(Router::new().route(
+            "/",
+            post({
+                let outage = outage.clone();
+                let hits = hits.clone();
+                move |headers: HeaderMap| {
+                    let outage = outage.clone();
+                    let hits = hits.clone();
+                    let fixture = relay_fixture.clone();
+                    async move {
+                        hits.fetch_add(1, Ordering::SeqCst);
+                        if outage.load(Ordering::SeqCst) {
+                            StatusCode::SERVICE_UNAVAILABLE.into_response()
+                        } else {
+                            handler(AxumState(fixture), headers).await
+                        }
+                    }
+                }
+            }),
+        ))
+        .await;
+        set_endpoint(&mut relay, format!("https://{address}/"));
+        let error = relay
+            .fetch_fresh(TARGET, 4096, "max_spec_bytes", vec![], None)
+            .await
+            .err()
+            .unwrap();
+        assert!(!error.is::<document::PossiblePayment>());
+        outage.store(false, Ordering::SeqCst);
+        assert!(
+            relay
+                .fetch_fresh(TARGET, 4096, "max_spec_bytes", vec![], None)
+                .await
+                .is_ok()
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+        server.abort();
+        unused.abort();
+
+        let (relay, fixture, server) = fixture(envelope(TARGET), true, false).await;
+        assert!(
+            relay
+                .fetch_fresh(TARGET, 4096, "max_spec_bytes", vec![], None)
+                .await
+                .is_err()
+        );
+        assert!(
+            relay
+                .fetch_fresh(TARGET, 4096, "max_spec_bytes", vec![], None)
+                .await
+                .is_err()
+        );
+        assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.calls.load(Ordering::SeqCst), 2);
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn pre_submission_failure_leaves_other_targets_available() {
         let (mut relay, _, task) = fixture(envelope(TARGET), false, false).await;
         let listener = crate::test_tls::listener().await;
@@ -1387,7 +1478,7 @@ pub(crate) mod tests {
             !crate::http_cache::Metadata::from_relay_headers(
                 &response.headers,
                 response.catalog_cache_age(),
-                Some(600)
+                Some(crate::catalog::CacheLifetime::Seconds(600))
             )
             .unwrap()
             .fresh()
@@ -1512,7 +1603,9 @@ pub(crate) mod tests {
             cfg.spec = "https://other.example.com/spec".into();
             cfg.relay_fallback = None;
             let (a, b) = tokio::join!(pending.resume(), pending.resume());
-            assert_eq!(a.unwrap().document, b.unwrap().document);
+            let mut accepted = a.unwrap();
+            assert_eq!(accepted.document, b.unwrap().document);
+            accepted.commit().await;
             cfg = original;
             assert!(matches!(
                 crate::catalog::prepare_json_discovery_with(&cfg, &context)

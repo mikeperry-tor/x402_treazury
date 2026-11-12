@@ -192,3 +192,63 @@ baseline and review relevant unchanged hotspots.
 Follow [AGENTS.md](../../AGENTS.md) and the
 [validation order](../testing.md#validation-order-and-continuation). This plan
 authorizes no live paid calls.
+
+## Implementation status and review evidence
+
+Working branch: `stale_cache_expiry`. Implementation starting baseline:
+`837ea6a6ada7f0d87541f01b4146012d173ea4af`. The plan was already committed
+before implementation (`6cb2e2ea`); intervening changes from the decision baseline
+adjusted this plan, example configuration and the unsigned discovery header profile.
+Unrelated local files are preserved. No live paid calls are authorized or used.
+
+Independent fresh-conversation design review examined the starting SHA and
+acquisition, pricing, static/dynamic publication and payment consumers. A distinct
+runtime design analysis examined refresh ownership and final response attribution.
+Material findings accepted before implementation:
+
+- Represent indefinite explicitly and avoid translating its persistence sentinel
+  into a platform clock deadline.
+- Stage forced cache replacement through complete source generation and routing
+  validation; failed downloads and invalid definitions retain old complete bytes.
+- Preserve optional asynchronous startup pricing. Runtime refresh awaits configured
+  pricing acquisition before publication; failure leaves unknown prices. This
+  clarifies “before wallet selection” without adding a universal readiness gate.
+- Add a separate source-generation admission binding; registered `source` identity
+  retains its existing semantics. Observe final response facts inside accepted
+  payment work, including decoded relay destination statuses and read failures.
+- Retain failed snapshots for inspection, but block new execution through expired
+  definitions and return the actual refresh failure. An independent already
+  admitted outcome may trigger another attempt; failure alone never schedules one.
+- Retire obsolete generations so late outcomes cannot refresh their replacements.
+  Runtime metadata refresh uses existing authority without allocation or funding.
+- Keep dynamic discovery authoritative. No peer registry or notification broadcast
+  is introduced; static clients may need reconnect/reload.
+
+SC1 and SC2 implementation and focused regression coverage are in progress.
+Compiler, Clippy, source-matched complexity, exact-SHA reviews and combined review
+remain pending. SC3 cleanup remains pending until all required gates pass.
+
+SC1 committed as `0e9754d2`; independent exact-SHA review found two material
+retention gaps. Strict warm completeness was checked after staged publication;
+the single completeness check now precedes it, with a mixed supported/unsupported
+operation regression preserving old bytes, generation and observed price. Forced
+relay reads also retained proven completed unpaid failures; retained failure
+metadata now preserves the acquisition's existing definitive fact so force can
+retry completed failure while uncertain accepted work remains protected. Focused
+fixup and its exact-SHA review are pending. The prior compiler/all-target Clippy
+snapshot passed; final changed-source revalidation remains pending. Complexity
+attempts invalidated by source edits are recorded as failed, not passes.
+
+SC2 correction `2c84fb2c` received independent exact-SHA source review with no
+remaining findings in that correction. Review identified a recurring SC1
+replacement gap across cache provenance: older indefinite direct/origin/relay
+variants could supersede new data or reappear after eviction. The focused fix
+indexes each exact catalog policy/URL/lifetime family in disposable SQLite and
+retires sibling variants atomically on accepted replacement, preserving distinct
+provenance. It also retires old variants on accepted uncacheable responses while
+failed staging retains them. No provider handles, wallets or cross-process stale
+markers are needed. Tests cover both direct/ordinary directions, relay variants,
+eviction, observations and successful uncacheable acquisition. The initial local
+key version advances for indexed families; documented one-time upgrade miss still
+applies. A small separate SC2 test fix adds the required isolated log-capture child.
+Exact correction reviews and final runtime evidence remain pending.

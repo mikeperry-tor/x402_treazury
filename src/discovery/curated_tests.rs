@@ -1,6 +1,6 @@
 //! Accepted curated settings use the same import/publication/restore paths as generic sources.
 use super::*;
-use crate::catalog::Config;
+use crate::catalog::{self, Config};
 use crate::discovery::curated::AcceptedProvider;
 
 #[test]
@@ -8,11 +8,14 @@ fn accepted_provider_keeps_advertised_lifetime_without_enabling_disk_cache() {
     let accepted = AcceptedProvider::new(
         "fixture",
         Config {
-            catalog_cache_ttl_seconds: 123,
+            catalog_cache_ttl_seconds: crate::catalog::CacheLifetime::Seconds(123),
             ..Default::default()
         },
     );
-    assert_eq!(accepted.settings.catalog_cache_ttl_seconds, 123);
+    assert_eq!(
+        accepted.settings.catalog_cache_ttl_seconds,
+        crate::catalog::CacheLifetime::Seconds(123)
+    );
     assert!(!accepted.settings.http_cache_enabled);
     assert!(
         crate::http_cache::Slot::new(
@@ -77,10 +80,25 @@ fn accepted_remote_advertisements_keep_acquisition_age_after_restore() {
     root["paths"]["/v1/read"]["post"]["x-payment-info"] =
         json!({"price":{"currency":"USD","amount":"0.01"}});
     let document = root.to_string();
-    for (acquired, expected) in [
-        (epoch(), Some(alloy_primitives::U256::from(10_000))),
-        (0, None),
+    for (lifetime, acquired, expected) in [
+        (
+            crate::catalog::CacheLifetime::Seconds(120),
+            epoch(),
+            Some(alloy_primitives::U256::from(10_000)),
+        ),
+        (crate::catalog::CacheLifetime::Seconds(120), 0, None),
+        (
+            crate::catalog::CacheLifetime::Indefinite,
+            0,
+            Some(alloy_primitives::U256::from(10_000)),
+        ),
     ] {
+        candidate
+            .provider
+            .as_mut()
+            .unwrap()
+            .settings
+            .catalog_cache_ttl_seconds = lifetime;
         let mut record = Record {
             id: Uuid::new_v4().to_string(),
             owner: "writer".into(),
@@ -119,6 +137,133 @@ fn accepted_remote_advertisements_keep_acquisition_age_after_restore() {
             "restart cannot renew acquired pricing"
         );
     }
+}
+
+#[tokio::test]
+async fn external_advertisements_keep_parent_expiry_on_initial_load_and_restore() {
+    if crate::test_log_capture::run_in_child(
+        "discovery::tests::curated_tests::external_advertisements_keep_parent_expiry_on_initial_load_and_restore",
+    ) {
+        return;
+    }
+    use axum::{Json, Router, routing::get};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (address, server) = crate::test_tls::serve(Router::new().route(
+        "/prices", get({
+            let entered = entered.clone();
+            let release = release.clone();
+            let calls = calls.clone();
+            move |headers: axum::http::HeaderMap| {
+                let entered = entered.clone();
+                let release = release.clone();
+                let calls = calls.clone();
+                async move {
+                    assert!(!headers.contains_key("payment-signature"));
+                    assert!(!headers.contains_key("x-payment"));
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    entered.notify_one();
+                    release.notified().await;
+                    Json(json!({"x402Version":2,"items":[{
+                        "resource":"https://api.example.com/read","method":"GET",
+                        "accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"1000"}]
+                    }]}))
+                }
+            }
+        }),
+    )).await;
+    let socks = crate::test_socks::Socks::start(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    crate::network::install_test_context(
+        crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some(socks.address.into()),
+            tor_isolation_retries: Some(0),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
+    );
+    let document = json!({"openapi":"3.0.3","paths":{"/read":{"get":{}}}}).to_string();
+    let price = alloy_primitives::U256::from(1000);
+    for (acquired, restore, lifetime, expected) in [
+        (
+            epoch(),
+            false,
+            catalog::CacheLifetime::Seconds(120),
+            Some(price),
+        ),
+        (0, false, catalog::CacheLifetime::Seconds(120), None),
+        (0, true, catalog::CacheLifetime::Seconds(120), None),
+        (0, true, catalog::CacheLifetime::Indefinite, Some(price)),
+    ] {
+        let settings: Config = toml::from_str(
+            "spec='https://api.example.com/spec'\nbase_url='https://api.example.com'\nprefix='fixture'\n[pricing]\nsource='https://api.example.com/prices'\nformat='x402-discovery'\n",
+        ).unwrap();
+        let mut candidate: Candidate = serde_json::from_value(json!({
+            "name":"priced", "provider":AcceptedProvider::new("fixture", settings),
+            "lifetime":"persistent",
+        }))
+        .unwrap();
+        candidate
+            .provider
+            .as_mut()
+            .unwrap()
+            .settings
+            .catalog_cache_ttl_seconds = lifetime;
+        let mut record = Record {
+            id: Uuid::new_v4().to_string(),
+            owner: "writer".into(),
+            candidate,
+            targets: vec![],
+            revision: 1,
+            document: document.clone(),
+            hash: hash(document.as_bytes()),
+            format: FORMAT,
+            accepted_at: acquired,
+            updated_at: acquired,
+            removed: false,
+            disabled: None,
+            built: None,
+        };
+        if restore {
+            record = serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
+        }
+        record.prepare_with_client(PaidClient::unsigned()).unwrap();
+        let tool = record.built.as_ref().unwrap().tools[0].clone();
+        entered.notified().await;
+        assert!(tool.advertised_pricing.amount().is_none());
+        assert!(
+            tool.route("https://api.example.com", &Default::default())
+                .is_ok()
+        );
+        release.notify_one();
+        // source() observes completed enrichment even when its expiry correctly
+        // prevents amount()/description() from exposing an expired price.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while tool.advertised_pricing.source().as_deref()
+                != Some("https://api.example.com/prices")
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(tool.advertised_pricing.amount(), expected);
+        assert_eq!(
+            tool.advertised_pricing.external_description().is_some(),
+            expected.is_some()
+        );
+        assert_eq!(record.updated_at, acquired);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    server.abort();
 }
 
 pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {

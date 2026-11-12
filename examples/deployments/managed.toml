@@ -19,6 +19,9 @@ max_api_payment_usdc = "0.50" # Per authorization, independently of reserve size
 # Default randomized nominal funding: $2-3.
 
 [sources.exa]
+# Catalogs and price hints persist indefinitely; use positive seconds to expire,
+# or 0 to disable disk caching. Explicit catalog warm always re-downloads.
+catalog_cache_ttl_seconds = "indefinite"
 extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.
 instructions_text = "Use exa_search for URL discovery and exa_contents for known URLs. Consider type=lite ($0.004) for lower-cost indexed search when its restricted inputs and lack of live fetching fit the task; auto ($0.007) remains the general-search default. Use deeper modes when the task needs them. Content options add charges; choose freshness, coverage and quality before price."
 

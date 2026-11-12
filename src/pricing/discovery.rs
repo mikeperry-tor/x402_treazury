@@ -115,15 +115,15 @@ fn start(
     base: &str,
     tools: &mut [ToolSpec],
     load: impl std::future::Future<Output = Result<crate::catalog::LoadedCatalog>> + Send + 'static,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     let Ok(Some(config)) = cfg.effective_pricing() else {
-        return;
+        return None;
     };
     if config.source == "catalog" {
-        return;
+        return None;
     }
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-        return;
+        return None;
     };
     let outputs = tools
         .iter()
@@ -139,8 +139,9 @@ fn start(
         })
         .collect::<Vec<_>>();
     if outputs.is_empty() {
-        return;
+        return None;
     }
+    let parent_expires = cfg.catalog_pricing_expires;
     let source = cfg.discovery_source.clone().or_else(|| cfg.prefix.clone());
     let settings = cfg.clone();
     let root = root.clone();
@@ -161,22 +162,23 @@ fn start(
             return;
         };
         match load.await {
-            Ok(document) => {
-                let expires = document.advertised_expires.unwrap_or(0);
+            Ok(mut document) => {
+                let expires = parent_expires.or(document.advertised_expires).unwrap_or(crate::http_cache::INDEFINITE_EXPIRY);
                 let matching_config = config.clone();
+                let root = document.document.clone();
                 // Blocking work owns no publication cells. Aborting this async
                 // waiter cannot let a completed obsolete job publish afterwards.
                 let prices = tokio::task::spawn_blocking(move || {
-                    assignments_indexed(&matching_config, &document, &index)
+                    assignments_indexed(&matching_config, &root, &index)
                 }).await;
                 match prices {
                     Ok(Ok(prices)) => {
-                        let remaining = expires.saturating_sub(crate::http_cache::now());
-                        let until = std::time::Instant::now().checked_add(Duration::from_secs(remaining)).unwrap_or_else(std::time::Instant::now);
+                        document.commit().await;
+                        let until = crate::http_cache::advertised_until(expires);
                         for (identity, price) in prices {
                             if let Some(cells) = targets.remove(&operations[identity]) {
                                 for cell in cells {
-                                    cell.replace(price.clone(), config.source.clone(), Some(until));
+                                    cell.replace(price.clone(), config.source.clone(), until);
                                 }
                             }
                         }
@@ -195,42 +197,44 @@ fn start(
     for tool in tools.iter_mut().filter(|tool| tool.help_url.is_none()) {
         tool.advertised_pricing.attach_owner(owner.clone());
     }
+    Some(task)
 }
 
-pub(crate) fn attach_static(
+fn static_task(
     cfg: &Config,
     root: &Arc<Value>,
     base: &str,
     tools: &mut [ToolSpec],
     gate: Option<Arc<network::DiscoveryCapacity>>,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     let Ok(Some(pricing)) = cfg.effective_pricing() else {
-        return;
+        return None;
     };
     if pricing.source == "catalog" {
-        return;
+        return None;
     }
     let mut settings = cfg.clone();
     settings.spec = pricing.source;
+    settings.catalog_cache_force_refresh |= cfg.catalog_pricing_refresh;
     // Retain the original configuration revision and runtime relay principal.
     // The explicit URL owns its cache entry and refresh timestamp.
     start(cfg, root, base, tools, async move {
         crate::catalog::load_json_pricing(&settings, network::global(), gate).await
-    });
+    })
 }
 
-pub(crate) fn attach_dynamic(
+fn dynamic_task(
     cfg: &Config,
     root: &Arc<Value>,
     base: &str,
     tools: &mut [ToolSpec],
     client: crate::payment::PaidClient,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     let Ok(Some(pricing)) = cfg.effective_pricing() else {
-        return;
+        return None;
     };
     if pricing.source == "catalog" {
-        return;
+        return None;
     }
     let settings = cfg.clone();
     let (client, _) = client.pin_document_authority();
@@ -240,7 +244,48 @@ pub(crate) fn attach_dynamic(
         base,
         tools,
         load_dynamic(settings, pricing, client),
-    );
+    )
+}
+
+pub(crate) fn attach_static(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    gate: Option<Arc<network::DiscoveryCapacity>>,
+) {
+    let _ = static_task(cfg, root, base, tools, gate);
+}
+pub(crate) async fn refresh_static(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    gate: Option<Arc<network::DiscoveryCapacity>>,
+) {
+    if let Some(task) = static_task(cfg, root, base, tools, gate) {
+        let _ = task.await;
+    }
+}
+pub(crate) fn attach_dynamic(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    client: crate::payment::PaidClient,
+) {
+    let _ = dynamic_task(cfg, root, base, tools, client);
+}
+pub(crate) async fn refresh_dynamic(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    client: crate::payment::PaidClient,
+) {
+    if let Some(task) = dynamic_task(cfg, root, base, tools, client) {
+        let _ = task.await;
+    }
 }
 
 async fn load_dynamic(
@@ -273,8 +318,11 @@ async fn load_dynamic(
     Ok(crate::catalog::LoadedCatalog {
         document: Arc::new(root),
         hints: None,
-        advertised_expires: Some(crate::http_cache::now().saturating_add(
-            crate::http_cache::advertised_ttl(settings.catalog_cache_ttl_seconds),
+        pending: None,
+        refresh_pricing: true,
+        advertised_expires: Some(crate::http_cache::advertised_expiry(
+            settings.catalog_cache_ttl_seconds,
+            Duration::ZERO,
         )),
     })
 }

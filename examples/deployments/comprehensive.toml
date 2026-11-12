@@ -115,6 +115,9 @@ max_api_payment_usdc = "0.50"
 # Delayed funding cannot erase earlier links and is not an unlinkability guarantee.
 
 [sources.social_botsmith]
+# Catalogs and price hints persist indefinitely; use positive seconds to expire,
+# or 0 to disable disk caching. Explicit catalog warm always re-downloads.
+catalog_cache_ttl_seconds = "indefinite"
 extends = "../../providers/botsmith.toml"
 send_tools = [
   { to = "exclude", tools = ["help", "jev", "polymarket_*"] },

@@ -517,16 +517,9 @@ impl AdvertisedPricing {
         }
     }
     pub fn set_expires(&self, expires: u64) {
-        let remaining = std::time::UNIX_EPOCH
-            .checked_add(std::time::Duration::from_secs(expires))
-            .and_then(|expires| expires.duration_since(std::time::SystemTime::now()).ok());
-        let now = Instant::now();
-        self.set_fresh_until(Some(
-            remaining
-                .and_then(|duration| now.checked_add(duration))
-                .unwrap_or(now),
-        ));
+        self.set_fresh_until(crate::http_cache::advertised_until(expires));
     }
+
     pub fn attach_owner(&mut self, owner: Arc<Acquisition>) {
         self.owner = Some(owner);
     }

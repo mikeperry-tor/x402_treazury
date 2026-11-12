@@ -109,6 +109,63 @@ const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b'|')
     .add(b'}');
 
+/// Local snapshot lifetime. Zero seconds disables disk persistence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CacheLifetime {
+    #[default]
+    Indefinite,
+    Seconds(u64),
+}
+
+impl Serialize for CacheLifetime {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        match self {
+            Self::Indefinite => serializer.serialize_str("indefinite"),
+            Self::Seconds(seconds) => serializer.serialize_u64(*seconds),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for CacheLifetime {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Value {
+            Seconds(u64),
+            Name(String),
+        }
+        match Value::deserialize(deserializer)? {
+            Value::Seconds(seconds) => Ok(Self::Seconds(seconds)),
+            Value::Name(name) if name == "indefinite" => Ok(Self::Indefinite),
+            _ => Err(serde::de::Error::custom(
+                "expected nonnegative seconds or 'indefinite'",
+            )),
+        }
+    }
+}
+impl From<u64> for CacheLifetime {
+    fn from(seconds: u64) -> Self {
+        Self::Seconds(seconds)
+    }
+}
+impl CacheLifetime {
+    pub(crate) fn disabled(self) -> bool {
+        self == Self::Seconds(0)
+    }
+    pub(crate) fn expires(self, stored: u64, delay: std::time::Duration) -> u64 {
+        match self {
+            Self::Indefinite => crate::http_cache::INDEFINITE_EXPIRY,
+            Self::Seconds(seconds) => stored
+                .saturating_add(seconds.saturating_sub(delay.as_secs()))
+                .min(crate::http_cache::INDEFINITE_EXPIRY - 1),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -125,7 +182,14 @@ pub struct Config {
     pub wait_for_startup_socks: bool,
     pub http_cache_enabled: bool,
     /// Local catalog snapshot lifetime; zero disables catalog disk caching.
-    pub catalog_cache_ttl_seconds: u64,
+    pub catalog_cache_ttl_seconds: CacheLifetime,
+    /// Unconditional acquisition requested by explicit warm or source refresh.
+    #[serde(skip)]
+    pub catalog_cache_force_refresh: bool,
+    #[serde(skip)]
+    pub catalog_pricing_refresh: bool,
+    #[serde(skip)]
+    pub catalog_pricing_expires: Option<u64>,
     #[serde(skip)]
     #[doc(hidden)]
     pub http_cache_directory: Option<std::path::PathBuf>,
@@ -238,7 +302,10 @@ impl Default for Config {
             relay_fallback: None,
             wait_for_startup_socks: false,
             http_cache_enabled: true,
-            catalog_cache_ttl_seconds: crate::limits::API_CACHE_TTL_SECONDS,
+            catalog_cache_ttl_seconds: CacheLifetime::Indefinite,
+            catalog_cache_force_refresh: false,
+            catalog_pricing_refresh: false,
+            catalog_pricing_expires: None,
             http_cache_directory: None,
             http_cache_direct_warm_target: None,
             reliability_tags: vec![],
@@ -601,6 +668,51 @@ pub struct LoadedCatalog {
     pub hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
     /// None is an authored local document; remote expiry is independent of storage.
     pub advertised_expires: Option<u64>,
+    pub(crate) pending: Option<std::sync::Arc<PendingCatalog>>,
+    pub(crate) refresh_pricing: bool,
+}
+#[derive(Debug)]
+pub(crate) struct PendingCatalog {
+    slot: crate::http_cache::Slot,
+    entry: Option<crate::http_cache::Entry>,
+    committed: tokio::sync::OnceCell<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>>,
+}
+impl LoadedCatalog {
+    /// Bind optional pricing acquisition to this catalog generation and expiry.
+    pub fn configure_pricing(&self, config: &mut Config) {
+        config.catalog_pricing_refresh = self.refresh_pricing;
+        config.catalog_pricing_expires = self.advertised_expires;
+    }
+
+    /// Persist acquired bytes only after the caller accepts their content.
+    /// API sources must validate generation, routing and required completeness first.
+    /// Cache failure is best effort; accepted content remains usable.
+    pub async fn commit(&mut self) {
+        if let Some(pending) = self.pending.take() {
+            self.hints = pending
+                .committed
+                .get_or_init(|| pending.slot.write(pending.entry.clone()))
+                .await
+                .clone();
+        }
+    }
+}
+fn stage_catalog(
+    document: Value,
+    slot: Option<crate::http_cache::Slot>,
+    entry: Option<crate::http_cache::Entry>,
+    expires: u64,
+) -> LoadedCatalog {
+    let mut document = loaded(document, None, Some(expires));
+    document.refresh_pricing = true;
+    if let Some(slot) = slot {
+        document.pending = Some(std::sync::Arc::new(PendingCatalog {
+            slot,
+            entry,
+            committed: tokio::sync::OnceCell::new(),
+        }));
+    }
+    document
 }
 impl std::ops::Deref for LoadedCatalog {
     type Target = Value;
@@ -619,6 +731,8 @@ impl From<std::sync::Arc<Value>> for LoadedCatalog {
             document,
             hints: None,
             advertised_expires: None,
+            pending: None,
+            refresh_pricing: false,
         }
     }
 }
@@ -631,6 +745,8 @@ fn loaded(
         document: std::sync::Arc::new(document),
         hints,
         advertised_expires,
+        pending: None,
+        refresh_pricing: false,
     }
 }
 pub(crate) enum CatalogLoad {
@@ -713,7 +829,17 @@ impl RelayContinuation {
             );
         }
         let relay = cfg.relay_fallback.as_ref().expect("captured relay");
-        let response = if let Some(readiness) = readiness {
+        let response = if cfg.catalog_cache_force_refresh {
+            relay
+                .fetch_fresh(
+                    &cfg.spec,
+                    cfg.max_spec_bytes,
+                    "max_spec_bytes",
+                    gate.into_iter().collect(),
+                    self.retry_after,
+                )
+                .await
+        } else if let Some(readiness) = readiness {
             relay
                 .fetch_when_ready_bounded(
                     &cfg.spec,
@@ -746,43 +872,34 @@ impl RelayContinuation {
         })?;
         // The relay has already validated complete JSON before caching the response.
         let document = parse_document(&response.body)?;
-        let expires = crate::http_cache::now().saturating_add(
-            crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds)
-                .saturating_sub(response.catalog_cache_age().as_secs()),
+        let expires = crate::http_cache::advertised_expiry(
+            cfg.catalog_cache_ttl_seconds,
+            response.catalog_cache_age(),
         );
-        let hints = if let Some(slot) = crate::discovery_relay::slot_for(
+        let slot = crate::discovery_relay::slot_for(
             cfg,
             &cfg.spec,
             "catalog",
             cfg.max_spec_bytes,
             &response.cache_key,
-        ) {
-            let metadata = crate::http_cache::Metadata::from_relay_headers(
-                &response.headers,
-                response.catalog_cache_age(),
-                Some(cfg.catalog_cache_ttl_seconds),
-            );
-            tracing::debug!(
-                cache = "relay_response",
-                cache_policy =
-                    crate::http_cache::Metadata::policy_label(&response.headers, metadata.as_ref()),
-                persist = metadata.as_ref().is_some_and(|m| m.fresh()),
-                "Catalog relay response cache policy"
-            );
-            slot.write(
-                metadata
-                    .filter(|m| m.fresh())
-                    .map(|metadata| crate::http_cache::Entry {
-                        hints: None,
-                        metadata,
-                        data: response.body.clone(),
-                    }),
-            )
-            .await
-        } else {
-            None
-        };
-        Ok(loaded(document, hints, Some(expires)))
+        );
+        let entry = crate::http_cache::Metadata::from_relay_headers(
+            &response.headers,
+            response.catalog_cache_age(),
+            Some(cfg.catalog_cache_ttl_seconds),
+        )
+        .filter(|m| m.fresh())
+        .map(|metadata| crate::http_cache::Entry {
+            hints: None,
+            metadata,
+            data: response.body.clone(),
+        });
+        Ok(stage_catalog(
+            document,
+            slot.map(|slot| slot.replacement()),
+            entry,
+            expires,
+        ))
     }
 }
 
@@ -794,12 +911,15 @@ pub(crate) async fn load_json_discovery_with(
     cfg: &Config,
     network: &crate::network::NetworkContext,
 ) -> Result<Value> {
-    Ok((*load_json_discovery_bounded(cfg, network, None)
-        .await?
-        .document)
-        .clone())
+    let mut document = load_json_discovery_bounded(cfg, network, None).await?;
+    // This generic JSON convenience API accepts parsed content. API source callers
+    // use the bounded loader and commit only after source-specific validation.
+    document.commit().await;
+    Ok((*document.document).clone())
 }
 
+/// Acquire a document without persisting newly downloaded or revalidated bytes.
+/// Call [`LoadedCatalog::commit`] after accepting the document for its intended use.
 pub async fn load_json_discovery_bounded(
     cfg: &Config,
     network: &crate::network::NetworkContext,
@@ -857,6 +977,9 @@ pub(crate) async fn prepare_json_discovery_bounded(
         "Catalog disk cache configuration"
     );
     for slot in crate::discovery_relay::slots(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes) {
+        if cfg.catalog_cache_force_refresh {
+            continue;
+        }
         slot.check_revision().await;
         let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) else {
             continue;
@@ -927,7 +1050,11 @@ async fn load_json_discovery_origin(
     if let Some(slot) = &slot {
         slot.check_revision().await;
     }
-    let cached = read_cached_catalog(slot.as_ref()).await;
+    let cached = if cfg.catalog_cache_force_refresh {
+        None
+    } else {
+        read_cached_catalog(slot.as_ref()).await
+    };
     if cached
         .as_ref()
         .is_some_and(|(entry, _)| entry.metadata.fresh())
@@ -965,15 +1092,7 @@ async fn load_json_discovery_origin(
         "Catalog fetching origin"
     );
 
-    match fetch_catalog_origin(cfg, network, conditional, slot.as_ref(), gate).await {
-        Ok(document) => Ok(document),
-        Err(err) => {
-            if let Some(slot) = &slot {
-                slot.write(None).await;
-            }
-            Err(err)
-        }
-    }
+    fetch_catalog_origin(cfg, network, conditional, slot.as_ref(), gate).await
 }
 
 async fn fetch_catalog_origin(
@@ -1029,18 +1148,12 @@ async fn fetch_catalog_origin(
                 let headers = response.headers().clone();
                 drop(response);
                 drop(_permit);
-                let expires = crate::http_cache::now().saturating_add(
-                    crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds),
+                let expires = crate::http_cache::advertised_expiry(
+                    cfg.catalog_cache_ttl_seconds,
+                    std::time::Duration::ZERO,
                 );
-                let hints = revalidate_cached_catalog(&headers, conditional, slot)
-                    .await
-                    .map_err(Failure::validation)?;
-                return Ok(loaded(
-                    serde_json::from_slice(&conditional.expect("validated cached entry").data)
-                        .map_err(|error| Failure::validation(error.into()))?,
-                    hints,
-                    Some(expires),
-                ));
+                return revalidate_cached_catalog(&headers, conditional, slot, expires)
+                    .map_err(Failure::validation);
             }
             // An unfollowed redirect may still carry a valid legacy catalog body.
             if status.is_client_error() || status.is_server_error() {
@@ -1071,11 +1184,31 @@ async fn fetch_catalog_origin(
             drop(_permit);
             let document =
                 parse_document(&bytes).map_err(|error| Failure::remote_content(error, policy))?;
-            let expires = crate::http_cache::now().saturating_add(
-                crate::http_cache::advertised_ttl(cfg.catalog_cache_ttl_seconds),
+            let expires = crate::http_cache::advertised_expiry(
+                cfg.catalog_cache_ttl_seconds,
+                std::time::Duration::ZERO,
             );
-            let hints = persist_catalog_response(status, &headers, bytes, slot).await;
-            Ok(loaded(document, hints, Some(expires)))
+            let entry = (status == reqwest::StatusCode::OK)
+                .then(|| {
+                    crate::http_cache::Metadata::from_catalog_headers(
+                        &headers,
+                        std::time::Duration::ZERO,
+                        None,
+                        cfg.catalog_cache_ttl_seconds,
+                    )
+                    .map(|metadata| crate::http_cache::Entry {
+                        hints: None,
+                        metadata,
+                        data: bytes,
+                    })
+                })
+                .flatten();
+            Ok(stage_catalog(
+                document,
+                slot.map(|slot| slot.replacement()),
+                entry,
+                expires,
+            ))
         },
     )
     .await?;
@@ -1138,11 +1271,12 @@ async fn read_cached_catalog(
     }
 }
 
-async fn revalidate_cached_catalog(
+fn revalidate_cached_catalog(
     headers: &reqwest::header::HeaderMap,
     conditional: Option<&crate::http_cache::Entry>,
     slot: Option<&crate::http_cache::Slot>,
-) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
+    expires: u64,
+) -> Result<LoadedCatalog> {
     let Some(entry) = conditional else {
         return Err(anyhow::anyhow!("unsolicited catalog HTTP 304"))
             .context(diagnostics::Problem(
@@ -1160,72 +1294,34 @@ async fn revalidate_cached_catalog(
         .context(LoadStage::Headers);
     }
     // A 304 may refresh only a representation that still meets the catalog contract.
-    parse_document(&entry.data)?;
+    let document = parse_document(&entry.data)?;
     let metadata = crate::http_cache::Metadata::from_catalog_headers(
         headers,
         std::time::Duration::ZERO,
         Some(&entry.metadata),
-        slot.map_or(0, |s| s.catalog_ttl),
+        slot.map_or(CacheLifetime::Seconds(0), |s| s.catalog_ttl),
     );
     tracing::debug!(
         cache_policy = crate::http_cache::Metadata::policy_label(headers, metadata.as_ref()),
         "Catalog revalidation response cache policy"
     );
-    let hints = if let Some(slot) = slot {
-        slot.write(metadata.map(|metadata| crate::http_cache::Entry {
-            hints: None,
-            metadata,
-            data: entry.data.clone(),
-        }))
-        .await
-    } else {
-        None
-    };
     tracing::debug!(
         cache = "revalidated",
         http_status = 304,
-        "Catalog HTTP disk cache revalidated by origin"
+        "Catalog HTTP representation revalidated; cache update awaits content acceptance"
     );
-    Ok(hints)
-}
-
-async fn persist_catalog_response(
-    status: reqwest::StatusCode,
-    headers: &reqwest::header::HeaderMap,
-    bytes: Vec<u8>,
-    slot: Option<&crate::http_cache::Slot>,
-) -> Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>> {
-    let metadata = if status == reqwest::StatusCode::OK {
-        crate::http_cache::Metadata::from_catalog_headers(
-            headers,
-            std::time::Duration::ZERO,
-            None,
-            slot.map_or(0, |s| s.catalog_ttl),
-        )
-    } else {
-        None
-    };
-    tracing::debug!(
-        cache = if slot.is_some() {
-            "enabled"
-        } else {
-            "unavailable"
-        },
-        cache_policy = crate::http_cache::Metadata::policy_label(headers, metadata.as_ref()),
-        http_status = status.as_u16(),
-        "Catalog origin response cache policy"
-    );
-    if let Some(slot) = slot {
-        slot.write(metadata.map(|metadata| crate::http_cache::Entry {
+    Ok(stage_catalog(
+        document,
+        slot.cloned(),
+        metadata.map(|metadata| crate::http_cache::Entry {
             hints: None,
             metadata,
-            data: bytes,
-        }))
-        .await
-    } else {
-        None
-    }
+            data: entry.data.clone(),
+        }),
+        expires,
+    ))
 }
+
 pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value> {
     let started = std::time::Instant::now();
     let document: Value = serde_json::from_slice(bytes).context(LoadStage::Parse)?;

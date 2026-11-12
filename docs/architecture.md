@@ -668,7 +668,7 @@ available, otherwise a usable advertised per-call estimate, otherwise unknown
 pricing. Advertisements are normalized from provider metadata and stay separate
 from observed-offer cache entries and result evidence. Local catalogs supply them
 on the first build; remote advertisements follow the configured catalog lifetime
-(seven days by default), retaining their acquisition expiry even when persistence
+(indefinite by default), retaining the source acquisition expiry even when persistence
 fails. An invocation snapshots its advertised amount without balance or funding
 I/O. Advertised prices rank existing identities and do not add admission checks.
 
@@ -720,13 +720,28 @@ Qualification retains its existing run permits and charges every attempt.
 Remote catalog entries own passive operation estimates. Their existing cache
 identity also shares prices across compatible aliases, wallet groups, listeners,
 API destination overrides and authentication settings. It never shares a signer
-or payer-bound transport. Catalog retention defaults to seven days and
+or payer-bound transport. Catalog retention defaults to indefinite and
 `catalog_cache_ttl_seconds` controls both catalog and hints; there is no price-age
-gate. Reads, restart and observations do not renew expiry. Successful unchanged
-loads/revalidation preserve prices; HTTP 304 renews the joint entry. Changed bytes
-and source configuration updates invalidate both. Per-source revision bookkeeping
+gate. Reads, restart and observations do not renew expiry. Explicit positive-second
+expiry, forced refresh, changed bytes and source configuration updates invalidate
+both, including unchanged bytes on a forced refresh. External pricing hints are
+re-downloaded on a new catalog acquisition and inherit its expiry. Optional startup
+pricing loads remain asynchronous; refreshed source publication waits for its
+configured optional hint acquisition, with failure leaving unknown prices. Per-source revision bookkeeping
 runs before shared acquisition and records every alias after acquisition, including
 the first cache creation. Revision records disappear with their catalog.
+
+The disposable cache indexes compatible origin, direct-warm and relay variants by
+one catalog family. Accepted replacement retires older sibling variants in the
+same SQLite transaction, retaining the replacement's distinct provenance. This
+also applies to successful uncacheable responses; failed staging leaves the old
+family intact.
+Ordinary startup and explicit warm stage downloads and HTTP 304 revalidations
+until source generation, source routing and required completeness succeed.
+Optional pricing commits only after metadata format validation. The generic JSON
+convenience loader accepts parsed JSON; the bounded loader leaves acceptance and
+cache commit to its caller. This prevents a transient JSON error response from
+becoming an indefinite API catalog snapshot.
 
 The SQLite cache keeps raw bytes intact, with generation-bound operation amounts
 alongside them. Live bindings share in-memory learning immediately; detached,

@@ -326,13 +326,12 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if args.all_tools {
         cfg.use_recommended_tools = false;
     }
-    let root =
+    let mut root =
         catalog::load_json_discovery_bounded(&cfg, x402_treazury::network::global(), None).await?;
     if args.list_tags {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&catalog::tag_counts(&root)?)?
-        );
+        let tags = catalog::tag_counts(&root)?;
+        root.commit().await;
+        println!("{}", serde_json::to_string_pretty(&tags)?);
         return Ok(());
     }
     let base = cfg
@@ -365,6 +364,8 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         built.tools
     };
     catalog::append_omissions(&mut cfg.instructions_text, "standalone", &issues);
+    root.commit().await;
+    root.configure_pricing(&mut cfg);
     for tool in &mut tools {
         tool.catalog_hints = root.hints.clone();
         if let Some(expires) = root.advertised_expires {

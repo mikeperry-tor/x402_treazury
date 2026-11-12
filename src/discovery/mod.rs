@@ -69,6 +69,7 @@ impl Record {
             return Ok(());
         }
         self.prepare()?;
+        let expires = self.advertised_expires();
         if let Some(provider) = &self.candidate.provider {
             if provider
                 .settings
@@ -80,8 +81,10 @@ impl Record {
             let root = Arc::new(crate::catalog::parse_document(self.document.as_bytes())?);
             let built = Arc::get_mut(self.built.as_mut().expect("prepared source"))
                 .expect("newly prepared source");
+            let mut settings = provider.settings.clone();
+            settings.catalog_pricing_expires = expires;
             crate::pricing::discovery::attach_dynamic(
-                &provider.settings,
+                &settings,
                 &root,
                 &built.base,
                 &mut built.tools,
@@ -96,28 +99,31 @@ impl Record {
             let built = import::build(&self.candidate, self.document.as_bytes())?;
             // Accepted remote bytes keep their acquisition age across restart.
             // Rebuilding a saved source is not a metadata revalidation.
-            if self.candidate.remote_spec().is_some() {
-                let ttl = self.candidate.provider.as_ref().map_or(
-                    crate::limits::API_CACHE_TTL_SECONDS,
-                    |provider| {
-                        crate::http_cache::advertised_ttl(
-                            provider.settings.catalog_cache_ttl_seconds,
-                        )
-                    },
-                );
-                let expires = self.updated_at.saturating_add(ttl);
-                let until = std::time::Instant::now()
-                    .checked_add(Duration::from_secs(
-                        expires.saturating_sub(crate::http_cache::now()),
-                    ))
-                    .unwrap_or_else(std::time::Instant::now);
+            if let Some(expires) = self.advertised_expires() {
+                let until = crate::http_cache::advertised_until(expires);
                 for tool in &built.tools {
-                    tool.advertised_pricing.set_fresh_until(Some(until));
+                    tool.advertised_pricing.set_fresh_until(until);
                 }
             }
             self.built = Some(Arc::new(built));
         }
         Ok(())
+    }
+
+    fn advertised_expires(&self) -> Option<u64> {
+        self.candidate.remote_spec().map(|_| {
+            let lifetime = self
+                .candidate
+                .provider
+                .as_ref()
+                .map(|provider| provider.settings.catalog_cache_ttl_seconds)
+                .unwrap_or_default();
+            if lifetime.disabled() {
+                crate::http_cache::INDEFINITE_EXPIRY
+            } else {
+                lifetime.expires(self.updated_at, Duration::ZERO)
+            }
+        })
     }
 }
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]

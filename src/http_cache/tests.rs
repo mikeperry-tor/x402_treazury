@@ -229,7 +229,10 @@ async fn catalogs_survive_reopen_revalidate_replace_and_never_serve_stale_errors
             .as_u16(),
         503
     );
-    assert!(slot.read().await.is_none());
+    assert!(
+        slot.read().await.is_some(),
+        "failed refresh retains the complete expired snapshot"
+    );
     origin.lock().unwrap().mode = 0;
     catalog(&url, &cfg).await.unwrap();
     expire(slot.clone()).await;
@@ -239,7 +242,10 @@ async fn catalogs_survive_reopen_revalidate_replace_and_never_serve_stale_errors
     expire(slot.clone()).await;
     origin.lock().unwrap().mode = 4;
     assert!(catalog(&url, &cfg).await.is_err());
-    assert!(slot.read().await.is_none());
+    assert!(
+        slot.read().await.is_some(),
+        "invalid refresh retains the previous snapshot"
+    );
     task.abort();
 }
 #[tokio::test]
@@ -359,12 +365,18 @@ async fn origin_limit_has_consumer_error_and_sanitized_log() {
     assert!(logs.contains("download limit exceeded"));
     assert!(logs.contains("limit_bytes=1024"));
     assert!(!logs.contains(&url));
+    let retained = Slot::new(&cfg, &url, "catalog", 1024)
+        .unwrap()
+        .read()
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&retained.data).unwrap()["value"],
+        1
+    );
     assert!(
-        Slot::new(&cfg, &url, "catalog", 1024)
-            .unwrap()
-            .read()
-            .await
-            .is_none()
+        !retained.metadata.fresh(),
+        "failed acquisition must not renew the retained snapshot"
     );
     task.abort();
 }
@@ -689,9 +701,12 @@ fn catalog_local_ttl_overrides_origin_freshness() {
         assert!(Metadata::from_catalog_headers(&h, Duration::ZERO, None, 0).is_none());
     }
     assert!(Metadata::from_headers(&HeaderMap::new(), Duration::ZERO, None).is_none());
-    let delayed =
-        Metadata::from_relay_headers(&HeaderMap::new(), Duration::from_secs(121), Some(120))
-            .unwrap();
+    let delayed = Metadata::from_relay_headers(
+        &HeaderMap::new(),
+        Duration::from_secs(121),
+        Some(120.into()),
+    )
+    .unwrap();
     assert!(
         !delayed.fresh(),
         "coalesced relay reuse must not renew lifetime"
@@ -774,7 +789,7 @@ fn lists_extensions_private_variants_and_304_refresh_are_supported() {
         .is_none()
     );
     assert!(
-        Metadata::from_relay_headers(&h, Duration::ZERO, Some(86400)).is_none(),
+        Metadata::from_relay_headers(&h, Duration::ZERO, Some(86400.into())).is_none(),
         "relay target request headers are unknown"
     );
 }
@@ -786,30 +801,33 @@ async fn advertised_catalog_lifetime_does_not_require_or_renew_disk_storage() {
     origin.lock().unwrap().mode = 2; // no-store still follows configured snapshot retention.
     let mut cfg = config(dir.path());
     cfg.spec = url;
-    cfg.catalog_cache_ttl_seconds = 120;
+    cfg.catalog_cache_ttl_seconds = 120.into();
     cfg.http_cache_enabled = false;
-    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    let mut loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
+    loaded.commit().await;
     assert!(loaded.hints.is_none());
     assert!(loaded.advertised_expires.unwrap() > now());
     assert!(loaded.advertised_expires.unwrap() <= now() + 120);
 
-    cfg.catalog_cache_ttl_seconds = 0;
-    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    cfg.catalog_cache_ttl_seconds = 0.into();
+    let mut loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
+    loaded.commit().await;
     assert!(loaded.advertised_expires.unwrap() > now());
-    assert!(loaded.advertised_expires.unwrap() <= now() + crate::limits::API_CACHE_TTL_SECONDS);
+    assert_eq!(loaded.advertised_expires, Some(INDEFINITE_EXPIRY));
 
     cfg.http_cache_enabled = true;
-    cfg.catalog_cache_ttl_seconds = 120;
+    cfg.catalog_cache_ttl_seconds = 120.into();
     let file = dir.path().join("cache-is-a-file");
     std::fs::write(&file, b"not a directory").unwrap();
     cfg.http_cache_directory = Some(file);
-    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    let mut loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
+    loaded.commit().await;
     assert!(
         loaded.hints.is_none(),
         "failed disk writes do not create observed ownership"
@@ -817,18 +835,17 @@ async fn advertised_catalog_lifetime_does_not_require_or_renew_disk_storage() {
     assert!(loaded.advertised_expires.unwrap() > now());
 
     cfg.http_cache_directory = config(dir.path()).http_cache_directory;
-    catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
-        .await
-        .unwrap();
+    catalog::load_json_discovery(&cfg).await.unwrap();
     let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
     let mut entry = slot.read().await.unwrap();
     entry.metadata.expires -= 10;
     let expires = entry.metadata.expires;
     slot.write(Some(entry)).await;
     let before = origin.lock().unwrap().calls.len();
-    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    let mut loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
+    loaded.commit().await;
     assert_eq!(loaded.advertised_expires, Some(expires));
     assert_eq!(origin.lock().unwrap().calls.len(), before);
     task.abort();
@@ -841,7 +858,7 @@ async fn catalog_ttl_changes_partition_cache_and_zero_disables_it() {
     let mut cfg = config(dir.path());
     catalog(&url, &cfg).await.unwrap();
     let original = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
-    cfg.catalog_cache_ttl_seconds = 120;
+    cfg.catalog_cache_ttl_seconds = 120.into();
     catalog(&url, &cfg).await.unwrap();
     let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
     assert_ne!(
@@ -850,7 +867,7 @@ async fn catalog_ttl_changes_partition_cache_and_zero_disables_it() {
     );
     let metadata = slot.read().await.unwrap().metadata;
     assert_eq!(metadata.expires - metadata.stored, 120);
-    cfg.catalog_cache_ttl_seconds = 0;
+    cfg.catalog_cache_ttl_seconds = 0.into();
     assert!(Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).is_none());
     catalog(&url, &cfg).await.unwrap();
     catalog(&url, &cfg).await.unwrap();
@@ -903,7 +920,7 @@ async fn unsolicited_and_conflicting_304_fail_once_at_headers() {
         assert_eq!(state.calls.len(), 2);
         assert_eq!(state.calls[1]["if-none-match"], "\"one\"");
     }
-    assert!(slot.read().await.is_none());
+    assert!(slot.read().await.is_some());
     task.abort();
 }
 
@@ -1732,15 +1749,16 @@ async fn static_catalog_proven_local_proxy_refusal_never_schedules_paid_fallback
 }
 
 #[tokio::test]
-async fn catalog_304_renews_prices_and_changed_body_discards_them_without_api_calls() {
+async fn catalog_expiry_discards_prices_even_when_304_keeps_the_bytes() {
     use alloy_primitives::U256;
     let root = tempfile::tempdir().unwrap();
     let (url, origin, task) = fixture().await;
     let mut cfg = config(root.path());
     cfg.spec = url;
-    let loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    let mut loaded = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
+    loaded.commit().await;
     let hints = loaded.hints.unwrap();
     let key = hints.operation("GET", "/items");
     key.learn(U256::from(3), crate::pricing::runtime::received().unwrap());
@@ -1752,19 +1770,30 @@ async fn catalog_304_renews_prices_and_changed_body_discards_them_without_api_ca
     slot.write(Some(expired)).await;
     assert!(key.get().is_none());
     origin.lock().unwrap().mode = 1;
-    let validated = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    let mut validated = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
-    assert!(Arc::ptr_eq(&hints, validated.hints.as_ref().unwrap()));
-    assert_eq!(key.get(), Some(U256::from(3)));
+    validated.commit().await;
+    assert!(!Arc::ptr_eq(&hints, validated.hints.as_ref().unwrap()));
+    assert!(key.get().is_none());
+    assert!(
+        validated
+            .hints
+            .as_ref()
+            .unwrap()
+            .operation("GET", "/items")
+            .get()
+            .is_none()
+    );
     assert_eq!(origin.lock().unwrap().calls.len(), 2);
     let mut expired = slot.read().await.unwrap();
     expired.metadata.expires = 0;
     slot.write(Some(expired)).await;
     origin.lock().unwrap().mode = 2;
-    let replaced = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+    let mut replaced = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
         .await
         .unwrap();
+    replaced.commit().await;
     assert_eq!(replaced["value"], 2);
     assert!(key.get().is_none());
     assert!(
@@ -1780,3 +1809,118 @@ async fn catalog_304_renews_prices_and_changed_body_discards_them_without_api_ca
 }
 
 use axum::serve::Listener as _;
+
+#[test]
+fn indefinite_lifetime_has_no_clock_arithmetic_and_migrates_the_cache_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(dir.path());
+    assert_eq!(
+        cfg.catalog_cache_ttl_seconds,
+        crate::catalog::CacheLifetime::Indefinite
+    );
+    let metadata = Metadata::from_catalog_headers(
+        &HeaderMap::new(),
+        Duration::ZERO,
+        None,
+        cfg.catalog_cache_ttl_seconds,
+    )
+    .unwrap();
+    assert_eq!(metadata.expires, INDEFINITE_EXPIRY);
+    assert!(advertised_until(metadata.expires).is_none());
+    assert!(metadata.fresh());
+    let indefinite = Slot::new(
+        &cfg,
+        "https://example.com/spec",
+        "catalog",
+        cfg.max_spec_bytes,
+    )
+    .unwrap();
+    let finite = Config {
+        catalog_cache_ttl_seconds: 604800.into(),
+        ..cfg
+    };
+    assert_ne!(
+        indefinite.key,
+        Slot::new(
+            &finite,
+            "https://example.com/spec",
+            "catalog",
+            finite.max_spec_bytes
+        )
+        .unwrap()
+        .key
+    );
+}
+
+#[tokio::test]
+async fn forced_refresh_is_unconditional_staged_and_discards_identical_generation_prices() {
+    let dir = tempfile::tempdir().unwrap();
+    let (url, origin, task) = fixture().await;
+    let mut cfg = config(dir.path());
+    cfg.spec = url;
+    let mut first = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    first.commit().await;
+    let old = first.hints.unwrap();
+    let key = old.operation("GET", "/items");
+    key.learn(
+        alloy_primitives::U256::from(99),
+        crate::pricing::runtime::received().unwrap(),
+    );
+    let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+    let old_generation = old.generation.clone();
+    cfg.catalog_cache_force_refresh = true;
+    let mut refreshed = catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+        .await
+        .unwrap();
+    assert!(refreshed.pending.is_some());
+    assert_eq!(
+        slot.read().await.unwrap().hints.unwrap().generation,
+        old_generation
+    );
+    refreshed.commit().await;
+    assert_ne!(refreshed.hints.as_ref().unwrap().generation, old_generation);
+    assert!(key.get().is_none());
+    assert!(
+        refreshed
+            .hints
+            .as_ref()
+            .unwrap()
+            .operation("GET", "/items")
+            .get()
+            .is_none()
+    );
+    {
+        let state = origin.lock().unwrap();
+        assert_eq!(state.calls.len(), 2);
+        assert!(!state.calls[1].contains_key("if-none-match"));
+        assert!(!state.calls[1].contains_key("if-modified-since"));
+    }
+    origin.lock().unwrap().mode = 3;
+    assert!(
+        catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&slot.read().await.unwrap().data).unwrap()["value"],
+        1
+    );
+    origin.lock().unwrap().mode = 12; // Successful Vary:* cannot be persisted.
+    let mut uncacheable =
+        catalog::load_json_discovery_bounded(&cfg, crate::network::global(), None)
+            .await
+            .unwrap();
+    assert_eq!(uncacheable.document["value"], 12);
+    assert!(
+        slot.read().await.is_some(),
+        "acceptance must precede retirement"
+    );
+    uncacheable.commit().await;
+    assert!(
+        slot.read().await.is_none(),
+        "accepted uncacheable bytes must not leave a fresh obsolete entry"
+    );
+    task.abort();
+}

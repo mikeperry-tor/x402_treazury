@@ -71,7 +71,7 @@ pub async fn warm_cache_with_network(
             .await?
             .settings;
         ensure!(
-            cfg.catalog_cache_ttl_seconds > 0,
+            !cfg.catalog_cache_ttl_seconds.disabled(),
             "source {id}: cache warming is disabled by catalog_cache_ttl_seconds=0"
         );
         ensure!(
