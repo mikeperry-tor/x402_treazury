@@ -173,27 +173,23 @@ fn method_paths_resolve_at_declaration_without_reading_missing_providers() {
 }
 
 fn check_refs(document: &Value, node: &Value) {
-    let mut pending = vec![(node, None::<&Value>)];
-    while let Some((node, defs)) = pending.pop() {
+    let mut pending = vec![node];
+    while let Some(node) = pending.pop() {
         match node {
             Value::Object(fields) => {
-                let nearest_defs = fields.get("$defs").or(defs);
                 if let Some(reference) = fields.get("$ref") {
                     let reference = reference.as_str().unwrap();
                     let pointer = reference
                         .strip_prefix('#')
                         .expect("bootstrap references must stay in the pinned document");
-                    let local = reference
-                        .strip_prefix("#/$defs/")
-                        .and_then(|name| nearest_defs.and_then(|defs| defs.get(name)));
                     assert!(
-                        document.pointer(pointer).is_some() || local.is_some(),
+                        document.pointer(pointer).is_some(),
                         "unresolved pinned reference {reference}"
                     );
                 }
-                pending.extend(fields.values().map(|value| (value, nearest_defs)));
+                pending.extend(fields.values());
             }
-            Value::Array(items) => pending.extend(items.iter().map(|item| (item, defs))),
+            Value::Array(items) => pending.extend(items),
             _ => {}
         }
     }
@@ -284,17 +280,69 @@ fn readfetch_provider_exposes_research_surface_without_support_writes() {
         "readfetch_screenshot",
         "readfetch_search",
         "readfetch_probe",
+        "readfetch_scrape",
+        "readfetch_scrape_residential",
         "readfetch_healthz",
     ] {
         assert!(names.contains(expected), "missing {expected}");
     }
-    for excluded in [
-        "readfetch_claims",
-        "readfetch_feedback",
-        "readfetch_scrape",
-        "readfetch_scrape_residential",
-    ] {
+    for excluded in ["readfetch_claims", "readfetch_feedback"] {
         assert!(!names.contains(excluded), "unexpected {excluded}");
+    }
+}
+
+#[test]
+fn readfetch_relocated_definitions_keep_scrape_inputs_closed_and_preserve_nested_constraints() {
+    let provider = x402_treazury::providers::get("readfetch").unwrap();
+    let document: Value = serde_json::from_str(provider.local_schema.unwrap()).unwrap();
+    check_refs(&document, &document);
+    let tools =
+        x402_treazury::catalog::build_tools(&provider.config, &document, "readfetch").unwrap();
+    for (name, path) in [
+        ("readfetch_scrape", "/v1/scrape"),
+        ("readfetch_scrape_residential", "/v1/scrape/residential"),
+    ] {
+        assert!(
+            document["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]
+                .get("$defs")
+                .is_none()
+        );
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        check_refs(&tool.input_schema, &tool.input_schema);
+        let properties = &tool.input_schema["properties"];
+        let advanced = &properties["advanced"]["anyOf"][0];
+        assert_eq!(
+            advanced["properties"]["wait_for_timeout_ms"]["maximum"],
+            120000
+        );
+        assert_eq!(advanced["properties"]["wait_for_timeout_ms"]["minimum"], 0);
+        assert_eq!(
+            advanced["properties"]["max_scroll_steps"]["anyOf"][0]["maximum"],
+            200
+        );
+        assert_eq!(
+            advanced["properties"]["cookies"]["anyOf"][0]["items"]["required"],
+            json!(["name", "value"])
+        );
+        let auth = &properties["auth"]["anyOf"][0];
+        assert_eq!(auth["required"], json!(["type"]));
+        assert_eq!(
+            auth["properties"]["type"]["enum"],
+            json!(["cookie", "bearer", "basic"])
+        );
+        assert_eq!(
+            auth["properties"]["cookies"]["anyOf"][0]["items"]["required"],
+            json!(["name", "value"])
+        );
+        assert_eq!(properties["advanced"]["anyOf"][1]["type"], "null");
+        assert_eq!(properties["options"]["deprecated"], true);
+        let input = json!({"url":"https://example.com/article", "advanced":{"wait_for_timeout_ms":120000,"cookies":[{"name":"session","value":"public-fixture"}]}, "auth":{"type":"cookie","cookies":[{"name":"session","value":"public-fixture"}]}});
+        let routed = tool
+            .route("https://readfetch.com", input.as_object().unwrap())
+            .unwrap();
+        assert_eq!(routed.method, "POST");
+        assert_eq!(routed.url, format!("https://readfetch.com{path}"));
+        assert_eq!(routed.body.as_ref(), Some(&input));
     }
 }
 

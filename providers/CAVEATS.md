@@ -1777,9 +1777,10 @@ not qualify funded delivery or current payment compatibility.
 
 ## Pinned relay contracts
 
-`agproxy-openapi.json`, `horizonpulse-openapi.json` and `readfetch-openapi.json`
-are complete, unmodified primary vendor OpenAPI downloads, embedded through
-`src/providers/assets.rs`.
+`agproxy-openapi.json` and `horizonpulse-openapi.json` are complete, unmodified
+primary vendor OpenAPI downloads. `readfetch-openapi.json` retains the complete
+contract with the authored reference closure documented below. These assets are
+embedded through `src/providers/assets.rs`.
 Their runtime consumer is offline relay bootstrap, and ordinary provider imports
 reuse the same complete catalogs. They are not reduced test fixtures. Curl's
 complete vendor schema remains in `curl/openapi.json`.
@@ -1796,7 +1797,8 @@ make run CARGO_ARGS='--example provider_updates -- capture --provider agproxy --
 make run CARGO_ARGS='--example provider_updates -- replay target/provider-updates/RUN'
 ```
 
-Review the staged full-copy candidates and preimage hashes using the
+Review staged full-copy candidates for unmodified assets, manual comparisons for
+authored closures, and preimage hashes using the
 [shared acceptance procedure](../docs/provider-updates.md#stage-and-accept-changes).
 The sweep never overwrites the tracked assets or dispatches a provider-specific updater.
 
@@ -1815,11 +1817,12 @@ downloading a new schema does not qualify paid delivery, refunds or Tor.
 
 Primary contracts: [agent guide](https://readfetch.com/llms.txt),
 [OpenAPI](https://readfetch.com/openapi.json), pinned in full as
-`readfetch-openapi.json`, and
+`readfetch-openapi.json` with the authored reference closure below, and
 [x402 discovery](https://readfetch.com/.well-known/x402). The public OpenAPI has
 no `x-payment-info`, and its x402 discovery document is not a supported
 `x402-resources` pricing document; per-tool `pricing_description` overrides
-therefore carry the published prices. Batch and crawl are page-metered (both
+therefore carry published price hints where available. Scrape tariffs remain
+unknown until a live challenge supplies an offer. Batch and crawl are page-metered (both
 quote a minimum of ten pages), so their fixed discovery samples are not their
 final tariffs. `/v1/probe` and crawl-status polling are free. The `/v1` naming
 anchor retains a root fallback for the public `/healthz` service health read.
@@ -1856,11 +1859,18 @@ search) remain available in the reusable provider but are not selected in the
 research deployment: APEX Faucet and Exa already cover most selected reading/search
 paths at lower advertised prices. `POST /v1/claims` and `POST /v1/feedback` are
 excluded as support workflows rather than research reads; feedback is an
-unprotected persistent write. `POST /v1/scrape` and `POST /v1/scrape/residential`
-are excluded because their vendor request schemas use local `$defs` references that
-the offline tool input builder cannot represent; the complete pinned schema retains
-both routes, and a future authored input repair could expose them. Residential
-scraping is extraction, not a raw relay.
+unprotected persistent write.
+
+The pinned vendor schema placed identical `Auth`, `Cookie` and `ScrapeOptions`
+definitions inside each scrape request's `$defs` bag while its references targeted
+`#/$defs/...` at the document root. The authored local closure moves those three
+definitions into `components.schemas`, removes the duplicate bags and rewrites
+references to those components. All other vendor schema fields are retained.
+This makes both the complete source and generated standalone tool inputs resolve
+without special parser behavior. Both scrape routes are exposed; their previous
+reference-related exclusions no longer apply. Residential scraping is extraction,
+not a raw relay. Maintenance intent is `authored`; review future upstream updates
+against this transformation rather than replacing the asset as an unmodified copy.
 
 ## AgData, Degenscan and Market Intelligence API
 

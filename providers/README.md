@@ -62,7 +62,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | AgData | `agdata.toml` | Web/social data; both x402-capable aliases; screenshot/PDF JSON |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | AGProxy | `agproxy.toml` | Complete pinned `agproxy-openapi.json`; residential fetch and proxy packs |
-| readFetch | `readfetch.toml` | Complete pinned `readfetch-openapi.json`; raw HTTP relay, article extraction, crawl, PDF, map, diff, screenshot and batch |
+| readFetch | `readfetch.toml` | Pinned `readfetch-openapi.json` with authored reference closure; raw HTTP relay, article extraction, browser/residential scrape, crawl, PDF, map, diff, screenshot and batch |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
 | Horizon Pulse | `horizonpulse.toml` | Complete pinned `horizonpulse-openapi.json`; SEC/macro/security reads and atomic-price caveat |

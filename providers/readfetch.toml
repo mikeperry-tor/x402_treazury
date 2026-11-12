@@ -1,6 +1,6 @@
-description = "Pay-per-call web reading and raw HTTP fetch: article text, screenshots, PDFs, site maps, crawls, diff, section extraction, search and batches."
-# Complete pinned vendor schema; pricing is documented per tool because the schema
-# has no x-payment-info and the discovery document is not a supported pricing format.
+description = "Pay-per-call web reading and raw HTTP fetch: article text, browser/residential scrape, screenshots, PDFs, maps, crawls, diffs, sections, search and batches."
+# Complete pinned schema with authored reference closure; price hints are authored
+# per tool because x-payment-info and supported discovery pricing are absent.
 spec = "readfetch-openapi.json"
 relay_format = "readfetch"
 name = "readFetch"
@@ -13,13 +13,9 @@ exclude_operations = [
   # an unprotected persistent write.
   "POST /v1/claims",
   "POST /v1/feedback",
-  # The vendor request schema uses local $defs references that the offline
-  # tool input builder cannot represent; the pinned spec retains both routes.
-  "POST /v1/scrape",
-  "POST /v1/scrape/residential",
 ]
 help_url = "https://readfetch.com/llms.txt"
-instructions_text = "Use fetch for raw status, headers and bytes; text for readable articles; probe before paying. Scrape and residential scrape are omitted because the vendor request schema uses local references the offline builder cannot represent. Crawl is asynchronous: start it, then poll its status. Batch and crawl prices scale with requested pages; undelivered pages are credited, not billed. Check billed and provenance truncation before treating content as complete."
+instructions_text = "Use fetch for raw status, headers and bytes; text for readable articles; probe before paying. Use scrape for JavaScript-rendered content and scrape_residential when a site rejects datacentre addresses. Crawl is asynchronous: start it, then poll its status. Batch and crawl prices scale with requested pages; undelivered pages are credited, not billed. Check billed and provenance truncation before treating content as complete."
 
 [overrides.readfetch_fetch]
 description = "Raw HTTP through readfetch egress: returns target status, headers and body as text or base64. Use for JSON APIs, GraphQL, PDFs and byte ranges; the direct tool supports GET, POST, PUT, PATCH, DELETE or HEAD with headers and a string or JSON body. Relay fallback uses GET, HEAD or POST. Follows redirects but reports only the final URL."
@@ -28,6 +24,12 @@ pricing_description = "Cost: ~$0.003/call [spec]."
 [overrides.readfetch_text]
 description = "Read a public URL's main readable content with boilerplate removed: Markdown or plain text plus title, author, published date and site name. Uses plain HTTP first and one Chromium fallback when the page blocks it."
 pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.readfetch_scrape]
+description = "Render a public page in Chromium and extract Markdown or text, including JavaScript content. Use advanced for browser options and auth for authenticated access. Check billed and the returned status."
+
+[overrides.readfetch_scrape_residential]
+description = "Render and extract a public page through a residential address pool when a site rejects datacentre addresses. Uses the same advanced browser options and auth inputs as readfetch_scrape. Check billed and the returned status."
 
 [overrides.readfetch_map]
 description = "Discover a site's crawlable surface without fetching page bodies: robots.txt rules, sitemaps, RSS/Atom/JSON feeds and homepage link counts. Use the result to plan batch or crawl."
