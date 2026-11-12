@@ -289,3 +289,73 @@ refresh formerly deleted old snapshots. Assertions now enforce the planned
 contracts: expiry discards observations even on 304, and failed acquisition retains
 complete expired bytes without renewing them. Error/status, bounds, privacy and
 request-count assertions remain intact. Focused revalidation is pending.
+
+The full default library run completed with 1,426 passes, four failures and 24
+ignored helper/opt-in tests. Independent baseline source inspection established
+three inherited failures (no historical executable was run): two relay tests
+index absent comprehensive-example source names, and readFetch has ten unresolved
+root `$defs` references while definitions are operation-local. The relay tests
+are repaired to current corresponding payer groups so affected ownership assertions
+execute. The acquisition-age regression now explicitly covers a finite override
+and indefinite lifetime. Focused continuation of those three tests is pending;
+unchanged passing library results remain applicable. The unchanged readFetch
+import failure is retained as an inherited schema-reference defect; no provider is
+omitted and reference validation is not weakened. This limits full-library
+assurance and does not establish a cache regression.
+
+The final source-matched complexity report through `87ee849f` is complete (508
+files, no exclusions, independently verified zero source-hash mismatches).
+Independent review accepted every exact implementation/fixup SHA through that
+revision and the combined implementation. Further changes here are test/document
+corrections only. Selected production compiler and all-target feature Clippy gates
+passed; default debug test linking emits a macOS unwind-table-size warning, with
+no compiler warning in the selected production/Clippy gate. Compatibility passed
+31 tests. Focused cache/refresh/deferred/warm tests passed; affected integration
+and focused library continuation remain pending.
+
+## Final implementation gate
+
+SC1 and SC2 are implemented and source-reviewed through `ac298359`, including all
+accumulated exact commits and unsquashed fixups. The three library continuations
+now pass one test each: acquisition age (`29f8f843`), relay sharing and wallet
+selection (`ac298359`). The small synthetic relay fixture removes the repeated
+comprehensive-example naming/routing dependency while preserving every ownership
+assertion. No production behavior changed in these last test corrections.
+
+Validation on the fixed source, using pinned Make entrypoints and socket-capable
+execution for local fixtures:
+
+- Production `make check-clippy` compiler gate passed; subsequent test-only edits
+  retain that production evidence. Final all-target feature Clippy passed via
+  `make clippy CARGO_ARGS='--all-targets --features zcash-regtest'`.
+- `make check-compat` passed 31 tests. Its unchanged production/executable inputs
+  remain applicable after test-only fixture corrections.
+- Config tests passed 17. Focused cache tests passed 38; source refresh/signed
+  preservation passed six; dynamic refresh passed six; deferred publication passed
+  29 (three isolated helpers ignored); warm tests passed five.
+- Full default library run plus the three focused continuations establishes 1,429
+  passes, one inherited readFetch failure and 24 ignored helpers/opt-in tests.
+  This is a failed full-library check with focused continuations, not a full pass.
+  ReadFetch source attribution and required correction are in the focused deferred
+  plan. Its invalid reference asset and validators were not changed or bypassed.
+- Nine affected integration targets (`cache_warm`, `catalog_selection`,
+  `deployment`, `foreground_capacity`, `pricing`, `pricing_inspection`,
+  `relay_shutdown`, `shutdown`, `startup`) passed 53 tests, one opt-in test ignored.
+- Final source-matched complexity artifact is
+  `target/complexity-runs/20261112T014202Z-c64276c5`: 508 files, no exclusions.
+  Production metrics and earlier independent dispositions remain unchanged;
+  complete_refresh is 2/5 and optional hint attachment 9/6. Retained Slot::write
+  transaction and serving shutdown coordination warnings were accepted. Reports
+  and execution logs remain in ignored `target/`.
+- Default debug test linking reported a macOS unwind-table-size warning. Tests ran;
+  selected production/compiler Clippy diagnostics were clear. No pin, profile,
+  warning gate, proof boundary or test contract was weakened.
+
+No live paid calls, consensus/Tor qualification, full `make check`, push or merge
+is claimed. No new dependency checkout or monetary authority was introduced.
+Permanent cache/refresh/pricing/client contracts and example comments are updated;
+endpoint descriptions/search keywords were reviewed with no new tool or routing
+capability requiring new discovery terms. Runtime refresh guidance stays in
+search/call results and the owning guides. The known inherited readFetch repair is
+explicitly deferred with concrete acceptance evidence. Final independent runtime
+and evidence review, then SC3 plan/index cleanup and exact cleanup review, remain.
