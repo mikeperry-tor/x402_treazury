@@ -284,11 +284,11 @@ fn readfetch_provider_exposes_research_surface_without_support_writes() {
         "readfetch_screenshot",
         "readfetch_search",
         "readfetch_probe",
+        "readfetch_healthz",
     ] {
         assert!(names.contains(expected), "missing {expected}");
     }
     for excluded in [
-        "readfetch_healthz",
         "readfetch_claims",
         "readfetch_feedback",
         "readfetch_scrape",

@@ -125,8 +125,8 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | x402-list | `x402-list.toml` | Public directory reads, assessments, suggestions and listing submissions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
 
-Curl, AGProxy and Horizon Pulse pin complete vendor OpenAPI documents as runtime
-assets. This lets relay bootstrap validate operations locally without buying or
+Curl, AGProxy, Horizon Pulse and readFetch pin vendor OpenAPI documents as runtime
+assets; readFetch includes the authored reference closure documented in its caveat. This lets relay bootstrap validate operations locally without buying or
 fetching another catalog. Their reusable catalogs remain pinned until a deliberate
 update; see [capture provenance and update instructions](CAVEATS.md#pinned-relay-contracts)
 and [relay configuration](../docs/configuration.md#relay-fallback).

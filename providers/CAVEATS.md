@@ -1813,7 +1813,8 @@ no `x-payment-info`, and its x402 discovery document is not a supported
 `x402-resources` pricing document; per-tool `pricing_description` overrides
 therefore carry the published prices. Batch and crawl are page-metered (both
 quote a minimum of ten pages), so their fixed discovery samples are not their
-final tariffs. `/v1/probe` and crawl-status polling are free.
+final tariffs. `/v1/probe` and crawl-status polling are free. The `/v1` naming
+anchor retains a root fallback for the public `/healthz` service health read.
 
 `/v1/fetch` supports GET, HEAD, POST, PUT, PATCH and DELETE with custom headers,
 a string or JSON body, redirect following, binary base64 output and a stored-body
@@ -1822,7 +1823,8 @@ bytes, validates the final URL, and treats a relayed target 402 as terminal. It
 forwards required business headers, including explicit API-key headers. Generated
 OpenAPI `Authorization` declarations remain ignored, and nonempty manual raw header
 sets disable paid relays. x402 payment headers are runtime-owned and are not
-relayed; transport-managed service headers are skipped. The provider read timeout
+relayed; a required transport-managed service header skips the entire relay entry.
+The provider read timeout
 is 100 s so the vendor's 95 s ceiling can complete. Binary bodies are base64-
 expanded, so the adapter reserves JSON/header overhead and caps the target body at
 about three quarters of the caller's relay response budget (and 10 MB); budgets

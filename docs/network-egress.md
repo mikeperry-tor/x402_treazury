@@ -319,8 +319,8 @@ Every relay connection uses the factory, deployment network and bound payer;
 Tor has no direct fallback. The relay sees target URLs and supplies target status,
 headers and plaintext from its own network. Origin HTTP does not follow redirects,
 but configured relays may do so remotely. Requested/reported final URLs and all
-Curl-reported hops pass the caller's public-destination checks. AGProxy/Horizon
-Pulse do not expose intermediate hops: their configured use accepts that limited
+Curl-reported hops pass the caller's public-destination checks. AGProxy, Horizon
+Pulse and readFetch do not expose intermediate hops: their configured use accepts that limited
 visibility. Missing chain evidence does not exclude
 them. Remote redirect/public-destination policy and content integrity remain
 trusted to the relay; TLS to the relay cannot establish target TLS or plaintext

@@ -6,7 +6,7 @@ relay_format = "readfetch"
 name = "readFetch"
 base_url = "https://readfetch.com"
 prefix = "readfetch"
-include = ["/v1"]
+include = ["/v1", ""]
 read_timeout_seconds = 100.0
 exclude_operations = [
   # Support workflows, not research reads: claims issues credit and feedback is
