@@ -281,6 +281,7 @@ async fn pending_failure_replacement_and_last_owner_drop_do_not_block_tools() {
         "https://api.example.com",
         &mut first,
         async move { receive.await.unwrap() },
+        None,
     );
     assert!(first[0].advertised_pricing.amount().is_none());
     assert_eq!(
@@ -297,6 +298,7 @@ async fn pending_failure_replacement_and_last_owner_drop_do_not_block_tools() {
         "https://api.example.com",
         &mut replacement,
         async { Ok(loaded(document("https://api.example.com/read", 2000))) },
+        None,
     );
     eventually(|| replacement[0].advertised_pricing.amount() == Some(U256::from(2000))).await;
     send.send(Ok(loaded(document("https://api.example.com/read", 1000))))
@@ -328,6 +330,7 @@ async fn pending_failure_replacement_and_last_owner_drop_do_not_block_tools() {
             started.notify_one();
             std::future::pending().await
         },
+        None,
     );
     began.notified().await;
     let clone = pending.clone();
@@ -338,9 +341,14 @@ async fn pending_failure_replacement_and_last_owner_drop_do_not_block_tools() {
         .await
         .unwrap();
     let mut failed = tools(&cfg, &root);
-    start(&cfg, &root, "https://api.example.com", &mut failed, async {
-        Err(anyhow::anyhow!("fixture unavailable"))
-    });
+    start(
+        &cfg,
+        &root,
+        "https://api.example.com",
+        &mut failed,
+        async { Err(anyhow::anyhow!("fixture unavailable")) },
+        None,
+    );
     tokio::task::yield_now().await;
     assert!(failed[0].advertised_pricing.amount().is_none());
     assert!(
@@ -862,10 +870,104 @@ async fn absent_api_outputs_do_not_start_metadata_acquisition() {
             seen.fetch_add(1, Ordering::SeqCst);
             Ok(loaded(document("https://api.example.com/read", 1000)))
         },
+        None,
     );
     // An aborted spawn still retains its future until the executor runs it.
     // With no consumers, acquisition must instead be discarded synchronously.
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
     tokio::task::yield_now().await;
     assert_eq!(polled.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn retired_optional_pricing_cannot_replace_current_cache() {
+    let (base, state, server) = fixture(false).await;
+    let directory = tempfile::tempdir().unwrap();
+    let mut cfg = config(&format!("{base}/prices"));
+    cfg.http_cache_directory = Some(directory.path().join("cache"));
+    cfg.cache_revision = Some("audit-fixed-source-revision".into());
+    cfg.catalog_cache_force_refresh = true;
+    let root = Arc::new(schema());
+    let mut metadata_cfg = cfg.clone();
+    metadata_cfg.spec = cfg.pricing.as_ref().unwrap().source.clone();
+    let old_document =
+        crate::catalog::load_json_pricing(&metadata_cfg, crate::network::global(), None)
+            .await
+            .unwrap();
+    let release = Arc::new(Notify::new());
+    let held = release.clone();
+    let mut old = tools(&cfg, &root);
+    let old_task = start(
+        &cfg,
+        &root,
+        &base,
+        &mut old,
+        async move {
+            held.notified().await;
+            Ok(old_document)
+        },
+        None,
+    )
+    .unwrap();
+    let binding = crate::catalog_refresh::Binding::new(|_| {});
+    binding.own_prices(&old);
+    *state.price.lock().unwrap() = 3000;
+    let mut current = tools(&cfg, &root);
+    refresh_static(&cfg, &root, &base, &mut current, None).await;
+    assert_eq!(
+        current[0].advertised_pricing.amount(),
+        Some(U256::from(3000))
+    );
+    binding.retire();
+    release.notify_one();
+    old_task.await.unwrap();
+    assert!(old[0].advertised_pricing.amount().is_none());
+    cfg.catalog_cache_force_refresh = false;
+    let mut restarted = tools(&cfg, &root);
+    refresh_static(&cfg, &root, &base, &mut restarted, None).await;
+    assert_eq!(state.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        restarted[0].advertised_pricing.amount(),
+        Some(U256::from(3000)),
+        "retired source task must not restore an older indefinite price cache"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn prepared_pricing_waits_for_publication_and_discarded_work_never_polls_loader() {
+    let cfg = config("https://api.example.com/prices");
+    let root = Arc::new(schema());
+    for published in [false, true] {
+        let polled = Arc::new(AtomicUsize::new(0));
+        let seen = polled.clone();
+        let mut tools = tools(&cfg, &root);
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let task = start(
+            &cfg,
+            &root,
+            "https://api.example.com",
+            &mut tools,
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                Ok(loaded(document("https://api.example.com/read", 2000)))
+            },
+            Some(receive),
+        )
+        .unwrap();
+        let captured = tools.clone();
+        assert!(captured[0].advertised_pricing.has_acquisition_owner());
+        assert_eq!(polled.load(Ordering::SeqCst), 0);
+        if published {
+            send.send(()).unwrap();
+        } else {
+            drop(send);
+        }
+        task.await.unwrap();
+        assert_eq!(polled.load(Ordering::SeqCst), usize::from(published));
+        assert_eq!(
+            captured[0].advertised_pricing.amount(),
+            published.then_some(U256::from(2000))
+        );
+    }
 }

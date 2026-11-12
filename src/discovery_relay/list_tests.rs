@@ -100,6 +100,47 @@ async fn reported_destination_errors_keep_actual_provider_status_and_no_replay()
         "Provider API HTTP 200 OK; destination HTTP 404 Not Found. Do not retry automatically."
     );
     assert!(error.is::<crate::payment::PossiblePayment>());
+    let binding = crate::catalog_refresh::Binding::new(|_| {});
+    binding.observe(None, Some(&error));
+    assert!(
+        binding.refreshing(),
+        "paying the relay does not sign the target request"
+    );
+    harness.assert_order(&[(0, false), (0, true)]);
+}
+
+#[tokio::test]
+async fn relay_service_removal_statuses_and_invalid_envelopes_do_not_refresh_target() {
+    for status in [
+        StatusCode::NOT_FOUND,
+        StatusCode::METHOD_NOT_ALLOWED,
+        StatusCode::GONE,
+    ] {
+        let harness = Harness::start(
+            vec![(Format::Curl, curl(200, "unused"))],
+            false,
+            Some(status),
+        )
+        .await;
+        let error = harness
+            .acquire(&target(Method::GET), Contract::Api, 4096, None)
+            .await
+            .err()
+            .expect("relay rejection");
+        let binding = crate::catalog_refresh::Binding::new(|_| {});
+        binding.observe(None, Some(&error));
+        assert!(!binding.refreshing());
+        harness.assert_order(&[(0, false), (0, true)]);
+    }
+    let harness = Harness::new(vec![(Format::Curl, json!({"statusCode":404}))]).await;
+    let error = harness
+        .acquire(&target(Method::GET), Contract::Api, 4096, None)
+        .await
+        .err()
+        .expect("relay rejection");
+    let binding = crate::catalog_refresh::Binding::new(|_| {});
+    binding.observe(None, Some(&error));
+    assert!(!binding.refreshing());
     harness.assert_order(&[(0, false), (0, true)]);
 }
 impl Harness {

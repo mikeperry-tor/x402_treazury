@@ -448,9 +448,14 @@ pub struct Advertisement {
     pub fresh_until: Option<Instant>,
     external: bool,
 }
+#[derive(Debug, Default)]
+struct AdvertisementState {
+    invalidated: bool,
+    value: Option<Advertisement>,
+}
 #[derive(Clone, Debug, Default)]
 pub struct AdvertisedPricing {
-    value: Arc<RwLock<Option<Advertisement>>>,
+    value: Arc<RwLock<AdvertisementState>>,
     owner: Option<Arc<Acquisition>>,
 }
 impl AdvertisedPricing {
@@ -459,11 +464,19 @@ impl AdvertisedPricing {
         self.owner.is_some()
     }
 
+    #[cfg(test)]
+    pub(crate) fn acquisition_finished(&self) -> bool {
+        self.owner
+            .as_ref()
+            .is_none_or(|owner| owner.0.is_finished())
+    }
+
     /// Fresh external metadata can enrich presentation after source publication.
     pub fn external_description(&self) -> Option<String> {
         self.value
             .read()
             .expect("advertised pricing poisoned")
+            .value
             .as_ref()
             .filter(|value| {
                 value.external && value.fresh_until.is_none_or(|until| Instant::now() < until)
@@ -476,30 +489,39 @@ impl AdvertisedPricing {
         self.value
             .read()
             .expect("advertised pricing poisoned")
+            .value
             .as_ref()
             .map(|value| value.source.clone())
     }
 
     pub fn new(price: NormalizedPrice, source: String, fresh_until: Option<Instant>) -> Self {
         Self {
-            value: Arc::new(RwLock::new(Some(Advertisement {
-                price,
-                source,
-                fresh_until,
-                external: false,
-            }))),
+            value: Arc::new(RwLock::new(AdvertisementState {
+                invalidated: false,
+                value: Some(Advertisement {
+                    price,
+                    source,
+                    fresh_until,
+                    external: false,
+                }),
+            })),
             owner: None,
         }
     }
     pub fn amount(&self) -> Option<U256> {
         let value = self.value.read().expect("advertised pricing poisoned");
         value
+            .value
             .as_ref()
             .filter(|v| v.fresh_until.is_none_or(|until| Instant::now() < until))
             .and_then(|v| v.price.selection_amount)
     }
     pub fn replace(&self, price: NormalizedPrice, source: String, fresh_until: Option<Instant>) {
-        *self.value.write().expect("advertised pricing poisoned") = Some(Advertisement {
+        let mut state = self.value.write().expect("advertised pricing poisoned");
+        if state.invalidated {
+            return;
+        }
+        state.value = Some(Advertisement {
             price,
             source,
             fresh_until,
@@ -511,6 +533,7 @@ impl AdvertisedPricing {
             .value
             .write()
             .expect("advertised pricing poisoned")
+            .value
             .as_mut()
         {
             value.fresh_until = fresh_until;
@@ -520,6 +543,22 @@ impl AdvertisedPricing {
         self.set_fresh_until(crate::http_cache::advertised_until(expires));
     }
 
+    pub(crate) fn invalidate(&self) {
+        let mut state = self.value.write().expect("advertised pricing poisoned");
+        state.invalidated = true;
+        state.value = None;
+    }
+    pub(crate) fn invalidated(&self) -> bool {
+        self.value
+            .read()
+            .expect("advertised pricing poisoned")
+            .invalidated
+    }
+    /// Serialize durable publication with this generation's terminal invalidation.
+    pub(crate) fn while_current<T>(&self, publish: impl FnOnce() -> T) -> Option<T> {
+        let state = self.value.read().expect("advertised pricing poisoned");
+        (!state.invalidated).then(publish)
+    }
     pub fn attach_owner(&mut self, owner: Arc<Acquisition>) {
         self.owner = Some(owner);
     }

@@ -4,6 +4,8 @@ use axum::serve::Listener as _;
 #[cfg(test)]
 mod readiness_tests;
 #[cfg(test)]
+mod refresh_tests;
+#[cfg(test)]
 mod startup_socks_tests;
 #[cfg(test)]
 mod tor_catalog_capacity_tests;
@@ -14,6 +16,11 @@ use std::sync::Arc;
 pub(super) struct Runtime {
     #[cfg(test)]
     failure: Option<tokio::sync::oneshot::Receiver<()>>,
+    refresh_send:
+        tokio::sync::mpsc::UnboundedSender<(String, Arc<crate::catalog_refresh::Binding>)>,
+    refresh_receive:
+        tokio::sync::mpsc::UnboundedReceiver<(String, Arc<crate::catalog_refresh::Binding>)>,
+    refreshes: BTreeMap<String, Arc<crate::catalog_refresh::Binding>>,
     deployment: Deployment,
     wallets: BTreeMap<String, PaidClient>,
     catalog: Arc<crate::catalog_state::CatalogState>,
@@ -23,7 +30,17 @@ pub(super) struct Runtime {
     readiness: BTreeMap<String, tokio::sync::oneshot::Sender<Result<()>>>,
     startup_ready: Option<tokio::sync::oneshot::Sender<readiness::FundingPools>>,
 }
+type RefreshedSource = (
+    Box<Source>,
+    catalog::LoadedCatalog,
+    Option<tokio::sync::oneshot::Sender<()>>,
+);
 enum Event {
+    Refresh(
+        String,
+        Arc<crate::catalog_refresh::Binding>,
+        Result<RefreshedSource>,
+    ),
     Dependency(
         String,
         Option<crate::discovery_relay::CatalogDependency>,
@@ -46,6 +63,55 @@ fn status_change(
     .boxed()
 }
 
+fn refresh_binding(
+    id: &str,
+    sender: &tokio::sync::mpsc::UnboundedSender<(String, Arc<crate::catalog_refresh::Binding>)>,
+) -> Arc<crate::catalog_refresh::Binding> {
+    let sender = sender.clone();
+    let id = id.to_owned();
+    crate::catalog_refresh::Binding::new(move |binding| {
+        if let Err(error) = sender.send((id.clone(), binding)) {
+            error.0.1.fail();
+        }
+    })
+}
+
+async fn refresh_source(
+    id: &str,
+    config: catalog::Config,
+    rules: Option<Vec<SendToolsRule>>,
+    gate: Arc<crate::network::DiscoveryCapacity>,
+) -> Result<RefreshedSource> {
+    let document =
+        catalog::load_json_discovery_bounded(&config, crate::network::global(), Some(gate.clone()))
+            .await?;
+    let mut source =
+        Source::from_document(id, config, document.clone())?.with_send_tools(id, rules)?;
+    let pricing = crate::pricing::discovery::prepare_static(
+        &source.config,
+        &source.document,
+        &source.base_url,
+        &mut source.tools,
+        Some(gate),
+    );
+    Ok((Box::new(source), document, pricing))
+}
+
+fn refresh_failed(id: &str, binding: &crate::catalog_refresh::Binding, error: &anyhow::Error) {
+    binding.fail();
+    let failure =
+        crate::discovery_relay::document::SharedFailure::capture(error, "catalog_refresh_failed");
+    let diagnostic = startup::catalog_failure(error, "refresh");
+    tracing::warn!(
+        source = id,
+        failure_stage = diagnostic.stage,
+        reason = diagnostic.reason,
+        http_status = failure.status(),
+        authorization_may_charge = failure.possible_payment(),
+        "Provider definitions could not be refreshed; existing tools remain available; the original API call was not replayed"
+    );
+}
+
 impl Runtime {
     pub fn new(
         deployment: Deployment,
@@ -65,7 +131,17 @@ impl Runtime {
                     .filter_map(|s| s.config.relay_fallback.clone()),
             )
             .collect();
+        let (refresh_send, refresh_receive) = tokio::sync::mpsc::unbounded_channel();
+        let refreshes = deployment
+            .config
+            .sources
+            .keys()
+            .map(|id| (id.clone(), refresh_binding(id, &refresh_send)))
+            .collect();
         Self {
+            refresh_send,
+            refresh_receive,
+            refreshes,
             can_allocate,
             readiness: BTreeMap::new(),
             startup_ready: None,
@@ -77,6 +153,9 @@ impl Runtime {
             manager,
             relays,
         }
+    }
+    pub(super) fn refresh_manager(&self) -> Option<Arc<crate::discovery::Manager>> {
+        self.manager.clone()
     }
     pub fn relays(&self) -> Vec<Arc<crate::discovery_relay::Relay>> {
         self.relays.clone()
@@ -129,14 +208,43 @@ impl Runtime {
         self.startup_ready = Some(send);
         receive
     }
-    async fn publish(&self) -> Result<()> {
+    pub(super) async fn publish(&self) -> Result<()> {
+        self.publish_retiring(None).await
+    }
+    async fn publish_retiring(
+        &self,
+        retiring: Option<Arc<crate::catalog_refresh::Binding>>,
+    ) -> Result<()> {
+        for (name, tools) in &self.deployment.selected {
+            for (source, _) in tools {
+                let wallet = &self.deployment.wallet_resolution.bindings[name][source].wallet;
+                ensure!(
+                    self.wallets.contains_key(wallet),
+                    anyhow::Error::new(catalog::diagnostics::Problem(
+                        "The catalog selects a wallet that was not initialized at startup; restart to initialize the newly selected wallet"
+                    ))
+                    .context(catalog::LoadStage::Publication)
+                );
+            }
+        }
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         let old = match &self.manager {
             Some(manager) => manager.static_snapshot().await?,
             None => (*self.catalog.read()).clone(),
         };
+        for (id, source) in &self.deployment.sources {
+            self.refreshes[id].own_prices(&source.tools);
+        }
         for (name, server) in self.deployment.build_servers(&self.wallets) {
             let mut tools = server.catalog.read().views["default"].clone();
+            for tool in &mut tools {
+                if let Some((id, _)) = self.deployment.selected[&name]
+                    .iter()
+                    .find(|(_, selected)| selected.name == tool.tool.name)
+                {
+                    tool.refresh = self.refreshes.get(id).cloned();
+                }
+            }
             // Unrelated source publication preserves successful help.
             for tool in &mut tools {
                 if let Some(previous) = old.views.get(&name).and_then(|tools| {
@@ -155,27 +263,28 @@ impl Runtime {
         }
         match &self.manager {
             Some(manager) => {
-                manager.replace_static(old.generation, snapshot).await?;
+                manager
+                    .replace_static_retiring(old.generation, snapshot, retiring)
+                    .await?;
             }
             None => {
-                self.catalog.replace_static(old.generation, snapshot)?;
+                self.catalog.replace_static_retiring(
+                    old.generation,
+                    snapshot,
+                    retiring.as_deref(),
+                )?;
             }
         }
         Ok(())
     }
     fn accept_source(&mut self, id: &str, source: Source) -> Result<()> {
-        let unavailable = source.compatibility_unavailable();
-        self.deployment.sources.insert(id.into(), source);
         let prefix = self
             .deployment
             .unavailable_sources
-            .remove(id)
-            .expect("pending source prefix");
-        if unavailable {
-            self.deployment
-                .unavailable_sources
-                .insert(id.into(), prefix.clone());
-        }
+            .get(id)
+            .expect("pending source prefix")
+            .clone();
+        self.deployment.sources.insert(id.into(), source);
         match self.deployment.refresh_selection(true) {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -189,9 +298,9 @@ impl Runtime {
     }
     // Report only published transitions. Failed publication retains old tools,
     // so selection preparation cannot announce their withdrawal.
-    fn report_selection_failures(&self, previous: &BTreeMap<String, &'static str>) {
+    fn report_selection_failures(&self, previous: &BTreeMap<String, &'static str>, runtime: bool) {
         for (name, reason) in &self.deployment.selection_errors {
-            if !self.deployment.listeners[name].wait_for_catalogs
+            if (runtime || !self.deployment.listeners[name].wait_for_catalogs)
                 && previous.get(name) != Some(reason)
             {
                 tracing::error!(
@@ -201,6 +310,85 @@ impl Runtime {
                     "MCP endpoint tools are unavailable because its tool selection is invalid; correct the configuration and restart"
                 );
             }
+        }
+    }
+    async fn complete_refresh(
+        &mut self,
+        id: String,
+        binding: Arc<crate::catalog_refresh::Binding>,
+        result: Result<RefreshedSource>,
+    ) {
+        let (source, document, pricing) = match result {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                refresh_failed(&id, &binding, &error);
+                return;
+            }
+        };
+        let previous_errors = self.deployment.selection_errors.clone();
+        let old = self
+            .deployment
+            .sources
+            .insert(id.clone(), *source)
+            .expect("existing refresh source");
+        let publication = async {
+            self.deployment.refresh_selection(true)?;
+            self.refreshes
+                .insert(id.clone(), refresh_binding(&id, &self.refresh_send));
+            self.publish_retiring(Some(binding.clone())).await
+        }
+        .await;
+        if let Err(error) = publication {
+            self.deployment.sources.insert(id.clone(), old);
+            self.refreshes.insert(id.clone(), binding.clone());
+            let _ = self.deployment.refresh_selection(true);
+            refresh_failed(&id, &binding, &error);
+            return;
+        }
+        // Published clones already own enrichment; let it perform I/O only after
+        // the old generation has lost its right to publish shared metadata.
+        if let Some(pricing) = pricing {
+            let _ = pricing.send(());
+        }
+        self.report_selection_failures(&previous_errors, true);
+        self.signal_readiness();
+        self.attach_observed_hints(&id, document).await;
+        tracing::info!(
+            source = id,
+            "Provider definitions refreshed; the original API call was not replayed"
+        );
+    }
+    // The complete definitions are already published. Cache/hint failure cannot
+    // undo that success or reopen execution through the expired generation.
+    async fn attach_observed_hints(&mut self, id: &str, mut document: catalog::LoadedCatalog) {
+        document.commit().await;
+        let Some(hints) = document.hints else {
+            return;
+        };
+        let source = self
+            .deployment
+            .sources
+            .get_mut(id)
+            .expect("published source");
+        hints.slot.record_configuration(&source.config).await;
+        for tool in &mut source.tools {
+            tool.catalog_hints = Some(hints.clone());
+        }
+        self.refreshes[id].own_prices(&source.tools);
+        for tools in self.deployment.selected.values_mut() {
+            for (source, tool) in tools {
+                if source == id {
+                    tool.catalog_hints = Some(hints.clone());
+                }
+            }
+        }
+        if let Err(error) = self.publish().await {
+            let diagnostic = startup::catalog_failure(&error, "hint_publication");
+            tracing::warn!(
+                source = id,
+                reason = diagnostic.reason,
+                "Provider definitions refreshed, but shared price observations could not be attached; API tools remain usable"
+            );
         }
     }
     pub async fn run(mut self, stop: CancellationToken) -> Self {
@@ -213,7 +401,7 @@ impl Runtime {
             }
         }
         let mut failure_guard = FailureGuard(self.catalog.clone(), true);
-        self.report_selection_failures(&BTreeMap::new());
+        self.report_selection_failures(&BTreeMap::new(), false);
         self.signal_readiness();
         #[cfg(test)]
         let failure_receiver = self.failure.take();
@@ -255,11 +443,29 @@ impl Runtime {
                 biased;
                 _ = stop.cancelled() => break,
                 event = work.next(), if !work.is_empty() => event,
+                Some((id, binding)) = self.refresh_receive.recv() => {
+                    if !self.refreshes.get(&id).is_some_and(|current| Arc::ptr_eq(current, &binding)) { continue; }
+                    let Some(source) = self.deployment.sources.get(&id) else { binding.retire(); continue; };
+                    let mut config = source.config.clone();
+                    config.catalog_cache_force_refresh = true;
+                    let rules = self.deployment.config.sources[&id].send_tools.clone();
+                    let refresh_id = id.clone();
+                    let gate = gate.clone();
+                    work.push(async move {
+                        let result = refresh_source(&refresh_id, config, rules, gate).await;
+                        Event::Refresh(refresh_id, binding, result)
+                    }.boxed());
+                    continue;
+                },
                 _ = &mut failure => panic!("injected deferred worker failure"),
             };
             let Some(event) = event else { continue };
             let previous_selection_errors = self.deployment.selection_errors.clone();
             match event {
+                Event::Refresh(id, binding, result) => {
+                    self.complete_refresh(id, binding, result).await;
+                    continue;
+                }
                 Event::Dependency(id, dependency, receiver) => {
                     let Some(dependency) = dependency else {
                         continue;
@@ -322,7 +528,7 @@ impl Runtime {
                 self.catalog.mark_publication_failed();
                 break;
             }
-            self.report_selection_failures(&previous_selection_errors);
+            self.report_selection_failures(&previous_selection_errors, false);
             self.signal_readiness();
         }
         drop(work);
@@ -343,6 +549,106 @@ mod tests {
     use axum::{Router, routing::get};
     use serde_json::json;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn final_failure_refreshes_only_its_source_without_replaying_calls() {
+        use std::sync::atomic::AtomicUsize;
+        let hits = Arc::new(AtomicUsize::new(0));
+        let seen = hits.clone();
+        let (address, http) = crate::test_tls::serve(Router::new().route(
+            "/gone",
+            get(move || {
+                let seen = seen.clone();
+                async move {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    axum::http::StatusCode::NOT_FOUND
+                }
+            }),
+        ))
+        .await;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deployment.toml");
+        let spec = directory.path().join("spec.json");
+        std::fs::write(&spec, json!({"paths":{"/gone":{"get":{}}}}).to_string()).unwrap();
+        std::fs::write(
+            directory.path().join("other.json"),
+            json!({"paths":{"/other":{"get":{}}}}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(&path, format!("version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNUSED'\n[sources.api]\nspec='spec.json'\nbase_url='https://{address}'\n[sources.other]\nspec='other.json'\nbase_url='https://{address}'\n[servers.test]\nlisten='127.0.0.1:0'\nbearer_token_env='UNUSED'\nwallet='payer'\nsources=['api','other']\n")).unwrap();
+        let deployment = Deployment::load(&path).await.unwrap();
+        let catalog = Arc::new(crate::catalog_state::CatalogState::new(
+            crate::catalog_state::CatalogSnapshot {
+                views: BTreeMap::from([("test".into(), Vec::new())]),
+                ..Default::default()
+            },
+        ));
+        let runtime = Runtime::new(
+            deployment,
+            BTreeMap::from([("payer".into(), PaidClient::unsigned())]),
+            catalog.clone(),
+            None,
+            false,
+        );
+        runtime.publish().await.unwrap();
+        let old = catalog.read();
+        let tool = old.views["test"]
+            .iter()
+            .find(|tool| tool.tool.path == "/gone")
+            .unwrap()
+            .clone();
+        let other = old.views["test"]
+            .iter()
+            .find(|tool| tool.tool.path == "/other")
+            .unwrap()
+            .refresh
+            .clone()
+            .unwrap();
+        let error = tool.invoke_output(&Default::default()).await.unwrap_err();
+        assert_eq!(
+            crate::payment::ResponseFacts::from_error(&error)
+                .unwrap()
+                .provider
+                .unwrap()
+                .as_u16(),
+            404
+        );
+        assert!(tool.refresh.as_ref().unwrap().refreshing());
+        assert!(tool.invoke_output(&Default::default()).await.is_err());
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        std::fs::write(&spec, json!({"paths":{"/new":{"get":{}}}}).to_string()).unwrap();
+        let stop = CancellationToken::new();
+        let worker = tokio::spawn(runtime.run(stop.clone()));
+        while catalog.read().generation == old.generation {
+            tokio::task::yield_now().await;
+        }
+        let new = catalog.read();
+        assert!(
+            new.views["test"]
+                .iter()
+                .any(|tool| tool.tool.path == "/new")
+        );
+        assert!(
+            !new.views["test"]
+                .iter()
+                .any(|tool| tool.tool.path == "/gone")
+        );
+        assert!(new.views["test"].iter().any(|tool| {
+            tool.refresh
+                .as_ref()
+                .is_some_and(|binding| Arc::ptr_eq(binding, &other))
+        }));
+        assert!(tool.invoke_output(&Default::default()).await.is_err());
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            2,
+            "only explicit calls reach the API; refresh and stale clones do not replay"
+        );
+        stop.cancel();
+        worker.await.unwrap();
+        http.abort();
+        let _ = http.await;
+    }
 
     #[tokio::test]
     async fn deferred_unsupported_contract_publishes_issues_before_endpoint_failure() {
@@ -806,7 +1112,7 @@ discover_on_demand=true
             ("TOKEN".into(), "fixture".into()),
         ]);
         let running = deployment.bind(&env).await.unwrap();
-        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let catalog = running.deferred.catalog.clone();
         (dir, running, catalog, fixture, relay_task, api_task)
     }
 
@@ -913,7 +1219,7 @@ discovery_search_tool_instructions_text='Pending platform guidance'
         );
         let running = deployment.bind(&env).await.unwrap();
         assert_ne!(running.addresses()[0].1.port(), 0);
-        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let catalog = running.deferred.catalog.clone();
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
         tokio::time::timeout(Duration::from_secs(5), observed)
@@ -1079,7 +1385,7 @@ wait_for_catalogs=false
         assert_eq!(deployment.pending_sources.len(), 1);
         let running = deployment.bind(&env).await.unwrap();
         assert_ne!(running.addresses()[0].1.port(), 0);
-        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let catalog = running.deferred.catalog.clone();
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
         let initial = tokio::time::timeout(Duration::from_secs(5), async {
@@ -1187,7 +1493,7 @@ wait_for_catalogs=false
             let (_dir, mut running, catalog, fixture, relay, api) =
                 prepared(false, false, Some(payer.clone())).await;
             let readiness = running.catalog_readiness.remove("one").unwrap();
-            let mut runtime = running.deferred.take().unwrap();
+            let mut runtime = running.deferred;
             assert!(
                 runtime.deployment.pending_sources["a"]
                     .shares_download(&runtime.deployment.pending_sources["b"])
@@ -1335,7 +1641,7 @@ wait_for_catalogs=false
             );
             let (_dir, running, catalog, fixture, relay, api) =
                 prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
-            let relay_owner = running.deferred.as_ref().unwrap().relays()[0].clone();
+            let relay_owner = running.deferred.relays()[0].clone();
             let waiting = crate::discovery_relay::tests::dependency_wait_signal(&relay_owner).await;
             drop(relay_owner);
             let initial = catalog.read();
@@ -1592,9 +1898,9 @@ wait_for_catalogs=false
         let store = crate::rotation::store::Store::create(&state, &key, 1, b"fixture").unwrap();
         let id = store.id().to_owned();
         running.runtime = ManagedRuntime::StoreOnly(StoreOnlyOwner::new(store));
-        let relay = running.deferred.as_ref().unwrap().relays[0].clone();
+        let relay = running.deferred.relays[0].clone();
         let (fail, failed) = tokio::sync::oneshot::channel();
-        running.deferred.as_mut().unwrap().failure = Some(failed);
+        running.deferred.failure = Some(failed);
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -1637,7 +1943,7 @@ wait_for_catalogs=false
             return;
         }
         let (_dir, mut running, _catalog, _fixture, relay, api) = prepared(false, true, None).await;
-        let runtime = running.deferred.as_mut().unwrap();
+        let runtime = &mut running.deferred;
         let authored = Source::from_document(
             "healthy",
             runtime.deployment.sources["healthy"].config.clone(),
@@ -1708,3 +2014,6 @@ wait_for_catalogs=false
         api.abort();
     }
 }
+
+#[cfg(test)]
+mod managed_refresh_tests;

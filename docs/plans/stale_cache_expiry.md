@@ -239,6 +239,26 @@ fixup and its exact-SHA review are pending. The prior compiler/all-target Clippy
 snapshot passed; final changed-source revalidation remains pending. Complexity
 attempts invalidated by source edits are recorded as failed, not passes.
 
+SC1 fixups `51030b41` and `a802de66` received independent source review;
+the two reported findings are resolved. SC2 is `0f9c9fbb`. Independent combined
+review covered all four commits, complete affected consumers and source-matched
+complexity report `target/complexity-runs/20261112T011346Z-625e9e12` (506 files,
+no exclusions, zero source-hash mismatches). The retained Slot::write transaction
+and serving shutdown coordination were accepted; unchanged payment, relay and
+selection hotspots were examined. Compiler/all-target feature Clippy passed that
+source. Config tests passed 17/17; initial refresh tests passed 4/4, including
+cancelled waiter ownership. These results are scoped evidence, not a full check.
+
+The combined review found later static retention and runtime diagnostic gaps:
+cache commit must follow shared admission/publication, and already-ready waiting
+listeners need runtime ERROR reporting when refreshed definitions invalidate exact
+selection. Corrections publish the complete new source before best-effort disk
+commit and optional observed-hint attachment; this brief advisory-hint window
+avoids new mutable generation registries or transactional publication machinery.
+Price invalidation is terminal within its cell so late optional enrichment cannot
+revive obsolete estimates or restore baked-in generated price descriptions.
+Regression coverage and independent correction review are pending.
+
 SC2 correction `2c84fb2c` received independent exact-SHA source review with no
 remaining findings in that correction. Review identified a recurring SC1
 replacement gap across cache provenance: older indefinite direct/origin/relay
@@ -252,3 +272,20 @@ eviction, observations and successful uncacheable acquisition. The initial local
 key version advances for indexed families; documented one-time upgrade miss still
 applies. A small separate SC2 test fix adds the required isolated log-capture child.
 Exact correction reviews and final runtime evidence remain pending.
+
+Independent exact-SHA and combined review cleared cache-family fix `2c61c800`
+and log-isolation fix `6f356c5c`. The complete 507-file complexity artifact matched
+that SHA with no exclusions. It identified a compelling simplification in
+Runtime::complete_refresh (CogC 45): failed acquisition now leaves deployment state
+untouched, and one early rollback path handles combined validation/publication.
+This removes the optional acquired-document state and duplicate rollback work.
+A shared terminal diagnostic now also covers first-publication failure. Optional
+hint attachment remains a separate post-success responsibility. Slot::write's
+atomic family replacement/retirement/eviction responsibilities were accepted.
+
+The focused HTTP cache suite initially reported 36 passes and two old-contract
+assertions: expired 304 revalidation formerly retained observations, and oversized
+refresh formerly deleted old snapshots. Assertions now enforce the planned
+contracts: expiry discards observations even on 304, and failed acquisition retains
+complete expired bytes without renewing them. Error/status, bounds, privacy and
+request-count assertions remain intact. Focused revalidation is pending.

@@ -23,6 +23,7 @@ use std::{
         Mutex,
         atomic::{AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 enum Reply {
@@ -202,6 +203,76 @@ impl Fixture {
         self.worker.await.unwrap();
         self.server.abort();
     }
+}
+
+#[tokio::test]
+async fn challenge_observation_survives_later_external_pricing_completion() {
+    let f = fixture().await;
+    f.signed_output.store(200, Ordering::SeqCst);
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let resource = format!("{}/items", f.base);
+    let (address, pricing) = crate::test_tls::serve(Router::new().route("/prices", get({
+        let entered = entered.clone();
+        let release = release.clone();
+        move || {
+            let entered = entered.clone();
+            let release = release.clone();
+            let resource = resource.clone();
+            async move {
+                entered.notify_one();
+                release.notified().await;
+                Json(json!({"x402Version":2,"resources":[{"resource":resource,"method":"GET","accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1000"}]}]}))
+            }
+        }
+    }))).await;
+    let cfg = crate::catalog::Config {
+        pricing: Some(crate::pricing::advertised::PricingConfig {
+            source: format!("https://{address}/prices"),
+            format: crate::pricing::advertised::PricingFormat::X402Resources,
+            key: None,
+            unit: Some("call".into()),
+            usd_as_usdc: false,
+        }),
+        ..Default::default()
+    };
+    let root = Arc::new(json!({"paths":{"/items":{"get":{}}}}));
+    let mut tools = crate::catalog::build_tools(&cfg, &root, "fixture").unwrap();
+    tools[0].catalog_hints = Some(f.hints.clone());
+    crate::pricing::discovery::attach_static(&cfg, &root, &f.base, &mut tools, None);
+    let bound =
+        crate::catalog_state::bind(vec![(tools.remove(0), f.client.clone(), f.base.clone())])
+            .remove(0);
+    entered.notified().await;
+    f.replies
+        .lock()
+        .unwrap()
+        .push_back(Reply::Challenge(challenge(&[7000])));
+    let output = bound.invoke_output(&Default::default()).await.unwrap();
+    let observed = f.key("/items");
+    assert_eq!(output.observed_price.unwrap().amount, U256::from(7000));
+    assert_eq!(observed.get(), Some(U256::from(7000)));
+    assert!(bound.tool.advertised_pricing.amount().is_none());
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !bound.tool.advertised_pricing.acquisition_finished() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        bound.tool.advertised_pricing.amount(),
+        Some(U256::from(1000))
+    );
+    assert_eq!(observed.get(), Some(U256::from(7000)));
+    assert!(bound.description().contains("Observed cost: ~$0.007/call."));
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
+    drop(bound);
+    pricing.abort();
+    f.close().await;
 }
 
 #[tokio::test]

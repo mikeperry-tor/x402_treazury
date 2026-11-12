@@ -29,6 +29,7 @@ enum Wire {
     Verification,
     Settlement,
     ChangingSettlement,
+    UnsignedAfterSettlement(StatusCode),
     Allowance,
     Prose,
     Generic,
@@ -89,6 +90,11 @@ async fn seller(
         .get("payment-signature")
         .or_else(|| headers.get("x-payment"))
     else {
+        if let Wire::UnsignedAfterSettlement(status) = f.wire
+            && !f.signed.lock().unwrap().is_empty()
+        {
+            return status.into_response();
+        }
         if matches!(f.wire, Wire::V1(_)) {
             return (StatusCode::PAYMENT_REQUIRED, Json(legacy_challenge())).into_response();
         }
@@ -271,6 +277,7 @@ async fn seller(
             response
         }
         Wire::Settlement
+        | Wire::UnsignedAfterSettlement(_)
         | Wire::ChangingSettlement
         | Wire::Allowance
         | Wire::Oversized
@@ -504,6 +511,13 @@ async fn run_private(
     let error = result
         .and_then(Result::err)
         .map_or_else(String::new, |e| {
+            if matches!(wire, Wire::UnsignedAfterSettlement(_)) {
+                assert!(ResponseFacts::from_error(&e).unwrap().unsigned_target);
+                assert!(e.is::<PossiblePayment>(), "the earlier signed authorization remains chargeable");
+                let binding = crate::catalog_refresh::Binding::new(|_| {});
+                binding.observe(None, Some(&e));
+                assert!(binding.refreshing());
+            }
             if matches!(wire, Wire::ChangingSettlement) {
                 assert_eq!(crate::output::ObservedPrice::from_error(&e).unwrap().amount, U256::from(200));
             }
@@ -552,6 +566,7 @@ async fn run_private(
             | Wire::V1(LegacyReceipt::Verification | LegacyReceipt::Failure)
             | Wire::Settlement
             | Wire::ChangingSettlement
+            | Wire::UnsignedAfterSettlement(_)
             | Wire::HeldSuccess
             | Wire::QualifiedThree
             | Wire::Oversized
@@ -828,6 +843,25 @@ async fn insufficient_funds_traverses_once_with_original_get_and_post_and_isolat
         }
     }
 }
+#[tokio::test]
+async fn unsigned_removal_after_signed_insufficiency_refreshes_without_losing_liability() {
+    for status in [
+        StatusCode::NOT_FOUND,
+        StatusCode::METHOD_NOT_ALLOWED,
+        StatusCode::GONE,
+    ] {
+        let (success, signed, requests, _) =
+            run("GET", Wire::UnsignedAfterSettlement(status), 1).await;
+        assert!(!success);
+        assert_eq!(signed.len(), 1);
+        assert_eq!(
+            requests.len(),
+            3,
+            "one unsigned call per wallet and only the original signed attempt"
+        );
+    }
+}
+
 #[tokio::test]
 async fn captured_inventory_exhausts_and_keeps_every_chargeable_authorization() {
     let (success, signed, requests, error) = run("GET", Wire::Settlement, 10).await;

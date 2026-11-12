@@ -1433,6 +1433,22 @@ impl Deployment {
     // Catalogs belong to sources; selection failures belong to endpoints. Keep
     // successful acquisition even when one destination has invalid narrowing.
     fn refresh_selection(&mut self, serving: bool) -> Result<()> {
+        // Loaded sources own their compatibility status. Retain absent-source
+        // entries for pending downloads and acquisition failures.
+        for (id, source) in &self.sources {
+            if source.compatibility_unavailable() {
+                self.unavailable_sources.insert(
+                    id.clone(),
+                    source
+                        .config
+                        .prefix
+                        .clone()
+                        .expect("resolved source prefix"),
+                );
+            } else {
+                self.unavailable_sources.remove(id);
+            }
+        }
         let mut selected = BTreeMap::new();
         let mut conflicts = BTreeMap::new();
         let mut errors = BTreeMap::new();
@@ -1870,22 +1886,23 @@ impl Deployment {
             && self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
             && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
         let initial_readiness = (!self.defer_discovery).then(|| self.resolved_catalog_readiness());
-        let mut deferred = self.defer_discovery.then(|| {
-            deferred::Runtime::new(self, deferred_wallets, catalog, manager, can_allocate)
-        });
-        let catalog_readiness = match deferred.as_mut() {
-            Some(runtime) => runtime.catalog_readiness(),
-            None => initial_readiness.expect("nondeferred catalog results"),
+        let was_deferred = self.defer_discovery;
+        let mut deferred =
+            deferred::Runtime::new(self, deferred_wallets, catalog, manager, can_allocate);
+        deferred.publish().await?;
+        let catalog_readiness = if was_deferred {
+            deferred.catalog_readiness()
+        } else {
+            initial_readiness.expect("nondeferred catalog results")
         };
-        let startup_catalogs = match deferred.as_mut() {
-            Some(runtime) => runtime.startup_readiness(),
-            None => {
-                let (send, receive) = tokio::sync::oneshot::channel();
-                if local_catalogs_ready {
-                    let _ = send.send(local_startup_pools);
-                }
-                receive
+        let startup_catalogs = if was_deferred {
+            deferred.startup_readiness()
+        } else {
+            let (send, receive) = tokio::sync::oneshot::channel();
+            if local_catalogs_ready {
+                let _ = send.send(local_startup_pools);
             }
+            receive
         };
         Ok(RunningDeployment {
             startup_catalogs,
@@ -2236,7 +2253,7 @@ type FundingRuntime = (
 );
 pub struct RunningDeployment {
     startup_catalogs: tokio::sync::oneshot::Receiver<readiness::FundingPools>,
-    deferred: Option<deferred::Runtime>,
+    deferred: deferred::Runtime,
     catalog_readiness: BTreeMap<String, tokio::sync::oneshot::Receiver<Result<()>>>,
     accepted_work: Vec<crate::server::work::Work>,
     #[cfg(test)]
@@ -2400,14 +2417,9 @@ impl RunningDeployment {
         }
         let deferred_stop = CancellationToken::new();
         let _deferred_on_drop = deferred_stop.clone().drop_guard();
-        let deferred_relays = self
-            .deferred
-            .as_ref()
-            .map(|runtime| runtime.relays())
-            .unwrap_or_default();
-        let deferred_task = self
-            .deferred
-            .map(|runtime| tokio::spawn(runtime.run(deferred_stop.clone())));
+        let deferred_relays = self.deferred.relays();
+        let refresh_manager = self.deferred.refresh_manager();
+        let deferred_task = tokio::spawn(self.deferred.run(deferred_stop.clone()));
         let mut startup_announcement =
             Box::pin(readiness::announce(self.startup_catalogs, listening));
         let mut announcement_finished = false;
@@ -2450,16 +2462,16 @@ impl RunningDeployment {
                 }
             }
         );
-        let (deferred_owner, deferred_result) = match deferred_task {
-            Some(task) => match task.await {
-                Ok(owner) => (Some(owner), Ok(())),
-                Err(error) => (
-                    None,
-                    Err(anyhow::Error::new(error).context("deferred discovery worker failed")),
-                ),
-            },
-            None => (None, Ok(())),
+        let (deferred_owner, deferred_result) = match deferred_task.await {
+            Ok(owner) => (Some(owner), Ok(())),
+            Err(error) => (
+                None,
+                Err(anyhow::Error::new(error).context("deferred discovery worker failed")),
+            ),
         };
+        if let Some(manager) = refresh_manager {
+            manager.drain_refreshes().await;
+        }
         for relay in deferred_relays {
             relay.drain().await;
         }

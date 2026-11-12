@@ -83,6 +83,7 @@ pub(crate) fn fallback<'a>(
         let facts = crate::payment::ResponseFacts {
             provider: response.provider_status,
             destination: reqwest::StatusCode::from_u16(response.status).ok(),
+            unsigned_target: true,
             ..Default::default()
         };
         Ok((

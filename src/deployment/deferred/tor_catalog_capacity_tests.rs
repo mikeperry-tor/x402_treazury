@@ -126,7 +126,7 @@ async fn catalog_capacity_child() {
         .unwrap();
     assert_eq!(deployment.pending_sources.len(), 3);
     let running = deployment.bind(&env).await.unwrap();
-    let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+    let catalog = running.deferred.catalog.clone();
     let stop = CancellationToken::new();
     let serving = tokio::spawn(running.serve(stop.clone()));
     state.seen("/serving/z").await;
@@ -360,7 +360,7 @@ wait_for_catalogs=false
         assert!(price.amount().is_none());
         assert_eq!(gate.available_permits(), 0);
         let running = deployment.bind(&env).await.unwrap();
-        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let catalog = running.deferred.catalog.clone();
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
         bodies["/same-spec"].started.notified().await;

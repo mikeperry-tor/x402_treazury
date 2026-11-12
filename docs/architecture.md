@@ -725,9 +725,18 @@ or payer-bound transport. Catalog retention defaults to indefinite and
 gate. Reads, restart and observations do not renew expiry. Explicit positive-second
 expiry, forced refresh, changed bytes and source configuration updates invalidate
 both, including unchanged bytes on a forced refresh. External pricing hints are
-re-downloaded on a new catalog acquisition and inherit its expiry. Optional startup
-pricing loads remain asynchronous; refreshed source publication waits for its
-configured optional hint acquisition, with failure leaving unknown prices. Per-source revision bookkeeping
+re-downloaded on a new catalog acquisition and inherit its expiry. Optional pricing
+loads remain asynchronous at startup and during runtime refresh; complete
+replacement definitions publish without waiting for enrichment. Observations
+learned through the new generation's attached cache remain preferred when its
+advertisements arrive. Optional pricing failure leaves those observations intact
+and operations without other hints unknown. Retired generations cannot publish
+late observations or revive their advertisements.
+Optional pricing cache commits use the advertisement's existing terminal lock;
+retirement fences dispatched writes as well as presentation. Static and dynamic replacement pricing
+starts after the prior generation retires, while its task ownership is attached
+to tools before publication. Unpublished replacement tasks perform no pricing I/O.
+Per-source revision bookkeeping
 runs before shared acquisition and records every alias after acquisition, including
 the first cache creation. Revision records disappear with their catalog.
 
@@ -752,8 +761,29 @@ The SQLite cache keeps raw bytes intact, with generation-bound operation amounts
 alongside them. Live bindings share in-memory learning immediately; detached,
 best-effort writes never delay responses or recreate missing generations. Receipt
 order controls in-process updates and conditional versions prevent older writes
-from replacing newer ones. Expiry and eviction discard only metadata. No new
-background refresh, price probes or financial recovery obligations follow. Local
+from replacing newer ones. Expiry and eviction discard only metadata. For deployment
+sources and registered dynamic sources, final unsigned target 404/405/410 outcomes
+after existing recovery are heuristic signals for one
+source-generation refresh through the serving publisher. Signed target outcomes
+and relay-service failures are excluded; a decoded relay destination remains
+unsigned target evidence even when the relay fee was signed. Existing tools, search
+results and hints remain usable during refresh under their original expiry;
+obsolete outcomes cannot invalidate replacements. Dynamic registrations refresh
+under their accepted candidate and exact revision, retaining durable publication
+and listener ownership. Static replacement shares the registry's publication
+boundary. Failed refresh retains the complete snapshot without renewing expiry or
+scheduling a retry; a later fresh unsigned signal may retry. Successful replacement
+retires old API handles and invalidates their hints before replacement definitions
+become visible. Retirement follows all fallible validation and persistence at the
+publication boundary; calls already admitted retain their original execution owner.
+Static refresh validates combined
+selection and publishes current definitions before committing disposable cache
+replacement. A second best-effort publication attaches shared observed-price
+hints; failure there leaves the successfully published definitions usable.
+Terminal advertisement invalidation prevents late enrichment from restoring the
+old generation, while canonical searchable descriptions remain intact. There are no price probes, periodic
+refresh timers or new financial recovery obligations. See
+[runtime source refresh](configuration.md#runtime-source-refresh). Local
 catalogs, dynamic imports, opted-out sources and deployments without an existing
 state directory keep per-call pricing without a shared hint cache. Help retains
 its separate authority-bound cache. Hints learn from actual invocation challenges

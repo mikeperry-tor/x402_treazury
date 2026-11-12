@@ -561,6 +561,7 @@ fn checked_cached(
         failure.response = Some(crate::payment::ResponseFacts {
             provider: response.provider_status,
             destination: StatusCode::from_u16(response.status).ok(),
+            unsigned_target: true,
             ..Default::default()
         });
         return Err(failure.error(possible || response.payment_may_have_occurred));
@@ -736,6 +737,7 @@ impl Entry {
                 failure.response = Some(crate::payment::ResponseFacts {
                     provider: provider_status,
                     destination: StatusCode::from_u16(response.status).ok(),
+                    unsigned_target: true,
                     ..Default::default()
                 });
                 failure.retry_after = crate::network::parse_retry_after(

@@ -219,6 +219,70 @@ fn listener(name: &str, sources: &str, settings: &str) -> String {
     )
 }
 
+#[tokio::test]
+async fn refresh_selection_failure_resolves_readiness_while_another_catalog_is_pending() {
+    let mut fixtures = Fixture::new(
+        &(listener(
+            "waiting",
+            "['local','slow']",
+            "include_tools=['local_read','slow_*']",
+        ) + &listener("eager", "['local']", "wait_for_catalogs=false")),
+        true,
+    )
+    .await;
+    let mut readiness = fixtures
+        .running
+        .catalog_readiness
+        .remove("waiting")
+        .unwrap();
+    let catalog = fixtures.running.deferred.catalog.clone();
+    let old = catalog.read().views["eager"][0].clone();
+    std::fs::write(
+        fixtures._dir.path().join("local.json"),
+        r#"{"operations":[{"method":"GET","path":"/new"}]}"#,
+    )
+    .unwrap();
+    let stop = CancellationToken::new();
+    let worker = tokio::spawn(fixtures.running.deferred.run(stop.clone()));
+    // Both remote acquisitions are held in their origin handlers. Neither can
+    // publish an unrelated completion that would rescue a missing refresh signal.
+    tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    assert!(matches!(
+        readiness.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(old.refresh.as_ref().unwrap().trigger());
+    let result = tokio::time::timeout(Duration::from_secs(5), readiness).await;
+    stop.cancel();
+    let runtime = worker.await.unwrap();
+    fixtures.origin.abort();
+    let _ = fixtures.origin.await;
+
+    let error = result
+        .expect("refresh must resolve terminal readiness without another catalog event")
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<catalog::LoadStage>(),
+        Some(&catalog::LoadStage::Selection)
+    );
+    assert!(runtime.deployment.pending_sources.contains_key("slow"));
+    let snapshot = catalog.read();
+    assert!(snapshot.views["waiting"].is_empty());
+    assert!(
+        snapshot.instructions["waiting"]
+            .as_deref()
+            .unwrap()
+            .contains("UNAVAILABLE endpoint tool selection")
+    );
+    assert_eq!(snapshot.views["eager"][0].tool.path, "/new");
+    assert!(old.refresh.as_ref().unwrap().check().is_err());
+}
+
 async fn rpc(address: SocketAddr, method: &str) -> Value {
     let params = if method == "initialize" {
         json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}})
@@ -341,7 +405,7 @@ async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
                 .unwrap();
             assert!(format!("{strict_error:#}").contains("no tools selected"));
         }
-        let catalog = fixtures.running.deferred.as_ref().unwrap().catalog.clone();
+        let catalog = fixtures.running.deferred.catalog.clone();
         let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
         let stop = CancellationToken::new();
         let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
@@ -425,7 +489,7 @@ async fn legacy_listener_typo_does_not_reject_a_shared_catalog() {
         Some(json!({"operations":[{"method":"GET","path":"/read"}]})),
     )
     .await;
-    let catalog = fixtures.running.deferred.as_ref().unwrap().catalog.clone();
+    let catalog = fixtures.running.deferred.catalog.clone();
     let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
     let stop = CancellationToken::new();
     let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
@@ -866,7 +930,7 @@ async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
             true,
         )
         .await;
-        let runtime = fixtures.running.deferred.as_mut().unwrap();
+        let runtime = &mut fixtures.running.deferred;
         let failed_catalog = if panic {
             runtime.catalog.clone()
         } else {

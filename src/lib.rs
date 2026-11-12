@@ -1,4 +1,6 @@
 pub mod catalog;
+#[doc(hidden)]
+pub mod catalog_refresh;
 pub mod catalog_state;
 pub mod config;
 pub mod deployment;

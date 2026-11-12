@@ -412,6 +412,8 @@ pub(crate) struct Slot {
     force_refresh: bool,
     family: Option<String>,
     replace_family: bool,
+    #[cfg(test)]
+    before_commit: Option<std::sync::Arc<price_tests::CommitHold>>,
 }
 impl Slot {
     pub fn availability(cfg: &crate::catalog::Config, kind: &str) -> &'static str {
@@ -493,6 +495,8 @@ impl Slot {
             force_refresh: cfg.catalog_cache_force_refresh,
             family,
             replace_family: false,
+            #[cfg(test)]
+            before_commit: None,
             revision: (kind == "catalog").then(|| {
                 (
                     cfg.discovery_source
@@ -542,7 +546,7 @@ impl Slot {
                 }
                 tx.execute("INSERT INTO catalog_revisions SELECT key,?2,?3 FROM entries WHERE key=?1 ON CONFLICT(key,source) DO UPDATE SET revision=excluded.revision", params![slot.key, source, revision])?;
             }
-            commit_cache(&slot, tx, retired, None, None)?;
+            commit_cache(&slot, tx, retired, None, None, None)?;
             Ok(())
         }).await;
     }
@@ -602,7 +606,7 @@ impl Slot {
                     "HTTP cache entry exceeds resource limit; discarded, fetching origin"
                 );
                 db.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
-                commit_cache(&slot, db, vec![slot.key.clone()], None, None)?;
+                commit_cache(&slot, db, vec![slot.key.clone()], None, None, None)?;
                 return Ok(None);
             }
             let (metadata, data): (String, Vec<u8>) = db.query_row(
@@ -641,10 +645,17 @@ impl Slot {
         &self,
         entry: Option<Entry>,
     ) -> Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>> {
+        self.write_if_current(entry, None).await
+    }
+    pub(crate) async fn write_if_current(
+        &self,
+        entry: Option<Entry>,
+        advertisement: Option<crate::pricing::advertised::AdvertisedPricing>,
+    ) -> Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>> {
         let slot = self.clone();
         let result = blocking(move || -> Result<(bool, Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>)> {
             // Never create a treasury state directory, including after concurrent removal.
-            if entry.is_none() && !slot.directory.exists() { retire(&slot); return Ok((false,None)); }
+            if entry.is_none() && !slot.directory.exists() { retire(&slot, advertisement.as_ref()); return Ok((false,None)); }
             ensure!(slot.directory.parent().is_some_and(Path::is_dir), "cache parent missing");
             let mut db = open(&slot.directory)?;
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -652,7 +663,7 @@ impl Slot {
             let Some(entry) = entry else {
                 tx.execute("DELETE FROM entries WHERE key=?1", [&slot.key])?;
                 retired.push(slot.key.clone());
-                commit_cache(&slot, tx, retired, None, None)?;
+                commit_cache(&slot, tx, retired, None, None, advertisement.as_ref())?;
                 return Ok((false,None));
             };
             let metadata = serde_json::to_string(&entry.metadata)?;
@@ -660,7 +671,7 @@ impl Slot {
             if entry.data.len() > slot.limit || metadata.len() > METADATA_LIMIT || size > CAPACITY {
                 tx.execute("DELETE FROM entries WHERE key=?1",[&slot.key])?;
                 retired.push(slot.key.clone());
-                commit_cache(&slot, tx, retired, None, None)?;
+                commit_cache(&slot, tx, retired, None, None, advertisement.as_ref())?;
                 tracing::warn!(limit_bytes = slot.limit.min(CAPACITY), limit_metadata_bytes = METADATA_LIMIT, "HTTP cache entry exceeds resource limit; complete response used without persistence");
                 return Ok((false,None));
             }
@@ -685,8 +696,7 @@ impl Slot {
                 prepare_hints(&slot,&tx,&entry.metadata)?
             } else { None };
             if let Some((source,revision)) = &slot.revision { tx.execute("INSERT OR IGNORE INTO catalog_revisions VALUES(?1,?2,?3)",params![slot.key,source,revision])?; }
-            let hints = commit_cache(&slot, tx, retired, hints, Some(&entry.metadata))?;
-            Ok((true,hints))
+            commit_cache(&slot, tx, retired, hints, Some(&entry.metadata), advertisement.as_ref())
         }).await;
         if matches!(result, Ok(Ok((true, _)))) {
             tracing::debug!(
@@ -840,12 +850,15 @@ fn existing(slot: &Slot) -> Option<std::sync::Arc<crate::pricing::runtime::Catal
         .get(&(slot.directory.clone(), slot.key.clone()))
         .and_then(std::sync::Weak::upgrade)
 }
-fn retire(slot: &Slot) {
-    retire_locked(
-        slot,
-        &slot.key,
-        &mut registry().lock().expect("catalog registry poisoned"),
-    );
+fn retire(slot: &Slot, advertisement: Option<&crate::pricing::advertised::AdvertisedPricing>) {
+    let mut registry = registry().lock().expect("catalog registry poisoned");
+    let mut invalidate = || retire_locked(slot, &slot.key, &mut registry);
+    match advertisement {
+        Some(cell) => {
+            cell.while_current(invalidate);
+        }
+        None => invalidate(),
+    }
 }
 fn retire_locked(slot: &Slot, key: &str, registry: &mut Registry) {
     if let Some(hints) = registry
@@ -865,34 +878,51 @@ fn commit_cache(
     retired: Vec<String>,
     hints: Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
     metadata: Option<&Metadata>,
-) -> Result<Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>> {
+    advertisement: Option<&crate::pricing::advertised::AdvertisedPricing>,
+) -> Result<(
+    bool,
+    Option<std::sync::Arc<crate::pricing::runtime::CatalogHints>>,
+)> {
+    #[cfg(test)]
+    if let Some(hold) = &slot.before_commit {
+        hold.wait();
+    }
     let mut registry = registry().lock().expect("catalog registry poisoned");
-    tx.commit()?;
-    for key in retired {
-        retire_locked(slot, &key, &mut registry);
+    let publish = || {
+        tx.commit()?;
+        for key in retired {
+            retire_locked(slot, &key, &mut registry);
+        }
+        // An expired entry has no new attachment, but its committed expiry still
+        // applies to handles already attached to this unchanged generation.
+        if hints.is_none()
+            && let Some(metadata) = metadata
+            && let Some(previous) = registry
+                .get(&(slot.directory.clone(), slot.key.clone()))
+                .and_then(std::sync::Weak::upgrade)
+        {
+            previous
+                .state
+                .lock()
+                .expect("catalog hints poisoned")
+                .metadata = metadata.clone();
+        }
+        Ok((
+            true,
+            hints.map(|hints| {
+                publish_hints(
+                    slot,
+                    hints,
+                    metadata.expect("catalog metadata"),
+                    &mut registry,
+                )
+            }),
+        ))
+    };
+    match advertisement {
+        Some(cell) => cell.while_current(publish).unwrap_or(Ok((false, None))),
+        None => publish(),
     }
-    // An expired entry has no new attachment, but its committed expiry still
-    // applies to handles already attached to this unchanged generation.
-    if hints.is_none()
-        && let Some(metadata) = metadata
-        && let Some(previous) = registry
-            .get(&(slot.directory.clone(), slot.key.clone()))
-            .and_then(std::sync::Weak::upgrade)
-    {
-        previous
-            .state
-            .lock()
-            .expect("catalog hints poisoned")
-            .metadata = metadata.clone();
-    }
-    Ok(hints.map(|hints| {
-        publish_hints(
-            slot,
-            hints,
-            metadata.expect("catalog metadata"),
-            &mut registry,
-        )
-    }))
 }
 impl Slot {
     pub(crate) async fn persist_price(

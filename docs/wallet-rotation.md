@@ -564,6 +564,11 @@ configuration invalidation and eviction discard estimates;
 reads and payment observations do not renew lifetime. These operations cause no
 probe, cached-challenge reuse or new payment authority. See
 [shared cache behavior](architecture.md#wallet-selection-and-network-isolation).
+Heuristic runtime source refresh retains existing hints under their original expiry
+while acquisition runs and after catalog failure. Successful replacement retires
+old API handles and invalidates their hints. Optional pricing enriches the replacement
+asynchronously, without gating its publication or replacing new challenge
+observations. Failure leaves operations without other hints unknown.
 A valid observed offer can update a hint even when current Store authority refuses
 financial admission; that hint grants no permission to sign.
 

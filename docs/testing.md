@@ -49,9 +49,35 @@ winning scope's actual fixture disclosure. Existing promotion/key/eviction tests
 retain their separate ownership contracts; these fixtures add no production
 coalescing, timeout or scope-history framework.
 
+Catalog acceptance fixtures exercise ordinary inspection, serving and deferred
+startup with fresh acquisition owners: semantically rejected JSON is not cached,
+restart can reach a recovered origin, and rejected downloads or HTTP 304 content
+cannot replace or renew the previous snapshot. Optional pricing format rejection
+also retains the accepted cache. Concurrent alias refresh fixtures hold actual
+acquisitions and publish each source separately, preserving admission while the
+last accepted shared cache generation wins and obsolete hints remain retired.
 Deferred-constraint commit failures cover family replacement, unchanged metadata
 renewal, revision deletion and oversized-entry deletion: rollback retains durable
 rows, live observation identity and the original expiry.
+Pricing retirement fixtures hold an actual blocking writer before its final commit
+guard, retire the source, and verify both cache bytes and current observations
+survive. A delayed retired acquisition also cannot restore old metadata across
+restart. Prepared enrichment retains tool ownership before publication and does
+not poll its loader if publication is discarded.
+Dynamic refresh fixtures retain proposed tools across removal, revision replacement,
+snapshot rejection and persistence refusal; none starts optional pricing I/O.
+Successful replacement publishes before optional pricing completes.
+
+Catalog refresh publication regressions observe the final visibility boundary for
+static publishers with and without a dynamic registry, and for registered-source
+refresh. Failed validation preserves old admission; successful replacement retires
+old handles before exposure while an already submitted signed response can finish.
+The two-endpoint managed fixture holds a bootstrap-signed response during coalesced
+catalog refresh, injects credit into preallocated destination reserves, and exercises
+destination handoff and READY-member promotion. Exact requests, payer/nonce journals
+and unchanged funding-job/address inventories establish no replay or refresh-induced
+allocation. Synthetic credit does not qualify treasury funding or live settlement.
+Fixture cleanup releases catalog snapshots before joining the Store worker.
 
 ## Provider regressions
 
@@ -900,6 +926,21 @@ catalog cache fixtures, `src/payment/hint_tests.rs` and catalog-state descriptio
 and direct-target fixtures. They cover joint persistence/lifetime, revision and
 content invalidation, alias sharing, received-order updates, delayed writes and
 unchanged concise rendering/per-call offers, without live funds or price probes.
+Forced warm tests cover unconditional catalog and configured-pricing acquisition,
+normal serving reuse, complete-snapshot retention and provenance-family retirement.
+`src/catalog_refresh/`, `src/discovery/refresh.rs` and
+`src/discovery_relay/list_tests.rs` cover final unsigned target removal signals
+after recovery, signed-target and relay-service exclusions, decoded relay
+destinations despite signed relay fees, source-generation coalescing, continued
+tools/search/hints during refresh and catalog failure, replacement preparation
+while current tools serve, repaired tool invocation before optional pricing
+completion, retained challenge observations after advertisement arrival, retired
+generation fences against late enrichment, and usable replacements after optional
+pricing failure. They also cover accepted signed work, cancelled callers, registration
+races and shutdown ownership. Deferred refresh
+fixtures cover combined publication failure, endpoint selection diagnostics and
+unrelated endpoint usability. These are synthetic local contracts, not live
+provider availability or financial qualification.
 The managed relay fixture retains a depleted first wallet: local bootstrap catalogs
 have no shared hint, so the actual relay offer earns an unsigned sibling handoff.
 It pins the exact unchanged relay requests, signing owners and authorization journal

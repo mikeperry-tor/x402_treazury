@@ -2097,6 +2097,63 @@ TTL expires; then a 304 can reuse the saved body. Missing entries alone do not p
 caching: expiration, eviction, network/timeout policy changes, and failed writes
 also affect reuse.
 
+### Runtime source refresh
+
+Automatic refresh covers deployment sources and registered dynamic sources.
+Standalone `serve --provider` loads definitions once at startup; restart it to
+reload them.
+
+A final unsigned target HTTP 404, 405 or 410 from an operation in these sources is a
+heuristic signal to refresh that source's definitions. The existing request retry
+and relay policy finishes first; no extra request, probe or API replay is added.
+Signed target outcomes and a relay service's own failures do not trigger refresh.
+A decoded relay destination remains unsigned target evidence even when the relay
+fee was signed. Generic 400/422, challenge price changes, document timestamps and
+HTTP validators are not triggers.
+Offline operation/override drift requires an explicit warm or provider edit; it
+does not signal an already running process.
+
+Refresh coalesces within the affected source generation and uses the existing
+acquisition/publication owner. Existing tools, search results and price hints remain
+usable while refresh runs and after catalog acquisition or publication failure,
+under their original expiry; refresh does not renew them. Accepted calls retain
+their original definitions, payer and financial obligations. Refresh uses existing
+metadata authority and does not allocate wallets or start funding.
+If replacement tools select a static wallet that was unused and therefore not
+initialized at startup, publication fails and existing tools remain available.
+Restart to initialize that newly selected wallet under the current configuration.
+If every selected API operation becomes unsupported, the source is unavailable
+just as at startup; exact selectors owned by it do not withdraw healthy sibling
+sources. If no API tools remain, that source cannot produce another refresh
+signal; restart after repairing its catalog to restore it.
+Refresh publishes the complete replacement catalog without waiting for optional
+pricing. Its generation owns asynchronous pricing enrichment, just as at startup.
+Until enrichment completes, operations without catalog prices or new challenge
+observations have unknown estimates; pricing failure does not withdraw tools or
+erase observations. Successful replacement retires old API handles and invalidates
+their hints before replacement definitions become visible. Failed publication
+preserves old admission; calls already admitted can finish through retirement.
+Old observed prices cannot populate the replacement generation, even when its
+catalog bytes are unchanged. New challenge observations remain separate from
+advertisements and take precedence when optional pricing completes. The static
+observed-price cache attaches best effort after successful definition publication;
+calls captured before that attachment do not retain observations.
+Replacement pricing ownership attaches before publication for both static deployment
+and registered dynamic sources, but its I/O
+starts only after publication succeeds and the old generation retires. Retired
+pricing work cannot commit shared metadata, even if its blocking cache write was
+already dispatched; retained old handles cannot restore stale pricing on restart.
+
+The triggering call keeps its actual outcome. Failure alone schedules no retry;
+a later fresh unsigned removal signal may start another attempt.
+Late outcomes cannot expire the replacement generation. If an operation disappeared,
+subsequent lookup returns its actual absence.
+
+Dynamic discovery is the supported way to obtain current definitions. Static MCP
+clients may cache schemas and require reconnect/reload after a schema change.
+The server maintains no session registry for tool-list broadcasts; client
+notification support is not a correctness dependency.
+
 ### Warming a selected source, including directly for a Tor deployment
 
 ```sh

@@ -531,6 +531,7 @@ impl PaidClient {
     ) -> impl std::future::Future<Output = Result<T>> + Send + '_ {
         ownership::run(&self.work, work)
     }
+    #[cfg(test)]
     pub(crate) async fn execute_rendered_scoped(
         &self,
         route: RoutedRequest,
@@ -538,14 +539,26 @@ impl PaidClient {
         mapping: Option<&crate::output::ResponseMapping>,
         limits: &crate::output::ImageLimits,
     ) -> Result<crate::output::ToolOutput> {
+        self.execute_rendered_refresh(route, operation, mapping, limits, None)
+            .await
+    }
+    pub(crate) async fn execute_rendered_refresh(
+        &self,
+        route: RoutedRequest,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+        mapping: Option<&crate::output::ResponseMapping>,
+        limits: &crate::output::ImageLimits,
+        refresh: Option<Arc<crate::catalog_refresh::Binding>>,
+    ) -> Result<crate::output::ToolOutput> {
         let mapping = mapping.cloned();
         let limits = limits.clone();
-        self.execute_finished(
+        self.execute_finished_refresh(
             route,
             Default::default(),
             &SubmissionProgress::default(),
             operation,
             true,
+            refresh,
             move |output, _status| Ok((output.render(mapping.as_ref(), &limits)?, true)),
         )
         .await
@@ -611,6 +624,23 @@ impl PaidClient {
         + Send
         + 'static,
     ) -> Result<T> {
+        self.execute_finished_refresh(route, headers, progress, operation, activate, None, finish)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_finished_refresh<T: Send + 'static>(
+        &self,
+        route: RoutedRequest,
+        headers: crate::discovery::raw::ManualRawHeaders,
+        progress: &SubmissionProgress,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+        activate: bool,
+        refresh: Option<Arc<crate::catalog_refresh::Binding>>,
+        finish: impl FnOnce(crate::output::HttpOutput, Option<ResponseFacts>) -> Result<(T, bool)>
+        + Send
+        + 'static,
+    ) -> Result<T> {
         let client = self.clone();
         let progress = progress.clone();
         let span = diagnostics::span(&self.source_identity, &route.method);
@@ -620,7 +650,13 @@ impl PaidClient {
         self.run_owned(
             diagnostics::scope(async move {
                 let mut observed_price = None;
+                let mut final_facts = None;
+                let mut admitted = false;
                 let result = async {
+                    if let Some(binding) = &refresh {
+                        binding.check()?;
+                    }
+                    admitted = true;
                     let private = headers.is_private();
                     let mut request = build_request(route)?;
                     let padding = client.cover.as_ref().and_then(|(config, _)| {
@@ -645,6 +681,7 @@ impl PaidClient {
                 }
                 .await
                 .and_then(|(mut output, unsigned_promotion, status)| {
+                    final_facts = status;
                     output.observed_price = observed_price;
                     diagnostics::stage("output_conversion");
                     let (output, valid) = finish(output, status).map_err(|error| match status {
@@ -656,6 +693,9 @@ impl PaidClient {
                     }
                     Ok(output)
                 });
+                if admitted && let Some(binding) = &refresh {
+                    binding.observe(final_facts, result.as_ref().err());
+                }
                 diagnostics::finish(&result, &progress, client.relay_call);
                 with_payment_context(
                     progress.possible(),
@@ -914,25 +954,30 @@ impl PaidClient {
         };
         diagnostics::stage("response_body");
         let status = response.status();
+        let facts = ResponseFacts {
+            unsigned_target: unsigned_promotion.is_some(),
+            ..ResponseFacts::provider(status)
+        };
         let result = self
             .response_output(
                 response,
                 paid_submission,
                 request.method() == reqwest::Method::HEAD,
             )
-            .await;
+            .await
+            .map_err(|error| {
+                let facts = ResponseFacts {
+                    unsigned_target: facts.unsigned_target,
+                    ..ResponseFacts::from_error(&error).unwrap_or(facts)
+                };
+                error.context(facts)
+            });
         if let Some(call) = &mut cover
             && result.is_ok()
         {
             call.complete();
         }
-        let result = result.map(|output| {
-            (
-                output,
-                unsigned_promotion,
-                Some(ResponseFacts::provider(status)),
-            )
-        });
+        let result = result.map(|output| (output, unsigned_promotion, Some(facts)));
         if extensions_omitted {
             result.context(crate::rotation::manager::OMITTED_EXTENSIONS)
         } else {

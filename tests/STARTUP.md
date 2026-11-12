@@ -69,7 +69,11 @@ rejects it. `deployment::deferred::readiness_tests` uses real MCP HTTP requests 
 verify default waiting per endpoint, publication before initialize/tools/list,
 independent local/immediate peers, optional failure, ERROR plus socket closure for
 required failure, local-only/management-only endpoints, cancellation while waiting, and
-worker/publication failures. Failure logs distinguish HTTP status, tool-generation
+worker/publication failures.
+Runtime refresh coverage holds other catalog downloads pending and verifies that
+published selector failure resolves the affected endpoint's readiness immediately,
+while eager peers retain their valid tools and old handles retire.
+Failure logs distinguish HTTP status, tool-generation
 and listener-selection failures without upstream prose; publication failures explain
 the retained inventory. Startup unit tests cover a fresh cached JSON document
 whose unsupported header schema prevents generation, and shared failures preserving

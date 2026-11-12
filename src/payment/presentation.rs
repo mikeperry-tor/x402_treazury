@@ -35,6 +35,8 @@ impl std::error::Error for ApiExecution {}
 /// Facts from one exchange, including explicitly attributed relay destinations.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ResponseFacts {
+    /// Positively attributed to an unsigned target exchange, independent of relay fees.
+    pub unsigned_target: bool,
     pub provider: Option<StatusCode>,
     pub destination: Option<StatusCode>,
     pub insufficient_funds: bool,
@@ -53,6 +55,7 @@ impl ResponseFacts {
     }
     pub fn provider(status: StatusCode) -> Self {
         Self {
+            unsigned_target: false,
             provider: Some(status),
             destination: None,
             insufficient_funds: false,

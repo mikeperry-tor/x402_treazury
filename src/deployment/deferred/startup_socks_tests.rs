@@ -133,7 +133,7 @@ async fn late_socks_child() {
         treasury_stop.clone(),
     ));
     let mut running = deployment.bind(&env).await.unwrap();
-    let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+    let catalog = running.deferred.catalog.clone();
     let mcp_address = running.addresses()[0].1;
     running.managed_pools.push(Arc::new(
         ManagedPool::new(

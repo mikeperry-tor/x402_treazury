@@ -45,6 +45,72 @@ fn forget(slot: &Slot) {
         .remove(&(slot.directory.clone(), slot.key.clone()));
 }
 
+#[derive(Debug)]
+pub(super) struct CommitHold {
+    entered: tokio::sync::Notify,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+impl CommitHold {
+    pub(super) fn wait(&self) {
+        self.entered.notify_one();
+        // Dropping the test's sender also releases a worker after test failure.
+        let _ = self.release.lock().unwrap().recv();
+    }
+}
+
+#[tokio::test]
+async fn dispatched_pricing_write_cannot_commit_after_retirement() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = config(root.path());
+    let mut slot = slot(&cfg);
+    let current = slot.write(Some(entry(b"current"))).await.unwrap();
+    let observed = current.operation("GET", "/read");
+    observed.learn(U256::from(7), received().unwrap());
+    let mut tools = crate::catalog::build_tools(
+        &cfg,
+        &serde_json::json!({"paths":{"/read":{"get":{}}}}),
+        "fixture",
+    )
+    .unwrap();
+    let binding = crate::catalog_refresh::Binding::new(|_| {});
+    binding.own_prices(&tools);
+    let owner = tools.remove(0).advertised_pricing;
+    let (release, receive) = std::sync::mpsc::channel();
+    let hold = Arc::new(CommitHold {
+        entered: Default::default(),
+        release: std::sync::Mutex::new(receive),
+    });
+    slot.before_commit = Some(hold.clone());
+    let writer = tokio::spawn({
+        let slot = slot.clone();
+        let owner = owner.clone();
+        async move {
+            slot.write_if_current(Some(entry(b"obsolete")), Some(owner))
+                .await
+        }
+    });
+    hold.entered.notified().await;
+    binding.retire();
+    release.send(()).unwrap();
+    assert!(writer.await.unwrap().is_none());
+    slot.before_commit = None;
+    let saved = slot.read().await.unwrap();
+    assert_eq!(saved.data, b"current");
+    assert!(Arc::ptr_eq(saved.hints.as_ref().unwrap(), &current));
+    assert_eq!(observed.get(), Some(U256::from(7)));
+
+    // A distinct active alias still replaces the cache. Retirement after its
+    // completed commit cannot retroactively roll back accepted metadata.
+    let active = crate::pricing::advertised::AdvertisedPricing::default();
+    assert!(
+        slot.write_if_current(Some(entry(b"active alias")), Some(active.clone()))
+            .await
+            .is_some()
+    );
+    active.invalidate();
+    assert_eq!(slot.read().await.unwrap().data, b"active alias");
+}
+
 #[tokio::test]
 async fn prices_restore_share_expire_and_never_renew_catalogs() {
     let root = tempfile::tempdir().unwrap();

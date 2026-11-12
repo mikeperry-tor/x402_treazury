@@ -15,7 +15,16 @@ impl Manager {
     pub async fn replace_static(
         self: &Arc<Self>,
         expected_revision: u64,
+        base: CatalogSnapshot,
+    ) -> Result<u64> {
+        self.replace_static_retiring(expected_revision, base, None)
+            .await
+    }
+    pub(crate) async fn replace_static_retiring(
+        self: &Arc<Self>,
+        expected_revision: u64,
         mut base: CatalogSnapshot,
+        retiring: Option<Arc<crate::catalog_refresh::Binding>>,
     ) -> Result<u64> {
         let permit = crate::limits::acquire_owned_capacity(
             self.mutations.clone(),
@@ -51,7 +60,7 @@ impl Manager {
             // Validation and all fallible work precede publication. This state is
             // process-local; persisted dynamic records are unchanged.
             inner.base = base;
-            this.catalog.publish(snapshot);
+            this.catalog.publish_retiring(snapshot, retiring.as_deref());
             Ok(revision)
         })
         .await?

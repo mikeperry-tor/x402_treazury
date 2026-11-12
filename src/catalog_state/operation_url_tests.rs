@@ -204,6 +204,7 @@ async fn paid_operation_urls() {
                     "properties":{"item":{"type":"string"}}}}}}
             }}}});
             BoundTool {
+                refresh: None,
                 tool: build_tools(
                     &Config {
                         operation_url_extension: Some("x-direct-url".into()),

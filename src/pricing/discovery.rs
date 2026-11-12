@@ -115,6 +115,7 @@ fn start(
     base: &str,
     tools: &mut [ToolSpec],
     load: impl std::future::Future<Output = Result<crate::catalog::LoadedCatalog>> + Send + 'static,
+    ready: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let Ok(Some(config)) = cfg.effective_pricing() else {
         return None;
@@ -141,12 +142,18 @@ fn start(
     if outputs.is_empty() {
         return None;
     }
+    // Every output of this acquisition retires with its source. Capture a cell
+    // before attaching the task owner, so the commit fence introduces no cycle.
+    let publication = outputs[0].1.clone();
     let parent_expires = cfg.catalog_pricing_expires;
     let source = cfg.discovery_source.clone().or_else(|| cfg.prefix.clone());
     let settings = cfg.clone();
     let root = root.clone();
     let base = base.to_owned();
     let task = runtime.spawn(async move {
+        if let Some(ready) = ready && ready.await.is_err() {
+            return;
+        }
         let prepared = tokio::task::spawn_blocking(move || {
             let operations = inventory(&settings, &root, &base)?;
             let index = matching::Index::new(&operations);
@@ -173,7 +180,7 @@ fn start(
                 }).await;
                 match prices {
                     Ok(Ok(prices)) => {
-                        document.commit().await;
+                        document.commit_if_current(Some(publication)).await;
                         let until = crate::http_cache::advertised_until(expires);
                         for (identity, price) in prices {
                             if let Some(cells) = targets.remove(&operations[identity]) {
@@ -206,6 +213,7 @@ fn static_task(
     base: &str,
     tools: &mut [ToolSpec],
     gate: Option<Arc<network::DiscoveryCapacity>>,
+    ready: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let Ok(Some(pricing)) = cfg.effective_pricing() else {
         return None;
@@ -218,9 +226,24 @@ fn static_task(
     settings.catalog_cache_force_refresh |= cfg.catalog_pricing_refresh;
     // Retain the original configuration revision and runtime relay principal.
     // The explicit URL owns its cache entry and refresh timestamp.
-    start(cfg, root, base, tools, async move {
-        crate::catalog::load_json_pricing(&settings, network::global(), gate).await
-    })
+    start(
+        cfg,
+        root,
+        base,
+        tools,
+        async move { crate::catalog::load_json_pricing(&settings, network::global(), gate).await },
+        ready,
+    )
+}
+
+pub(crate) fn attach_dynamic(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    client: crate::payment::PaidClient,
+) {
+    let _ = dynamic_task(cfg, root, base, tools, client, None);
 }
 
 fn dynamic_task(
@@ -229,6 +252,7 @@ fn dynamic_task(
     base: &str,
     tools: &mut [ToolSpec],
     client: crate::payment::PaidClient,
+    ready: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let Ok(Some(pricing)) = cfg.effective_pricing() else {
         return None;
@@ -244,7 +268,20 @@ fn dynamic_task(
         base,
         tools,
         load_dynamic(settings, pricing, client),
+        ready,
     )
+}
+
+/// Retain pricing ownership on proposed tools without starting metadata I/O.
+pub(crate) fn prepare_dynamic(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    client: crate::payment::PaidClient,
+) -> Option<tokio::sync::oneshot::Sender<()>> {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    dynamic_task(cfg, root, base, tools, client, Some(receive)).map(|_| send)
 }
 
 pub(crate) fn attach_static(
@@ -254,7 +291,20 @@ pub(crate) fn attach_static(
     tools: &mut [ToolSpec],
     gate: Option<Arc<network::DiscoveryCapacity>>,
 ) {
-    let _ = static_task(cfg, root, base, tools, gate);
+    let _ = static_task(cfg, root, base, tools, gate, None);
+}
+
+/// Attach ownership before publication, but defer pricing I/O until replacement
+/// definitions are published and the previous generation has retired.
+pub(crate) fn prepare_static(
+    cfg: &Config,
+    root: &Arc<Value>,
+    base: &str,
+    tools: &mut [ToolSpec],
+    gate: Option<Arc<network::DiscoveryCapacity>>,
+) -> Option<tokio::sync::oneshot::Sender<()>> {
+    let (send, receive) = tokio::sync::oneshot::channel();
+    static_task(cfg, root, base, tools, gate, Some(receive)).map(|_| send)
 }
 pub(crate) async fn refresh_static(
     cfg: &Config,
@@ -263,31 +313,10 @@ pub(crate) async fn refresh_static(
     tools: &mut [ToolSpec],
     gate: Option<Arc<network::DiscoveryCapacity>>,
 ) {
-    if let Some(task) = static_task(cfg, root, base, tools, gate) {
+    if let Some(task) = static_task(cfg, root, base, tools, gate, None) {
         let _ = task.await;
     }
 }
-pub(crate) fn attach_dynamic(
-    cfg: &Config,
-    root: &Arc<Value>,
-    base: &str,
-    tools: &mut [ToolSpec],
-    client: crate::payment::PaidClient,
-) {
-    let _ = dynamic_task(cfg, root, base, tools, client);
-}
-pub(crate) async fn refresh_dynamic(
-    cfg: &Config,
-    root: &Arc<Value>,
-    base: &str,
-    tools: &mut [ToolSpec],
-    client: crate::payment::PaidClient,
-) {
-    if let Some(task) = dynamic_task(cfg, root, base, tools, client) {
-        let _ = task.await;
-    }
-}
-
 async fn load_dynamic(
     settings: Config,
     pricing: PricingConfig,

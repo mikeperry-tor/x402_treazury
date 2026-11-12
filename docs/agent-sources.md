@@ -870,6 +870,20 @@ uses a fresh request/challenge and current payment admission. See the
 [selection and isolation decision](architecture.md#wallet-selection-and-network-isolation)
 for connection, cover-state and Tor reuse limitations.
 
+Published API definitions can refresh after a final unsigned target 404, 405 or 410,
+once existing recovery finishes; see
+[runtime source refresh](configuration.md#runtime-source-refresh). Signed target
+outcomes and relay-service failures are excluded; a decoded relay destination
+remains unsigned target evidence even if the relay fee was signed. Existing tools,
+search results and hints remain usable during refresh and after failure under their
+original expiry. Successful replacement retires old API handles and their hints. The
+original API call is never replayed. Refresh preserves the accepted registration
+settings and listener principal; a concurrent removal or newer revision prevents
+obsolete publication. Static clients may need to reload cached schemas.
+Initial and restored dynamic sources bind external price hints to the saved
+catalog acquisition expiry too; optional metadata acquisition cannot renew that
+expiry or restore estimates after it has elapsed.
+
 ## Persistence and operator maintenance
 
 The separate owner-only SQLite registry holds accepted specification bytes, hashes,

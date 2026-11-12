@@ -19,6 +19,8 @@ use std::{
 use tokio::sync::OnceCell;
 #[derive(Clone)]
 pub struct BoundTool {
+    #[doc(hidden)]
+    pub refresh: Option<Arc<crate::catalog_refresh::Binding>>,
     pub tool: ToolSpec,
     pub client: PaidClient,
     pub base: String,
@@ -246,11 +248,12 @@ impl BoundTool {
             let route = self.tool.route(&self.base, args)?;
             let (client, operation) = self.execution_scope();
             client
-                .execute_rendered_scoped(
+                .execute_rendered_refresh(
                     route,
                     operation,
                     self.tool.response_mapping.as_ref(),
                     &self.tool.image_limits,
+                    self.refresh.clone(),
                 )
                 .await
         }
@@ -274,6 +277,8 @@ pub struct CatalogState {
     publication_failed: std::sync::atomic::AtomicBool,
     snapshot: RwLock<Arc<CatalogSnapshot>>,
     instance: String,
+    #[cfg(test)]
+    pub(crate) before_publish: std::sync::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 impl Default for CatalogState {
     fn default() -> Self {
@@ -286,6 +291,8 @@ impl CatalogState {
             publication_failed: Default::default(),
             snapshot: RwLock::new(Arc::new(snapshot)),
             instance: uuid::Uuid::new_v4().to_string(),
+            #[cfg(test)]
+            before_publish: Default::default(),
         }
     }
     pub(crate) fn mark_publication_failed(&self) {
@@ -302,10 +309,11 @@ impl CatalogState {
     pub fn read(&self) -> Arc<CatalogSnapshot> {
         self.snapshot.read().expect("catalog lock poisoned").clone()
     }
-    pub(crate) fn replace_static(
+    pub(crate) fn replace_static_retiring(
         &self,
         expected: u64,
         mut snapshot: CatalogSnapshot,
+        retiring: Option<&crate::catalog_refresh::Binding>,
     ) -> Result<u64> {
         let mut current = self.snapshot.write().expect("catalog lock poisoned");
         anyhow::ensure!(current.generation == expected, "static_revision_changed");
@@ -315,11 +323,36 @@ impl CatalogState {
         );
         snapshot.generation = expected.checked_add(1).context("generation exhausted")?;
         let revision = snapshot.generation;
-        *current = Arc::new(snapshot);
+        self.install_snapshot(&mut current, snapshot, retiring);
         Ok(revision)
     }
     pub fn publish(&self, snapshot: CatalogSnapshot) {
-        *self.snapshot.write().expect("catalog lock poisoned") = Arc::new(snapshot);
+        self.publish_retiring(snapshot, None);
+    }
+    /// All fallible preparation precedes this boundary. Readers cannot observe
+    /// replacement definitions while their predecessor still admits new calls.
+    pub(crate) fn publish_retiring(
+        &self,
+        snapshot: CatalogSnapshot,
+        retiring: Option<&crate::catalog_refresh::Binding>,
+    ) {
+        let mut current = self.snapshot.write().expect("catalog lock poisoned");
+        self.install_snapshot(&mut current, snapshot, retiring);
+    }
+    fn install_snapshot(
+        &self,
+        current: &mut Arc<CatalogSnapshot>,
+        snapshot: CatalogSnapshot,
+        retiring: Option<&crate::catalog_refresh::Binding>,
+    ) {
+        if let Some(binding) = retiring {
+            binding.retire();
+        }
+        #[cfg(test)]
+        if let Some(observe) = self.before_publish.lock().unwrap().as_ref() {
+            observe();
+        }
+        *current = Arc::new(snapshot);
     }
 }
 pub fn bind(tools: Vec<(ToolSpec, PaidClient, String)>) -> Vec<BoundTool> {
@@ -335,6 +368,7 @@ pub fn bind(tools: Vec<(ToolSpec, PaidClient, String)>) -> Vec<BoundTool> {
                 .or_insert_with(|| Arc::new(binding))
                 .clone();
             BoundTool {
+                refresh: None,
                 tool,
                 client,
                 base,

@@ -450,6 +450,12 @@ impl ToolSpec {
 
     /// Present a current scoped observation without changing canonical catalog text.
     pub fn render_description(&self, observed: Option<crate::output::ObservedPrice>) -> String {
+        if self.advertised_pricing.invalidated() {
+            return self.description_rendering.as_ref().map_or_else(
+                || self.description.clone(),
+                |rendering| truncate_description(&rendering.base, rendering.max_chars),
+            );
+        }
         let fragment = observed
             .map(|observed| format!("Observed cost: ~${observed}/call."))
             .or_else(|| self.advertised_pricing.external_description());
@@ -688,10 +694,21 @@ impl LoadedCatalog {
     /// API sources must validate generation, routing and required completeness first.
     /// Cache failure is best effort; accepted content remains usable.
     pub async fn commit(&mut self) {
+        self.commit_if_current(None).await;
+    }
+
+    pub(crate) async fn commit_if_current(
+        &mut self,
+        advertisement: Option<crate::pricing::advertised::AdvertisedPricing>,
+    ) {
         if let Some(pending) = self.pending.take() {
             self.hints = pending
                 .committed
-                .get_or_init(|| pending.slot.write(pending.entry.clone()))
+                .get_or_init(|| {
+                    pending
+                        .slot
+                        .write_if_current(pending.entry.clone(), advertisement)
+                })
                 .await
                 .clone();
         }

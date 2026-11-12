@@ -7,6 +7,7 @@ mod local;
 pub mod policy;
 mod publication;
 pub(crate) mod raw;
+mod refresh;
 mod relevance;
 mod remote;
 pub(crate) mod source_details;
@@ -196,12 +197,17 @@ enum DirectoryFixture {
 }
 
 pub struct Manager {
+    self_weak: Weak<Self>,
+    refresh_tasks: tokio_util::task::TaskTracker,
+    refresh_bindings: Mutex<BTreeMap<(String, u64), Weak<crate::catalog_refresh::Binding>>>,
     #[cfg(test)]
     recheck_started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     #[cfg(test)]
     commit_barrier: Mutex<Option<CommitBarrier>>,
     #[cfg(test)]
     fixture_endpoint: Mutex<Option<String>>,
+    #[cfg(test)]
+    refresh_prepared: Mutex<Option<tokio::sync::oneshot::Sender<Vec<crate::catalog::ToolSpec>>>>,
     #[cfg(test)]
     fixture_directory: Mutex<Option<DirectoryFixture>>,
     #[cfg(test)]
@@ -337,6 +343,7 @@ impl Manager {
                 client: client.clone(),
                 base,
                 source: None,
+                refresh: None,
                 help: Arc::new(crate::catalog_state::HelpBinding::new(client.clone())),
             });
         }
@@ -345,6 +352,7 @@ impl Manager {
             client: client.clone().public_destinations(),
             base,
             source: None,
+            refresh: None,
             help: Arc::new(crate::catalog_state::HelpBinding::new(client.clone())),
         })
     }
@@ -411,11 +419,16 @@ impl Manager {
         .await??;
         let mut base = (*catalog.read()).clone();
         base.registrations = Default::default();
-        let manager = Arc::new(Self {
+        let manager = Arc::new_cyclic(|self_weak| Self {
+            self_weak: self_weak.clone(),
+            refresh_tasks: tokio_util::task::TaskTracker::new(),
+            refresh_bindings: Mutex::new(BTreeMap::new()),
             #[cfg(test)]
             recheck_started: Mutex::new(None),
             #[cfg(test)]
             fixture_endpoint: Mutex::new(None),
+            #[cfg(test)]
+            refresh_prepared: Mutex::new(None),
             #[cfg(test)]
             fixture_directory: Mutex::new(None),
             #[cfg(test)]
@@ -597,6 +610,7 @@ impl Manager {
                     client: payer.clone(),
                     base: built.base.clone(),
                     source: Some((record.id.clone(), record.revision)),
+                    refresh: Some(self.refresh_binding(record)),
                     help: previous_names
                         .get(target.as_str())
                         .and_then(|tools| tools.get(tool.name.as_str()).copied())
@@ -1204,7 +1218,7 @@ fn search_catalog_query(
     );
     let available = candidates.len();
     let values = relevance::rank_candidates(candidates, q.query.as_deref().unwrap_or_default());
-    page(
+    let result = page(
         values,
         &q,
         snapshot.generation,
@@ -1221,7 +1235,8 @@ fn search_catalog_query(
                     .collect::<Vec<_>>()
             )
         ),
-    )
+    )?;
+    Ok(result)
 }
 fn epoch() -> u64 {
     std::time::SystemTime::now()

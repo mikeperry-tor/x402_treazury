@@ -5,6 +5,7 @@ use x402_treazury::{catalog::ToolSpec, catalog_state::BoundTool};
 
 fn binding(h: &Harness, method: &str) -> BoundTool {
     BoundTool {
+        refresh: None,
         tool: ToolSpec {
             advertised_pricing: Default::default(),
             catalog_hints: None,
