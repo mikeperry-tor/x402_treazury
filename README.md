@@ -9,9 +9,12 @@ network address to these API providers and to Coinbase infrastructure.
 
 **x402_treazury** reduces that linkability with **Zcash-funded rotating wallets** and **Tor isolation tied to each payment identity**. You choose which providers share a wallet and which stay separate.
 
-The `x402_treazury` cli tool loads x402 provider API catalogs, converts them into MCP tools, handles x402 payments, and replenishes Base USDC wallets, without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
+The `x402_treazury` cli tool loads x402 provider API catalogs, converts them into
+MCP tools, handles x402 payments, and replenishes Base USDC wallets, without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
 
-You can also optionally grant your agent a set of tools to discover and add x402 providers themselves.
+You can also optionally grant your agent a set of tools to discover and add x402 providers themselves, and as a separate additonal option, to send and receive cryptocurrency on any blockchain supported by Near Intents, using shielded ZEC swaps.
+
+You can set custom financial limits on all of these transactions.
 
 ## How it works
 
@@ -22,54 +25,66 @@ You can also optionally grant your agent a set of tools to discover and add x402
 > `x402_treazury` reduces wallet and network linkability; it does not make payments
 > invisible. The Zcash to USDC funding path uses **public NEAR swaps and public Base
 > transactions**. These are visible, but unlinkable to your Zcash shielded
-> address. Because of the $2 minimum swap size, each wallet will make multiple API
-> calls before rotation. Identifying request contents across these rotations can
-> also link activity.
+> address. Because of the Near Intents ~$2 minimum swap size, each wallet will make
+> multiple API calls before rotation. Timing correlation and identifying request
+> contents across wallet rotations can also link activity. x402_treazury schedules
+> wallet rotation swaps to decouple their execution from prior transactions, but
+> if Near Intents USDC swap volume is extremely low, this correlation will be easier.
+> You can also bind independent wallet groups to specific API collections, to reduce
+> content linkability.
 
-Each managed wallet group uses one small Base USDC reserve and an
-optional large reserve, without a separate active allocation. With optional
-bootstrap deferral, participating groups prepare after first API use and initially
-share the configured bootstrap group's payer. Funded retained wallets remain
-available for payments.
-Validated recent price estimates can choose the smallest sufficient wallet before
-the ordinary request. A reserve's first journaled payment makes it active and
-leaves its slot vacant; the previous active becomes retained. Ordinary authorized
-funding fills each vacancy independently of payment and retirement.
-Funding, confirmation and payment uncertainty are persisted across restarts.
+Each managed wallet group uses one small (~$2.50) Base USDC wallet pair, and an
+optional custom-denomination large wallet pair.
 
-A managed group's small slot defaults to a randomized $2-3 nominal range; an
-explicit empty large slot opts into $10-25. Set `funding_amount_usdc` for a fixed
-target, or `min_funding_amount_usdc` plus `max_funding_amount_usdc` for a custom
-inclusive range. Bridge-minimum redraws stay within the slot maximum. Actual
-spendable Zcash treasury funds govern enabled funding; the API payment cap is
-separate.
-
-For a small-only group, the first wallet and its first replacement together draw
-$4-6 nominal, averaging approximately $5 before bridge floors, fees and other
-costs. The first wallet becomes ACTIVE on its first journaled payment; its
-replacement becomes READY later. Allow headroom above the average, plus ongoing
-use and any large reserves. This is a capital estimate across two allocations,
-not a requirement to fund both at startup or a promise of $5 remaining spendable.
-See [reserve sizing](docs/configuration.md#reserve-sizing-and-fragmentation).
+API catalog pricing data and cached paid API prices are used to choose the
+smallest sufficient wallet for each paid x402 request. A ZEC swap is scheduled
+on a randomized timer (30-120 seconds) to create a new wallet address when one
+of the wallets in a group drops below a randomized threshold (5-25%) of its
+initial value.
 
 Payment requests, wallet-specific balance checks and swap jobs use the current
 payer wallet address as the Tor circuit isolation identity. Switching payers
-changes the Tor isolation identity. API catalog
-retrieval and llm help text use separate Tor identities
-grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
-uses remote DNS and has no direct-network fallback.
+changes the Tor isolation identity. API catalog retrieval and llm help text use
+separate Tor identities grouped by origin. Zcash treasury synchronization has
+its own identity. Tor mode uses remote DNS and has no direct-network fallback.
 
-The CLI uses explicit commands: `serve` starts MCP serving, `catalog tools` and
-`catalog tags` inspect API inventories, and `config show` / `config check` inspect
-and validate configuration. `wallet` manages the treasury; `sources inspect`
-reads persisted agent-added sources. Running `x402_treazury` without a command
-shows help. See the [command reference](docs/configuration.md).
+The CLI uses explicit commands: `serve` starts MCP endpoint serving, `catalog
+tools` inspects API inventories, `catalog warm` caches the API catalog, `wallet`
+manages the ZEC treasury and USDC wallet groups, `sources inspect` reads
+persisted agent-added sources. Running `x402_treazury` without a command shows
+help. See the [command reference](docs/configuration.md).
+
+## Choose a deployment
+
+| Path | Best for | Network | Starting cost |
+| --- | --- | --- | --- |
+| [Managed starter](examples/deployments/managed.toml) | Learning the model and making a first paid call | Direct | One $5 ZEC allocation plus fees and bridge costs |
+| [Research desk](examples/deployments/research_desk.toml) | Multi-domain research with task-oriented endpoints | Tor | One $5 ZEC allocation to start; fully funding all four independent wallet groups takes ~$20. |
+| [Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) | A complete packaged private Hermes Agent stack | Tor-routed TEE-verified private agent use | Same as Research Desk (uses this config by default) |
+
+The managed starter is the smallest readable configuration: one listener, one
+wallet group and one source. The research desk is the full selection described in
+[README_ADVANCED.md](README_ADVANCED.md). `comprehensive.toml` remains a smaller
+multi-listener example documented there.
+
+[Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) is maintained
+separately. It packages Hermes Agent, Tor-routed egress, confidential inference,
+a code executor and this project with Docker Compose. It adds its own requirements
+(Docker Engine 28+ with Linux containers, Compose 2.36+, make, Python 3, Linux
+GRE, fixed bridge networks, Teep and optional Tailscale Funnel), ships its own copy
+of `research_desk.toml`, and owns its version pins and
+support. Its copy can drift from this repository; use its documented release or
+tag. Stack and packaging issues belong there, and x402_treazury issues belong here.
+Its funding guidance includes headroom beyond the nominal ranges above.
+
+For the research desk, `$5 to start` means one initial bootstrap allocation; all APIs will work, but all will share an initial bootstrap wallet.
 
 ## Quickstart: Z-Cash Wallet with Dynamically Managed Tools
 
 The [managed starter](examples/deployments/managed.toml) exposes Exa web search,
 page contents and provider-management tools on `http://127.0.0.1:8000/mcp`, backed
-by one rotating wallet pool. Agents can [add public APIs](#agent-api-auto-discovery-and-tool-addition) that use that same pool;
+by one rotating wallet pool. Agents can
+[add public APIs](docs/agent-sources.md#agent-tools) that use that same pool;
 API registrations last until the process exits. Exa's catalog loads from its public
 OpenAPI specification; no Exa API key is required.
 
@@ -97,36 +112,28 @@ whitespace-only values fail startup. To allow unauthenticated access explicitly,
 set `auth = false` and omit `bearer_token_env` on that listener. Host checking must
 remain enabled when authentication is disabled.
 
+Send $5 worth of ZEC to the shielded receive address printed by initialization to cover
+the $3 upper initial nominal USDC bound plus source fees and bridge costs. Keep
+additional funds for future replacements. Each x402 API payment is capped at
+$0.50. Funding starts after the listener binds, so tools remain visible while
+funding is pending. Connect your MCP client with
+`Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
+
 To serve over Tor instead, start Tor Browser with its SOCKS listener at
-`127.0.0.1:9150`. Pass [the Tor and discovery-relay settings](examples/network/tor.toml):
+`127.0.0.1:9150` and pass [the Tor and discovery-relay settings](examples/network/tor.toml):
 
 ```sh
 target/release/x402_treazury serve \
   --network-config examples/network/tor.toml
 ```
 
-Or embed those settings once in the fresh local deployment and use the basic command:
-
-```sh
-cat examples/network/tor.toml >> examples/deployments/managed.local.toml
-target/release/x402_treazury serve
-```
-
 `--network-config` replaces the complete `[network]` policy and, when present,
-`[relay_fallback]` for that invocation. This Tor example enables configured paid relay fallback for catalog,
-document reads and built-in directory/Coinbase searches using the deployment’s
-existing payers. Actual API fallback requires explicit `api_requests = true`. Without the option, the managed starter uses its own settings.
-For treasury initialization over Tor, pass the same option to `wallet init`, or
-initialize using the deployment with the embedded policy.
-
-Send enough ZEC to the shielded receive address printed by initialization to cover
-the $3 upper initial nominal USDC bound plus source fees and bridge costs. The pool draws a
-randomized $2-3 USDC nominal reserve; NEAR bridge minimums can raise the
-operation's local floor within that range. Keep additional funds for fees and
-future replacements. Each payment is capped at
-$0.50. Funding starts after the listener binds, so tools remain visible while
-funding is pending. Connect your MCP client with
-`Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
+`[relay_fallback]` for that invocation. This Tor example enables configured paid
+relay fallback for catalog, document reads and built-in directory/Coinbase searches
+using the deployment's existing payers. Actual API fallback requires explicit
+`api_requests = true`. Without the option, the managed starter uses its own
+settings. For treasury initialization over Tor, pass the same option to
+`wallet init`, or initialize using a deployment with the embedded policy.
 
 The default key file lives with treasury state at `state/managed/wallet.key`;
 protect that directory because it contains both state and decryption material.
@@ -138,361 +145,14 @@ other exclusive wallet administration requires stopping it. See
 [wallet administration](docs/wallet-cli.md) and the
 [example choices](examples/README.md).
 
-## Comprehensive walkthrough: Zcash and Tor
-
-The [comprehensive deployment](examples/deployments/comprehensive.toml)
-provides four MCP endpoints and two intended wallet groups. All initially use the
-web group's payer and $0.10 per-payment cap. After the company group's first
-positive credit, social, company and toolbox share its separate payer and $0.50
-cap; web keeps its own group. Previously credited company groups route directly
-on restart, and later depletion never returns them to web:
-
-| Research context | Selected APIs | MCP endpoint |
-| --- | --- | --- |
-| Web | Exa, SocialFetch web/community tools, Google Trends | `http://127.0.0.1:6337/mcp` |
-| Social | SocialFetch social platforms, PDL people tools | `http://127.0.0.1:6338/mcp` |
-| Company | PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants, RelayShield security and phone reputation, NetIntel phone/IP/infrastructure intelligence | `http://127.0.0.1:6339/mcp` |
-| Toolbox | API discovery, direct calls and persistent agent-added tools | `http://127.0.0.1:6340/mcp` |
-
-SocialFetch's overlapping Reddit tools use different groups on the web and social
-endpoints after company's first credit. Company tools are explicitly selected by name to keep the agent's
-context focused.
-
-The company endpoint adds 12 selected RelayShield security tools: email breach and
-infostealer checks, identity graphs, vendor supply-chain risk, IP intelligence,
-ransomware risk, public secret exposure, domain identity risk scores, declared-stack
-CVE checks, counterparty wallet risk, SIM-swap checks and phone reputation.
-Phone reputation uses a [local companion catalog](providers/relayshield/phone-reputation.toml)
-for the route missing from the vendor's main schema. Its SIM-swap signals are cached
-for 24 hours; the separate carrier SIM-swap endpoint is included but vendor-documented
-availability problems may prevent a result. Neither missing findings nor degraded
-results establish safety. See [RelayShield caveats](providers/CAVEATS.md#relayshieldtoml--relayshield).
-
-Seven selected NetIntel tools add phone validation and formatting, IP threat
-reputation and combined reports, geolocation, WHOIS/RDAP registration data,
-cloud-provider detection and website technology fingerprinting. NetIntel phone intelligence complements RelayShield reputation;
-it does not establish scam history or live reachability. Advertised prices for
-these tools are $0.002-$0.20 per call, within company's eventual $0.50 cap; calls
-above web's initial $0.10 cap can be refused while company prepares.
-
-The social endpoint enables `discover_on_demand = true` because of its large
-number of tools. This [on-demand discovery mode](docs/agent-sources.md)
-initially advertises search/call wrapper tools; agents retrieve full tool
-descriptions and schemas as needed. The server's `instructions_text` mentions
-the available networks and explains the discovery workflow to help the agent
-find the tools without loading every definition into context.
-
-The toolbox endpoint enables
-[Agent API Auto-Discovery and Tool Addition](#agent-api-auto-discovery-and-tool-addition)
-using the company group (initially routed through web). Added APIs are saved in `state/privacy-sources.sqlite` and
-restored after restart; their tools are available only on the toolbox endpoint.
-
-### 1. Build x402_treazury and start Tor
-
-Run these commands from the repository checkout directory:
-
-```sh
-make build
-
-cp examples/deployments/comprehensive.toml examples/deployments/comprehensive.local.toml
-```
-
-The Makefile verifies the pinned Rust/Cargo toolchain and supplies protoc.
-Make builds require GNU Make 3.81+ and a POSIX shell. The engineering scope is
-Linux and macOS; Windows runtime and native validation work is deferred. See
-[portability guidance](docs/development.md#portability) for support and evidence
-boundaries.
-Zcash is always included; static-wallet deployments omit treasury configuration.
-Only synthetic proving and local consensus tests use opt-in Cargo features.
-See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
-
-The cargo download dependencies and Zcash proving parameters are downloaded
-outside of Tor routing by default.
-
-The build produces `target/release/x402_treazury`. For incremental development
-builds, use `make build-dev`; see
-[build storage options](docs/development.md#build-storage-options).
-
-Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
-the application. The [comprehensive deployment](examples/deployments/comprehensive.toml)
-connects to Tor Browser's `127.0.0.1:9150` SOCKS port. `x402_treazury` uses
-SOCKS username+password isolation, so it will not use the same Tor circuits
-as your web browsing traffic.
-
-For a dedicated daemon, use a listener such as `SocksPort 127.0.0.1:9050
-IsolateSOCKSAuth` and change `network.socks_endpoint` in your local deployment
-file. The endpoint accepts any IP literal or network name, so a Docker service
-such as `tor:9050` works; on Unix, use `unix:/absolute/path` for a Tor filesystem
-socket. That same file controls initialization, synchronization and serving.
-Keep Tor running throughout.
-
-### 2. Create the treasury
-
-```sh
-export X402_TREAZURY_CONFIG="examples/deployments/comprehensive.local.toml"
-target/release/x402_treazury wallet init
-```
-
-Initialization creates the configured wallet directory (`./state/privacy`),
-generates a seed, and discovers its birthday through Tor. It prints the treasury's
-shielded ZEC receive address.
-
-The default encryption key is `wallet.key` inside the wallet directory, with no
-password or OS-keychain protection. Anyone obtaining that directory obtains both
-state and decryption material.
-
-### 3. Start the MCP server
-
-Set the required `X402_TREAZURY_MCP_TOKEN`, then launch using the exported
-`X402_TREAZURY_CONFIG` path:
-
-```sh
-export X402_TREAZURY_MCP_TOKEN="treazury_bearer_auth_key_here"
-target/release/x402_treazury serve
-```
-
-`serve` synchronizes the treasury, discovers API catalogs, and funds
-USDC wallets in the background after listeners bind. This example initially
-prepares web only. A validated company/social/toolbox API invocation records
-company demand; independent randomized 30–120-second opportunities prepare it
-later without making API calls wait for swaps. Free responses and response-cache
-hits activate demand too; discovery, registration and metadata do not. With
-insufficient spendable ZEC, it keeps monitoring and retries funding automatically. You can
-deposit ZEC before starting it or at any time afterward.
-
-> **NOTE: Single Instance Only**
->
-> Run only one `serve` process per treasury directory. `wallet status` is safe to
-> run alongside it. See the [wallet reference](docs/wallet-cli.md) for other commands.
-
-API payments initially use **web's 0.10 USDC cap**, including company, social
-and toolbox. After company's first positive credit, those three contexts use
-**company's 0.50 USDC cap**. A cap refusal still records first-use demand; earlier
-captured calls finish under their original authority. These are per-payment caps,
-not total budgets.
-
-If the treasury is already funded, optionally run `wallet bootstrap` before
-`serve`. With this example it waits only for web's enabled reserve claims, without
-catalogs or listeners. Stop serving before running this exclusive command; it does
-not prepare company or activate participant demand.
-
-### 4. Fund the treasury and connect
-
-In another terminal, display the shielded receive address, saved balances and sync
-progress using the same deployment file:
-
-```sh
-export X402_TREAZURY_CONFIG="examples/deployments/comprehensive.local.toml"
-target/release/x402_treazury wallet status
-```
-
-Send ZEC to that **shielded receive address**. Initial setup funds one web wallet
-with a **$2–3 nominal USDC allocation**. Cover the $3 upper bound plus source fees
-and bridge costs, with additional capital for company preparation, relay payments
-and future replacements. Both groups' eventual configured initial allocations
-sum to $4–6 nominal; that is also the initial range with bootstrap deferral disabled.
-These amounts exclude fees and are neither guaranteed credit nor lifetime costs.
-
-The approximately $5 per-group estimate for the first small wallet and its later
-replacement covers two allocations ($4–6 before bridge floors and fees), not this
-one-wallet setup. The first payment makes the READY wallet ACTIVE and opens its
-replacement vacancy. Allow headroom above the average: two draws can total $6,
-and bridge floors can bias nominal amounts upward.
-
-The example enables this policy:
-
-```toml
-[wallet_bootstrap]
-bootstrap_group = "web"
-deferred_groups = ["company"]
-```
-
-Comment out the whole table to fund both declared groups normally and use
-separate payers from the beginning. Other nonparticipating managed groups retain
-ordinary funding when the table is present. Existing funds and historical links
-are not moved or erased. Removing a listener alone does not disable its declared
-managed group.
-
-Separate initial addresses avoid direct payer reuse, but closely spaced swaps
-still provide a funding-time correlation signal. First-use activation and
-randomized later opportunities can weaken that signal. Bootstrap payments use a
-visibly common payer; timing, amounts, providers, request content and settlement
-can still correlate activity. Delayed funding does not erase earlier links or
-provide an unlinkability guarantee.
-
-While enabled reserve claims need funds, `serve` discovers later ZEC deposits
-and confirmations at its shared observation cadence, then funds the managed USDC
-wallets when the SDK can spend them. Available tools remain accessible during
-funding; paid calls use existing eligible payers under their payment authority.
-Saved balance estimates do not prevent an otherwise permitted signature. A
-wallet's first positive USDC observation consumes its initial claim, even below
-its nominal minimum, and never authorizes a top-up.
-
-Startup performs finite balance discovery behind bound listeners. Fully funded
-idle serving does not watch for incoming transfers. `wallet status` reads saved
-observations without network traffic; an idle deposit may remain absent until
-startup, explicit `wallet sync` with serving stopped, or another relevant trigger.
-See the [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy)
-for the discovery scopes and unavailable-treasury exception.
-
-The comprehensive example uses a [paid discovery relay](docs/configuration.md#relay-fallback)
-over Tor when catalog requests are blocked, rate limited or time out.
-Relay fees depend on the configured provider and request; relay-dependent catalogs
-appear when their effective payer becomes usable. With bootstrap policy enabled,
-metadata and directory relay fees always use web without activating company
-funding, overriding `relay_fallback.wallet`. Without bootstrap policy, an explicit
-relay wallet selects the payer for static discovery.
-
-Connect your MCP client to the endpoint(s) in the table above, authenticating with
-`Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
-
-To stop, press Ctrl-C once and allow the announced transaction-safety drain to finish.
-
-> **NOTE: Advanced Wallet Commands**
->
-> For manual wallet bootstrapping, funding failures, refunds, backup restoration and RPC configuration, use the
-> [wallet reference](docs/wallet-cli.md) and [rotation guide](docs/wallet-rotation.md).
-> For bounded paid test runs, use the [live integration runbook](tests/live/INTEGRATION.md).
-
-## Using Expensive APIs
-
-The comprehensive example initially uses web's $0.10 payment cap everywhere.
-Company/social/toolbox calls switch to company's $0.50 cap after its first credit.
-The selected RelayShield tools advertise $0.05-$0.40 per call, so some can be
-refused during preparation even though they fit the later company cap. Larger company/grant
-queries and result batches can still exceed it. Increase `max_api_payment_usdc`
-on the relevant wallet group to authorize larger individual payments; live
-challenges determine the actual amount.
-
-If any of your APIs cost more than **$0.50 per call**, consider
-adding a large reserve wallet to that wallet group.
-
-> **NOTE: Why Separate Large Wallets?**
->
-> We provide a separate large wallet option for expensive APIs (rather than simply increasing the small wallet `funding_amount_usdc`), because this uses fewer API calls per rotation of both wallets, which reduces usage tracking and linkability.
-
-To enable a large reserve wallet for a wallet group, add an empty `[wallets.NAME.reserves.large]` stanza. It opts into the randomized $10-25 nominal default; set `min_funding_amount_usdc` and `max_funding_amount_usdc` to choose a custom range. Reserve ranges authorize nominal USDC sizing only; actual spendable treasury funds govern funding, and the SDK calculates transaction fees.
-
-When sizing the large wallet, aim for a **4x multiple of your largest expected API payment**. For example, a $2.50 maximum API payment suggests at least **$10**, which is the lower end of the default $10-25 large range:
-
-```toml
-# Add a large wallet to the company group in examples/deployments/comprehensive.toml
-[wallets.company.reserves.large]
-# Default randomized nominal funding: $10-25.
-```
-
-> **NOTE: Why 4X Sizing?**
->
-> Ensuring that wallets only serve payments up to 25% of their initial allocation
-> size reduces the risk of fragmentation: balances left across several wallets
-> cannot be combined for one payment. Retained balances can still serve smaller
-> calls, but selection may also keep cheap calls on a sufficient large wallet.
-> See the [fragmentation examples and bounds](docs/configuration.md#reserve-sizing-and-fragmentation) for the detailed math and assumptions.
-
-## Wallet Sharing and Automatic Assignment
-
-A wallet group determines which API calls reuse a payment identity until rotation.
-Grouping related tools saves funding overhead; separate pools reduce address reuse
-across those groups. Sharing the same wallet profile also shares its current
-payment-related Tor isolation identity.
-
-| Arrangement | Wallet sharing |
-| --- | --- |
-| One wallet for the deployment | All selected APIs share one pool |
-| One default wallet per MCP server | APIs on each server share a pool |
-| One wallet per source | A source shares its pool across listeners |
-| Several sources reference one wallet | Your own provider groups |
-| One wallet per server/source binding | Separate pool for each binding |
-
-You may want to create many independent and Tor-isolated wallet groups with the same settings, rather than using the same group for multiple MCP server endpoints. This is accomplished using **wallet templates**.
-
-A **wallet template** defines reusable settings that can be applied to any wallet group to set
-payment cap, reserve sizes, and funding safeguards to common values. The template itself creates
-no wallets. A `wallet_assignment` policy chooses where to create separate groups
-using those template settings: per deployment, MCP server, source or server/source binding.
-
-Each generated group has its own wallets and payment identity; using the same
-template does not make the groups share funds or addresses.
-
-For example, this `research` template gives each listener its own group with the
-default $2-3 small and $10-25 large nominal ranges. It permits payments up to
-$2.50, following the 4x large-wallet sizing guidance above:
-
-```toml
-[wallet_templates.research]
-mode = "zcash_rotation"
-max_api_payment_usdc = "2.50"
-max_retirement_remainder_usdc = "0.001"
-
-[wallet_templates.research.reserves.small]
-# Default randomized nominal funding: $2-3.
-
-[wallet_templates.research.reserves.large]
-# Default randomized nominal funding: $10-25.
-
-[wallet_assignment]
-scope = "server" # deployment, server, source, or binding
-template = "research"
-```
-
-This is an alternative to explicit wallet assignments in either example. Remove
-those explicit wallet group assignments where you want the `wallet_assignment` policy to apply; explicit references
-retain priority.
-
-The retirement tolerance defaults to $0.001 independently per group; explicit
-`"0"` requires exact zero. Retired funds remain owned at their addresses. Positive
-tolerance has no cumulative stranded-funds cap.
-
-Each generated group in this example has a $12-$28 nominal USDC inventory range, so
-three automatically assigned listeners would have $36-$84 in combined nominal
-bounds. `config show` displays the resolved bindings and combined initial-inventory
-minimum and maximum before allocating anything. These bounds include any accepted
-bridge-minimum redraw within each slot maximum; fees and later replacements are
-additional. A successful credit below the nominal minimum still consumes that
-wallet's initial claim.
-
-See the [automatic assignment reference](docs/configuration.md#multiple-mcp-ports-from-one-configuration)
-and [comprehensive deployment](examples/deployments/comprehensive.toml) for
-multiple listeners sharing explicit named pools.
-
-## Agent Zcash payments and swaps
-
-Optionally let agents receive payments into your Zcash treasury and send ZEC or
-foreign assets from it. These tools are disabled by default. Native ZEC transfers
-use shielded Ironwood; foreign assets use NEAR swaps.
-
-Use an initialized `[treasury]` and an authenticated MCP endpoint (`auth = true`).
-Add this to your deployment file, replacing `research` with the endpoint name
-(`research` in the quickstart, `toolbox` in the comprehensive example):
-
-```toml
-[servers.research.swap_control]
-receive = true
-send = true
-max_send_zec = "0.05" # Optional per-send ZEC limit, including the network fee.
-```
-
-Enable `receive` and `send` independently. `max_send_zec` limits only sends and
-swaps through these tools; it does not limit managed wallet funding or other ZEC
-usage. Omit it or set it to `"none"` for no total-debit limit. Native ZEC needs no
-NEAR setup; foreign assets require the [NEAR swap settings](docs/configuration.md#direct-swap-control)
-under `[funding]`. Start or restart `serve` to expose the enabled tools.
-
-| Tool | Enabled by | What it does |
-| --- | --- | --- |
-| `x402_treazury_swap_assets` | Either flag | Search native ZEC and supported foreign assets by symbol, chain or keywords. |
-| `x402_treazury_payment_request_create` | `receive` | Create a fresh shielded ZEC receive address or a single-use foreign swap deposit request. |
-| `x402_treazury_swap_preview` | `send` | Preview an outgoing payment and whether its estimated total fits the send limit and spendable ZEC balance. |
-| `x402_treazury_swap_send` | `send` | Send native ZEC or swap treasury ZEC for a specified foreign amount. |
-| `x402_treazury_swap_status` | Either flag; retained for saved requests | Check sent payments or receive requests, including current UTC time and available expiry countdowns. |
-
-Foreign payers must send the **exact requested amount**, with network fees
-additional and any required memo included. Never reuse a swap receive address:
-another payment needs a new `request_id` and fresh quote/address. Native ZEC
-addresses may be reused, and partial receipts accumulate toward the requested
-amount. Saved requests remain accessible through status after disabling new sends
-or receives. See the [direct payment and swap reference](docs/configuration.md#direct-swap-control)
-for parameters and timing details.
+## Going further
+
+- [Advanced deployments](README_ADVANCED.md): research desk and comprehensive walkthroughs, Tor, bootstrap and relay details.
+- [Large reserves and expensive APIs](docs/configuration.md#reserve-sizing-and-fragmentation): sizing, fragmentation and the separate large-wallet rationale.
+- [Wallet sharing and automatic assignment](docs/configuration.md#multiple-mcp-ports-from-one-configuration): templates, scopes and examples.
+- [Agent Zcash payments and swaps](docs/configuration.md#direct-swap-control): optional receive/send tools and limits.
+- [Agent-added API providers](docs/agent-sources.md#agent-tools): discovery, registration and direct calls.
+- [Wallet CLI](docs/wallet-cli.md): treasury operations, funding limits and recovery.
 
 ## Adding API Providers
 
@@ -518,156 +178,16 @@ entire large catalog to the agent.
 For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to provide the agent with search+call wrapper tools instead of every API schema. Agents retrieve full
 descriptions and schemas as needed via the `x402_treazury_tools_search()` tool, and can
 make calls to discovered tools via the `x402_treazury_tool_call()` tool.
-
-See [on-demand discovery](docs/agent-sources.md) for more details.
-
-### Agent API Auto-Discovery and Tool Addition
+See [on-demand discovery](docs/agent-sources.md).
 
 Provider management lets agents find bundled providers or APIs through
 [x402 List](https://x402-list.com) and Coinbase resource search, then add tools to an
-MCP endpoint themselves. Known provider IDs and specification URLs can be registered
-directly; discovery and usage-help inspection are optional.
-
-The feature is disabled by default.
-
-Enable local management, remote management and raw URL calls independently inside
-a `[servers.NAME]` section, and name its
-existing `[wallets.NAME]` profile with `wallet`. Optional `source_registry_file`
-on that endpoint enables persistence.
-
-The [comprehensive deployment](examples/deployments/comprehensive.toml) enables
-this on its toolbox listener using the existing company pool. The
-[managed starter](examples/deployments/managed.toml) enables it on the research
-listener using its research pool. See the
-[agent source guide](docs/agent-sources.md#configuration-and-authority) for persistence
-and wallet sharing.
-
-Here is an example excerpt:
-
-```toml
-[servers.research]
-listen = "127.0.0.1:8000"
-bearer_token_env = "RESEARCH_MCP_TOKEN"
-wallet = "agent_shared" # defined elsewhere as [wallets.agent_shared]
-provider_management_local = true
-provider_management_remote = true
-remote_provider_directories = ["coinbase", "x402-list"]
-# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
-raw_url_calls = true
-source_registry_file = "../../state/agent-sources.sqlite" # optional; relative to this file
-# discover_on_demand = true # keep API definitions out of the advertised tool list
-```
-
-Directory requests and added APIs use the endpoint's wallet. Existing payment
-caps and endpoint tool filters apply.
-
-Registrations are
-shared by agents using the same MCP server endpoint, but are not visible on other MCP server endpoints.
-Agent tools cannot change your configured API sources, wallet settings, or spending limits.
-
-The endpoint advertises tools according to its enabled capabilities:
-
-| Tool | How the agent uses it | Permission and main inputs |
-| --- | --- | --- |
-| `x402_treazury_providers_list_local` | Finds reviewed bundled definitions with compatibility filters and repairs, offline. | Local management; optional `q`, `page`, `per_page`. |
-| `x402_treazury_providers_add_local` | Registers a prepared bundled definition. | Local management; exact `provider_id`, optional `name`. |
-| `x402_treazury_providers_search_remote` | Queries every configured directory concurrently. | Remote management and nonempty directory list; optional `q`, `limit`, `max_price_usd`. |
-| `x402_treazury_providers_add_remote` | Registers a public OpenAPI 3 JSON specification. | Remote management; `spec_url`, optional `name`. |
-| `x402_treazury_provider_details_remote` | Locates specifications/help or reads exact usage text. | Remote management; exactly one `base_url`, `documentation_url`, or `x402_list_id` (only with `x402-list` selected). |
-| `x402_treazury_tools_search` | Retrieves tool descriptions, schemas and readable IDs. | Either management capability or on-demand discovery; optional query, `source_name`, pagination. |
-| `x402_treazury_tool_call` | Invokes a current tool with normal payment checks. | Same as tool search; readable `tool_id` and matching `arguments`. |
-| `x402_treazury_raw_call` | Calls a documented public HTTPS API URL. | Raw URL permission; `method`, `url`, optional query parameters and JSON body. |
-
-For offline discovery, call `providers_list_local` with `{"q":"web search"}`,
-then `providers_add_local` with `{"provider_id":"exa"}`. Bundled sources preserve
-reviewed compatibility settings and default to short names such as `dyn_exa__search`.
-Bundled metadata does not establish current reachability or live qualification.
-
-For remote search, use `providers_search_remote` with `{"q":"weather","limit":3}`.
-The operator selects directories: `coinbase` includes curated and non-curated
-resources, `coinbase_curated` searches only the curated subset, and `x402-list`
-uses balanced ranked search. Each configured directory receives the requested
-limit (default 5, range 1–20). Results are grouped by those identifiers, preserving
-complete native JSON, unknown fields and partial-result indicators. A directory
-failure appears as an explicit `local_error` value while successful siblings remain
-intact. One search can authorize multiple directory or relay charges; failed,
-empty or partial results do not trigger automatic federation replay.
-
-A documented HTTP request can use `raw_call` when enabled; a published OpenAPI URL
-can use `providers_add_remote`. Optional
-`provider_details_remote(documentation_url=...)` reads a published usage link.
-Configured relay fallback can charge for that read. If only a resource URL is
-known, try its origin root as `base_url`; this probes documentation locations,
-not the business operation, and can miss docs under another path or host.
-Prefer an explicitly documented API base. Missing contracts remain missing:
-do not guess paid arguments.
-
-Coinbase origin search needs no API key. Tor uses one origin attempt plus
-`network.tor_isolation_retries` fresh attempts (default two). Configured
-`[relay_fallback.relays]` method lists enable runtime fallback using the
-endpoint’s payer. `source_discovery` defaults true for built-in directories,
-`provider_metadata` defaults true for schemas/help, and `api_requests` defaults false
-for actual API data. Set the applicable preference false to disable its fallback.
-With no relay section, requests use only the origin.
-See the [relay bootstrap settings](docs/configuration.md#relay-fallback).
-Connections to relays retain the configured Tor/direct policy. Relays fetch from
-their own networks; their redirect policy, unreported hops and plaintext content
-remain trusted. Requested and reported destinations are checked against the
-caller’s policy. Every search is fresh and repeating fallback may authorize
-another payment. Valid empty/partial results do not trigger fallback; never
-automatically replay an uncertain paid search.
-
-Supply a readable source name when registering: `name = "netintel"` creates tools
-such as `dyn_netintel__ip_reputation_analyze`. Names are preserved exactly and are
-case-sensitive; `__` is reserved as the separator. Search with
-`{"source_name":"netintel"}` and call the returned `tool_id`.
-Use `dyn_netintel__*` for source-specific tool filters. Existing ID-based filters
-must be updated explicitly; they are not rewritten.
-
-By default, registered API tools also appear in the endpoint's tool list; clients may cache that list. Tool IDs remain usable across turns and restarts while available.
-
-Set `discover_on_demand = true` to keep API definitions out of the advertised
-tool list and let clients retrieve schemas as needed. Search/call wrappers and
-independently enabled management/raw tools remain advertised. Tool arguments and the API discovery
-workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).
-
-With `source_registry_file` set, accepted specifications are saved and restored on restart;
-without it, additions last only until the process exits.
-
-To view saved API sources and each source's tool names, HTTP methods and paths:
-
-```sh
-export X402_TREAZURY_CONFIG="path/to/deployment_config.toml"
-target/release/x402_treazury sources inspect
-```
-
-Each source's `tools` list is rebuilt offline from its saved specification and
-accepted settings or generic selection, before current listener filters. Disabled sources still show their
-saved tools; removed sources have an empty list. An unreadable saved catalog has
-`tools: null` and a `tools_error` instead. For current callable tools and full
-schemas, use `x402_treazury_tools_search` on the owning MCP endpoint.
-
-Saved API specifications do
-not automatically follow vendor updates; they must be updated manually.
-
-First, stop the server, then:
-
-```sh
-target/release/x402_treazury sources refresh --server research --source SOURCE_ID_OR_NAME
-```
-
-To remove a source:
-
-```sh
-target/release/x402_treazury sources remove --server research --source SOURCE_ID_OR_NAME
-```
-
-Use an exact saved ID or name with `--source`. To remove every saved source on
-that endpoint, use `sources remove --server research --all`.
-Removal revokes API access without network or wallet work and preserves financial journals.
-
-See the [configuration and authority reference](docs/agent-sources.md#configuration-and-authority)
-for import restrictions, limits and endpoint permissions.
+MCP endpoint themselves. The feature is disabled by default; enable local
+management, remote management and raw URL calls independently on an endpoint with
+an explicit existing `wallet`. Optional `source_registry_file` enables persistence.
+Agent tools cannot change configured API sources, wallet settings or spending
+limits. See [configuration and authority](docs/agent-sources.md#configuration-and-authority)
+and the [agent tool table](docs/agent-sources.md#agent-tools).
 
 ## Experimental HTTP/2 cover traffic
 
@@ -688,10 +208,13 @@ sources do not automatically authorize cover traffic. See the
 
 | Guide | What it covers |
 | --- | --- |
+| [Advanced deployments](README_ADVANCED.md) | Research desk, comprehensive example, Tor and bootstrap walkthroughs |
+| [Examples](examples/README.md) | Deployment choices, wallet groups, ports and source selections |
 | [Configuration](docs/configuration.md) | Sources, listeners, filters, pricing and transport options |
 | [Wallet CLI](docs/wallet-cli.md) | Treasury operations, funding limits and recovery |
 | [Wallet rotation](docs/wallet-rotation.md) | Admission, reserve claims, retained capacity and durable accounting |
 | [Network isolation](docs/network-egress.md) | Tor identities, connection pools and egress boundaries |
+| [Provider caveats](providers/CAVEATS.md) | Current provider support boundaries and uncertainty |
 | [Development](docs/development.md) | Tests, coverage and complexity tools |
 | [Documentation index](docs/README.md) | Architecture, demos, plans and further references |
 

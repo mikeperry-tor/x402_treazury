@@ -1,10 +1,13 @@
 # Documentation
 
 The [project README](../README.md) is the entry point for setup, TOML configuration
-and CLI usage. Maintained implementation and operational explanations live here:
+and CLI usage. [Advanced deployments](../README_ADVANCED.md) cover the multi-listener
+examples. Maintained implementation and operational explanations live here:
 
 | Guide | Subject |
 | --- | --- |
+| [Advanced deployments](../README_ADVANCED.md) | Research desk and comprehensive walkthroughs, Tor and wallet bootstrap |
+| [Deployment examples](../examples/README.md) | Example choices, wallet groups, ports and source selections |
 | [Provider updates](provider-updates.md) | Public evidence and pricing capture, comparison and reviewed provider maintenance |
 | [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |

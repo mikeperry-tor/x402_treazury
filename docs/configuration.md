@@ -1,8 +1,9 @@
 # Configuration reference
 
 Start with the [managed-wallet quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools);
-the README also provides a comprehensive Zcash-and-Tor walkthrough.
-This reference covers TOML composition, tool selection, transport and pricing.
+[advanced deployments](../README_ADVANCED.md) cover the multi-listener Zcash-and-Tor
+walkthroughs. This reference covers TOML composition, tool selection, transport and
+pricing.
 Commands run from the repository root. The executable requires an explicit
 subcommand; running it without arguments displays help and never starts serving.
 
