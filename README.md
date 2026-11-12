@@ -67,15 +67,12 @@ wallet group and one source. The research desk is the full selection described i
 [README_ADVANCED.md](README_ADVANCED.md). `comprehensive.toml` remains a smaller
 multi-listener example documented there.
 
-[Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) is maintained
-separately. It packages Hermes Agent, Tor-routed egress, confidential inference,
-a code executor and this project with Docker Compose. It adds its own requirements
-(Docker Engine 28+ with Linux containers, Compose 2.36+, make, Python 3, Linux
-GRE, fixed bridge networks, Teep and optional Tailscale Funnel), ships its own copy
-of `research_desk.toml`, and owns its version pins and
-support. Its copy can drift from this repository; use its documented release or
-tag. Stack and packaging issues belong there, and x402_treazury issues belong here.
-Its funding guidance includes headroom beyond the nominal ranges above.
+[Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) is
+maintained separately. It packages Hermes Agent, Tor-routed egress,
+validated TEE confidential inference, a code executor, and this project.
+It adds its own requirements (Docker Engine 28+ with Linux containers, Compose
+2.36+, make, Python 3), and it pins the versions of each componentt. Stack and
+packaging issues belong there, and x402_treazury issues belong here.
 
 For the research desk, `$5 to start` means one initial bootstrap allocation; all APIs will work, but all will share an initial bootstrap wallet.
 
