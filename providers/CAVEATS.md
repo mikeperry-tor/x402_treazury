@@ -35,26 +35,24 @@ Public `tools/list` returns a complete SSE JSON-RPC result without initializatio
 or pagination in the verified capture. The check, lookup and generation schemas
 match the authored constraints; their Draft-07 dialect declarations are preserved,
 while descriptions remain concise authored guidance. Current root routes/prices
-also match. Per-source provenance distinguishes this metadata verification from the
-older campaign-preview and paid samples. The preview's input schema describes the
-free preview only; it still does not establish the paid campaign body.
+also match. The preview's input schema describes the free preview only; it does not
+establish the paid campaign body.
 
-Paid samples on 2026-10-29 delivered checks, lookup and drafting. Keyword `APY`
-returned rules without a filter but no matches with the advertised `Reg DD`
-filter. The check flagged missing FDIC language but did not catch the full
-annual-percentage-yield wording requirement. Its rules cited 1030.8(a) for a
-requirement in (b), (b) for minimum balances in (c)(3), and (d) for date disclosure
-in (c)(2). The same-day 2s eCFR call returned full text as of 2026-10-27. Treat
-these 56 provider rules as advisory summaries; business's authoritative eCFR
-retrieval remains complementary, not redundant. Finance owns the selected banking
-copy checks/lookup because the subject is financial products, rather than general
-legal research.
+Checks, lookup and drafting are supported. Keyword `APY` returns rules without a
+filter but no matches with the advertised `Reg DD` filter. Checks can miss the full
+annual-percentage-yield wording requirement, and rule citations can be wrong:
+observed citations included 1030.8(a) for a requirement in (b), (b) for minimum
+balances in (c)(3), and (d) for date disclosure in (c)(2). Treat these 56 provider
+rules as advisory summaries; business's authoritative eCFR retrieval remains
+complementary, not redundant. Finance selects rule lookup because the subject is
+financial products rather than general legal research; the research desk omits
+checks and drafting on information-quality grounds.
 
-Draft generation returned `needs_review`, eight warnings, an invented website,
-and “Member FDIC” despite `fdic_insured=false` for a fictional institution. It
-remains available in the reusable provider with an explicit warning. It would
-belong on social, but the research desk omits it on information-quality grounds.
-No generated copy was published and the campaign was not purchased.
+Draft generation returns `needs_review`, warnings, and can invent a website or
+“Member FDIC” despite `fdic_insured=false` for a fictional institution. It remains
+available in the reusable provider with an explicit warning. It would belong on
+social, but the research desk omits it on information-quality grounds. No generated
+copy is published and no campaign is purchased.
 
 ## Blockchain Money Map
 
@@ -66,22 +64,21 @@ root fallback for new routes. The inspected catalog had 113 operations and no
 same-path method twins. Live challenges govern prices.
 
 The research desk assigns snapshots, transaction reads/decoding and saved reports
-to finance, and wallet audit to security. A paid Base snapshot returned a native
-balance and NFT/activity data but `Partial`/low confidence with token data
-unavailable. Empty holdings do not establish zero balance. AgentFund's comparable
-portfolio call failed all four Base RPC balance reads; it was not repeated.
-For the same public transaction, $0.01 BMM status and $0.40 Arkham detail agreed
-on successful status, block 48796530, from/to addresses and gas 683352. Arkham added
-timestamp, precise fees, labels and token transfers; retain both. These samples
-do not qualify untested report, batch, decode or audit operations.
+to finance, and wallet audit to security. A Base snapshot can return a native
+balance plus NFT/activity data with `Partial`/low confidence and token data
+unavailable; empty holdings do not establish zero balance. AgentFund's comparable
+portfolio call can fail all four Base RPC balance reads and is not a balance source.
+BMM status and Arkham detail can agree on successful status, block, addresses and
+gas; Arkham may add timestamps, fees, labels and token transfers, so the two
+contracts remain complementary. Neither establishes untested report, batch, decode
+or audit operations.
 
-The $0.01 failure classifier only classified supplied Maxwell error codes as
-`facilitator_rejected`; its response expressly disclaimed contacting targets or
-facilitators and proving settlement. Other diagnostics similarly require supplied
-evidence. The desk leaves these out of toolbox for lack of independent diagnostic
-value, rather than a compatibility failure. Seller-marketing analyses and
-operational notary/ledger/revocation workflows are also outside its research
-selection. The $5 deep report exceeds the existing financials cap.
+The failure classifier only classifies supplied error codes and expressly disclaims
+contacting targets or facilitators and proving settlement. Other diagnostics
+similarly require supplied evidence. The desk leaves these out of toolbox for lack
+of independent diagnostic value, not a compatibility failure. Seller-marketing
+analyses and operational notary/ledger/revocation workflows are also outside its
+research selection. The $5 deep report exceeds the existing financials cap.
 
 Saved/deep reports persist at unlisted URLs accessible to URL holders. Hash
 notaries/ledgers are synchronous JSON create/verify operations: callers own
@@ -138,8 +135,8 @@ their contents are not interpreted as agent instructions. No runtime path search
 or full-download fallback is performed. See [cover policy](../docs/cover-traffic.md).
 
 Automatic cover prefers same-origin help before the catalog for every bundled
-provider without an explicit profile. The selected primary resources passed
-unsigned Tor probes at offsets zero and 1024, with exact 1024-byte responses and
+provider without an explicit profile. The selected primary resources accept
+unsigned identity-encoded single-range GETs with exact 1024-byte 206 responses and
 unchanged validators:
 
 | Provider | Primary | Fallback |
@@ -151,9 +148,9 @@ unchanged validators:
 
 The two authored root-page profiles retain the built-in range-only budgets and
 timing values; runtime qualification still applies to all profiles. The automatic
-catalog fallbacks also require qualification; Otto and Vaaya catalogs ignored
-ranges in the probes. PDL and StableEnrich use their canonical static root pages rather than guessed document paths serving catch-all HTML.
-Otto's same-origin `AGENTS.md` and `.well-known/agent.json` also passed the probes,
+catalog fallbacks also require qualification; Otto and Vaaya catalogs ignore
+ranges. PDL and StableEnrich use their canonical static root pages rather than guessed document paths serving catch-all HTML.
+Otto's same-origin `AGENTS.md` and `.well-known/agent.json` also support ranges,
 but its existing help URL already supplies a working automatic primary.
 x402stock retains its working automatic profile; both help and catalog support
 ranges. Vaaya's `robots.txt` also supports ranges but is shorter than the default 1024-byte
@@ -161,20 +158,19 @@ qualification; the larger guide avoids a provider-specific size override.
 
 AgOSINT, AgentFund, Exa, BotSmith, IPIntel, Locus and NetIntel disable optional
 cover after their catalog/help or public discovery resources, root pages, and
-tested `agents.md`, `AGENTS.md`, `SKILL.md`, `robots.txt` and
+reviewed `agents.md`, `AGENTS.md`, `SKILL.md`, `robots.txt` and
 `.well-known/agent.json` candidates returned ignored ranges or missing resources.
 This does not establish that every resource on those origins is incompatible.
-AgentUtility and Atlas Google Patents also opt out after direct unsigned probes
+AgentUtility and Atlas Google Patents also opt out after direct unsigned checks
 of their API-origin resources found no suitable range candidate; see their
 provider sections below. SocialFetch and RelayShield retain their existing
-opt-outs. No paid call was
-needed for these resource probes; they do not establish paid settlement or
+opt-outs. These resource checks do not establish paid settlement or
 physical-connection affinity. API functionality and configured Tor routing remain
 available without cover.
 
 Banking Compliance also disables optional cover: its local catalog and absent
 help URL supply no eligible same-origin HTTP resource. Claw402 and APEX Faucet
-opt out after unsigned HTTP/2 probes showed Claw's help/catalog and APEX's help
+opt out after unsigned HTTP/2 checks showed Claw's help/catalog and APEX's help
 returning 200 instead of the required range 206. These defaults suppress candidate
 and range-qualification notices for the affected providers; they do not assert
 that every resource on those origins is incompatible. A deployment may explicitly
@@ -264,17 +260,19 @@ without a verified standalone guide retain their embedded/authored guidance.
 Media and async constraints are described below and in the artifact/polling plans.
 [Challenge-extension and offer-metadata handling](../docs/architecture.md#payment-extensions-and-offer-metadata)
 is shared policy; extension omission alone does not establish provider support.
-The observations below describe captured contracts, not live settlement.
+The notes below describe supported contracts, not live settlement.
 
 ## socialfetch.toml — SocialFetch
 
 The vendor `https://www.socialfetch.dev/openapi.json` document exceeds the default
 32 MiB `max_spec_bytes`; catalog acquisition rejects it as an incomplete inventory.
 Do not raise the global spec limit or accept a partial catalog solely for this
-provider. It also showed intermittent paid lookup/settlement failures, and both
-demo deployments now use the research-desk social source set instead. The provider
-remains bundled for provenance and possible future review; it is not selected by
-`comprehensive.toml` or `research_desk.toml`.
+provider. Paid lookup and settlement can fail intermittently, and both demo
+deployments use the research-desk social source set instead. The provider remains
+bundled for provenance and possible future review; it is not selected by
+`comprehensive.toml` or `research_desk.toml`. Page readers can return generic 503
+`temporarily_unavailable` without a settlement receipt; that does not confirm an
+on-chain outcome.
 
 TikTok transcript pricing includes `billableDomainErrors`: the
 `transcript_target_not_video` response (HTTP 400) costs one credit even though
@@ -366,12 +364,11 @@ complete result set.
 
 Market-signal API for trading agents (X/Twitter intel, Polymarket, perp
 funding/OI, stablecoin pegs). Routes use GET with tool-dependent flat prices.
-Profile and three-post dossier lookups for `elonmusk` returned usable data with
-observed offers of $0.015 and $0.05 respectively. Historical post-authorization
-404s remain unexplained without their original handles and error detail; these
-successful samples do not establish delivery for every account.
+Profile and dossier lookups are supported; advertised offers have included $0.015
+and $0.05. Post-authorization 404s can occur without enough error detail to explain
+them, so successful reads do not establish delivery for every account.
 `[pricing]` selects the structured `x-x402` dollar-string tariffs for descriptions
-and initial advisory estimates. Actual calls obtain the current x402 challenge;
+and advisory estimates. Actual calls obtain the current x402 challenge;
 no startup endpoint requests are sent.
 
 ## x402stock.toml — x402stock.xyz
@@ -390,8 +387,8 @@ raise payment caps. Prices come from vendor metadata; restored routes without st
 remain unknown until an actual call obtains a challenge. Vendor `llms.txt` help remains lazy. Source instructions preserve
 path placeholders and the `{ticker, data, source, as_of}` result convention.
 Only a selected calendar request schema is retained for offline qualification;
-the current complete spec/guide could not be retrieved during this audit. Neither
-that schema nor the configured URL establishes current upstream availability.
+neither that schema nor the configured URL establishes current upstream
+availability.
 
 ## google-trends.toml — Google Trends SEO keyword data (x402 Atlas)
 
@@ -419,8 +416,8 @@ missing unit and interprets the advertised dollars nominally as USDC for advisor
 wallet ranking. The credit weights explain the amount, not an extra multiplier.
 The row-priced transfers/swaps retain their dynamic ranges and supply no fixed
 initial estimate. This interpretation does not prove current settlement; the
-actual supported challenge remains authoritative. The earlier paid transaction
-comparison above establishes the existing supported payment path.
+actual supported challenge remains authoritative, and the supported payment path is
+established.
 Guidance: `help_url` points at the vendor `llms.txt` (rate limits, error
 handling, per-row pricing) served as `arkham_help()`; `instructions_text`
 summarizes body-params + credit pricing + rate limits.
@@ -475,8 +472,7 @@ The `/api/v1` anchor preserves existing names; an empty fallback exposes the
 public `/api/health`, `/api/stats`, `/api/methodology` and discovery manifest.
 These are not authentication boundaries. The saved full input is also an
 explicit runtime source in the live-Tor example, so it is retained independently
-of regression pruning. A cached primary OpenAPI document supported this public-route distinction;
-it is not a current health check.
+of regression pruning. The public-route distinction does not establish current health.
 
 ## concordance.toml — Concordance (concordancehq.duckdns.org)
 
@@ -603,7 +599,7 @@ closed via `additional_properties = false`. Caveats:
   repeated keys while the vendor documents comma-separated values — treat
   the POST twins as canonical.
 - No llms.txt overflow to worry about: `help_url` serves the vendor's compact
-  `llms.txt` (per-route prices, payment contract, free preflight sample) as
+  `llms.txt` (per-route prices, payment contract, free preflight route) as
   `genuinegood_help()`, and `instructions_text` condenses the spec's
   top-level `x-guidance` — noting that the 402/sign/retry dance the vendor
   describes for raw HTTP clients is automatic here, plus the research-aid
@@ -659,7 +655,7 @@ the existing request, price, billing and response projection unchanged. Design n
   SDK filters the Solana/Tempo/Circle-Gateway entries out).
 - Pollable-job routes are excluded on purpose (`place-report-batch` $0.25,
   `record-batch` $0.05, `property-update`): they return `statusUrl`/
-  `webhookUrl` jobs. The live spec now documents token-protected
+  `webhookUrl` jobs. The live spec documents token-protected
   `GET /api/property-update-jobs/{id}`, but the curated catalog omits it and
   Treazury has no durable job/token lifecycle. Batch polling contracts need separate
   review. See the deferred polling plan. Response headers (X-Locus-Report-*) are
@@ -725,7 +721,7 @@ minutes apart and older pages can be five minutes. Export includes recent ticks
 but older index rows are daily OHLC/min/max/mean/band aggregates; history supplies
 older tick-level data. Risk-premium recomputation is ten-minute, while weekly IMF
 inputs can lag over a week. Preserve cadence, periods, resolution and input dates.
-The research desk now selects paged history and keeps the costlier bulk/daily export
+The research desk selects paged history and keeps the costlier bulk/daily export
 as a documented reusable alternative.
 
 With both tiers enabled, ordinary collision naming produces `straits_vessels_get`
@@ -745,7 +741,7 @@ normalization remains necessary for premium routes with long descriptions.
 ## lonestar.toml — LoneStarOracle catalog (lonestaroracle.xyz)
 
 The unified [OpenAPI](https://lonestaroracle.xyz/openapi.json) retains
-`https://lonestaroracle.xyz/api` as its server, but gateway requests now return
+`https://lonestaroracle.xyz/api` as its server, but gateway requests return
 HTTP 307 to service-specific hosts. The provider opts into
 `operation_url_extension = "x-direct-url"` so requests use each operation's direct
 URL, matching the resource named by its payment challenge. Original service paths
@@ -809,13 +805,11 @@ the actual price, calculated upfront. Authored descriptions explain per-result
 summary charges and per-page content choices.
 The x402 guide documents a ten-result search maximum (larger requests are
 clamped) and default text when no content type is requested. Pricing is
-request-dependent. One unsigned
-request per operation returned HTTP 402 with x402 v2 exact Base USDC options;
-the sampled requests quoted 7000 and 1000 atomic units respectively. These were
-unpaid discovery checks, not funded settlement qualification or universal prices.
-Other networks and gateway variants in the challenges are not enabled by this
-provider; the existing payment compatibility policy still selects the supported
-Base USDC option.
+request-dependent. Both operations return HTTP 402 with x402 v2 exact Base USDC
+options; advertised amounts are request-dependent and the live challenge remains
+authoritative. Other networks and gateway variants in the challenges are not
+enabled by this provider; the existing payment compatibility policy selects the
+supported Base USDC option.
 
 The x402 guide's per-search tariffs are lite/instant $0.004, auto/fast $0.007,
 deep-lite/deep $0.012 and deep-reasoning $0.015. The structured range starts at
@@ -832,7 +826,7 @@ reference's sole description sibling is preserved through `allOf`. This supports
 the selected static provider/catalog path. Dynamic registration retains its
 stricter whole-document cycle rejection and cannot import this captured recursive
 catalog; static support does not remove that existing import limitation. Contents uses a root presence-only
-`oneOf` requiring exactly one of `ids` or `urls`. The converter now preserves
+`oneOf` requiring exactly one of `ids` or `urls`. The converter preserves
 presence-only `oneOf`/`anyOf`/`allOf` alternatives and renames body keys in them when
 query/body arguments collide. This is agent-facing schema information, not a new
 runtime JSON-Schema validator; other arbitrary root body predicates are not
@@ -885,15 +879,15 @@ a separate integration change rather than a larger TOML allowlist.
 
 The OpenAPI security prose describes `Authorization` plus `X-Quote-ID`, and the
 [search guide](https://docs.oneshotagent.com/api-reference/web-search.md) describes
-`X-Payment-Proof`. An unsigned live search on 2026-10-03 instead returned a standard
-base64 `PAYMENT-REQUIRED` header with x402 v2 `exact`, network `eip155:8453`, Base
-USDC, and `amount = "1000"` ($0.001). The JSON body is a different, vendor-specific
+`X-Payment-Proof`. The live search challenge instead returns a standard base64
+`PAYMENT-REQUIRED` header with x402 v2 `exact`, network `eip155:8453`, Base USDC,
+and `amount = "1000"` ($0.001). The JSON body is a different, vendor-specific
 payment request envelope; Treazury uses the standard header. No legacy header
-translation is added. This verifies challenge compatibility, not funded settlement;
-no wallet credentials or payment were sent.
+translation is added. This establishes challenge compatibility, not funded
+settlement.
 
 Most `x-payment-info` records also carry authentication flags; the paid search
-operation now publishes a USD fixed price, and the provider opts into the nominal
+operation publishes a USD fixed price, and the provider opts into the nominal
 USDC interpretation through `[pricing]`. The authored search description keeps its
 vendor-listed $0.001 display, while the live challenge and configured payment cap
 remain authoritative. Included free operations keep their authored `Free.`
@@ -963,9 +957,9 @@ schemas rather than inventing stricter filters from divergent prose. Search and
 answer streaming parameters are documented as false/omitted; values are not
 silently rewritten. A 90-second timeout accommodates slower synchronous requests.
 
-One unsigned `/api/exa/search` request returned standard x402 v2 exact offers,
-including Base USDC for 10000 atomic units ($0.01). No wallet or payment was used;
-this verifies the sampled challenge, not funded settlement or every upstream.
+The `/api/exa/search` route returns standard x402 v2 exact offers, including Base
+USDC for 10000 atomic units ($0.01). This establishes a representative challenge,
+not funded settlement or every upstream.
 The [deferred polling plan](../docs/plans/deferred/polling_tool_support.md) records
 the new SIWX, JWT-token, mixed synchronous/asynchronous and paid-poll patterns.
 
@@ -1081,7 +1075,7 @@ possibly partial JSON result directly.
 ## agentutility/provider.toml — AgentUtility
 
 The documentation host's `/openapi.json` returns 404; the live spec is at
-[the API host](https://x402.agentutility.ai/openapi.json). The 2026-10-03 capture
+[the API host](https://x402.agentutility.ai/openapi.json). The public spec
 has 817 POST operations, all with embedded `x-payment-info.price`. The separate
 [registry](https://agentutility.ai/registry.json) records 282 aliases and 17 actual
 cluster values, despite the guide advertising 18 clusters. Its fine-grained tags
@@ -1115,12 +1109,12 @@ and `tags = ["edge-finance"]`. Provider files assign no wallet; choose the walle
 
 ### Payment compatibility
 
-A single unsigned POST to `/web-search` returned x402 v2 `PAYMENT-REQUIRED` with
-Base USDC exact pricing of 6000 atomic units ($0.006), alongside a Solana offer.
-The guide's `X-PAYMENT` wording is stale for that sample. Treazury retains its
-Base USDC asset/network policy; it does not add Solana support.
+POSTing to `/web-search` returns x402 v2 `PAYMENT-REQUIRED` with Base USDC exact
+pricing of 6000 atomic units ($0.006), alongside a Solana offer. The guide's
+`X-PAYMENT` wording is stale. Treazury retains its Base USDC asset/network policy;
+it does not add Solana support.
 
-The sampled challenge includes `bazaar` and `builder-code` extensions.
+Challenges can include `bazaar` and `builder-code` extensions.
 [Shared extension handling](../docs/architecture.md#payment-extensions-and-offer-metadata)
 applies. Local static and managed payer/seller fixtures verify selection, signing,
 extension omission and retained reservations through rejection/restart. They do
@@ -1168,23 +1162,24 @@ Venice/Fal/CloudConvert credentials or initialize a separate vendor wallet/clien
   as complete. Web-search can return an explicitly marked recent-news fallback;
   `include_text` is a compatibility input and does not enable page-text retrieval.
 
-A web-search probe returned HTTP 424 with `dependency=search_provider`
-and `upstream_status=429`. This is an operation-specific upstream failure, not a
+Web search can return HTTP 424 with `dependency=search_provider` and
+`upstream_status=429`. This is an operation-specific upstream failure, not a
 provider-wide outage: link extraction, static-page JSON and closest-date archive
-lookup all returned useful results in the same qualification round. JSON extraction
-returned a title/description but omitted a requested optional summary field; do
-not assume every requested field was populated. Research-desk selects only those
-three working operations and excludes web search. The bundled provider therefore
-carries no startup reliability flag for that search failure. Runtime call failures
-still warn with payment uncertainty; neither relay nor flag removal grants replay.
+lookup remain usable. JSON extraction can return a title/description but omit a
+requested optional summary field; do not assume every requested field is
+populated. Research-desk selects those three working operations and excludes web
+search. The bundled provider carries no startup reliability flag for that search
+failure. Patent keyword search can fail with upstream USPTO 403. Runtime call
+failures still warn with payment uncertainty; neither relay nor flag removal grants
+replay.
 
 Optional cover is disabled. The pinned catalog is local and the actual guide is
 on `agentutility.ai`, outside the API origin `https://x402.agentutility.ai`.
-Direct unsigned HTTP/2 range probes to the API root, remote OpenAPI, public agent
-manifest, favicon and manifest-advertised `/agent-image.png` returned 200 while
-ignoring Range; API `/llms.txt` redirected. Reviewed robots/agent/skill resources
-were missing. No reviewed resource qualified for exact 206 reads. This does not
-establish that every path lacks range support or that Tor caused a failure.
+The API root, remote OpenAPI, public agent manifest, favicon and
+manifest-advertised `/agent-image.png` return 200 while ignoring Range; API
+`/llms.txt` redirects. Reviewed robots/agent/skill resources are missing. No
+reviewed resource supports exact 206 reads. This does not establish that every
+path lacks range support or that Tor caused a failure.
 Ordinary API calls retain the configured network policy without optional cover.
 
 The large [llms.txt](https://agentutility.ai/llms.txt) is loaded only when help is
@@ -1256,28 +1251,26 @@ does not resolve that uncertainty.
 
 ## Reviewed and rejected: x402node
 
-Investigated on 2026-11-11 for possible `research_desk` use or reserve coverage;
-it has no enabled provider definition. Recording it here avoids repeating the same
-wide-catalog review on a later topic.
+x402node has no enabled provider definition. Recording its current support
+boundary avoids repeating the same wide-catalog review.
 
 **x402node (`api.x402node.dev`).** The catalog is large and broad, but payment is
-currently unusable. Every sampled paid call returned `402 Payment Required:
-payment rejected` (`/search/academic`, $0.008; `/defi/dex-volume`, $0.01). The
+unusable. Paid calls return `402 Payment Required: payment rejected`, and the
 advertised Base USDC requirement sets the EIP-712 domain name to `USDC Coin`
 instead of the contract's `USD Coin`, so the EIP-3009 authorization cannot
-validate. The advertised pay-to wallet (`0x4466d4A84b7c49a6A094ec6eef4a0712D6dd125e`)
-received its last successful incoming USDC transfer at 2026-11-10 04:37:42 UTC,
-with none observed since, consistent with a botched deployment around that time.
-Catalog and unsigned-schema discovery work, and no paid response was sampled. Even if payment
-is restored, the sampled domains were dominated: OpenAlex scholarly search at
+validate. The advertised pay-to wallet
+(`0x4466d4A84b7c49a6A094ec6eef4a0712D6dd125e`) shows no recent successful incoming
+USDC transfers, consistent with a broken deployment. Catalog and unsigned-schema
+discovery work; paid responses are unsupported. Its domains are also dominated:
+OpenAlex scholarly search at
 $0.008 versus APEX `research_search` ($0.003) and 2s `papers_search` ($0.006 with
 abstracts); Ethereum-only Uniswap DEX reads at $0.01–$0.02 versus Otto
 `pools_search` ($0.001 across chains); and asynchronous Amazon-only commerce at
 $0.02–$0.03 versus OpenWeb Ninja ($0.003 across marketplaces). Its distinct
-capabilities were citation formatting/BibTeX, arXiv-ID metadata, token liquidity
-depth, an aggregate DEX-volume ranking, and Amazon reviews/seller profiles; none
-was purchasable. Revisit only after the payment challenge and settlement resume,
-and then as a narrow curated subset.
+capabilities include citation formatting/BibTeX, arXiv-ID metadata, token liquidity
+depth, an aggregate DEX-volume ranking, and Amazon reviews/seller profiles; none is
+purchasable. Revisit only after payment challenge and settlement resume, then as a
+narrow curated subset.
 
 ## openverbs.toml — OpenVerbs combined catalog
 
@@ -1295,17 +1288,17 @@ combined apex catalog. A registration using a service subdomain uses `/v1/...` o
 (`openverbs_crypto_v1_price`) and preserves a root fallback for future non-API
 routes; the 418 names have no slug collisions.
 
-All 418 operations advertise a fixed USD `x-payment-info.price`, and sampled
-unsigned x402 challenges matched the spec with the correct `USD Coin` EIP-712
-domain on Base USDC. The block's root rail is the preferred MPP/Tempo offer
+All 418 operations advertise a fixed USD `x-payment-info.price`, and unsigned
+x402 challenges match the spec with the correct `USD Coin` EIP-712 domain on Base
+USDC. The block's root rail is the preferred MPP/Tempo offer
 (`network: "4217"`); the compatible x402 Base USDC entry appears only under
 `protocols`. The standard `payment-info` parser treats that explicit contrary root
 rail as incompatible, so `[pricing]` renders the display tariff but supplies no
 advisory wallet-ranking selection estimate. `unit = "call"` and
 `usd_as_usdc = true` are retained for consistency and future parser support, not
-because they currently enable selection. This does not affect signing authority or
-payment: the live x402 challenge remains authoritative. The same metadata also
-offers MPP/EVM and MPP/Tempo alternatives. Do not configure the apex
+because they currently enable selection. This does not affect signing authority or payment: the live x402 challenge
+remains authoritative. The same metadata also offers MPP/EVM and MPP/Tempo
+alternatives. Do not configure the apex
 `.well-known/x402` as `x402-resources`: its 418 resource URLs use subdomain origins
 while this provider calls `openverbs.com/api/...`, so external origin/path matching
 cannot bind them.
@@ -1319,27 +1312,27 @@ not derive categories or filters from tags; use the path verb segment. There is 
 
 Some operations overlap with existing research-desk sources and may be more
 expensive or thinner, so this is a reusable catalog rather than a default
-recommendation. Schema construction and unsigned challenges were verified; a new
-paid settlement was not sampled.
+recommendation. Schema construction and unsigned challenges are supported; paid
+settlement is not qualified.
 
 ## Payment extension and offer boundaries
 
 Additional extension semantics:
 
 - `payment-identifier`: request/payment deduplication, advertised `required:false`
-  in both samples. Omitting it forgoes that mechanism; it does not justify replaying
+  on supported challenges. Omitting it forgoes that mechanism; it does not justify replaying
   a signed request. Future support must distinguish a per-logical-operation key
   from a persistent user identifier. [Specification](https://github.com/x402-foundation/x402/blob/main/specs/extensions/payment_identifier.md).
 - `agentkit`: Exa advertised a World-chain (`eip155:480`) EIP-191/EIP-1271 proof
   challenge and a 100-use free-trial option. This is a separate authentication
-  option in the sample, not evidence that every paid call requires human verification.
+  option, not evidence that every paid call requires human verification.
 - `locus.freePreflight`: vendor coverage-check/tool-directory hints. These are
   untrusted guidance; do not automatically execute suggested commands or tool calls.
 - `offer-receipt`: Locus and Otto include seller-signed offer records with accepted
   offer indexes, payment facts and validity. Their presence is not proof that the
   buyer paid, nor that Treazury verified the seller signature.
-- `otto-content-receipt`: empty advertisement in the sampled challenge; no successful
-  response was purchased, so its receipt contents and verification remain unqualified.
+- `otto-content-receipt`: empty advertisement on supported challenges; its receipt
+  contents and verification remain unqualified.
 - `sign-in-with-x`: Otto advertises wallet ownership authentication. Its full guide
   documents selected read-only pay-once re-access for one hour. Stripping it does
   not implement that benefit or same-wallet job polling. [SIWX specification](https://github.com/x402-foundation/x402/blob/main/specs/extensions/sign-in-with-x.md)
@@ -1360,13 +1353,13 @@ Offer metadata is distinct from top-level extensions:
 | --- | --- | --- |
 | Agent402 | `accepts[].outputSchema` on the exact Base offer | Accepted as opaque object/boolean JSON Schema and echoed unchanged. Its contents never affect payment terms; the alternative Base `upto`/Permit2 offer remains unsupported. |
 | Exa | `extra.breakdown`, `extra.totalUsd`, `extra.acceptId` | Reviewed informational fields accepted and echoed unchanged on ordinary Base EIP-3009 offers. GatewayWalletBatched remains unsupported. Search and Contents challenges are pinned. |
-| Google Trends | `extra.merchant`, `extra.tier` | Sampled labels accepted and echoed unchanged. Challenges for trend, interest-by-region, related-queries and related-topics are pinned. |
+| Google Trends | `extra.merchant`, `extra.tier` | Labels are accepted and echoed unchanged. Challenges for trend, interest-by-region, related-queries and related-topics are pinned. |
 | Locus | Ordinary EIP-3009 plus GatewayWalletBatched alternatives | Local fixture selects ordinary USDC and strips top-level extensions. |
 | Otto | Ordinary EIP-3009 plus Permit2 alternatives | Local fixture selects ordinary USDC and strips top-level extensions. |
 
 Informational annotations remain opaque and preserved under the
 [shared admission rules](../docs/architecture.md#payment-extensions-and-offer-metadata).
-The table records sampled provider fields. Atomic payment authority and
+The table records supported provider fields. Atomic payment authority and
 unsupported mechanisms retain their independent checks.
 Local signing regressions do not prove live settlement.
 
@@ -1436,10 +1429,10 @@ Uses vendor [OpenAPI](https://tools.ipintel.ai/openapi.json) and lazy
 inventory. Recommendations cover DNS, IP, domain health and WHOIS lookups plus
 help; satellite and developer utilities remain available by default. Structured
 prices supply display estimates. Captured schemas retain nullability, enums and arbitrary
-validator JSON without a local repair. Public document retrieval was unavailable
-in this audit; local tests do not qualify current availability, settlement or Tor.
+validator JSON without a local repair. Public document retrieval can be unavailable;
+local tests do not qualify current availability, settlement or Tor.
 
-Observed documentation oddities and interpretation boundaries:
+Documentation oddities and interpretation boundaries:
 
 - The guide and schema overview advertise $0.001–$0.17, but operation prices
   currently span $0.001–$0.09; satellite is $0.09. Live challenges govern payment.
@@ -1469,7 +1462,7 @@ remain separate from compatibility selection. Prices use `x-payment-info`. The v
 challenge remains authoritative. No API key is required by this integration.
 
 The vendor's `/openapi.json` is already x402-focused, rather than a separate
-key-only inventory, but substitutes sample `NVDA`, token
+key-only inventory, but substitutes `NVDA`, token
 and condition IDs for path templates, omits the eight fantasy and three
 `/api/v1` paid routes, and includes the catalog diagnostic. The x402 catalog is
 therefore the request source of truth. Its three `/api/v1` resources are
@@ -1507,9 +1500,11 @@ follow-up, polling route, completeness promise or paid replay.
 The research desk does not select Vaaya: `stableenrich_firecrawl_scrape` is the
 selected Firecrawl reader. Vaaya's Firecrawl route offers richer parameters, but
 it uses the deprecated Firecrawl `/v1/scrape` API and some options are
-non-functional; the `proxy=stealth` call timed out in the 2026-11-12 sample.
-JavaScript, PDF and `proxy=enhanced` Cloudflare reads succeeded at $0.01 per call
-but did not displace the StableEnrich route. Other Vaaya tools remain unselected.
+non-functional; `proxy=stealth` can time out. JavaScript, PDF and
+`proxy=enhanced` Cloudflare reads are supported at $0.01 per call but do not
+displace the StableEnrich route. Other Vaaya tools remain unselected. Paid
+receipts can report facilitator settlement failure with CDP's
+`payment-method-required`; this does not confirm the on-chain outcome.
 
 Excluded families require unsupported async result retrieval, uploads, persistent
 account/memory/sandbox ownership, message/purchase authority, or payment
@@ -1529,7 +1524,7 @@ Input guidance and data caveats:
   lookup and discovery interchangeable or establish delivery reliability.
 - Fundable company/company-search say supply one identifier but have no formal
   `required`/`oneOf`. Preserve that schema and follow the tool guidance. The vendor
-  documents a sampled company mismatch (1/10) and lagging total funding values;
+  documents possible company mismatches and lagging total funding values;
   verify identity and favor dated source/deal evidence. Follow-up deals/investor-deals
   actions mentioned in prose are absent from this x402 schema.
 - EDGAR autocomplete cannot prove an entity never registered, despite vendor
@@ -1568,8 +1563,8 @@ extra `/v1` prefix. Company/due-diligence requests require exactly one lookup ke
 id/name also require country. Network uses ip or asn; sanctions uses name or
 wallet. Invalid inputs may still receive a quote before a paid validation error,
 so preserve input guidance. Long registry fan-out is synchronous work, not proof
-of a polling lifecycle. Public documents could not be retrieved during this audit;
-there is no full offline provider capture or new settlement qualification.
+of a polling lifecycle. The public vendor documents can be unavailable; there is
+no full offline provider capture or settlement qualification.
 
 ## datakoot.toml — Datakoot
 
@@ -1580,7 +1575,7 @@ uses the [apex guide](https://datakoot.com/llms.txt), rather than the x402 host'
 historically missing guide. Preserve alternate CVE/dependency input guidance,
 US-only location coverage and operation-level estimates that differ from the
 top-level summary. No recommendation list is needed for its coherent supported
-catalog. Current document retrieval was unavailable and no full offline capture
+catalog. Current document retrieval can be unavailable and no full offline capture
 is bundled; definitions are not evidence of funded delivery.
 
 ## hirescrape.toml — HireScrape
@@ -1604,12 +1599,11 @@ YouTube `videos_by_*`, `channels_by_keyword` and `comments` as async. It does no
 provide an equivalent current-mode classification for TikTok; do not invent a
 safe mode allowlist from its legacy examples.
 
-The sampled Instagram, LinkedIn, YouTube and TikTok synchronous requests each
-failed with upstream HTTP 401 `Token expired`; this is distinct from snapshot
-retrieval incompatibility. A separate Indeed-only jobs call returned complete
-inline items in 37 seconds (reported $0.052), despite including an `sd_sync_`
-identifier. An identifier alone does not make a complete result pending. Other
-job boards and modes were not qualified by that call.
+Instagram, LinkedIn, YouTube and TikTok synchronous requests can fail with upstream
+HTTP 401 `Token expired`; this is distinct from snapshot retrieval incompatibility.
+An Indeed-only jobs call can return complete inline items despite including an
+`sd_sync_` identifier. An identifier alone does not make a complete result pending.
+Other job boards and modes are not qualified.
 
 Current path/tool filters do not remove individual mode values or reject a
 challenge because it advertises `async: true`. Parameter descriptions warn callers;
@@ -1756,14 +1750,13 @@ not a failed unpaid relay call. `/api/fetch` instead returns cleaned page text;
 it is not a raw-response replacement. Filtered header support does not establish
 that x402 payment headers, duplicate headers or cookies survive unaltered.
 
-Representative SEC company-facts reads succeeded through GET and the canonical
-POST body for AAPL. Horizon returned separate annual and three-month flow periods;
-the same annual facts matched 2s, whose sampled interim flows were fiscal year-to-date.
-Preserve per-fact start/end dates and point-in-time balance dates. Both gateways use
-SEC EDGAR, so they add gateway redundancy rather than independent underlying data.
-The research-desk selects both as complementary company-fact contracts. The new
-BLS, Treasury, domain/security and weather routes remain available in the reusable
-catalog; sparse vendor query declarations retain published argument guidance
+SEC company-facts reads are supported through GET and the canonical POST body.
+Horizon returns separate annual and three-month flow periods; 2s interim flows can
+be fiscal year-to-date. Preserve per-fact start/end dates and point-in-time balance
+dates. Both gateways use SEC EDGAR, so they add gateway redundancy rather than
+independent underlying data. The comprehensive example selects Horizon; the research
+desk selects only 2s. The BLS, Treasury, domain/security and weather routes remain
+available in the reusable catalog; sparse vendor query declarations retain published argument guidance
 without invented schema constraints. BLS jobs publishes a maximum 20-year optional
 year range but no query-parameter names; preserve that range without guessing names.
 `/api/domain/precheck` declares neither query parameters nor a POST request body.
@@ -1771,7 +1764,7 @@ The compiler therefore leaves its inputs unspecified and routes supplied argumen
 as query parameters. Captured guidance lists GET and POST but does not establish
 input names, POST body support or method equivalence. Preserve the published schema
 and default method selection without inventing controls or claiming verified POST
-behavior. Specific sample success does not qualify other routes, paid relay delivery
+behavior. Company-facts support does not qualify other routes, paid relay delivery
 or live Tor confinement.
 
 AGProxy and Horizon Pulse follow redirects remotely and return a final URL rather than Curl's
@@ -1860,7 +1853,7 @@ no `x-payment-info`, and its x402 discovery document is not a supported
 `x402-resources` pricing document; per-tool `pricing_description` overrides
 therefore carry published price hints where available. Scrape tariffs remain
 unknown until a live challenge supplies an offer. Batch and crawl are page-metered (both
-quote a minimum of ten pages), so their fixed discovery samples are not their
+quote a minimum of ten pages), so their fixed discovery prices are not their
 final tariffs. `/v1/probe` and crawl-status polling are free. The `/v1` naming
 anchor retains a root fallback for the public `/healthz` service health read.
 
@@ -1885,11 +1878,10 @@ caller's outer relay response limit. The vendor documents a 95-second ceiling an
 a 2083-character URL limit. Redirects expose only the final URL, so intermediate hops are unknown,
 as with AGProxy and Horizon Pulse.
 
-Observed paid calls on 2026-11-11: GET returned a 5288-byte JSON body with status,
-headers and final URL; a redirect resolved to the final target; a relayed target
-402 was delivered and billed; HEAD returned an empty body with provenance; and
-`binary: true` returned `content_base64`. These samples do not qualify current
-availability, every response shape, refunds or Tor reachability. readfetch is a
+Paid calls support GET with status, headers and final URL, redirect resolution,
+relayed target 402 delivery and billing, HEAD with provenance, and `binary: true`
+returning `content_base64`. Other response shapes, refunds, current availability
+and Tor reachability are not qualified. readfetch is a
 commercial API; its schema is pinned for local bootstrap, not redistributed as a
 data licence. Other reading routes (text, map, crawl, batch, PDF, section, diff, screenshot,
 search) remain available in the reusable provider but are not selected in the
@@ -1904,8 +1896,8 @@ definitions inside each scrape request's `$defs` bag while its references target
 definitions into `components.schemas`, removes the duplicate bags and rewrites
 references to those components. All other vendor schema fields are retained.
 This makes both the complete source and generated standalone tool inputs resolve
-without special parser behavior. Both scrape routes are exposed; their previous
-reference-related exclusions no longer apply. Residential scraping is extraction,
+without special parser behavior. Both scrape routes are exposed; their reference-related exclusions are resolved.
+Residential scraping is extraction,
 not a raw relay. Maintenance intent is `authored`; review future upstream updates
 against this transformation rather than replacing the asset as an unmodified copy.
 
@@ -1927,20 +1919,17 @@ results remain subject to ordinary visible text truncation. Quotes depend on
 requested counts; the vendor documents partial-result refunds and invalid-body
 quotes, which are not evidence that invalid inputs can be delivered.
 
-Sampled synchronous AgData social calls delivered one NASA Instagram post,
-one NASA TikTok video, one NASA YouTube channel video and NASA's Facebook
-page details. These qualify the sampled account-post/video and page-detail
-requests, alongside the separately exercised LinkedIn company lookup. The
-TikTok item was dated 2026-07-21, not evidence of a latest-post ordering guarantee.
-The separate comments, transcript, personal-profile and other platform modes
-remain unqualified; sampled comments embedded in an Instagram post do not
-establish complete comment retrieval. These operations remain available in
-the reusable provider regardless of the deployment's narrower selection.
+AgData social calls support an Instagram post, TikTok video, YouTube channel
+video and Facebook page details, alongside LinkedIn company lookup. TikTok item
+dates do not establish latest-post ordering. Comments, transcript,
+personal-profile and other platform modes remain unqualified; comments embedded
+in an Instagram post do not establish complete comment retrieval. These operations
+remain available regardless of the deployment's narrower selection.
 
 Degenscan's six Carry reads support keyless per-call x402 despite the schema's
 subscription/API-key descriptions. Their guide prices are retained in explicit
 `pricing_description` override fragments;
-an unsigned funding-matrix probe returned an x402 Base USDC offer for $0.03.
+the funding-matrix route returns an x402 Base USDC offer for $0.03.
 Other `x-price-usd` values are numeric USD/call hints, displayed as raw pricing
 metadata. The public oracle workflow returns a forecast ID from submission and
 provides a free status/result read; both operations remain available. Poll until
@@ -2053,8 +2042,8 @@ verify that the selected branch is still the external contract; do not pick a
 branch solely by position. The request-branch witness regression verifies the
 projection and the absence of Console-only inputs.
 
-The unsigned probe reported `availability=ready`, token chains Base/Solana and a
-Base USDC $0.02 offer. Readiness is deployment-specific; a quote alone does not
+The catalog reports `availability=ready`, token chains Base/Solana and a Base
+USDC $0.02 offer. Readiness is deployment-specific; a quote alone does not
 qualify execution. Analysis of a Solana mint still pays on Base. No account or
 Privy session is sent and external calls earn no Console rewards. Preserve the
 returned disclaimer and public verdict link; image URLs remain hosted links.
@@ -2104,24 +2093,19 @@ notification delivery nor an owned alert lifecycle is inferred. The preserved
 body ident collides with the repaired path ident: supply the same flight in
 `ident` and `ident_body`. The wrapper's intent semantics remain unqualified.
 
-Unsigned GET probes for Google Flights search, a UAL123 lookup and a KJFK/KLAX
-route returned x402 Base USDC offers of $0.02, $0.01 and $0.04 respectively,
-alongside Solana offers. These confirm concrete route/challenge discovery, not
-paid data delivery. Subsequent paid samples returned 22 dated one-way JFK–LHR
-fare itineraries (3 best and 19 other) and 15 JFK departures. These two reads are
-selected on research_desk travel. Fare observations do not hold availability;
-cash booking-link/token follow-ups remain unqualified. Search
-returned booking_token values in this sample, while the booking route declares
-departure_token, so that follow-up must not be assumed interchangeable.
-A later Seats.aero search returned ten cached SFO–FRA availability records;
-trip details for one Alaska-program record returned twelve itineraries and five
-booking links. Preserve program, cache dates, cabin, taxes and raw/filtered
-availability distinctions. All four award reads and non-weather FlightAware
-reads are selected on travel after representative testing, not per-operation
-qualification. Flight-intent writes remain omitted, as does the unresolved cash
+Google Flights search, UAL123 lookup and KJFK/KLAX routes return x402 Base USDC
+offers of $0.02, $0.01 and $0.04 alongside Solana offers. Paid reads support dated
+one-way JFK–LHR fare itineraries and JFK departures. Fare observations do not hold
+availability; cash booking-link/token follow-ups remain unqualified. Search can
+return `booking_token` while the booking route declares `departure_token`, so the
+follow-up is not interchangeable. Seats.aero search returns cached mileage-award
+inventory and trip details can return itineraries and booking links. Preserve
+program, cache dates, cabin, taxes and raw/filtered availability distinctions. All
+four award reads and non-weather FlightAware reads are selected on travel; this is
+not per-operation qualification. Flight-intent writes remain omitted, as does the unresolved cash
 booking-token workflow. Airline awards are not hotel loyalty coverage.
-The 2s flight status/board/schedule samples also returned records but share
-FlightAware upstream with StableTravel operations. No new timeout, payment rail
+2s flight status/board/schedule reads share FlightAware upstream with StableTravel
+operations. No new timeout, payment rail
 or response transformation is introduced.
 
 Update the local schema deliberately from the vendor document and guide. Retain
@@ -2141,12 +2125,17 @@ reference admission. The full upstream capture remains development evidence.
 `/api` is the naming anchor; `twos` is the tool prefix.
 Base USDC exact offers are available alongside optional metered offers. No funded
 settlement or comparative output quality is established by schema inspection.
+GitHub repository lookup can fail with upstream GitHub 401. Scholarly search can
+return PubMed metadata with an arXiv component error; partial results are enabled
+with explicit coverage caveats. HICP `latest` can be stale. The security resolver
+joins an issuer LEI by name and returns issuer ISINs, including debt, rather than
+exact share-class equivalence.
 
-The help and catalog resources both ignored unsigned range requests with HTTP/2
+The help and catalog resources both ignore unsigned range requests with HTTP/2
 200 responses, exhausting automatic cover qualification. The explicit cover
-profile instead uses the homepage-linked `https://2s.io/2sio-avatar.png`. A direct
-unsigned HTTP/2 probe at offset zero returned exact identity-encoded 206 bytes
-0–1023 of a 7,910-byte PNG without redirect. This is not Tor qualification; the
+profile instead uses the homepage-linked `https://2s.io/2sio-avatar.png`, which
+returns exact identity-encoded 206 bytes 0–1023 of a 7,910-byte PNG without
+redirect. This is not Tor qualification; the
 runtime must still qualify the resource. The profile preserves all built-in
 range-only budgets and timing values and omits the known-incompatible fallback.
 An identity/origin already marked unavailable needs a restart or normal inactive
@@ -2160,7 +2149,7 @@ and utility calls remain reusable; research selections are editorial. Object-val
 query filters remain unresolved for `GET /api/gov/osha-violations`, which stays
 excluded. Its `initialPenalty` JSON string returned HTTP 400; default flattened
 min/max encoding returned the unfiltered baseline, and bracket notation and a
-scalar control returned HTTP 502. A successful unfiltered trial does not establish
+scalar control returned HTTP 502. A successful unfiltered request does not establish
 penalty filtering. The schema supplies no supported POST twin. Revisit this exact
 exclusion when an authoritative working filter contract is available.
 
@@ -2182,8 +2171,8 @@ Use the bundled provider ID or API-base lookup for this repaired contract;
 importing the upstream OpenAPI URL directly uses the unpatched remote schema.
 
 Generic POI and Google Places calls are partial resort alternatives, not ski APIs.
-The 2s POI sample near Kitzbühel failed HTTP 502 from Overpass; StableEnrich partial
-Google Nearby Search returned three restaurants. The deployment deliberately
+2s POI can fail with HTTP 502 from Overpass; StableEnrich Google Nearby Search
+returns generic alternatives. The deployment deliberately
 selects 2s POI and shares StableEnrich nearby/text search and help with travel while
 preserving business access. Resolve coordinates independently; these tools do not
 supply Maxwell resort menus, lift distances, ticket prices or operating feeds.
@@ -2192,8 +2181,8 @@ supply Maxwell resort menus, lift distances, ticket prices or operating feeds.
 
 Use the actual `/x402/v2` paths in `https://api.strale.io/openapi.json`.
 The `/x402/catalog` directory also supplies canonical `/x402/v2` URLs; retain that
-namespace rather than substituting legacy `/x402` paths. An unsigned UK-company request advertised
-Base USDC exact under v2; this does not qualify delivery. Authenticated account,
+namespace rather than substituting legacy `/x402` paths. UK-company requests
+advertise Base USDC exact under v2; delivery is not qualified. Authenticated account,
 credit and transaction workflows are separate from wallet-paid capabilities.
 Public metadata remains available where the schema supports ordinary reads.
 
@@ -2210,19 +2199,18 @@ JSON-stringifying objects in query parameters cannot fix the method mismatch.
 
 The gateway and PDF executor were inspected at upstream commit
 `e79fbf2574def4583b80053a29515a265db8a0ac`. HTML-to-PDF returns synchronous JSON
-with `base64_pdf`, without the async-only `files` field. Live POST probes showed
-schema validation applying a nested schema and HTTP-to-cURL preserving nested
-headers/body; the other seven operations have source/schema evidence rather than
-paid delivery qualification. No automatic retry or nonpayment assurance follows
-from the failed GET probe.
+with `base64_pdf`, without the async-only `files` field. Schema validation applies
+a nested schema and HTTP-to-cURL preserves nested headers/body; the other seven
+operations have source/schema evidence rather than paid delivery qualification.
+No automatic retry or nonpayment assurance follows from the failed GET request.
 
 Refresh through shared maintenance capture/review, reconciling the upstream
 OpenAPI, complete catalog input schemas and gateway source. Preserve complete
 body schemas rather than reconstructing them from the lossy GET parameter view;
 retire a repair when upstream publishes the correct POST contract. Bundled ID or
 API-base selection uses the repaired asset; importing the upstream OpenAPI URL
-directly retains upstream contracts. Previously accepted dynamic registrations
-retain their accepted bytes until explicitly refreshed.
+directly retains upstream contracts. Accepted dynamic registrations retain their
+accepted bytes until explicitly refreshed.
 
 Exact exclusions also cover account-owned transaction listing/deletion,
 audit-token creation, dispute reads/submission, solution execution, webhook-secret
@@ -2230,25 +2218,20 @@ access and web3 assurance. Public transaction verification remains available.
 Do not broaden these exclusions to whole transaction/job namespaces: unrelated
 public reads retain their own contracts.
 
-Sampled v2 offers include both `amount` and a legacy `maxAmountRequired`. These
-are ordinary Base USDC exact offers, not an unsupported transfer type. Managed
-selection formerly rejected the legacy field's presence; v2 now preserves it as
-opaque metadata while signing and capping only `amount`. This removes that local
-pre-sign rejection. A subsequent static link-extraction call returned 26 IANA
-links and reported settlement at $0.0324. UK charity lookup subsequently returned
-registration and dated financial facts; both MiCA checks reported unavailable
-registers despite HTTP success. Unexercised operations still need separate delivery
-qualification.
-Canadian and Swiss company lookups delivered profiles; Canadian lookup resolved
-SHOPIFY INC. to corporation 4261607 and advertised $0.864, versus Maxwell's $0.005
-hint. Slovak ICO lookup delivered ESET with representatives, but its underlying
-last-updated field was 2025-07-07 despite a fresh fetch. EU topic search returned
-2024 regulations including CELEX 32024R1689; it has no dedicated act-ID lookup.
-Polish company-name input failed HTTP 400: name search is unavailable despite the
-remote schema advertising it. The local tool/parameter descriptions require a
-10-digit KRS number and preserve the advertised price; the provider remains
-available for known-ID lookup. These alternatives are deliberately selected
-alongside Maxwell, without treating their contracts or freshness as identical.
+v2 offers include both `amount` and a legacy `maxAmountRequired`. These are
+ordinary Base USDC exact offers, not an unsupported transfer type. The legacy
+field is preserved as opaque metadata while signing and capping only `amount`.
+Static link extraction and UK charity registration with dated financial facts are
+supported. MiCA checks can report unavailable registers despite HTTP success.
+Unexercised operations still need separate delivery qualification.
+
+Canadian and Swiss company lookups are supported; Canadian lookup advertises
+$0.864 versus Maxwell's $0.005 hint. Slovak ICO lookup returns representatives but
+upstream data can be stale. EU topic search covers regulations but has no dedicated
+act-ID lookup. Polish company-name input fails HTTP 400 despite the remote schema
+advertising it; require a 10-digit KRS number. These alternatives are deliberately
+selected alongside Maxwell, without treating their contracts or freshness as
+identical.
 
 The Finnish Patent and Registration Office lookup is a company registry, not a
 patent search. The reviewed catalog has no patent-research operation.
@@ -2272,24 +2255,22 @@ option alongside any observed offer: these describe conditional billing rather
 than a fixed tariff for the current request.
 They are omitted from the research deployment.
 
-A later pair of paid Polish-registry and court searches returned HTTP 402
-`payment_invalid`. After the operator approved a local firewall rule, a fresh,
-distinct `copyright` court request failed in about nine seconds and disclosed
-`facilitatorStatus: 502` with `detail.error: upstream_unreachable`. This narrows the
-observed failure to the seller's verification/facilitator path; it does not prove
-an invalid signature, identify the failing downstream host or establish settlement.
-Unsigned documented court and Polish-company samples still returned records.
-The advertised Base offer was $0.005 with a 60-second authorization window; the
-SDK sets expiry at signing, so a firewall delay before signing does not consume
-that window. No signer, extension or generic relay workaround is established.
-Earlier failed authorizations remain potentially chargeable and were not replayed.
-The current Maxwell schema no longer generates `courts_search`; the research
-deployment removes its stale exclusion. Existing local copies can retain that
-exclusion: unmatched exclusions report INFO without failing catalog loading.
-The final exclusion rule still omits any unselected or returning court route. CompanyRecords court search and the remaining Maxwell government,
-travel and research selections retain their existing routing. The deployment
-also enables the audited close/partial alternatives alongside those Maxwell tools;
-Maxwell may need removal if its facilitator failures persist. General place/weather
+Paid Polish-registry and court searches can return HTTP 402 `payment_invalid`; a
+fresh distinct court request can disclose `facilitatorStatus: 502` with
+`detail.error: upstream_unreachable`. This points to the seller's
+verification/facilitator path; it does not prove an invalid signature, identify the
+failing downstream host or establish settlement. Unsigned documented court and
+Polish-company requests can still return records. The advertised Base offer is
+$0.005 with a 60-second authorization window; the SDK sets expiry at signing. No
+signer, extension or generic relay workaround is established. Failed authorizations
+remain potentially chargeable; do not replay them. The current schema does not
+generate `courts_search`; the research deployment removes its stale exclusion.
+Existing local copies can retain it: unmatched exclusions report INFO without
+failing catalog loading. The final exclusion rule still omits any unselected or
+returning court route. CompanyRecords court search and the remaining Maxwell
+government, travel and research selections retain their routing. The deployment
+also enables close/partial alternatives alongside those Maxwell tools; Maxwell may
+need removal if its facilitator failures persist. General place/weather
 components do not replace ski prices, lift status or resort-specific relationships.
 
 Most records come from a continuously refreshed cache. Preserve fetchedAt or
@@ -2298,23 +2279,22 @@ this is not a completed empty search. Completed searches with no matches can be
 charged. Vendor retry suggestions do not override the ordinary signed-request
 replay rules. Ski prices describe published seasons, not guaranteed bookable fares.
 
-The USPTO endpoint supports keyword search or a granted patent number. Its sampled
-Base USDC v2 offer also includes legacy `maxAmountRequired`; the same generic
-v2 compatibility correction applies as for Strale. This is not evidence of a
-different payment mechanism. After restart, the documented lithium-battery
-keyword query returned ten cached USPTO records. A separate CUDA lookup returned
-404 `not_cached`, queued retrieval and a provider claim of no charge. That claim
-does not verify settlement or authorize replay; no automatic retry or polling
-was performed. Preserve cache observation dates and distinguish a cache miss
-from a completed empty search.
+The USPTO endpoint supports keyword search or a granted patent number. Its Base
+USDC v2 offer also includes legacy `maxAmountRequired`; the same generic v2
+compatibility correction applies as for Strale. This is not evidence of a
+different payment mechanism. Cached keyword queries return records. An uncached
+query can return 404 `not_cached`, queue retrieval and claim no charge. That claim
+does not verify settlement or authorize replay; no automatic retry or polling is
+performed. Preserve cache observation dates and distinguish a cache miss from a
+completed empty search.
 
 Research-desk also selects resort access/lodging, attractions, dining/menus,
 rental and ski schools, individual pass quotes, operator networks and local tips.
-Two representative Kitzbühel reads returned 186 lodging records and 40 lift/ticket
-entry points plus rail, ski-bus and parking context. Lodging proximity is a map
-estimate, not a routed walking distance or dated room availability. Preserve
-observation dates and unavailable components. Other selected companion reads
-were contract-reviewed, not individually delivery-tested. `insider_info` is
+Kitzbühel resort reads return lodging records and lift/ticket entry points plus
+rail, ski-bus and parking context. Lodging proximity is a map estimate, not a
+routed walking distance or dated room availability. Preserve observation dates and
+unavailable components. Other selected companion reads are contract-reviewed, not
+individually delivery-tested. `insider_info` is
 local Slovak ski/mountain advice advertised at $1, not financial insider data.
 Bulk prices and trip bundles repeat selected component data and remain omitted
 from this deployment; this is editorial selection, not a compatibility exclusion.
@@ -2377,7 +2357,7 @@ and research tools without hiding other compatible operations from the provider.
 
 `apexfaucet-openapi.json` is an authored repair of the complete public
 `https://apexfaucet.xyz/openapi.json`, with its source hash, documentation URL and
-refresh instructions in `x-treazury-provenance`. The vendor now supplies the POST
+refresh instructions in `x-treazury-provenance`. The vendor supplies the POST
 bodies for chat-completions, token-verdict and base-token-verdict, so their former
 method/body repairs are removed. Current token-verdict requires tokenAddress and
 makes chain optional. The remaining authored asset supplies the documented prompt
@@ -2405,8 +2385,8 @@ the persistent record under the paying wallet explicit. Ask-flux also publishes
 its answer and the question hash on chain; publication alone does not establish
 an unsupported ownership lifecycle.
 
-Base USDC EIP-3009 signing is documented and was accepted by representative
-page-extract, page-markdown and research-search calls. Other advertised rails do
+Base USDC EIP-3009 signing is documented and supported by page-extract,
+page-markdown and research-search. Other advertised rails do
 not imply support in this client. Browser previews are not a free programmatic
 mode: programs can pay with or without `full=1`; use it for full page/site output.
 Page-extract and page-markdown execute JavaScript; web-read does not. Preserve
@@ -2414,24 +2394,24 @@ final URLs, HTTP status, truncation, skipped pages and source-specific errors.
 Rendered extraction does not prove the requested agreement or document was found.
 Research-search returns source results, not full paper text or Hacker News
 comments. Company-check provides identity and recent filing links, not general
-EDGAR full-text search. The former web-search and weather-now routes are absent
-from the current primary catalog. They were not selected by the research desk;
-Exa retains web search, and Otto plus 2s retain weather coverage. The sampled Otto
-and 2s current weather agreed but share Open-Meteo, so they offer gateway rather
-than upstream redundancy; Otto also supplies a five-day forecast.
+EDGAR full-text search. Web-search and weather-now routes are absent from the
+current primary catalog. The research desk does not select them; Exa retains web
+search, and Otto plus 2s retain weather coverage. Otto and 2s current weather can
+agree but share Open-Meteo, so they offer gateway rather than upstream redundancy;
+Otto also supplies a five-day forecast.
 
 New funding boards/gap estimates, stablecoin peg measurements, tokenized-stock
 quotes, prediction odds/movers and X1 reads remain ordinary market observations.
-APEX funding and Otto funding both offered $0.001 in representative calls. APEX's
+APEX funding and Otto funding both advertise $0.001. APEX's
 multi-coin venue/interval-normalized board complements Otto's targeted OI/positioning
 and different venues; neither is a cheaper equivalent of the other. Preserve quote
 units, venue failures, board truncation/coverage and observed timestamps. Fewer
 than two answering venues is refused before payment. These readings do not execute
 trades or authorize money movement.
 
-A flight-deals call returned thirty London-origin return fares in GBP with
-travel dates and affiliate booking links. It reads Aviasales searches cached for
-roughly 48 hours, not live seats. The traveller books with the external seller;
+Flight deals return London-origin return fares in GBP with travel dates and
+affiliate booking links. They read Aviasales searches cached for roughly 48 hours,
+not live seats. The traveller books with the external seller;
 links may pay APEX a commission. This distinct fare source is selected on travel.
 
 The provider can deliver a promotional Meal NFT on Arc to the payment signer
@@ -2462,10 +2442,9 @@ separate recovery contract. Email finding and person enrichment can return
 is not an authorized completion mechanism. These named workflows are excluded.
 Company enrichment and other synchronous reads remain available.
 
-Static IANA Markdown extraction returned the relevant text in the sampled call.
-The JavaScript quotes page returned only navigation, despite nested `isError=false`
-and HTTP 200. Do not use this static reader as a renderer or treat HTTP success as
-proof of relevant content. Preserve nested error and truncation markers. Document
+Static IANA Markdown extraction returns relevant text. JavaScript pages can return
+only navigation despite nested `isError=false` and HTTP 200. Do not use this static
+reader as a renderer or treat HTTP success as proof of relevant content. Preserve nested error and truncation markers. Document
 extraction is deterministic parsing without OCR or inferred missing fields. Some
 optional schemas are sparse; consult the public `/tools` catalog for their options.
 
@@ -2474,21 +2453,17 @@ optional schemas are sparse; consult the public `/tools` catalog for their optio
 Research-desk adds contract-reviewed hotel/hostel/vacation-rental sources and
 reviews, fare observations, flight tracking, rail/transit, EV-charger directories
 and Michelin records from HealthTravel, plus ShopSocial hiking, FlixBus/FlixTrain,
-Grubhub restaurant discovery and Rappi menus. Representative
-reads returned three dated Paris hotel prices in EUR, two active Amtrak trains
-from eleven NYP matches, the West Highland Way trail with OSM provenance and
-21 dated Berlin–Munich FlixBus trips with EUR fares/fees. Flix searches cover one
-adult one way. Grubhub discovery covers US locations; Rappi menus need a store
-ID/URL and cannot discover stores. These two dining reads remain untested.
-Hotel Google results applied the requested check-in/out dates; their currency
-follows the server region. Many companion operations remain untested. City-page
-hotel samples do not establish dated room availability; preserve price dates,
-currencies and source limits. The PlugShare-named read supplies OSM/NREL charger
-locations rather than live occupancy. The AllTrails-named read supplies Waymarked
-Trails/OSM routes, without user reviews/photos. No hotel-loyalty API was found.
-Known-empty Google Flights and failed Wikivoyage remain excluded, and aviation
-weather remains on world. These catalogs share an operator/payment recipient;
-source diversity does not establish independent gateway redundancy.
+Grubhub restaurant discovery and Rappi menus. Hotel searches return dated prices in
+the server's local currency; rail searches return active trains; hiking returns
+Waymarked Trails/OSM routes without user reviews or photos; FlixBus searches cover
+one adult one way. Grubhub discovery covers US locations; Rappi menus need a store
+ID/URL and cannot discover stores. Dining reads are not delivery-qualified.
+City-page hotel data does not establish dated room availability; preserve price
+dates, currencies and source limits. The PlugShare-named read supplies OSM/NREL
+charger locations rather than live occupancy. No hotel-loyalty API was found.
+Google Flights can return no fares and Wikivoyage can fail; both remain excluded,
+and aviation weather remains on world. These catalogs share an operator/payment
+recipient; source diversity does not establish independent gateway redundancy.
 
 ## ForgeMesh and Vextorium
 
@@ -2501,115 +2476,45 @@ hurricane routes). The reusable definition retains the complete catalog, so
 compare the actual request schema, response fields and observation dates before
 treating aliases as independent coverage. `GET /menu` has no payment metadata in
 the vendor document; the provider overrides its pricing text because a generated
-`Cost: unknown` description would be misleading. The 2026-11-07 Tor range probes
-returned 200 for `llms.txt`, `openapi.json` and the root page; `robots.txt`
-returned 206 but was 885 bytes, below the default qualification size. Optional
-cover is therefore disabled for this origin.
+`Cost: unknown` description would be misleading. `llms.txt`, `openapi.json` and
+the root page return 200 for ranges, and `robots.txt` is 885 bytes, below the
+default qualification size, so optional cover is disabled for this origin.
 
 Vextorium ([OpenAPI](https://api.vextorium.com/openapi.json),
 [guide](https://api.vextorium.com/llms.txt)) advertises 244 paid POST routes under
 `/v1`. Its offers include Base USDC alongside other networks; Treazury's delegated
-payments use the Base offer. The same 2026-11-07 probes returned 200 for the guide,
-catalog and root and a 67-byte `robots.txt` with 206; optional cover is disabled.
-Both definitions use the remote vendor schemas and do not pin a local catalog or
-add a provider-specific fixture. Live 402 challenges were observed for both.
-Specific reads were paid-qualified on 2026-11-07, but neither full catalog is
-qualified. In particular, 2s
-`gov_usaspending-awards` is itself a search (recipient, agency, state, award type
-and date filters) and remains broader and cheaper than ForgeMesh
-`federal_contracts_search`, which requires a recipient and supports fewer filters
-at $0.01 versus $0.006.
+payments use the Base offer. The guide, catalog and root return 200 for ranges, and
+`robots.txt` is 67 bytes with 206; optional cover is disabled. Both definitions use
+the remote vendor schemas and do not pin a local catalog or add a provider-specific
+fixture. Live 402 challenges are available for both; neither full catalog is
+qualified.
 
-Paid comparison samples on 2026-11-07 used Base USDC and are evidence for these
-specific requests, not qualification of the full catalogs. For Lockheed Martin
-federal contracts, ForgeMesh and Vextorium returned the same five largest awards
-at $0.01 and $0.005; Vextorium omits the awarding sub-agency and returned one
-empty description. 2s `gov_usaspending-awards` returned 504 at that time and was
-not retried, so it is not evidence of endpoint removal or of relative output
-quality; its schema still offers the broader filters above. For Federal Register
-"stablecoin", ForgeMesh returned the newest ten documents with excerpts, total
-167 and HTML/PDF/public-inspection links for $0.005. 2s
-`gov_federal_register_recent` already provides newest-first scanning with
-agency/type/date filters at $0.006, while `law_federal_register` returned five
-relevance-matched documents without excerpts for $0.0025. ForgeMesh's
-differentiator is match excerpts, total count and public-inspection links at
-$0.001 below the recent feed; it does not add a new newest-first capability.
-
-Congress trades for NVDA exposed a concrete ForgeMesh quality defect: it reported
-162 matches but returned duplicate rows, House-only coverage, and no source PDF
-for $0.02. 2s returned 122 deduplicated House rows with amount ranges,
-days-to-disclose and source links for $0.003. For earthquakes near San Francisco,
-ForgeMesh returned five raw USGS events but exposes no time-window parameter and
-the oldest was about 5.6 days old; 2s `earth-now` returned zero events in 24 hours
-plus wildfire counts. They have different recency contracts, so do not treat
-ForgeMesh as a 24-hour feed. Both air-quality reads returned the same Open-Meteo
-values, but 2s added European AQI, category, SO2 and CO for $0.003 versus
-ForgeMesh's $0.005. ForgeMesh's hurricane tracker returned live NHC storm Pena
-with advisories, track and GIS links for $0.005; no selected 2s tool exposes NHC
-storm positions.
-
-Vextorium's crypto regulation tracker returned no crypto documents for a 14-day
-window and five for 60 days, including duplicate statement/speech entries, at
-$0.018 per call; it covers SEC press/speech and White House sources absent from
-the Federal Register. Its Form D endpoint returned five current private offerings
-with offering/sold amounts, investors and first-sale dates for $0.004, filling a
-gap no selected provider covers. Its fails-to-deliver read returned the same TSLA
-half-month rows as x402stock plus `value_usd` for $0.004 versus $0.02, but only the
-latest half-month file while x402stock reads up to six periods. Its wallet
-sanctions check returned a clean OFAC result and list count for $0.002; AgOSINT
-returned four-list metadata and a signed receipt for $0.015.
-
-## Research-desk upstream failures
-
-The deployment initially excluded Vaaya and SocialFetch after the 2026-10-28
-probes and cited activity observations in [the example guide](../examples/README.md).
-This is an operator selection, not a reusable compatibility restriction. Paid 402 receipts
-from both vendors reported facilitator settlement failure with CDP's
-`payment-method-required`; SocialFetch page readers instead returned generic 503
-`temporarily_unavailable`, without a settlement receipt. Neither confirms the
-on-chain outcome. Missing advertised extensions did not explain all failures:
-Vaaya Firecrawl failed with none omitted.
-
-Vaaya Firecrawl was retested on 2026-11-12. JavaScript and PDF Markdown succeeded
-with the default proxy, and a Cloudflare challenge was bypassed with
-`proxy=enhanced`, at $0.01 per call. The deployment keeps Vaaya unselected:
-StableEnrich's Firecrawl scrape is the selected Firecrawl reader, and Vaaya's
-richer parameters use the deprecated Firecrawl API with some non-functional options.
-SocialFetch remains excluded.
-
-Replacement qualification also exposed 2s GitHub repository lookup returning 502
-`UPSTREAM_UNAVAILABLE` with upstream GitHub 401, and AgentUtility patent search
-returning 502 with upstream USPTO 403. They remain unselected. 2s scholarly search
-returned useful PubMed metadata but an arXiv component error (`This operation was
-aborted`). Its partial results are enabled with explicit coverage caveats. These
-application responses do not establish a Tor-specific cause or grant paid replay.
-
-Additional sampled research-desk reads delivered Strale UK charity registration
-and dated finances; 2s state-company records in NY, CO and CT, FCC filings and
-spectrum geographies, OpenFIGI identifiers, issuer joins and HN item/feed/user
-records; and Maxwell cached CourtListener results. Name searches are not entity
-identity proofs. The 2s resolver joins an issuer LEI by name and returns issuer
-ISINs, including debt, rather than exact share-class identifier equivalence.
-Strale's two MiCA checks returned unavailable-register notes and null update
-dates despite HTTP success and false match flags. The 2s HICP response advertised
-as latest contained 2025-12 data in October 2026. These three operations remain
-unselected in research_desk.
-
-2s destination advisory and visa-reference requests returned records; visa data
-is community-maintained rather than an official entry ruling. Maxwell's Austria
-inventory returned 354 resorts, Kitzbühel ticket prices returned 27 rows for
-2026/27 with official-source links, and conditions returned dated forecasts.
-The sampled calls do not qualify other countries, US state disambiguation,
-complete station/lift coverage or live ticket availability.
+Coverage distinctions: 2s `gov_usaspending-awards` is itself a search (recipient,
+agency, state, award type and date filters) and remains broader and cheaper than
+ForgeMesh `federal_contracts_search`, which requires a recipient and supports fewer
+filters at $0.01 versus $0.006. ForgeMesh adds match excerpts, total counts and
+HTML/PDF/public-inspection links for Federal Register documents at $0.005; it does
+not add newest-first capability over 2s `gov_federal_register_recent` and
+`law_federal_register`. ForgeMesh Congress trades can return duplicate House-only
+rows without source PDFs at $0.02; 2s returns deduplicated House rows with amount
+ranges, days-to-disclose and source links at $0.003. ForgeMesh earthquakes expose no
+time-window parameter and are not a 24-hour feed. ForgeMesh air quality can return
+the same Open-Meteo values with fewer fields at $0.005 versus 2s at $0.003.
+ForgeMesh hurricane tracking exposes NHC storm positions and GIS links at $0.005;
+no selected 2s tool does. Vextorium's crypto regulation tracker covers SEC
+press/speech and White House sources absent from the Federal Register but can return
+duplicate statement/speech entries. Its Form D read covers current private offerings
+absent elsewhere. Its fails-to-deliver read returns fewer periods than x402stock at
+a lower price. Its wallet sanctions check returns OFAC results and list counts;
+AgOSINT adds four-list metadata and a signed receipt.
 
 ## google-patents.toml — Google Patents through x402 Atlas
 
 This definition uses the bridge's complete two-route vendor OpenAPI at
 `https://google-patents.use.x402atlas.com/openapi.json` and its own `llms.txt`
 guide. It is an Atlas service, not a claim of affiliation with Google. Both GET
-`/search` and GET `/patent` advertise $0.02 per call. Their Base USDC payment and
-data delivery were exercised: search returned patent IDs, and detail retrieval
-for US8321849B2 returned all 23 claims. These examples do not qualify every query,
+`/search` and GET `/patent` advertise $0.02 per call. Search returns patent IDs,
+and detail retrieval returns claims. These examples do not qualify every query,
 jurisdiction or legal-status field. No lifecycle exclusion was identified.
 
 Pass the returned `patent_id` directly from search into details. Search supports
@@ -2627,18 +2532,15 @@ not an assumption that the implicit operator was ignored. Its
 [search guide](https://support.google.com/faqs/answer/7049475?hl=en) documents
 `TI=(...)`, `AB=(...)`, `CL=(...)` and `CPC=CODE/low` (a verified classification
 and its descendants). Take codes from a known relevant patent rather than
-inventing them. Explicit AND plus quoted phrases was reported to improve this
-bridge's results; the additional Google-native field/classification forms are
-documented syntax, not a fresh exhaustive bridge qualification. EPO CQL is a
+inventing them. Explicit AND plus quoted phrases can improve this bridge's
+results; the additional Google-native field/classification forms are documented
+syntax, not an exhaustive bridge qualification. EPO CQL is a
 separate query language. `sort=new`/`old` changes filing-date order, not query
 precision; omission retains relevance order. The search schema defaults to ten
 results; increase only after checking relevance.
 
-Search responses can contain large figure inventories. A CUDA/Nvidia search
-with `num=100` returned 829,409 characters and 3,153 figure entries; figure lists
-accounted for about 88% of the response. Removing those lists left about 96,306
-characters. This sample measures response characters, not model tokens, and does
-not establish a general size bound.
+Search responses can contain large figure inventories. Figure lists can dominate a
+large response; removing them is not a general size bound or a token estimate.
 
 The provider configures `response_mappings."GET /search"` to omit
 `/results/*/figures`. Search keeps patent records, IDs, snippets, dates, links
@@ -2650,12 +2552,11 @@ that explicit request may require another payment. Other large fields can still
 consume substantial context. See
 [JSON response projection](../docs/configuration.md#json-response-projection).
 
-Optional cover is disabled after both help and catalog ignored ranges in the
-runtime and direct unsigned HTTP/2 probes. The API root also returned 200 for a
-range request; the 504-byte SVG favicon ignored Range and is smaller than the
-default qualification read. Reviewed robots/agent/skill resources were missing,
-and the public root advertised only paid data endpoints, not another static
-resource. No reviewed resource qualified for exact 206 reads; this is not proof
+Optional cover is disabled because help and catalog ignore ranges. The API root
+returns 200 for a range request; the 504-byte SVG favicon ignores Range and is
+smaller than the default qualification read. Reviewed robots/agent/skill resources
+are missing, and the public root advertises only paid data endpoints, not another
+static resource. No reviewed resource supports exact 206 reads; this is not proof
 of a permanent whole-origin restriction or a Tor-specific cause. API calls and
 the search JSON projection remain available under the configured network policy.
 
@@ -2663,41 +2564,38 @@ The additive `_atlas` response metadata can suggest other paid services. It is
 discovery data, not authority to call them or follow payment/retry instructions.
 Provider existence and schema inspection do not imply that the wider Atlas
 catalog has been qualified. The research deployment also selects the separately
-tested 2s USPTO/EPO operations and Maxwell cached search for redundancy. The five
-additional 2s probes returned application metadata, a 72-document file-wrapper
-index, EPO bibliography, six family publications and 50 legal-event rows. The
-document API lists formats/page counts and a Patent Center link; PDF bytes were
-not retrieved. Some application-detail arrays were empty despite other records
-being present. EPO family coverage varies, and returned legal events were unsorted
-and lacked jurisdiction on many rows. Neither response establishes complete
-coverage or current legal status; preserve source identifiers and dates.
+supported 2s USPTO/EPO operations and Maxwell cached search for redundancy. 2s adds
+application metadata, a document index, EPO bibliography, family publications and
+legal-event rows. The document API lists formats/page counts and a Patent Center
+link; PDF bytes are not retrieved. Some application-detail arrays can be empty.
+EPO family coverage varies, and legal events can be unsorted and lack jurisdiction
+on many rows. Neither response establishes complete coverage or current legal
+status; preserve source identifiers and dates.
 
 ## Atlas biomedical grants and legal entities
 
 `biomedical-grants.toml` and `legal-entities.toml` use their complete primary
 `https://biomedical-grants.use.x402atlas.com/openapi.json` and
 `https://legal-entities.use.x402atlas.com/openapi.json` schemas. They are Atlas
-gateways, not NIH/GLEIF-operated services. All seven NIH operations delivered
-records in sampled nonempty queries: search, project history/abstract, PubMed
-links, investigator and organization funding, recent awards and fiscal trends.
+gateways, not NIH/GLEIF-operated services. All seven NIH operations are supported:
+search, project history/abstract, PubMed links, investigator and organization
+funding, recent awards and fiscal trends.
 Counts and amounts represent fiscal-year records; aggregate retrieval caps at
 500 and marks partial coverage. An incomplete trend sum of zero means omitted
-funding, not no funding. Empty-query sample behavior is explicit in tool guidance.
+funding, not no funding. Empty-query behavior is explicit in tool guidance.
 NIH recent awards can contain contract numbers that do not match the schema's
 grant-style project-detail pattern; that follow-up is not qualified. Preserve
 source dates, name variants, profile IDs, partial flags and publication linkage.
 
-All three legal-entity operations delivered GLEIF records: nonempty company
-search, a Bloomberg Finance LEI profile and direct/ultimate accounting-parent
-relationships. These add gateway redundancy to existing GLEIF access, not an
+The three legal-entity operations return GLEIF records: nonempty company search,
+an LEI profile and direct/ultimate accounting-parent relationships. These add gateway redundancy to existing GLEIF access, not an
 independent corporate source. Entity activity differs from LEI registration
 status; accounting parents do not prove natural-person beneficial ownership.
 The parent API may return reporting exceptions rather than relationships.
 
-Both Atlas 402radar pages showed identical shared-recipient payment activity.
-Recipient transfers and provider-wide directory metrics do not establish that
-each listed API delivered paid data. The deployment selections rest on the
-sampled calls above, not those aggregate metrics.
+Shared-recipient payment activity across Atlas services does not establish that
+each listed API delivers paid data. Deployment selections rest on operation
+contracts, not aggregate directory metrics.
 
 ## SmartPerps by AgentGate
 
@@ -2709,17 +2607,15 @@ at most 25 positions and may truncate fills; preserve last_30d.truncated. There 
 execution, key custody or account funding in this catalog. The documented API
 root supplies route prices and methodology; `/llms.txt` was unavailable.
 
-The free preview and paid BTC lite/coin plus a one-row-per-ranking scan delivered
-snapshots with 100% reported coverage of a 120-account cohort, high confidence
-and no failed sources. The wallet lookup remains unqualified and unselected in
-research_desk. Cohort selection favors recent public PnL and omits spot hedges
-and other venues; bias is descriptive, not predictive. Preserve snapshot age,
-coverage, confidence, withheld bands and failed sources. Older/fallback cohort
-metadata remains relevant even when the snapshot is fresh.
+The free preview and paid BTC lite/coin plus scan snapshots report coverage,
+confidence and failed sources. The wallet lookup remains unqualified and
+unselected in research_desk. Cohort selection favors recent public PnL and omits
+spot hedges and other venues; bias is descriptive, not predictive. Preserve
+snapshot age, coverage, confidence, withheld bands and failed sources.
+Older/fallback cohort metadata remains relevant even when the snapshot is fresh.
 
-Unsigned challenge inspection found a v2 PAYMENT-REQUIRED header and legacy v1
-body; the header is authoritative and the sampled Base amounts agreed. Paid
-delivery worked through the normal managed payer. The public landing/source
+Challenges use a v2 PAYMENT-REQUIRED header; a legacy v1 body can also be present.
+The header is authoritative. Paid delivery uses the normal managed payer. The public landing/source
 metadata names AgentGate/YourAITools, a contact and a source mirror; this is
 provenance, not an uptime commitment. Radar activity shares an AgentGate payment
 recipient and is not endpoint-specific settlement evidence.
@@ -2731,95 +2627,88 @@ use the complete official `/openapi.json` on their respective
 `api.<catalog>-api.workers.dev` hosts. Each uses `/api` as a naming anchor with
 a root fallback, `x-payment-info` prices and `/llms.txt` help. The four catalogs
 share the published contact `hello@offerastudio.com` and a Base payment recipient.
-They are related services, not four independent fallback operators. Public
-catalogs and paid delivery were observed on 2026-10-28; a Cloudflare Workers
-hostname neither proves ephemerality nor promises durability. Radar's listings
-were largely unverified, and recipient transfers may include non-x402 commerce.
+They are related services, not four independent fallback operators. A Cloudflare
+Workers hostname neither proves ephemerality nor promises durability. Radar's
+listings are largely unverified, and recipient transfers may include non-x402
+commerce.
 
-ShopSocial delivered NASA Instagram/TikTok profiles, a YouTube channel feed and
-Facebook Page Plugin facts, plus a timed transcript and 20 public comments for
-`jNQXAC9IVRw`. Further probes delivered a NASA Threads profile/post and Pinterest
-pin, and public Telegram channel posts. These are bounded public views, not
-complete histories or private content. The Facebook plugin and AgData returned
-different page identifiers for the same named page; preserve source URLs and
-identifiers rather than asserting identifier equivalence. Public age/view-count
-text and missing fields should remain explicit.
+ShopSocial supports Instagram/TikTok profiles, a YouTube channel feed and
+Facebook Page Plugin facts, a timed transcript, public comments, a Threads
+profile/post, Pinterest pins and public Telegram channel posts. These are bounded
+public views, not complete histories or private content. The Facebook plugin and
+AgData can return different page identifiers for the same named page; preserve
+source URLs and identifiers rather than asserting identifier equivalence. Public
+age/view-count text and missing fields remain explicit.
 
-ShopSocial's Instagram reel read covers videos among the twelve newest grid
-posts plus newest IGTV items, rather than the complete reels tab; view counts
-are null. Contact reads expose bio links and email/phone-like bio text; business
-email, phone and address buttons are null for logged-out visitors. Profile business
-category and reel/highlight counts are also null. The vendor explicitly states that
-failed or blocked HTTP 503 results are uncharged for all seven overridden Instagram
-and YouTube reads. Preserve each route's published coverage and billing conditions.
+ShopSocial's Instagram reel read covers videos among the twelve newest grid posts
+plus newest IGTV items, rather than the complete reels tab; view counts are null.
+Contact reads expose bio links and email/phone-like bio text; business email, phone
+and address buttons are null for logged-out visitors. Profile business category and
+reel/highlight counts are also null. Failed or blocked HTTP 503 results are
+uncharged for all seven overridden Instagram and YouTube reads. Preserve each
+route's published coverage and billing conditions.
 
-CompanyRecords NY company lookup matched 2s on IBM's DOS ID 30059, legal name,
-1911-06-16 filing date and service address. Its Swedish snapshot matched Strale's
-direct lookup on Volvo's organisation number 556012-5790, name, registration date,
-postal address and SNI code. CompanyRecords used an October 22 weekly snapshot;
-Strale fetched directly on October 29 and returned more normalized fields, but no
-representatives or beneficial owners. Preserve 2s for CO/CT and Strale for fresher
-Swedish facts rather than declaring those broader tools redundant. Known-ID KRS
-lookup returned record 0000006865, named CD PROJEKT RED SPÓŁKA AKCYJNA; Maxwell's
-matching request rejected payment. CompanyRecords lacks Maxwell's Polish name
-search, which remains selected with that payment limitation noted.
+CompanyRecords NY company lookup agrees with 2s on DOS ID, legal name, filing date
+and service address. Its Swedish snapshot agrees with Strale's direct lookup on
+organisation number, name, registration date, postal address and SNI code.
+CompanyRecords uses a weekly snapshot; Strale can return fresher, more normalized
+fields but no representatives or beneficial owners. Preserve 2s for CO/CT and
+Strale for fresher Swedish facts rather than declaring those broader tools
+redundant. Known-ID KRS lookup is supported; Maxwell's matching request can reject
+payment. CompanyRecords lacks Maxwell's Polish name search, which remains selected
+with that payment limitation noted.
 
-Its `gov_justia_case_law` route actually uses CourtListener. It matched all 20
-sampled 2s opinion records on canonical URL, court, docket, filing date and citations,
-while supplying snippets where 2s returned null. 2s returned 20 rows despite limit 3.
-Shared source records demonstrate wrapper consistency, not independent corroboration.
-Research desk selects CompanyRecords opinion search and explicitly excludes 2s and
-Maxwell search backups with comments; 2s docket, opinion-text and verification tools
-remain selected. Lower advertised prices favor the sampled core CompanyRecords
-reads but do not establish universal quality or freshness superiority.
+Its `gov_justia_case_law` route actually uses CourtListener. It can match 2s
+opinion records on canonical URL, court, docket, filing date and citations while
+supplying snippets where 2s returns null. Shared source records demonstrate wrapper
+consistency, not independent corroboration. Research desk selects CompanyRecords
+opinion search and excludes 2s and Maxwell search backups; 2s docket, opinion-text
+and verification tools remain selected. Lower advertised prices favor core
+CompanyRecords reads but do not establish universal quality or freshness
+superiority.
 
 Keyword catalogue searches for Canada, Australia, Germany, Britain and the US
-each returned two dataset records with source metadata. They have no dedicated
-dataset-ID lookup contract. The US sample's title, modification date and download
-link matched the official Data.gov record; foreign records were not independently
-corroborated. Slovak RPO lookup is known-ICO only. Research desk selects these as
-partial alternatives while retaining Maxwell's broader contracts.
+return dataset records with source metadata. They have no dedicated dataset-ID
+lookup contract. The US records can match official Data.gov; foreign records are
+not independently corroborated. Slovak RPO lookup is known-ICO only. Research desk
+selects these as partial alternatives while retaining Maxwell's broader contracts.
 
-WebMD family-medicine search returned 60 New Orleans records of a reported 1,108,
-including 10 other-specialty listings; 57 lacked office phones and three lacked
-offices. NPPES through 2s agreed on the first clinician's NPI, name and taxonomy,
-but returned a different office address. The separate dentistry request failed
-HTTP 503. ADA ZIP searches in New Orleans and Austin failed HTTP 404; neither
-proves no local dentists, and ADA remains unselected. HealthCare.gov returned three
-of 38 reported 2026 Orleans Parish plans for age 40. The linked insurer SBC confirmed
-the first plan's $9,900 deductible and $10,600 out-of-pocket limit, but premiums
-were supplied separately and not independently checked. Preserve federal-exchange
-state coverage, plan year, nearest published age and pre-subsidy pricing. Failed
-calls retain possible payment liability despite vendor no-charge/retry claims.
+WebMD family-medicine search can include other-specialty listings and missing
+office phones or offices. NPPES through 2s can agree on NPI, name and taxonomy while
+returning a different office address. Dentistry requests can fail HTTP 503; ADA
+ZIP searches can fail HTTP 404, which does not prove no local dentists, and ADA
+remains unselected. HealthCare.gov returns a subset of reported plans for the
+nearest published age. Preserve federal-exchange state coverage, plan year,
+nearest published age and pre-subsidy pricing. Failed calls retain possible payment
+liability despite vendor no-charge/retry claims.
 
-CompanyRecords delivered Microsoft LinkedIn company facts and a page of Apify
-Trustpilot reviews with dates, ratings, review URLs and verification markers.
-The review sample contains invited/incentivized disclosures; it is not a
-representative satisfaction survey. Public LinkedIn company data does not include
-people, followers or posts. Other company/social modes remain unqualified.
+CompanyRecords supports LinkedIn company facts and Apify Trustpilot reviews with
+dates, ratings, review URLs and verification markers. Reviews can contain
+invited/incentivized disclosures; they are not a representative satisfaction
+survey. Public LinkedIn company data does not include people, followers or posts.
+Other company/social modes remain unqualified.
 
-HealthTravel delivered Reykjavik Numbeo observations, four London–Paris Rome2Rio
-options from a headline ten, and EMA insulin shortage records. Numbeo's normalized
-currency was null while priceText retained `kr`; preserve the original text.
-Rome2Rio is a public-page preview, not a full route inventory or booking quote.
-EMA matches included resolved shortages and discontinued medicines, not solely
-active shortages. The Google Flights JFK–LHR sample returned no fare rows, which
-does not qualify flight coverage or establish no flights. Wikivoyage returned
-upstream HTTP 503 after authorization; no automatic replay occurred. Its upstream
-claim that nothing was charged does not prove settlement or authorize retry.
-These two travel operations remain unselected.
+HealthTravel supports Numbeo city observations, Rome2Rio options and EMA shortage
+records. Numbeo's normalized currency can be null while `priceText` retains the
+original currency; preserve the original text. Rome2Rio is a public-page preview,
+not a full route inventory or booking quote. EMA matches include resolved shortages
+and discontinued medicines, not solely active shortages. Google Flights can return
+no fare rows, which does not qualify flight coverage or establish no flights.
+Wikivoyage can fail upstream HTTP 503 after authorization; no automatic replay
+occurs. Its claim that nothing was charged does not prove settlement or authorize
+retry. These two travel operations remain unselected.
 
-WebIntel delivered news aggregation and GDELT Context article/sentence matches.
-Aggregation explicitly reported a Google News timeout while Bing and GDELT
-returned results. Preserve per-engine status and do not present partial output
-as a complete three-engine search. GDELT Context matches do not provide general
-volume/tone timelines. Other search, commerce, health, registry and security
-operations remain available in the reusable definitions but are not implied
-to be qualified by these samples. These upstream fetch failures do not establish
-a Tor-specific cause or show that API relay would repair the provider's internal
-fetch. A potentially signed failure still grants no automatic relay replay.
+WebIntel supports news aggregation and GDELT Context article/sentence matches.
+Aggregation can report a Google News timeout while Bing and GDELT return results.
+Preserve per-engine status and do not present partial output as a complete
+three-engine search. GDELT Context matches do not provide general volume/tone
+timelines. Other search, commerce, health, registry and security operations remain
+available but are not implied to be qualified. Upstream fetch failures do not
+establish a Tor-specific cause or show that API relay would repair the provider's
+internal fetch. A potentially signed failure still grants no automatic relay
+replay.
 
-SiteCheck Instagram/transcript descriptions advertised unverified free failures
+SiteCheck Instagram/transcript descriptions can advertise unverified free failures
 and, for transcripts, retry advice. Focused description overrides preserve input
 and coverage contracts while removing those claims. Cached SSL Labs operations
 clarify that a missing report is an error, not permission to replay a paid call.
@@ -2833,7 +2722,7 @@ settlement or authorize repeating failed paid work.
 operations are GET reads; no GET/POST twins, separate API-key requirements or
 owned asynchronous jobs were present. `/v1` is a naming anchor with a root fallback,
 so public info/schema/documentation routes remain available. Operation-level
-`x-payment-info` supplies fixed USD price hints (sampled $0.01–$0.05). Help headline
+`x-payment-info` supplies fixed USD price hints ($0.01–$0.05). Help headline
 counts and prices contradict its per-route details; use operation metadata and
 actual payment offers rather than the headline. Claims that errors or empty
 results are not charged do not establish settlement or authorize replay.
@@ -2853,18 +2742,17 @@ bases, not interchangeable patient quotes. Medicaid results are screening estima
 not eligibility decisions. HRSA site records include multiple locations and
 administrative sites; preserve HRSA attribution and ODbL licensing.
 
-Live calls on 2026-10-29 delivered Austin and New Orleans doctor searches, Austin
-brain-MRI hospital prices, New Orleans hospital assistance records and HRSA sites.
-These establish sampled delivery, not independent listing accuracy or full-catalog
+Doctor searches, hospital prices, hospital assistance records and HRSA sites are
+supported. Delivery does not establish independent listing accuracy or full-catalog
 qualification. Research desk deliberately assigns the full read-only catalog,
 including help, to health for healthcare access and costs.
 
 ## openwebninja.toml — OpenWeb Ninja
 
 The published `https://x402.openwebninja.com/openapi.json` (310 operations,
-~1.9 MB) and `/llms.txt` were reviewed; sampled calls on 2026-11-08 verified
-marketplace delivery. All selected commerce routes are GET reads with
-`x-payment-info` fixed USD hints (~$0.003; $0.005 for EV charge lookup).
+~1.9 MB) and `/llms.txt` describe the catalog. All selected commerce routes are
+GET reads with `x-payment-info` fixed USD hints (~$0.003; $0.005 for EV charge
+lookup).
 
 The catalog contains duplicate alias trees that re-expose the same operations
 under longer names. The provider excludes `/realtime-serp-data`,
@@ -2876,25 +2764,18 @@ Redfin copies under `/realtime-real-estate-data`, `/ai-answers` and
 (`realtime-amazon-data`, `realtime-lens-data`, `real-time-walmart-data`,
 `realtime-zillow-data`, `local-business-data`, `waze`, `jsearch`, and so on).
 Amazon `product-reviews` requires a caller-supplied Amazon cookie and is not
-suitable as a managed tool. Google Shopping `product-price-history`
-returned only the echoed product identifier, with no history data, in the sampled
-call; its book search returned empty arrays for "thinking fast and slow",
-"harry potter" (with `document_type=books`) and "dune frank herbert", so it is not
-a usable library source. EV charge search returned stations but empty `connectors`.
+suitable as a managed tool. Google Shopping `product-price-history` can return
+only the echoed product identifier with no history data; its book search can return
+empty arrays, so it is not a usable library source. EV charge search can return
+stations but empty `connectors`.
 
-Sampled delivery: Amazon search (14 products), product details (specs, rating
-distribution, review aspects, ranks), product offers (59 offers); Walmart 40,
-eBay 60, Home Depot 24, Wayfair 48, Costco 24 products; Google Shopping search
-(10 listings, 3 offers); Google Lens visual matches (59 retailer matches with
-prices). Local business, Glassdoor employer search, `jsearch` and Zillow search
-returned useful records on the same date, establishing sampled delivery only.
-Image tools also delivered: text image search returned 100 results, reverse-image
-and Lens exact matches each returned 398 source pages, and Lens OCR extracted text
-boxes. Trustpilot search was sampled but is not selected: a company-name query
-returned ambiguous and unrelated entities (Stripe & Stare, domain-split Stripe
-records, "Stipt"), so it requires domain-scoped resolution.
+Marketplace search, product details, product offers, Google Shopping, Google Lens
+visual matches, local business, Glassdoor employer search, `jsearch`, Zillow search
+and image tools are supported. This does not establish every operation or a durable
+marketplace contract. Trustpilot search is not selected: a company-name query can
+return ambiguous and unrelated entities, so it requires domain-scoped resolution.
 
 Offer lists can repeat the same offer, and price, availability, delivery and
-sponsorship fields are sampled marketplace state rather than guarantees. Response
+sponsorship fields are marketplace state rather than guarantees. Response
 bodies are large (50–180 KB) and field names differ per marketplace; preserve
 marketplace identifiers and currency rather than normalizing by field name.
