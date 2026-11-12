@@ -464,7 +464,7 @@ complete this verification.
    does not establish a paid operation's request body or prove HTTP delivery.
 4. Apply the normal acceptance, deployment-consumer, validation and independent
    review steps above. Record per-source provenance so a new schema observation
-   does not imply that an older preview or paid sample was repeated. Report remaining
+   does not imply that an earlier observation was repeated. Report remaining
    gaps explicitly; metadata verification does not qualify output quality or payment.
 
 Keep this path manual for now. If more providers need it, consider a shared public

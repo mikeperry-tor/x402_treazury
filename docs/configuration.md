@@ -1746,7 +1746,7 @@ base URL; they help select operations and do not certify a usable tool catalog.
 Deployment mode still requires strict catalog loading before reporting counts.
 It loads no credentials, fetches no help, and performs no
 pricing probes. A remote spec is still fetched once. Use `--spec tests/fixtures/socialfetch_openapi.json` on the single-source command for an
-offline sampled inventory. This scoped capture is not the complete vendor API.
+scoped offline inventory. This scoped capture is not the complete vendor API.
 It is mutually exclusive with other inventory commands.
 
 SocialFetch's `include: ["/v1", ""]` uses the longest matching naming anchor:
