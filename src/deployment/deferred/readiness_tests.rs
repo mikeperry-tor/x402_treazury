@@ -15,6 +15,11 @@ struct Fixture {
 
 #[tokio::test]
 async fn selector_warnings_wait_for_own_catalogs_and_do_not_repeat_on_unrelated_results() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::selector_warnings_wait_for_own_catalogs_and_do_not_repeat_on_unrelated_results",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
@@ -378,6 +383,11 @@ async fn routed_shadowed_destination_waits_without_blocking_unrelated_listener()
 
 #[tokio::test]
 async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::empty_routed_destinations_do_not_discard_a_siblings_catalog",
+    ) {
+        return;
+    }
     for remote in [false, true] {
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
@@ -509,6 +519,11 @@ async fn legacy_listener_typo_does_not_reject_a_shared_catalog() {
 
 #[tokio::test]
 async fn deferred_send_typo_reports_selection_failure_without_upstream_prose() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::deferred_send_typo_reports_selection_failure_without_upstream_prose",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
@@ -634,6 +649,11 @@ async fn finish(stop: CancellationToken, serving: tokio::task::JoinHandle<Result
 
 #[tokio::test]
 async fn default_waits_for_own_catalog_publication_while_peers_serve() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::default_waits_for_own_catalog_publication_while_peers_serve",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -711,6 +731,11 @@ async fn default_waits_for_own_catalog_publication_while_peers_serve() {
 
 #[tokio::test]
 async fn required_failure_logs_error_and_closes_only_dependent_endpoint() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::required_failure_logs_error_and_closes_only_dependent_endpoint",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
@@ -781,6 +806,11 @@ async fn required_failure_logs_error_and_closes_only_dependent_endpoint() {
 
 #[tokio::test]
 async fn generation_and_listener_failures_explain_why_a_readable_catalog_is_unavailable() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::generation_and_listener_failures_explain_why_a_readable_catalog_is_unavailable",
+    ) {
+        return;
+    }
     for (document, settings, stage, reason) in [
         (
             json!({"paths":{"/read":{"get":{
@@ -844,6 +874,11 @@ async fn generation_and_listener_failures_explain_why_a_readable_catalog_is_unav
 
 #[tokio::test]
 async fn shutdown_while_waiting_releases_sockets_without_readiness_errors() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::shutdown_while_waiting_releases_sockets_without_readiness_errors",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
@@ -912,6 +947,11 @@ async fn independent_capability_endpoints_start_without_pending_catalogs() {
 
 #[tokio::test]
 async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::worker_or_publication_failure_closes_waiters_and_keeps_ready_peers",
+    ) {
+        return;
+    }
     for panic in [false, true] {
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
