@@ -1668,12 +1668,20 @@ support, grocery routes add structured inputs/batches, and batch accepts a JSON
 array rather than URL-encoded JSON. For these five routes, results and documented
 per-call billing are the same; GET is not needed to recover unsupported functionality.
 The company-facts and domain-precheck pairs have the evidence boundaries described
-below. Free public data remain available alongside paid routes. Only
+below. Free public data remain available alongside paid routes.
 `POST /api/feedback` is excluded:
 it stores a message without a payment gate or documented idempotency key. The
 ordinary unsigned x402 retry assumption does not cover this unprotected persistent
 write; a failed response after storage could otherwise repeat the submission.
 This is not a restriction on unsigned POST retries for payment-gated x402 routes.
+
+`POST /api/vuln/lockfile` is also excluded. Its pinned OpenAPI operation omits
+`requestBody`, so generated calls cannot supply the lockfile. Independently, its
+payment contract requires `lockfileBindingNonce` over the exact POST body and
+rejects a random EIP-3009 nonce; the pinned x402 EVM SDK generates a random nonce.
+Adding a body schema alone would therefore leave payments incompatible. Keep the
+complete vendor asset unchanged and revisit this exclusion only when both the
+request contract and payer support are available. `/api/vuln/check` remains exposed.
 
 The current vendor catalog has no screenshot operation or screenshot response
 schema; the obsolete image mapping is removed. No deployment example selected

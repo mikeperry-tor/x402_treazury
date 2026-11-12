@@ -7,7 +7,8 @@ base_url = "https://horizonpulse.dev"
 prefix = "horizonpulse"
 include = ["/api", ""]
 # Free feedback stores a message without the x402 execution gate used for unsigned retries.
-exclude_operations = ["POST /api/feedback"]
+# Lockfile triage lacks a requestBody schema and requires a body-bound nonce unsupported by the payer.
+exclude_operations = ["POST /api/feedback", "POST /api/vuln/lockfile"]
 # x-payment-info.amount is atomic, not a display-unit tariff; retain vendor price prose.
 help_url = "https://horizonpulse.dev/llms.txt"
 instructions_text = "Use http for raw status, headers and text/base64 body; fetch returns cleaned page text. Preserve source dates, coverage and units; check truncation indicators before treating content as complete. Marketplace and seller reports are evidence, not endorsements."

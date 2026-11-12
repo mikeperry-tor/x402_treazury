@@ -327,3 +327,25 @@ fn categories_are_independent_defaulted_and_retired_controls_reject() {
         }
     }
 }
+
+#[test]
+fn horizon_lockfile_nonce_incompatibility_excludes_only_unsupported_operation() {
+    let provider = x402_treazury::providers::get("horizonpulse").unwrap();
+    let document: Value = serde_json::from_str(provider.local_schema.unwrap()).unwrap();
+    let lockfile = &document["paths"]["/api/vuln/lockfile"]["post"];
+    assert!(lockfile.is_object(), "retain the complete vendor operation");
+    assert!(lockfile.get("requestBody").is_none());
+
+    let tools =
+        x402_treazury::catalog::build_tools(&provider.config, &document, "horizonpulse").unwrap();
+    assert!(
+        !tools
+            .iter()
+            .any(|tool| tool.method == "POST" && tool.path == "/api/vuln/lockfile")
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool.method == "GET" && tool.path == "/api/vuln/check")
+    );
+}
