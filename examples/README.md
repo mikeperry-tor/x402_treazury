@@ -1,6 +1,9 @@
 # Deployment examples
 
-Provider sweeps also maintain these deployment selections. Follow the
+These examples are maintained selections, not provider inventories. Provider
+definitions remain reusable and broader; see [provider caveats](../providers/CAVEATS.md)
+for support boundaries and [provider maintenance](../docs/provider-updates.md)
+for the acceptance procedure. Follow the
 [deployment acceptance procedure](../docs/provider-updates.md#stage-and-accept-changes):
 review new catch-all assignments and stale exact selectors, find catalog replacements
 for deleted APIs, compare useful coverage before price, and retain adjacent reversible
@@ -8,12 +11,30 @@ replacement comments when displacing a tool. Refresh dynamic-endpoint search key
 hints and endpoint summaries with capability/routing changes. A backup sharing the
 same upstream adds gateway redundancy, not an independent data source.
 
-Start with [deployments/managed.toml](deployments/managed.toml): one authenticated
-MCP listener, one managed wallet pool, Exa web search and page contents, and
-source management for agent-added APIs. Exa's catalog loads from its public
-specification. Added APIs share the research pool; registrations last until exit.
-The [README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools) walks through
-building, treasury setup and serving.
+| Example | Shape | Network | Initial funding |
+| --- | --- | --- | --- |
+| [managed.toml](deployments/managed.toml) | One listener, one wallet group, Exa and agent-added APIs | Direct | One $2-3 small allocation; first replacement spans $4-6 nominal |
+| [comprehensive.toml](deployments/comprehensive.toml) | Four listeners, two intended groups, curated sources, relay and persistent agent-added APIs | Tor | Web's $2-3 start; eventual two-group range $4-6 nominal |
+| [research_desk.toml](deployments/research_desk.toml) | Twelve task-oriented listeners, four intended groups, broad research selection and relay | Tor | General's $2-3 start; eventual four-group range $8-12 nominal |
+
+Nominal USDC sizing is not a ZEC quote. Cover fees, bridge costs, relays and
+later replacements; bridge floors can bias draws upward. `README.md` owns the
+first-run walkthrough, and `README_ADVANCED.md` owns the multi-listener runbook.
+
+## Managed starter
+
+[deployments/managed.toml](deployments/managed.toml) exposes Exa web search, page
+contents and provider-management tools on one authenticated research listener and
+one managed pool. Exa's catalog loads from its public specification. Agent-added
+APIs share the research pool; registrations last until exit unless
+`source_registry_file` is set. It uses direct networking. See the
+[README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools).
+
+The listener requires `X402_TREAZURY_MCP_TOKEN`. Serving binds the listener before
+background funding; tools remain visible while funding is pending. The pool draws
+a randomized $2-3 nominal reserve and permits payments up to $0.50.
+
+## Comprehensive example
 
 [deployments/comprehensive.toml](deployments/comprehensive.toml) combines curated
 research sources, four listeners, two intended groups, paid discovery relay and a
@@ -24,147 +45,220 @@ company's payer and $0.50 cap. A cap refusal still records demand. It retains th
 `state/privacy` treasury, registry and operational identities; renaming the example
 does not migrate state.
 
-Initial setup is web's one default $2–3 nominal small allocation. Cover the $3
-upper bound plus source fees and bridge costs, and keep capital for company
-preparation, relay payments and ongoing replacements. Both groups' eventual
-initial allocations total $4–6 nominal. Preparing a group's first small wallet and
-its later replacement instead spans two allocations: $4–6 nominal, averaging
-approximately $5 before bridge-floor adjustments and fees. The first payment
-makes READY become ACTIVE and opens the replacement vacancy. Allow randomization
-headroom to $6; bridge floors can bias draws upward, so $5 is neither an all-in
-cost nor a guaranteed balance. A nominal bridge minimum above the $3 ceiling can
+Initial setup is web's one default $2-3 nominal small allocation. Both groups'
+eventual initial inventory totals $4-6 nominal. Separately, preparing one group's
+first small wallet and its later replacement spans two allocations: $4-6 nominal,
+averaging approximately $5 before bridge-floor adjustments and fees. The first
+payment makes READY become ACTIVE and opens the replacement vacancy. Allow
+randomization headroom to $6. A nominal bridge minimum above the $3 ceiling can
 refuse a route rather than silently increasing the bound.
 
-[deployments/research_desk.toml](deployments/research_desk.toml) distributes sources
-across twelve task-oriented endpoints with four intended groups: general for
-web, science, shopping, world and the toolbox; personal for social, property and
-travel; health for care research; financial for business, finance and security.
-General supplies the initial common payer and $1 cap. First API use activates each
-participating group independently; after that group's first credit it uses its own
-payer permanently. Previously credited groups route directly on restart; depletion
-never returns them to general. Health's cap therefore changes from general's $1 to health's $0.50.
-Initial general setup is $2–3 nominal, while the eventual four-group initial range
-is $8–12, before fees and later replacements.
+## Research desk
 
-Both examples use `[wallet_bootstrap]` with explicit `bootstrap_group` and
-`deferred_groups`. New participant allocations wait for first use and randomized
-30–120-second opportunities; API calls never wait for swaps. Paid metadata and
-directory relay fees stay on the bootstrap group across API cutover and do not
-activate a group. Run `wallet init`
-for treasury setup, fund the shielded receive address, and optionally run
-`wallet bootstrap` before `serve` to prepare only the bootstrap group's enabled
-reserves without catalogs/listeners. `serve` binds listeners before background
-funding. Exclusive wallet commands require stopping serving; see the
+[deployments/research_desk.toml](deployments/research_desk.toml) distributes
+sources across twelve task-oriented endpoints with four intended groups. General
+covers web, science, shopping, world and toolbox; personal covers social, property
+and travel; health covers care research; financial covers business, finance and
+security. General supplies the initial common payer and $1 cap. First API use
+activates each participating group independently; after that group's first credit
+it uses its own payer permanently. Previously credited groups route directly on
+restart; depletion never returns them to general. Personal also has a $1 cap;
+health changes to its own $0.50 cap; financial uses $1. Initial general setup is
+$2-3 nominal, while the eventual four-group initial range is $8-12, before fees,
+headroom and later replacements.
+
+| Endpoint | Port | Group | Scope |
+| --- | --- | --- | --- |
+| toolbox | 3010 | general | Provider management, raw calls and agent-added APIs |
+| web | 3011 | general | Search, retrieval, news, archives and images |
+| science | 3012 | general | Academic research, papers, funding and bio/chem references |
+| shopping | 3013 | general | Marketplace products, prices, offers and Lens |
+| world | 3014 | general | Geopolitics, weather, shipping and physical-world data |
+| social | 3015 | personal | People, contacts and platform content |
+| property | 3016 | personal | Parcels, local records, zoning and site context |
+| travel | 3017 | personal | Flights, awards, stays, transit and destinations |
+| health | 3018 | health | Care access, trials, drugs and public health |
+| business | 3019 | financial | Organizations, filings, jobs, funding and reviews |
+| finance | 3020 | financial | Equities, macro, crypto and derivatives |
+| security | 3021 | financial | Threats, breaches and infrastructure checks |
+
+Wallets group endpoints by what the upstream learns about the caller, not by
+topic. All initially share general's payer and cap. Separate addresses avoid
+direct payer reuse, but closely spaced initial swaps still reveal a funding-time
+correlation signal. First-use activation and randomized later opportunities can
+weaken that signal; they do not guarantee unlinkability.
+
+## Wallet bootstrap and funding
+
+Both multi-listener examples use `[wallet_bootstrap]` with explicit
+`bootstrap_group` and `deferred_groups`. New participant allocations wait for
+first use and randomized 30-120-second opportunities; API calls never wait for
+swaps. Paid metadata and directory relay fees stay on the bootstrap group across
+API cutover and do not activate a group. Run `wallet init` for treasury setup,
+fund the shielded receive address, and optionally run `wallet bootstrap` before
+`serve` to prepare only the bootstrap group's enabled reserves without
+catalogs/listeners. `serve` binds listeners before background funding. Exclusive
+wallet commands require stopping serving; see the
 [wallet reference](../docs/wallet-cli.md).
 
 Comment out the entire bootstrap table for ordinary funding and separate groups
 from the beginning. Existing funds and earlier links remain in place. Separate
 initial addresses avoid direct payer reuse, but closely spaced swaps reveal a
-funding-time correlation signal. First-use activation and randomized later
-opportunities can weaken that signal. Shared bootstrap payments have a visibly
-common payer, and timing, amounts, providers, content and settlement can still
-correlate activity. Delayed funding cannot erase prior links or guarantee
-unlinkability.
+funding-time correlation signal. Shared bootstrap payments have a visibly common
+payer, and timing, amounts, providers, content and settlement can still correlate
+activity. Delayed funding cannot erase prior links or guarantee unlinkability.
 
-Ordered source `send_tools` rules group tool families, exclude editorial choices
-and express sharing with destination arrays. Each source has one final catch-all
-that assigns or excludes unmatched tools; endpoint capability and wallet bindings
-remain intact. See [source tool distribution](../docs/configuration.md#source-tool-distribution)
-for matching and `config check --explain-routing` inspection.
+## Selection notes
 
-Exa mode choice remains advisory in the managed starter and research desk. Lite
-is $0.004 for lower-cost indexed search with restricted inputs and no live fetching;
-auto is $0.007 and remains the general-search default. Choose coverage, freshness
-and quality before price; content options add charges. No example forces lite.
-The comprehensive company listener also selects the pinned Horizon Pulse
-company-facts read alongside existing statements and filings. Compare each fact's
-actual period and US-GAAP scope; quarterly, year-to-date and annual flows differ.
+These notes explain deployment choices. Provider connectivity, payment and
+response boundaries live in [provider caveats](../providers/CAVEATS.md).
 
-The research desk prefers Exa for general/news search and retains Otto's topical
-crypto news and linked market recaps as complementary coverage. Topical reports
-lack citations; recap generation time can be newer than the underlying news window.
-StableEnrich Firecrawl supplies rendered page and PDF reads; AGProxy adds raw
-residential fetches for non-JavaScript pages; Exa supplies cited answer synthesis. NetIntel's page reader is excluded because it did not
-retrieve JavaScript-generated content.
-AgentUtility supplies static HTML links and schema-based static-page JSON, with
-Botsmith X search shared across web/social. Otto DNS, WHOIS and domain age remain
-available alongside NetIntel DNS/RDAP on security; matching sampled data did not
-establish an advantage from removing Otto. NetIntel's DKIM field is nullable and
-does not establish complete selector discovery.
-Exa retains explicit freshness/history controls. SocialFetch and Vaaya remain
-fully excluded in this deployment. Vaaya's 2026-11-12 Firecrawl retest succeeded,
-but StableEnrich's Firecrawl scrape remains the selected Firecrawl reader;
-Vaaya's richer parameters come with the deprecated Firecrawl API and
-non-functional options. On 2026-10-28, the latest Base settlements listed by
-[402radar for Vaaya](https://402radar.io/vaaya.ai) were 18 days old and
-[SocialFetch](https://402radar.io/api.socialfetch.dev) three days old. The operator
-had observed at least 14 days without Vaaya payments. Those dated external
-observations did not establish a universal outage, and later paid calls returned
-successful responses. Reusable provider definitions remain available for
-deliberate retesting. Selections belong here, not in the reusable providers.
+### Web
 
-Horizon Pulse and 2s company-facts reads are shared by business and finance.
-Both use SEC EDGAR; they add gateway choices rather than independent underlying
-evidence. Compare each fact's actual period: sampled annual values agreed, while
-2s interim flows were fiscal-year-to-date and Horizon supplied three-month flows.
-The narrower latest-facts API complements 2s history/metric controls.
+Exa is the primary general/news search and cited-answer source. StableEnrich
+Firecrawl supplies rendered page and PDF reads; APEX page_markdown is the cheaper
+JavaScript-only fallback; AGProxy adds raw residential fetches for
+non-JavaScript pages. Exa Contents supplies indexed text and explicit
+freshness/history controls. GLIM supplies X trends, Google Trends supplies interest
+timelines, and Strale inspects C2PA media credentials.
 
-Banking Compliance checks and rule lookup are advisory finance tools; business
-retains authoritative eCFR retrieval. Its sampled summaries had citation errors,
-and drafting invented a website and FDIC membership despite an explicit false
-insurance flag, so drafting is omitted from this desk (social would own it).
-Blockchain Money Map supplies finance wallet/transaction research and security
-wallet audits. Its sampled transaction status agreed with Arkham, whose richer
-labels and transfers remain useful. BMM diagnostics only analyze supplied facts
-and added no independent evidence about Maxwell, so toolbox does not select them.
-The reusable provider retains compatible diagnostic and operational tools. See
-[provider caveats](../providers/CAVEATS.md#blockchain-money-map) for sample limits,
-persistent report URLs and caller-owned notary secrets.
+Exa mode choice is advisory. Lite is $0.004 for indexed search with restricted
+inputs and no live fetching; auto is $0.007 and remains the general-search
+default. Choose coverage, freshness and quality before price; content options add
+charges. No example forces lite. NetIntel's page reader is excluded because it
+does not retrieve JavaScript-generated content. SocialFetch and Vaaya are not
+selected; their reusable definitions remain available for deliberate review.
 
-APEX adds contract-reviewed market-data reads on finance. Its sampled funding-rate
-board and Otto's targeted funding/OI read both offered $0.001, with different venues
-and fields, so both remain selected. Old APEX weather and web-search routes are gone;
-this desk already uses Exa for search and Otto/2s for weather. Otto's sampled
-current-plus-five-day weather matched 2s current conditions; both use Open-Meteo.
+### Science
 
-Locus adds broader groundwater monitoring-well history beside its free one-well
-preview, while new printable dossiers remain unselected pending distinct coverage
-comparison. Its free call gateway exposes reads; vendor-listed feedback and coverage
-participation writes have no replay/deduplication contract and are unsupported here.
-New water/owner-context reads and groundwater are reflected in property search hints.
-Straits paged history is selected on world for older full index ticks: seven-day
-pages use before/nextBefore and preserve response cadence; older bulk exports use
-daily aggregates and remain a documented alternative. These choices preserve source
-coverage and resolution rather than relying on tool names alone.
+2s supplies scholarly search, citations, PubMed metadata and Crossref/OpenAlex
+references; APEX adds OpenAlex search. Science also selects biomedical grants,
+medRxiv listings, NCBI/UniProt/GBIF and PubChem references. This is not a complete
+OpenAlex author/work API or a guaranteed full-text source. PubMed metadata lacks
+abstracts; preprints are not peer-reviewed. Preserve per-source errors and
+publication dates.
 
-APEX's page_markdown rendered reader retrieved the JavaScript test page, and its
-research search returned credited OpenAlex and Hacker News results. Research search
-is shared with science/social; it does not replace full paper retrieval or
-discussion threads. AgData company enrichment returned the requested LinkedIn
-company; Instagram posts,
-TikTok videos, YouTube channel videos and Facebook page details also delivered
-records. These narrow platform operations are enabled; separate comments,
-transcripts and personal-profile modes remain unqualified.
-AgentUtility closest-date archive lookup and 2s Hacker News search also succeeded.
-2s scholarly search returned PubMed results with an explicit arXiv failure; preserve
-per-source errors. These narrow workflows are enabled, rather than whole catalogs.
+### Shopping
+
+OpenWeb Ninja supplies marketplace search, product details, offers, Google
+Shopping and Google Lens/OCR across Amazon, Walmart, eBay, Home Depot, Wayfair and
+Costco. ShopSocial supplies Instagram, TikTok, YouTube, Facebook, Threads,
+Pinterest and Telegram reads shared with social. Prices, availability, delivery
+and sponsorship fields are marketplace state, not guarantees; identifiers and
+currencies differ by marketplace. OpenWeb Ninja's Trustpilot search remains
+unselected because company-name queries can return ambiguous entities;
+CompanyRecords supplies the selected Trustpilot reviews on business.
+
+### World
+
+Straits supplies the Hormuz shipping index and paged history; use `before` and
+`nextBefore` for older ticks and preserve cadence and resolution. Otto and 2s
+supply current weather and forecasts over shared Open-Meteo data; aviation weather
+and hazards stay here. World also covers energy, agriculture, satellites, disasters
+and FCC geographies. Preserve observation timestamps and
+distinguish current observations from historical baselines.
+
+### Social
+
+Glim supplies X search, Reddit search and GitHub metadata. Botsmith adds account
+dossier, watchlist polling, sentiment pulse and an audience read; Glim's follower
+listing remains unqualified. Botsmith also supplies Kalshi prediction-market
+reads. 2s supplies Hacker News items, feeds and users. AgData and ShopSocial
+supply narrow LinkedIn company, Instagram, TikTok, YouTube and Facebook reads;
+comments, transcripts and personal-profile modes are separate and less qualified.
+CompanyRecords adds LinkedIn company facts. Person and contact providers cover
+profiles, work email and phone research. SocialFetch's long tail and Vaaya remain
+unselected; this is not complete platform parity. Preserve platform, date and
+partial-result markers; missing posts do not prove absence.
+
+### Property
+
+Locus supplies the free list/call gateway, place reports and broader groundwater
+monitoring-well history; groundwater describes monitoring wells, not a parcel's
+well. Zillow and Redfin supply listings, estimates and market context; estimates
+are not appraisals. Property also selects NYC PLUTO/ACRIS/DOB/HPD records,
+flood/environmental data, zoning and local-government records. Preserve record
+dates and coverage. Locus feedback and coverage-participation writes are excluded.
+
+### Travel
+
+StableTravel supplies Google Flights cash fares, FlightAware operations and cached
+Seats.aero awards; 2s supplies flight status, airport boards and route schedules
+over shared FlightAware data; HALOWERK supplies route matrices. HealthTravel adds
+hotel prices and Amtrak; ShopSocial adds hiking and FlixBus/FlixTrain; Maxwell
+adds resort lodging, lift access, menus, rentals and local tips; APEX adds cached
+Aviasales deals. EV chargers are directory data rather than live occupancy;
+hiking is OpenStreetMap rather than user reviews. Flix searches cover one adult
+one way. Rappi menus need a store ID/URL and cannot discover stores. Published
+prices and schedules are not held inventory. Verify community-maintained visa
+references with the destination authority.
+
+### Health
+
+FindMyDirectDoctor supplies the full read-only healthcare-access catalog: doctor
+and clinic directories, membership fees, hospital cash prices, HRSA centers,
+financial assistance and uninsured-care guides. WebMD adds provider search;
+HealthCare.gov adds ACA plan data; EMA adds shortage records; HealthTravel adds
+PubMed citation metadata; 2s adds NPI/NPPES lookups. Hospital facility prices, Medicare benchmarks, drug acquisition
+costs and pre-subsidy premiums are distinct bases. Directories can be incomplete;
+dentistry delivery is unqualified. HCPCS and LOINC are reference codes: existence
+does not establish coverage, and LOINC results omit units and reference ranges.
+
+### Business
+
+Strale supplies UK charity records, Canadian and Swiss company profiles, Polish
+and Slovak ID lookups and EU regulation search; MiCA checks are excluded because
+the registers are unavailable. 2s supplies NY/CO/CT state company records and FCC
+proceedings.
+CompanyRecords supplies NY registry records, weekly Swedish snapshots, known-ID
+Polish KRS extracts, CourtListener opinions and Trustpilot reviews. Maxwell adds
+broad company and registry discovery; court search is selected through
+CompanyRecords and 2s, not Maxwell. Atlas Google Patents, 2s
+USPTO/EPO operations and Maxwell cached search cover patents; neither a document
+index nor a legal-event list establishes full document retrieval or current legal
+status. GenuineGood and Atlas biomedical grants cover federal and NIH funding.
+OpenWeb Ninja JSearch and Glassdoor employer data stay selected on business; other
+job boards and social modes remain unqualified. Resolve entity identity before
+enrichment; compare facts by their start/end periods. Missing records do not prove
+absence.
+
+### Finance
+
+Otto supplies crypto news, market briefs, market and token data and funding/OI
+reads; APEX adds venue-normalized funding boards, stablecoin pegs, prediction
+odds, tokenized-stock quotes and X1 reads. Blockchain Money Map supplies wallet,
+transaction and saved-report research; Arkham adds labels and transfers. SmartPerps
+supplies Hyperliquid cohort positioning. 2s supplies FIGI/security resolution.
+Concordance supplies multi-source series lookups; Banking Compliance supplies rule
+lookup only, while business retains authoritative eCFR retrieval. Checks and
+drafting are omitted on information-quality grounds. 2s supplies SEC company facts
+to the research desk; the comprehensive example uses Horizon Pulse for company
+facts. Compare each fact's actual period.
+Banking rule summaries are advisory and can contain citation errors.
+
+### Security
+
+RelayShield supplies email breach and infostealer checks, identity graphs, vendor
+supply-chain risk, IP intelligence, ransomware risk, public secret exposure,
+domain identity risk, declared-stack CVE checks, counterparty wallet risk and
+SIM-swap checks. Its phone companion supplies phone reputation. NetIntel supplies
+phone validation, IP reputation, geolocation, WHOIS/RDAP, cloud detection and
+technology fingerprinting. IPIntel adds IP lookup; Otto supplies DNS, WHOIS and
+domain age. Missing
+findings and degraded results do not establish safety. Bulk identity risk and
+campaign scanning exceed ordinary payment caps; SIM-swap signals are cached and
+carrier availability can prevent a result.
+
+### Cross-provider coverage limits
 
 | Excluded research | Selected alternatives | Coverage limits |
 | --- | --- | --- |
 | Web/news and rendering | Exa, StableEnrich, APEX page_markdown, AGProxy raw fetch | Preserve source dates, final destination and partial results. |
 | Papers | 2s scholarly search/citations, APEX OpenAlex search, existing science tools | No complete OpenAlex author/work API or guaranteed full text. |
 | SEC, court records, rules, nonprofits and recalls | Existing x402stock and 2s APIs | Different query/pagination contracts; US recalls do not replace six-authority international coverage. |
-| Archives | AgentUtility `archive_snapshot` | Closest snapshot lookup; no full CDX inventory or qualified archived-text read. |
-| Social and company evidence | Botsmith X, StableEnrich Reddit, Agent402 GitHub repository metadata, 2s HN, AgData LinkedIn company/Instagram/TikTok/YouTube/Facebook reads, existing contact providers | No complete SocialFetch platform or endpoint parity. |
-| Patents | Atlas Google Patents search/details, all seven 2s USPTO/EPO operations, Maxwell cached USPTO search, existing x402stock patent/company tools | Atlas returned 23 claims; 2s adds application detail, document indexes, bibliography, families and historical legal events. Neither a document index nor a legal-event list establishes full document retrieval or current legal status. |
-
-Atlas Google Patents remains enabled. Its search mapping omits
-`/results/*/figures` and discloses removals in the result advisory, preserving
-patent records and pagination. A sampled 100-result CUDA/Nvidia response shrank
-from 829,409 to about 96,306 characters after figure inventories were removed;
-this is not a context-size guarantee. Patent details are unchanged. An unmapped
-raw search can retrieve figure metadata as a separate explicit call that may be
-paid. See [JSON response projection](../docs/configuration.md#json-response-projection).
+| Archives | Exa `snapshotAsOf` | Stored historical page versions; no full CDX inventory or guaranteed archived-text retrieval. |
+| Social and company evidence | Glim X/Reddit/GitHub search, Botsmith derived social analysis, 2s HN, AgData and ShopSocial platform reads, CompanyRecords LinkedIn company facts, existing contact providers | No complete SocialFetch platform or endpoint parity. |
+| Patents | Atlas Google Patents search/details, 2s USPTO/EPO operations, Maxwell cached USPTO search, existing x402stock patent/company tools | 2s adds application detail, document indexes, bibliography, families and historical legal events. Neither a document index nor a legal-event list establishes full document retrieval or current legal status. |
 
 For Google Patents, prefer quoted technical phrases joined with explicit `AND`,
 structured assignee/office/date filters and verified classification restrictions.
@@ -173,244 +267,41 @@ Google's [search guide](https://support.google.com/faqs/answer/7049475?hl=en)
 documents title/abstract/claims fields and CPC descendants. These Google-native
 operators differ from EPO CQL. Date sorting is not a substitute for a precise query.
 
-Agent402 repository metadata succeeded. NetIntel and AgentUtility repository
-health calls also succeeded, but their different scores and contracts are
-candidates rather than silently interchangeable data. The 2s GitHub replacement
-failed upstream authentication and remains excluded. HireScrape's one-record
-Instagram profile, LinkedIn company, YouTube video and TikTok profile calls all
-failed with upstream HTTP 401 `Token expired`; TikTok also reported settlement
-before failure. Its social tools remain excluded. These failures do not prove
-that every small mode is asynchronous. A separate Indeed-only, one-record jobs
-request completed inline in 37 seconds at a reported $0.052; jobs stays selected.
-Its `sd_sync_` snapshot identifier accompanied complete items and required no
-polling. Other job boards remain unqualified. AgentUtility patent keyword search
-failed upstream USPTO 403.
-Maxwell returned ten cached USPTO records for its documented lithium-battery
-query after the payment compatibility fix. A separate CUDA query returned
-`not_cached` with queued retrieval; it was not automatically repeated. This is
-not an empty search or independently verified free failure. Check `fetchedAt`.
-All five additional 2s patent operations delivered records: application detail
-and a 72-document index for US application 11627892, and bibliography, six family
-publications and 50 legal events for EP1000000. The family included EP, AT, DE,
-NL and US publications. Legal rows were unsorted and often lacked jurisdiction;
-complete worldwide coverage and current status were not established.
-Other gaps include GitHub profiles/trending, GDELT timelines, Glassdoor employer
-reviews and customer-review sources beyond the qualified Trustpilot sample, TheirStack technographics and buying intent, licensed Tako data cards and
-SocialFetch's long tail of social platforms. Do not silently substitute ordinary
-web search for those structured datasets. The bundled FreeQ provider is available
-for discovery: static Markdown worked, JavaScript-generated content did not; it is
-not selected as another rendered-reader replacement.
+## Maintaining selections
 
-The travel listener at port 3019 shares the existing global wallet. Qualified
-2s calls supply destination advisories and community-maintained visa references.
-Maxwell returned 354 Austrian resorts, 27 published 2026/27 ticket-price rows for
-Kitzbühel and dated base/summit forecasts; lift and station components may be
-unavailable. Preserve dates, seasons, price channels and source links. Published
-prices are not live inventory; entry requirements require destination-authority
-verification. Flight prices, operational lookups, airport references and route
-matrices also belong on travel; aviation weather and accident research stay on world.
+Ordered source `send_tools` rules group tool families, exclude editorial choices
+and express sharing with destination arrays. Each source has one final catch-all
+that assigns or excludes unmatched tools; endpoint capability and wallet bindings
+remain intact. See [source tool distribution](../docs/configuration.md#source-tool-distribution)
+for matching and `config check --explain-routing` inspection.
 
-Business coverage includes Strale UK charity records, 2s NY/CO/CT state company
-records and FCC proceeding filings. CompanyRecords supplies NY registry records,
-Swedish weekly snapshots, known-ID Polish KRS extracts and CourtListener opinions.
-Its court search matched all 20 sampled 2s records and added snippets at a lower
-advertised price; 2s and Maxwell opinion searches remain explicitly excluded backups.
-2s retains CO/CT coverage, Strale retains fresher direct Swedish lookups, and Maxwell
-retains Polish name discovery. These broader contracts remain selected alongside
-CompanyRecords; Maxwell's current payment-service failure does not qualify delivery. 2s adds HN
-items/feeds/users, FCC spectrum geographies and FIGI/security resolution. Its
-issuer-level ISIN list may include bonds rather than identify the input share.
-Strale MiCA checks reported unavailable registers despite HTTP success; they
-remain excluded. 2s HICP returned 2025-12 as latest in October 2026 and remains
-unselected. Neither payment success nor a false match field proves data coverage.
+Prefer bundled provider listing before remote discovery; remote discovery can
+incur several charges. Wallet payment caps bound each challenge, not the sum of a
+research job. Agent guidance keeps invocation prices and uncertain-payment
+warnings, while transport fallback costs and vendor API path mappings remain
+operator concerns. Published schemas and estimates do not establish comparative
+output quality, Tor delivery or funded settlement.
 
-Maxwell remains selected alongside close and partial alternatives while its payment
-facilitator reports `upstream_unreachable`; persistent failures may warrant removal.
-Strale adds Canadian and Swiss company profiles, Polish and Slovak ID lookups and
-EU regulation search. Canada advertises $0.864 per call; other country contracts,
-prices and freshness differ. Polish name search failed despite the vendor schema,
-so caller guidance requires a KRS number. CompanyRecords adds keyword searches
-across Canadian, Australian, German, British and US dataset catalogues, plus Slovak
-ICO lookup. These do not replace dataset-ID retrieval or company-name discovery.
-
-Travel shares StableEnrich Google Places nearby/text search with business, and adds
-2s OSM POI search. Google returned nearby restaurants; the OSM sample failed at
-Overpass. These remain generic components, without Maxwell's resort resolution,
-lift relationships, stored menus or ski pricing. Existing FDA, weather, patent, CFR,
-route, lodging and Rappi selections already supply the other candidate alternatives;
-general weather remains on world. Sample delivery is not long-term reliability
-or full-contract equivalence. See the [provider caveats](../providers/CAVEATS.md).
-
-FindMyDirectDoctor adds its full read-only healthcare-access catalog on health:
-doctor and clinic directories, membership fees, hospital cash prices, HRSA community
-health centers, financial assistance and uninsured-care guides. Doctor search,
-hospital prices, financial assistance and health-center reads delivered records;
-those samples do not qualify every route or independently verify listing accuracy.
-See the [provider caveats](../providers/CAVEATS.md#findmydirectdoctor) for coverage
-and price interpretation.
-
-Seven further bundled providers add narrow, qualified selections. Atlas Biomedical
-Grants supplies all seven NIH research operations on science, sharing project
-search/details and organization funding with business. Atlas Legal Entities adds
-GLEIF search, registration and accounting parents on business; this is gateway
-redundancy, not independent ownership evidence. SmartPerps adds a free preview
-and paid Hyperliquid cohort lite/detail/scan reads on finance. Public wallet
-lookup remains unqualified and unselected. Preserve snapshot coverage and age.
-
-SiteCheck ShopSocial adds Instagram/TikTok profiles, YouTube channel feeds,
-transcripts/comments, Facebook Page Plugin facts, Threads profile/posts,
-Pinterest pins and public Telegram channel previews on social. AgData remains
-selected alongside it. CompanyRecords adds LinkedIn company facts shared with
-social/business and Trustpilot reviews on business, alongside the registry and
-court reads above. WebMD provider search and HealthCare.gov ACA plan data belong
-on health. WebMD delivered family-medicine listings with missing contacts and
-related specialties; dentistry failed upstream, and ADA searches returned no
-records in two cities, so ADA remains unselected. ACA data preserves plan year,
-published age and premiums before subsidies. These samples do not qualify every
-reusable operation. Review disclosures and verification markers remain part of
-the evidence.
-
-HealthTravel adds Numbeo city-price observations and Rome2Rio intercity options
-on travel, and EMA supply-shortage records on health. Preserve raw price text
-when normalized currency is missing, partial route previews and resolved versus
-active shortage statuses. Its Google Flights sample returned no fares; Wikivoyage
-failed upstream 503. Both remain excluded. WebIntel adds news aggregation and
-GDELT Context article matches on web; the sample had a Google timeout alongside
-Bing/GDELT results. It does not supply general GDELT volume/tone timelines.
-
-The four SiteCheck Workers catalogs share an operator contact and payment wallet,
-so they do not establish four independent fallback vendors. Their primary schemas,
-guides and sampled paid operations were live; the Workers hostname itself does
-not establish durability. Radar's shared-recipient activity is not endpoint-level
-paid-delivery proof. Full reusable catalogs stay available through local-provider
-discovery. Research_desk also selects contract-reviewed travel companions after
-representative delivery tests; this does not qualify every operation. No new
-wallet profile is introduced. See [provider caveats](../providers/CAVEATS.md)
-for source provenance, qualification boundaries and observed failures.
-
-A full-schema travel inventory covered all 61 bundled providers. StableTravel
-Google Flights returned 22 priced JFK–LHR itineraries for a one-way date, and its
-FlightAware departure read returned 15 JFK records. 2s flight status, airport
-board and route-schedule samples returned real flight records. These operations
-now live on travel with 2s airport lookup/nearby and HALOWERK route matrices;
-generic geocoding is shared with world. StableTravel and 2s flight operations
-share FlightAware, so gateway redundancy is not independent upstream redundancy.
-The fare search uses a separate Google Flights/SerpAPI workflow. A later award
-search returned ten cached availability records; details for one record returned
-12 itineraries and five booking links. All four Seats.aero reads and operational
-FlightAware reads are selected on travel, including history, tracks, delays and
-disruption counts. Intent writes and overlapping weather are excluded. Cash
-booking remains excluded: the sampled search returned booking_token while its
-booking route expects departure_token. Published observations do not hold tickets.
-
-Representative travel qualification made nine calls across five providers:
-StableTravel award search/details; HealthTravel dated hotel prices and Amtrak;
-APEX cached flight deals; Maxwell resort lodging/access; ShopSocial hiking and FlixBus. All
-returned useful records. Paris hotel search preserved the requested two-night
-stay and returned three EUR prices; Amtrak returned two trains from eleven NYP
-matches. FlixBus returned 21 Berlin–Munich trips for the requested date with
-EUR fares and fees. APEX returned 30 cached London-origin deals. Maxwell returned 186
-Kitzbühel lodging records and 40 lift/ticket entry points plus rail, bus and
-parking context. Hiking returned the 153.45 km West Highland Way from OSM.
-These are delivery observations, not independent settlement or booking guarantees.
-
-Travel also selects contract-reviewed companions: hotel/hostel/vacation-rental
-sources and reviews, regional rail/transit, FlixBus/FlixTrain, EV-charger
-directories, Michelin and Grubhub restaurants, Rappi menus, ski operators and pass quotes, resort dining/menus, rentals, ski
-schools, attractions and local mountain tips. Maxwell local tips advertise $1
-per call and currently cover Slovakia; the name does not mean financial tips.
-Resort proximity uses approximate map distances rather than routed walking time.
-APEX deals are roughly 48-hour cached Aviasales fares with affiliate links;
-hiking is Waymarked Trails/OpenStreetMap rather than AllTrails user content;
-EV chargers are OSM/NREL directory records rather than PlugShare live occupancy.
-FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a known
-store ID or URL and supply no store search. Grubhub discovery covers US locations.
-SiteCheck hotel city-page samples are not date-specific availability; use dated
-Google Hotels/Airbnb reads for stay dates. No hotel-loyalty API was found.
-
-Only representative calls were tested, not every selected companion operation.
-HealthTravel Google Flights (empty) and Wikivoyage (503) remain excluded; aviation
-weather stays on world. Maxwell bulk prices/trip bundles repeat selected component
-data and remain omitted. Non-travel namespace operations remain omitted as well.
-The full local-catalog inventory is not an exhaustive paid test of provider health.
-
-Otto's browser-dependent extraction returned incomplete JavaScript content and
-treated a challenge page as success in the same tests. Its JSON/link tools are
-excluded in favor of the selected Markdown readers and caller-side structuring;
-structured extraction coverage is correspondingly narrower. Inspect freshness,
-degradation, truncation and final destination before relying on a result; a
-successful extraction or quality grade does not prove the intended page was read.
-AgentUtility browser rendering and Strale structured extraction did not qualify;
-Strale static link extraction subsequently delivered 26 links after the same
-compatibility fix. No rendered/structured equivalence follows from that result. 2s
-structured extraction returned unknown fields on the JavaScript test page.
-Otto's remaining financial, owned-account, chain-specific and curated APIs retain
-distinct contracts; overlapping endpoint names alone do not justify removing them.
-Google Trends uses `trend_over_time` for all windows, including `2004_present`.
-Concordance's catalog is shared with business/finance so series IDs remain
-resolvable. Exa, Trends and Concordance vendor help tools are omitted here;
-complete input schemas and inline guidance cover the selected calls without
-HTTP setup instructions or unavailable follow-ups. Focused public-page probes
-support the selected reading, rendering, static extraction, DNS/RDAP and first-page
-X-search workflows; they do not establish universal availability, identical
-outputs or complete pagination. Botsmith returned a cursor longer than its
-declared input limit, so its continuation remains unqualified.
-
-The desk also selects direct scientific and public-record datasets from 2s,
-additional national registries and scoped ownership/insolvency evidence from Strale,
-and international legislation, open-data catalogs and selected company records from
-Maxwell. HALOWERK adds geocoding, route matrices, HS candidates and text-injection
-checks; Daedalus adds static code and skill-content scans. These sources select
-and route tools entirely through ordered `send_tools` rules.
-Explicit destination selectors precede a final exclusion; comments name existing
-alternatives or explain why the remaining workflows are outside this research selection.
-Reusable provider definitions remain broader than these editorial selections.
-
-Science groups academic search and metadata, citations, researcher/institution
-identities, research funding and biological/chemical references; it shares the web
-wallet. Health groups clinical trials, drug/device evidence, public-health and
-nutrition datasets, healthcare access, care costs and insurance plans. Health
-shares the existing social wallet and its per-payment authority. Investment-oriented
-pharma catalysts and general product recalls remain on business. Legal/government
-records retain their existing split across business, world, property and finance.
-
-Travel groups trip planning: dated flight prices, operational flight data,
-airport references, route matrices, destination references and ski/leisure data.
-World retains general weather, aviation weather/hazards and accident research;
-generic geocoding is shared. Sports data and generative/developer workflows
-remain available through bundled provider selection.
-
-The listener order and ports are web 3010, science 3011, health 3012, social 3013,
-business 3014, finance 3015, property 3016, security 3017, world 3018, travel 3019,
-toolbox 3020 and shopping 3021. Connect each client to its listed port. Local
-deployment overrides remain operator-owned.
-
-Published schemas and estimates do not establish comparative output quality,
-Tor delivery or funded settlement.
-
-Tool search reads the loaded catalog without provider requests. Prefer bundled
-provider listing before remote discovery; remote discovery can incur several
-charges. Wallet payment caps bound each challenge, not the sum of a research job.
-Agent guidance keeps invocation prices and uncertain-payment warnings, while
-transport fallback costs and vendor API path mappings remain operator concerns.
+## Operator notes
 
 Copy a deployment beside its tracked template as `NAME.local.toml` before
 customizing it. Relative paths resolve from the file declaring them. Existing
 local configurations remain operator-owned; keep using their original state and
 identities unless deliberately changing them.
 
-The starter uses direct networking. The comprehensive example requires a running
-Tor Browser SOCKS listener at `127.0.0.1:9150`; adjust its `[network]` for your own
-Tor daemon. [network/tor.toml](network/tor.toml) can be passed with
-`--network-config` to replace the whole network policy for deployment or standalone
-commands, or copied into a deployment as its `[network]` table. Tor resolves destination names remotely and has no direct
-fallback; separate circuits do not hide identifying request content.
+The starter uses direct networking. The comprehensive and research-desk examples
+require a running Tor Browser SOCKS listener at `127.0.0.1:9150`; adjust their
+`[network]` for your own Tor daemon. [network/tor.toml](network/tor.toml) can be
+passed with `--network-config` to replace the whole network policy for deployment
+or standalone commands, or copied into a deployment as its `[network]` table. Tor
+resolves destination names remotely and has no direct fallback; separate circuits
+do not hide identifying request content.
 
 Managed serving binds listeners before funding. Initialize the treasury explicitly
 and fund its shielded receive address; available tools remain accessible during
-funding or discovery delays. Reserve targets are funding preferences, payment
-caps authorize individual signatures, and actual spendable ZEC limits ordinary
-funding. See [wallet administration](../docs/wallet-cli.md),
+funding or discovery delays. Reserve targets are funding preferences, payment caps
+authorize individual signatures, and actual spendable ZEC limits ordinary funding.
+See [wallet administration](../docs/wallet-cli.md),
 [configuration](../docs/configuration.md) and
 [agent source management](../docs/agent-sources.md).
 
