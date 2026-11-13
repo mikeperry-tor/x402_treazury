@@ -138,6 +138,16 @@ writing this workflow.
   changes and combined consumers; validate synthetic monitor controls, fixed Make
   selection, Cargo artifact selection and Actions syntax without repeating the
   expensive lifecycle suite solely for output/tooling changes.
+- C18: Remove cooldown timing from the deployment funding-stop isolation fixture.
+  Start an empty managed group, await existing full startup completion, acknowledge
+  the applied test funding cancellation, then explicitly create one synthetic
+  funded recipient and request its first immediately-due Base read. Retain both
+  MCP listeners and exact one-job assertions. Reuse the startup-drained signal in
+  the two adjacent maintenance fixtures whose cooldown assertions currently join
+  only individual observations. Add a blocked-startup/sibling-publication ordering
+  witness using existing inventory RPC controls. Keep hooks crate-private and
+  test-only, preserve production cadence/authority and eight threads, review exact
+  commits and combined consumers, then validate affected default-library behavior.
 
 ## Review and validation gates
 
@@ -731,3 +741,39 @@ after snapshots allows the artifact upload attempt without waiting for completio
 The already-running ordinary job cannot acquire these diagnostics retroactively.
 No underlying failure/hang fix, native lifecycle capture or full CI success is
 claimed. Remaining SDK work and hosted/main acceptance remain explicit above.
+
+## Deployment reconciliation completion follow-up
+
+C18 starts at `51b80da5`. The reported default-library failure is the second RPC
+wait in `funding_failure_keeps_listeners_and_base_reconciliation_available` at
+deployment.rs2731, after a scalar cooldown publication and a virtual clock jump.
+Independent source review found that scalar publication precedes retirement and
+maintenance consumption of its Completion. Pending cursors can skip an active
+wallet and wrap on another maintenance tick. A single large virtual-time advance
+also does not execute all intermediate loop iterations. The source exposes this
+ordering vulnerability; it does not reproduce the exact hosted interleaving.
+
+Independent revised design removes the unrelated cooldown responsibility from
+this deployment isolation test. Declare empty capacity, install and await the
+existing full-startup signal, await a test-only acknowledgement after funding's
+stop token is cancelled, then allocate/credit/request one synthetic recipient
+within one Store call. This is explicit fixture setup, not runtime auto-funding
+authority. Its first read has no cooldown. Preserve real RPC/MCP assertions and
+exactly one funding job, with no new timer, longer guard or log-text assertion.
+Expose an existing startup-hook installer only under cfg(test), retaining private
+fields and the existing signal's complete-pass semantics.
+
+The bounded audit found two additional owner-completion gaps: zero-refresh idle
+maintenance and held pending inventory. Await startup drain before their existing
+clock assertions. The inventory fixture already holds one RPC while siblings
+finish: verify a healthy sibling's scalar cooldown is published but startup is
+still incomplete, then release the existing gate and await startup. No new RPC or
+Store gate is needed. Other users already join reconcile/startup, perform no clock
+advance, or intentionally observe independent work before SOCKS readiness.
+
+Update owning startup/testing guidance, run selected library-test Clippy and
+source-matched complexity review before affected cheap tests and the full default
+library suite. Localhost fixtures require socket-capable execution up front.
+Evidence belongs under `target/ci-deployment-completion-validation/`. The separate
+slow lifecycle diagnostics remain independent, and no lifecycle failure fix is
+implied. The user retains pushing; hosted acceptance remains necessary.
