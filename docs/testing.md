@@ -456,6 +456,10 @@ effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
 unsigned API and Base while retaining certificate checks and signed no-replay.
 Its body-read probe releases corrupt bytes only after the client accepts response
 headers; a semaphore establishes that transport phase without real-time waits.
+The fixture retains partial-header progress before releasing that semaphore.
+Corrupted-byte acceptance and observed delivery counts share a synchronous
+publication lock. Socket-free writer controls verify pending, failed and partial
+writes without counting attempted mutations as delivered corruption.
 Consumer cases retain retry ownership with corruption after server-written headers,
 which can surface during dispatch or body collection.
 Manual POST/PUT/PATCH/DELETE and ordinary PUT cases distinguish failed-handshake

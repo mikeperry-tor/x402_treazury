@@ -52,7 +52,7 @@ struct BodyFault {
     status_first: AtomicUsize,
     headers: Semaphore,
     probe_body: Semaphore,
-    flipped: AtomicUsize,
+    flipped: Mutex<usize>,
 }
 impl Default for BodyFault {
     fn default() -> Self {
@@ -63,7 +63,7 @@ impl Default for BodyFault {
             status_first: AtomicUsize::new(0),
             headers: Semaphore::new(0),
             probe_body: Semaphore::new(0),
-            flipped: AtomicUsize::new(0),
+            flipped: Mutex::new(0),
         }
     }
 }
@@ -75,14 +75,15 @@ fn take(n: &AtomicUsize) -> bool {
     n.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
         .is_ok()
 }
-struct Socket {
-    tcp: TcpStream,
+struct Socket<T = TcpStream> {
+    tcp: T,
     handshake: Arc<AtomicBool>,
     corrupt: bool,
     first_write: bool,
+    header_remaining: Option<usize>,
     body: Arc<BodyFault>,
 }
-impl AsyncRead for Socket {
+impl<T: AsyncRead + Unpin> AsyncRead for Socket<T> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -91,20 +92,28 @@ impl AsyncRead for Socket {
         Pin::new(&mut self.tcp).poll_read(cx, buf)
     }
 }
-impl AsyncWrite for Socket {
+impl<T: AsyncWrite + Unpin> AsyncWrite for Socket<T> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bytes: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        if !self.corrupt || !self.handshake.load(Ordering::SeqCst) {
+        if bytes.is_empty() || !self.corrupt || !self.handshake.load(Ordering::SeqCst) {
             return Pin::new(&mut self.tcp).poll_write(cx, bytes);
         }
         if !self.first_write {
-            let result = Pin::new(&mut self.tcp).poll_write(cx, bytes);
-            if matches!(result,Poll::Ready(Ok(n)) if n>0) {
-                self.first_write = true;
-                self.body.headers.add_permits(1);
+            // Rustls drains accepted prefixes of this first output chunk.
+            // A partial TCP write is not a complete header-record boundary.
+            let remaining = *self.header_remaining.get_or_insert(bytes.len());
+            let result =
+                Pin::new(&mut self.tcp).poll_write(cx, &bytes[..bytes.len().min(remaining)]);
+            if let Poll::Ready(Ok(n)) = result {
+                let remaining = remaining - n;
+                self.header_remaining = Some(remaining);
+                if remaining == 0 {
+                    self.first_write = true;
+                    self.body.headers.add_permits(1);
+                }
             }
             return result;
         }
@@ -113,10 +122,14 @@ impl AsyncWrite for Socket {
         if let Some(byte) = corrupt.get_mut(index) {
             *byte ^= 1;
         }
+        // The client can observe TCP bytes on another worker before this poll
+        // returns. Snapshots must join accepted-byte publication, not race it.
+        let body = self.body.clone();
+        let mut flipped = body.flipped.lock().unwrap();
         let result = Pin::new(&mut self.tcp).poll_write(cx, &corrupt);
         if matches!(result,Poll::Ready(Ok(n)) if n>index) {
             self.corrupt = false;
-            self.body.flipped.fetch_add(1, Ordering::SeqCst);
+            *flipped += 1;
         }
         result
     }
@@ -127,6 +140,135 @@ impl AsyncWrite for Socket {
         Pin::new(&mut self.tcp).poll_shutdown(cx)
     }
 }
+
+mod socket_tests {
+    use super::*;
+
+    struct Writer {
+        writes: std::collections::VecDeque<Poll<std::io::Result<usize>>>,
+        bytes: Vec<u8>,
+        body: Arc<BodyFault>,
+        expect_locked: bool,
+    }
+    impl AsyncWrite for Writer {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            assert_eq!(self.body.flipped.try_lock().is_err(), self.expect_locked);
+            let result = self.writes.pop_front().expect("unexpected write");
+            if let Poll::Ready(Ok(n)) = result {
+                assert!(n <= bytes.len());
+                self.bytes.extend_from_slice(&bytes[..n]);
+            }
+            result
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+    fn socket(first_write: bool, writes: Vec<Poll<std::io::Result<usize>>>) -> Socket<Writer> {
+        let body = Arc::new(BodyFault::default());
+        Socket {
+            tcp: Writer {
+                writes: writes.into(),
+                bytes: Vec::new(),
+                body: body.clone(),
+                expect_locked: false,
+            },
+            handshake: Arc::new(AtomicBool::new(true)),
+            corrupt: true,
+            first_write,
+            header_remaining: None,
+            body,
+        }
+    }
+    fn write(socket: &mut Socket<Writer>, bytes: &[u8]) -> Poll<std::io::Result<usize>> {
+        Pin::new(socket).poll_write(&mut Context::from_waker(std::task::Waker::noop()), bytes)
+    }
+
+    #[test]
+    fn corruption_count_requires_accepted_changed_byte_and_excludes_inflight_snapshots() {
+        let mut socket = socket(
+            true,
+            vec![
+                Poll::Ready(Ok(0)),
+                Poll::Pending,
+                Poll::Ready(Ok(0)),
+                Poll::Ready(Ok(2)),
+                Poll::Ready(Ok(2)),
+                Poll::Ready(Ok(4)),
+            ],
+        );
+        assert!(matches!(write(&mut socket, b""), Poll::Ready(Ok(0))));
+        socket.tcp.expect_locked = true;
+        assert!(write(&mut socket, b"body").is_pending());
+        assert!(matches!(write(&mut socket, b"body"), Poll::Ready(Ok(0))));
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 0);
+        assert!(matches!(write(&mut socket, b"body"), Poll::Ready(Ok(2))));
+        assert_eq!(socket.tcp.bytes, b"bo");
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 0);
+        assert!(matches!(write(&mut socket, b"dy"), Poll::Ready(Ok(2))));
+        assert_eq!(socket.tcp.bytes, b"bodx");
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 1);
+        socket.tcp.expect_locked = false;
+        assert!(matches!(write(&mut socket, b"next"), Poll::Ready(Ok(4))));
+        assert_eq!(socket.tcp.bytes, b"bodxnext");
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 1);
+        assert!(socket.tcp.writes.is_empty());
+    }
+
+    #[test]
+    fn failed_corrupt_write_does_not_publish_a_delivery() {
+        let mut socket = socket(
+            true,
+            vec![Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()))],
+        );
+        socket.tcp.expect_locked = true;
+        assert!(matches!(write(&mut socket, b"body"), Poll::Ready(Err(_))));
+        assert!(socket.tcp.bytes.is_empty());
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn partial_header_chunk_stays_valid_until_complete_before_body_corruption() {
+        let mut socket = socket(
+            false,
+            vec![
+                Poll::Ready(Ok(0)),
+                Poll::Ready(Ok(2)),
+                Poll::Pending,
+                Poll::Ready(Ok(0)),
+                Poll::Ready(Ok(4)),
+                Poll::Ready(Ok(4)),
+            ],
+        );
+        assert!(matches!(write(&mut socket, b""), Poll::Ready(Ok(0))));
+        assert_eq!(socket.header_remaining, None);
+        assert!(matches!(write(&mut socket, b"header"), Poll::Ready(Ok(2))));
+        assert_eq!(socket.header_remaining, Some(4));
+        assert_eq!(socket.body.headers.available_permits(), 0);
+        assert!(write(&mut socket, b"ader").is_pending());
+        assert!(matches!(write(&mut socket, b"ader"), Poll::Ready(Ok(0))));
+        assert_eq!(socket.header_remaining, Some(4));
+        assert_eq!(socket.body.headers.available_permits(), 0);
+        assert!(matches!(write(&mut socket, b"ader"), Poll::Ready(Ok(4))));
+        assert_eq!(socket.tcp.bytes, b"header");
+        assert_eq!(socket.body.headers.available_permits(), 1);
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 0);
+        socket.tcp.expect_locked = true;
+        assert!(matches!(write(&mut socket, b"body"), Poll::Ready(Ok(4))));
+        assert_eq!(socket.tcp.bytes, b"headerbodx");
+        assert_eq!(socket.body.headers.available_permits(), 1);
+        assert_eq!(*socket.body.flipped.lock().unwrap(), 1);
+        assert!(socket.tcp.writes.is_empty());
+    }
+}
+
 impl axum::serve::Listener for Listener {
     type Io = tokio_rustls::server::TlsStream<Socket>;
     type Addr = SocketAddr;
@@ -153,6 +295,7 @@ impl axum::serve::Listener for Listener {
                 handshake: handshake.clone(),
                 corrupt,
                 first_write: corrupt_headers,
+                header_remaining: None,
                 body: self.body.clone(),
             };
             let bad = take(&self.remaining);
@@ -636,7 +779,7 @@ async fn write_cases(state: &StateData, connections: &AtomicUsize, tor: bool, di
                 .header_faults
                 .store(usize::from(!handshake), Ordering::SeqCst);
             let before = connections.load(Ordering::SeqCst);
-            let flipped = state.body.flipped.load(Ordering::SeqCst);
+            let flipped = *state.body.flipped.lock().unwrap();
             // Separate origins prevent an earlier pooled connection from hiding
             // the deliberate handshake or first-response-record failure.
             let port = if tor {
@@ -682,7 +825,7 @@ async fn write_cases(state: &StateData, connections: &AtomicUsize, tor: bool, di
                 1 + usize::from(recovered)
             );
             assert_eq!(
-                state.body.flipped.load(Ordering::SeqCst) - flipped,
+                *state.body.flipped.lock().unwrap() - flipped,
                 usize::from(!handshake),
                 "actual first response TLS record was corrupted"
             );
@@ -765,7 +908,7 @@ async fn body_cases(
             .status_first
             .store(status_first, Ordering::SeqCst);
         state.body.skip.store(status_first, Ordering::SeqCst);
-        let flipped = state.body.flipped.load(Ordering::SeqCst);
+        let flipped = *state.body.flipped.lock().unwrap();
         let physical = connections.load(Ordering::SeqCst);
         let records_before = socks.records.lock().unwrap().len();
         let endpoint = format!(
@@ -836,7 +979,7 @@ async fn body_cases(
             "body TLS and status share one finite scope budget"
         );
         assert_eq!(
-            state.body.flipped.load(Ordering::SeqCst) - flipped,
+            *state.body.flipped.lock().unwrap() - flipped,
             failures.min(attempts.saturating_sub(status_first)),
             "actual encrypted body records were corrupted after headers were sent"
         );
