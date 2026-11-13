@@ -36,17 +36,26 @@ You can set custom financial limits on all of these transactions.
 Each managed wallet group uses one small (~$2.50) Base USDC wallet pair, and an
 optional custom-denomination large wallet pair.
 
-API catalog pricing data and cached paid API prices are used to choose the
-smallest sufficient wallet for each paid x402 request. A ZEC swap is scheduled
-on a randomized timer (30-120 seconds) to create a new wallet address when one
-of the wallets in a group drops below a randomized threshold (5-25%) of its
-initial value.
+Every wallet group always maintains as least two USDC wallet addresses to
+ensure that no x402 calls are blocked or delayed by refill swaps: one or more
+active wallets, and at least one fully-funded reserve USDC wallet. Thus, even
+though Near Intents swaps can take some minutes to settle, your agent never
+notices, nor do you experience any delays.
 
-Payment requests, wallet-specific balance checks and swap jobs use the current
-payer wallet address as the Tor circuit isolation identity. Switching payers
-changes the Tor isolation identity. API catalog retrieval and llm help text use
-separate Tor identities grouped by origin. Zcash treasury synchronization has
-its own identity. Tor mode uses remote DNS and has no direct-network fallback.
+API catalog pricing data and cached paid API prices are used to choose the
+smallest sufficient USDC wallet address from a wallet group for each paid x402
+request. ZEC-to-USDC swaps are scheduled on a randomized timer (30-120 seconds) to
+create a new wallet address when one of the wallets in a group drops below a
+randomized threshold (5-25%) of its initial value.
+
+If Tor is in use by x402_treazury, then payment requests, wallet-specific
+balance checks, and swap jobs all use the current payer wallet address as the
+Tor circuit isolation identity. Switching payers changes the Tor isolation
+identity. API catalog retrieval and llm help text use separate Tor identities
+isolated by the domain of the destination.  Zcash treasury synchronization has
+its own Tor identity and isolation. Tor mode uses remote DNS and has no
+direct-network fallback. If you [enable direct Zcash payments and swap tools](docs/configuration.md#direct-swap-control) for your agent, each swap is
+isolated to a separate Tor circuit.
 
 The CLI uses explicit commands: `serve` starts MCP endpoint serving, `catalog
 tools` inspects API inventories, `catalog warm` caches the API catalog, `wallet`
