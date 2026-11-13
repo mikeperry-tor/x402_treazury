@@ -3366,8 +3366,8 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
             store::Store::open(&file, &[]).is_err(),
             "live registry ownership must exclude reopening"
         );
-        // Draining the listener also releases services held by established HTTP/2
-        // connections; aborting its accept task alone does not establish that.
+        // Stop listener work before awaiting the actual final Manager release;
+        // graceful HTTP completion can precede connection-service destruction.
         shutdown.cancel();
         http_task.await.unwrap();
         drop(endpoint);
