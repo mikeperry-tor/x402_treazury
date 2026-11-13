@@ -121,7 +121,7 @@ check-proving: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
 
 check-lifecycle: toolchain
-	@$(call application_cargo,test,--features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=8)
+	@$(call application_cargo,test,--features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=8 --nocapture)
 
 check-codec: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib synthetic_address_codec_is_scoped_to_its_test_client -- --test-threads=1)

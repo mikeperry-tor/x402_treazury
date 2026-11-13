@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded, opt-in Linux experiment; never used by ordinary application checks."""
+"""Opt-in Linux test diagnostics; never used by ordinary application checks."""
 
 import argparse
 import json
@@ -12,7 +12,8 @@ import threading
 import time
 
 
-def test_executable(build_log):
+def test_executable(build_log, lifecycle=False):
+    name, kind = ("x402_treazury", "lib") if lifecycle else ("treasury_sync", "test")
     candidates = set()
     for line in build_log.read_text().splitlines():
         try:
@@ -21,17 +22,17 @@ def test_executable(build_log):
             continue  # Make may also print its recipe.
         if (
             item.get("reason") == "compiler-artifact"
-            and item.get("target", {}).get("name") == "treasury_sync"
-            and item.get("target", {}).get("kind") == ["test"]
+            and item.get("target", {}).get("name") == name
+            and item.get("target", {}).get("kind") == [kind]
             and item.get("profile", {}).get("test") is True
             and item.get("executable")
         ):
             candidates.add(item["executable"])
     if len(candidates) != 1:
-        raise ValueError(f"Expected one treasury_sync test executable; found {len(candidates)}")
+        raise ValueError(f"Expected one {name} test executable; found {len(candidates)}")
     executable = Path(candidates.pop())
     if not executable.is_file():
-        raise ValueError("The compiled treasury_sync executable is missing")
+        raise ValueError(f"The compiled {name} executable is missing")
     return executable
 
 
@@ -58,6 +59,9 @@ def group_members(group):
                 "state": fields[0],
                 "parent": int(fields[1]),
                 "group": group,
+                "cpu_user_seconds": int(fields[11]) / os.sysconf("SC_CLK_TCK"),
+                "cpu_system_seconds": int(fields[12]) / os.sysconf("SC_CLK_TCK"),
+                "resident_bytes": int(fields[21]) * os.sysconf("SC_PAGE_SIZE"),
                 "threads": threads,
             }
         except (OSError, ValueError, IndexError):
@@ -119,7 +123,15 @@ def capture(group, output, budget, interrupted):
                     continue
 
 
-def monitor(executable, output, after=300, capture_budget=30, grace=1):
+def collect_capture(group, output, budget, interrupted):
+    output.mkdir(parents=True, exist_ok=True)
+    try:
+        capture(group, output, budget, interrupted)
+    except Exception as error:
+        (output / "capture-error.txt").write_text(f"{type(error).__name__}: {error}\n")
+
+
+def monitor(executable, output, after=300, capture_budget=30, grace=1, lifecycle=False):
     output.mkdir(parents=True, exist_ok=True)
     interrupted = []
     previous = {}
@@ -134,8 +146,9 @@ def monitor(executable, output, after=300, capture_budget=30, grace=1):
     started = time.monotonic()
     try:
         with (output / "test.log").open("wb") as log:
+            selectors = ["treasury::lifecycle_tests"] if lifecycle else []
             process = subprocess.Popen(
-                [str(executable), "--test-threads=8", "--nocapture"],
+                [str(executable), *selectors, "--test-threads=8", "--nocapture"],
                 env={**os.environ, "X402_TEST_SYNC_DIAGNOSTICS": "1"},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -155,22 +168,39 @@ def monitor(executable, output, after=300, capture_budget=30, grace=1):
             reader = threading.Thread(target=copy_output, daemon=True)
             reader.start()
             reason = "completed"
+            next_capture = started + after
+            snapshots = 0
+            captured_cancellation = False
             while process.poll() is None:
                 if interrupted:
                     reason = "cancelled"
                     break
-                if time.monotonic() - started >= after:
-                    reason = "diagnostic_limit"
-                    break
+                if time.monotonic() >= next_capture:
+                    if not lifecycle:
+                        reason = "diagnostic_limit"
+                        break
+                    snapshots += 1
+                    snapshot = output / f"snapshot-{snapshots}"
+                    snapshot.mkdir()
+                    (snapshot / "elapsed_seconds.txt").write_text(
+                        f"{time.monotonic() - started:.3f}\n"
+                    )
+                    print(f"Capturing lifecycle snapshot {snapshots}; tests will continue", flush=True)
+                    collect_capture(process.pid, snapshot, capture_budget, interrupted)
+                    if interrupted:
+                        # The capture already shortened its budget. Do not spend
+                        # another cancellation grace window on a second attach.
+                        captured_cancellation = True
+                        reason = "cancelled"
+                        break
+                    next_capture = time.monotonic() + after
                 time.sleep(0.05)
             if reason != "completed":
                 print(f"Capturing treasury fixture diagnostics: {reason}", flush=True)
                 # GitHub normally gives SIGINT only 7.5 seconds before SIGTERM.
                 budget = min(capture_budget, 4) if interrupted else capture_budget
-                try:
-                    capture(process.pid, output, budget, interrupted)
-                except Exception as error:
-                    (output / "capture-error.txt").write_text(f"{type(error).__name__}: {error}\n")
+                if not captured_cancellation:
+                    collect_capture(process.pid, output, budget, interrupted)
                 if interrupted:
                     reason = "cancelled"
                 status = 128 + interrupted[0] if interrupted else 124
@@ -184,6 +214,8 @@ def monitor(executable, output, after=300, capture_budget=30, grace=1):
                 "elapsed_seconds": round(time.monotonic() - started, 3),
                 "test_pid": process.pid,
                 "test_threads": 8,
+                "lifecycle": lifecycle,
+                "periodic_snapshots": snapshots,
             }, indent=2) + "\n")
             # Also clean up descendants after a failed/panicking test exits.
             kill_group(process.pid, signal.SIGTERM)
@@ -207,10 +239,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build_log", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--lifecycle", action="store_true",
+                        help="Run the lifecycle library filter and take periodic snapshots without a test deadline")
     args = parser.parse_args()
     if sys.platform != "linux":
         parser.error("Native stack capture requires the focused Linux runner")
-    return monitor(test_executable(args.build_log), args.output)
+    return monitor(test_executable(args.build_log, args.lifecycle), args.output, lifecycle=args.lifecycle)
 
 
 if __name__ == "__main__":

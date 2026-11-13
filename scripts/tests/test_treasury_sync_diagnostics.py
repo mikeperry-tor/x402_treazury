@@ -37,9 +37,13 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
             f"spec = importlib.util.spec_from_file_location('monitor', {str(SCRIPT)!r})\n"
             "module = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\n"
             "module.group_members = lambda group: {group: {'state': 'S'}}\n"
+            "if os.environ.get('CAPTURE_FAILS') == '1':\n"
+            " def fail(*args): raise OSError('synthetic capture failure')\n"
+            " module.capture = fail\n"
             "sys.exit(module.monitor(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]),\n"
             " after=float(os.environ.get('CAPTURE_AFTER', '0.25')),\n"
-            " capture_budget=float(os.environ.get('CAPTURE_BUDGET', '0.3')), grace=0.1))\n"
+            " capture_budget=float(os.environ.get('CAPTURE_BUDGET', '0.3')), grace=0.1,\n"
+            " lifecycle=os.environ.get('LIFECYCLE') == '1'))\n"
         )
 
     def tool(self, path, body):
@@ -198,7 +202,9 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
         for pid, group in ((10, 10), (11, 10), (12, 12)):
             entry = proc / str(pid)
             entry.mkdir(parents=True)
-            (entry / "stat").write_text(f"{pid} (fixture (worker)) S 1 {group} 0\n")
+            fields = ["S", "1", str(group)] + ["0"] * 19
+            fields[11], fields[12], fields[21] = "250", "50", "3"
+            (entry / "stat").write_text(f"{pid} (fixture (worker)) {' '.join(fields)}\n")
             task = entry / "task" / str(pid)
             task.mkdir(parents=True)
             (task / "wchan").write_text("futex_wait\n")
@@ -209,6 +215,81 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
         self.assertEqual(set(members), {10, 11})
         self.assertEqual(members[10]["name"], "fixture (worker)")
         self.assertEqual(members[10]["threads"], {"10": "futex_wait"})
+        self.assertEqual(members[10]["cpu_user_seconds"], 250 / os.sysconf("SC_CLK_TCK"))
+        self.assertEqual(members[10]["cpu_system_seconds"], 50 / os.sysconf("SC_CLK_TCK"))
+        self.assertEqual(members[10]["resident_bytes"], 3 * os.sysconf("SC_PAGE_SIZE"))
+
+    def test_lifecycle_selects_library_artifact_instead_of_integration(self):
+        library = self.root / "library-fixture"
+        self.tool(library, "pass\n")
+        self.tool(self.executable, "pass\n")
+        build = self.root / "build.jsonl"
+        artifact = {
+            "reason": "compiler-artifact", "profile": {"test": True},
+            "target": {"name": "treasury_sync", "kind": ["test"]},
+            "executable": str(self.executable),
+        }
+        build.write_text(json.dumps(artifact) + "\n" + json.dumps({
+            **artifact, "target": {"name": "x402_treazury", "kind": ["lib"]},
+            "executable": str(library),
+        }))
+        self.assertEqual(MODULE.test_executable(build), self.executable)
+        self.assertEqual(MODULE.test_executable(build, lifecycle=True), library)
+
+    def test_periodic_lifecycle_capture_preserves_completion_during_failed_debugger(self):
+        permit = self.root / "finish-during-capture"
+        self.tool(
+            self.bin / "gdb",
+            f"import pathlib, subprocess, sys, time\npathlib.Path({str(permit)!r}).touch()\n"
+            "while True:\n"
+            " state = subprocess.run(['ps', '-p', sys.argv[-1], '-o', 'stat='], capture_output=True, text=True).stdout.strip()\n"
+            " if not state or state.startswith('Z'): break\n"
+            " time.sleep(0.01)\n"
+            "sys.exit(9)\n",
+        )
+        child = self.start(
+            "import pathlib, sys, time\n"
+            "assert sys.argv[1:] == ['treasury::lifecycle_tests', '--test-threads=8', '--nocapture']\n"
+            f"while not pathlib.Path({str(permit)!r}).exists(): time.sleep(0.01)\n"
+            "sys.exit(17)\n",
+            LIFECYCLE="1", CAPTURE_AFTER="0.1", CAPTURE_BUDGET="2",
+        )
+        status = self.result(child, 17)
+        self.assertEqual(status["reason"], "completed")
+        self.assertEqual(status["periodic_snapshots"], 1)
+        self.assertTrue((self.output / "snapshot-1/processes.json").exists())
+
+    def test_lifecycle_continues_after_multiple_capture_errors(self):
+        finished = self.root / "finished"
+        child = self.start(
+            f"import pathlib, time\ntime.sleep(0.7)\npathlib.Path({str(finished)!r}).touch()\n",
+            LIFECYCLE="1", CAPTURE_AFTER="0.1", CAPTURE_FAILS="1",
+        )
+        status = self.result(child, 0)
+        self.assertEqual(status["reason"], "completed")
+        self.assertGreaterEqual(status["periodic_snapshots"], 2)
+        self.assertTrue(finished.exists())
+        self.assertTrue((self.output / "snapshot-2/capture-error.txt").exists())
+
+    def test_cancel_during_periodic_capture_does_not_attach_twice(self):
+        ready = self.root / "capture-started"
+        self.tool(
+            self.bin / "gdb",
+            "import pathlib, time\n"
+            f"with pathlib.Path({str(ready)!r}).open('a') as marker: marker.write('attach\\n')\n"
+            "time.sleep(30)\n",
+        )
+        child = self.start(
+            "import time; time.sleep(30)\n", LIFECYCLE="1", CAPTURE_BUDGET="30",
+        )
+        self.wait_for(ready)
+        child.send_signal(signal.SIGINT)
+        status = self.result(child, 130)
+        self.assertEqual(status["reason"], "cancelled")
+        self.assertEqual(status["periodic_snapshots"], 1)
+        self.assertEqual(ready.read_text().splitlines(), ["attach"])
+        self.assertFalse((self.output / "processes.json").exists())
+        self.assert_not_running(status["test_pid"])
 
 
 if __name__ == "__main__":
