@@ -2259,7 +2259,7 @@ pub struct RunningDeployment {
     #[cfg(test)]
     listener_failure: Option<(String, tokio::sync::oneshot::Receiver<()>)>,
     #[cfg(test)]
-    funding_failure: Option<tokio::sync::oneshot::Receiver<()>>,
+    funding_failure: Option<(tokio::sync::oneshot::Receiver<()>, CancellationToken)>,
     runtime: ManagedRuntime,
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
     listeners: Vec<(String, TcpListener, axum::Router)>,
@@ -2277,11 +2277,12 @@ impl RunningDeployment {
         let reconciliation_stop = CancellationToken::new();
         let _reconciliation_on_drop = reconciliation_stop.clone().drop_guard();
         #[cfg(test)]
-        if let Some(failure) = self.funding_failure {
+        if let Some((failure, applied)) = self.funding_failure {
             let stopped = stop.clone();
             tokio::spawn(async move {
                 if failure.await.is_ok() {
                     stopped.cancel();
+                    applied.cancel();
                 }
             });
         }
@@ -2658,74 +2659,59 @@ bearer_token_env="TOKEN"
             b"fixture snapshot",
         )
         .unwrap();
-        let pool = crate::rotation::test_capacity::declare_and_allocate!(
-            store,
-            "test",
-            crate::rotation::test_capacity::small_reserve("5"),
-            Some(alloy_primitives::U256::from(1_000_000u64)),
-            0
-        )
-        .unwrap();
-        let job = store.funding_jobs().unwrap().remove(0);
-        store
-            .record_funding_balance(
-                &job.id,
-                &job.operation_id,
-                &job.wallet_id,
-                &job.recipient,
-                alloy_primitives::U256::from(5_000_000),
+        let pool = store
+            .ensure_capacity_group(
+                "test",
+                &crate::rotation::test_capacity::small_reserve("5"),
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
             )
             .unwrap();
-        store.low_balance(&pool, &job.wallet_id).unwrap();
-        let refresh_pool = pool.clone();
-        let refresh_wallet = job.wallet_id.clone();
         let (store, store_task) = crate::rotation::store::StoreHandle::spawn(store);
-        running.managed_pools.push(Arc::new(
-            crate::rotation::manager::ManagedPool::new(
-                store.clone(),
-                pool,
-                crate::rotation::base::BaseRpc::new(&rpc_url).unwrap(),
-                crate::payment::SpendPolicy::dollars("5").unwrap(),
-            )
-            .unwrap(),
-        ));
+        let mut managed = crate::rotation::manager::ManagedPool::new(
+            store.clone(),
+            pool.clone(),
+            crate::rotation::base::BaseRpc::new(&rpc_url).unwrap(),
+            crate::payment::SpendPolicy::dollars("5").unwrap(),
+        )
+        .unwrap();
+        let startup = managed.reconciliation_startup_completion();
+        running.managed_pools.push(Arc::new(managed));
         let (failure, signal) = tokio::sync::oneshot::channel();
-        running.funding_failure = Some(signal);
+        let funding_stopped = CancellationToken::new();
+        running.funding_failure = Some((signal, funding_stopped.clone()));
         let stop = CancellationToken::new();
         let task = tokio::spawn(running.serve(stop.clone()));
-        tokio::time::timeout(Duration::from_secs(5), reads.acquire())
-            .await
-            .unwrap()
-            .unwrap()
-            .forget();
-        // A handler count precedes client publication. Anchor the virtual clock
-        // only after the shared wallet acquisition has published its cooldown.
-        let next_due = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let due = store.balance_due(&job.wallet_id).await;
-                if due > tokio::time::Instant::now() {
-                    break due;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        failure.send(()).unwrap();
-        store
-            .call(move |s| s.low_balance(&refresh_pool, &refresh_wallet))
+        tokio::time::timeout(Duration::from_secs(5), startup.notified())
             .await
             .unwrap();
-        // Advance the owned cooldown plus one maintenance wake, then run time
-        // normally for actual RPC/MCP IO and Store work. The follow-up must
-        // survive the funding stop without cancelling reconciliation.
-        tokio::time::pause();
-        tokio::time::advance(
-            next_due.saturating_duration_since(tokio::time::Instant::now())
-                + Duration::from_secs(5),
-        )
-        .await;
-        tokio::time::resume();
+        assert!(reads.try_acquire().is_err(), "empty startup issued an RPC");
+        failure.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), funding_stopped.cancelled())
+            .await
+            .unwrap();
+        // Request fresh work only after funding has stopped. Its first read has
+        // no cooldown; cooldown scheduling belongs to the maintenance fixtures.
+        store
+            .call(move |s| {
+                s.allocate_capacity_kind(
+                    &pool,
+                    crate::rotation::store::AllocationKind::Small,
+                    true,
+                )?
+                .expect("fixture small slot was not allocated");
+                let job = s.funding_jobs()?.remove(0);
+                s.record_funding_balance(
+                    &job.id,
+                    &job.operation_id,
+                    &job.wallet_id,
+                    &job.recipient,
+                    alloy_primitives::U256::from(5_000_000),
+                )?;
+                s.low_balance(&pool, &job.wallet_id)
+            })
+            .await
+            .unwrap();
         tokio::time::timeout(Duration::from_secs(5), reads.acquire())
             .await
             .unwrap()

@@ -209,6 +209,9 @@ owner destruction. Task entry, server request receipt, a completed response and
 listener shutdown can precede those boundaries. Restart fixtures must release all
 service-held owners before reopening exclusive state; a retained-owner negative
 control should prove that teardown cannot acknowledge release early.
+When cooldown timing is outside a fixture's contract, request fresh work after
+the event under test instead of advancing an unrelated cooldown. Cooldown tests
+must join the enclosing maintenance work before moving their owned clock.
 When a flaky failure exposes a missing boundary, audit nearby fixtures that use
 the same helper or lifecycle. Reuse a small completion helper for demonstrated
 matches; intentionally blocked work and unrelated protocol phases require their

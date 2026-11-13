@@ -184,6 +184,12 @@ impl ManagedPool {
         })
     }
     #[cfg(test)]
+    pub(crate) fn reconciliation_startup_completion(&mut self) -> Arc<tokio::sync::Notify> {
+        let ready = Arc::new(tokio::sync::Notify::new());
+        self.reconciliation_startup_test_hook = Some(ready.clone());
+        ready
+    }
+    #[cfg(test)]
     async fn admission_test_stage(&self, stage: AdmissionTestStage) {
         if let Some(hook) = &self.test_admission_hook {
             hook(stage).await;
