@@ -62,6 +62,8 @@ struct ChainHistory {
     latest: u64,
     blocks: BTreeMap<u64, ChainSnapshot>,
 }
+type Trace = (Option<socks::Credentials>, String, String);
+
 #[derive(Clone)]
 struct Fake {
     balances: Arc<Mutex<BTreeMap<String, u64>>>,
@@ -89,7 +91,21 @@ struct Fake {
     unsigned_gate: Arc<Mutex<Option<UnsignedGate>>>,
     body_only: Arc<AtomicBool>,
     db: std::path::PathBuf,
-    traces: Arc<Mutex<Vec<(std::net::SocketAddr, String, String)>>>,
+    traces: Arc<Mutex<Vec<Trace>>>,
+    socks: Option<(socks::Records, std::net::SocketAddr)>,
+}
+impl Fake {
+    fn credentials(&self, peer: std::net::SocketAddr) -> Option<socks::Credentials> {
+        self.socks.as_ref().map(|(records, destination)| {
+            socks::credentials_for_peer(
+                &records.lock().unwrap(),
+                peer,
+                &destination.ip().to_string(),
+                destination.port(),
+            )
+            .expect("request must have authenticated SOCKS credentials")
+        })
+    }
 }
 fn challenge(amount: &str) -> Value {
     json!({"x402Version":2,"resource":{"url":"https://localhost/pay","description":"x".repeat(700),"mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":amount,"payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
@@ -99,6 +115,7 @@ async fn rpc(
     ConnectInfo(tls::PeerAddr(peer)): ConnectInfo<tls::PeerAddr>,
     Json(v): Json<Value>,
 ) -> Json<Value> {
+    let credentials = f.credentials(peer);
     if v["method"] == "eth_call"
         && let Some(data) = v["params"][0]["data"]
             .as_str()
@@ -248,7 +265,7 @@ async fn rpc(
                 f.traces
                     .lock()
                     .unwrap()
-                    .push((peer, "balance".into(), address.clone()));
+                    .push((credentials, "balance".into(), address.clone()));
                 *snapshot.balances.get(&address).unwrap_or(&0)
             } else {
                 u64::from(snapshot.used)
@@ -300,6 +317,7 @@ async fn seller(
     ConnectInfo(tls::PeerAddr(peer)): ConnectInfo<tls::PeerAddr>,
     headers: HeaderMap,
 ) -> Response {
+    let credentials = f.credentials(peer);
     if f.free.load(Ordering::SeqCst) {
         return "free".into_response();
     }
@@ -309,10 +327,11 @@ async fn seller(
     {
         let p: Value = serde_json::from_slice(&STANDARD.decode(h.as_bytes()).unwrap()).unwrap();
         let recovered = signatures::recover_exact(&p);
-        f.traces
-            .lock()
-            .unwrap()
-            .push((peer, "signed".into(), recovered.to_string()));
+        f.traces.lock().unwrap().push((
+            credentials.clone(),
+            "signed".into(),
+            recovered.to_string(),
+        ));
         // Assert the journal is committed before any signed bytes reach the seller.
         let db = rusqlite::Connection::open(&f.db).unwrap();
         let count:i64=db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED' AND nonce=?1",[p["payload"]["authorization"]["nonce"].as_str().unwrap()],|r|r.get(0)).unwrap();
@@ -340,7 +359,7 @@ async fn seller(
     f.traces
         .lock()
         .unwrap()
-        .push((peer, "unsigned".into(), String::new()));
+        .push((credentials, "unsigned".into(), String::new()));
     let gate = {
         let mut slot = f.unsigned_gate.lock().unwrap();
         slot.as_mut().and_then(|gate| {
@@ -387,6 +406,9 @@ struct Harness {
 }
 impl Harness {
     async fn new() -> Self {
+        Self::with_socks(None).await
+    }
+    async fn with_socks(records: Option<socks::Records>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::create(
             &dir.path().join("state"),
@@ -403,6 +425,9 @@ impl Harness {
             0
         )
         .unwrap();
+        install_network(Default::default());
+        let listener = tls::listener().await;
+        let destination = axum::serve::Listener::local_addr(&listener).unwrap();
         let f = Fake {
             balances: Arc::default(),
             challenge: Arc::new(Mutex::new(challenge("3000000"))),
@@ -430,6 +455,7 @@ impl Harness {
             body_only: Arc::default(),
             db: dir.path().join("state/state.sqlite"),
             traces: Arc::default(),
+            socks: records.map(|records| (records, destination)),
         };
         for address in &store.status().unwrap().pools[0].addresses {
             f.balances
@@ -438,12 +464,7 @@ impl Harness {
                 .insert(address.address.clone(), 5_000_000);
         }
         let (store, worker) = StoreHandle::spawn(store);
-        install_network(Default::default());
-        let listener = tls::listener().await;
-        let base = format!(
-            "https://{}",
-            axum::serve::Listener::local_addr(&listener).unwrap()
-        );
+        let base = format!("https://{destination}");
         let app = Router::new()
             .route("/rpc", post(rpc))
             .route("/pay", get(seller).post(seller))
@@ -2041,7 +2062,7 @@ async fn promotion_identity_child() {
         ..Default::default()
     });
     for method in ["GET", "POST"] {
-        let h = Harness::new().await;
+        let h = Harness::with_socks(Some(proxy.records.clone())).await;
         let initial = h.store.call(|s| s.status()).await.unwrap();
         let active = initial.pools[0].addresses[0].address.clone();
         let standby = initial.pools[0].addresses[1].address.clone();
@@ -2058,7 +2079,6 @@ async fn promotion_identity_child() {
         assert_eq!(status.pools[0].addresses.len(), 2);
         assert_eq!(h.f.signed.lock().unwrap().len(), 2);
         let traces = h.f.traces.lock().unwrap().clone();
-        let records = proxy.records.lock().unwrap().clone();
         let payment = traces
             .iter()
             .filter(|(_, phase, _)| phase != "balance")
@@ -2068,25 +2088,22 @@ async fn promotion_identity_child() {
             4,
             "unsigned active, signed active, unsigned standby, signed standby"
         );
-        for ((peer, phase, signer), expected) in payment
+        for ((credentials, phase, signer), expected) in payment
             .into_iter()
             .zip([&active, &active, &standby, &standby])
         {
-            let connection = records
-                .iter()
-                .find(|r| r.upstream_peer == Some(*peer))
-                .unwrap();
+            let credentials = credentials.as_ref().unwrap();
             let id = IsolationId::evm(expected).unwrap();
             let transport = network::global()
                 .http_participating(&id, &h.url, None, false, Default::default())
                 .unwrap();
             assert_eq!(
-                (connection.user.clone(), connection.password.clone()),
+                credentials.clone(),
                 network::global().credentials(&transport.scope),
                 "{phase}"
             );
             assert_ne!(
-                connection.password,
+                credentials.1,
                 network::global().credentials(&id).1,
                 "{phase}"
             );
@@ -2099,13 +2116,10 @@ async fn promotion_identity_child() {
             .filter(|(_, phase, _)| phase == "balance")
             .collect::<Vec<_>>();
         assert!(!balances.is_empty());
-        for (peer, _, address) in balances {
-            let connection = records
-                .iter()
-                .find(|r| r.upstream_peer == Some(*peer))
-                .unwrap();
+        for (credentials, _, address) in balances {
+            let credentials = credentials.as_ref().unwrap();
             assert_eq!(
-                (connection.user.clone(), connection.password.clone()),
+                credentials.clone(),
                 network::global().credentials(
                     &network::global()
                         .http_participating(

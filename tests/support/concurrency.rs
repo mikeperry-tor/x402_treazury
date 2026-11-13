@@ -188,10 +188,12 @@ async fn mcp_burst_across_listeners_retains_every_journal_and_isolates_pools() {
     h.close().await;
 }
 
-async fn rotation_burst() -> Vec<(String, std::net::SocketAddr, String, String)> {
+type BurstTrace = (String, Option<socks::Credentials>, String, String);
+
+async fn rotation_burst(records: Option<socks::Records>) -> Vec<BurstTrace> {
     let mut traces = vec![];
     for method in ["GET", "POST"] {
-        let h = Harness::new().await;
+        let h = Harness::with_socks(records.clone()).await;
         *h.f.challenge.lock().unwrap() = challenge("1000000");
         h.client.execute(h.route()).await.unwrap();
         let initial = h.store.call(|s| s.status()).await.unwrap();
@@ -262,7 +264,7 @@ async fn rotation_burst() -> Vec<(String, std::net::SocketAddr, String, String)>
                 .unwrap()
                 .iter()
                 .cloned()
-                .map(|(peer, phase, address)| (url.clone(), peer, phase, address)),
+                .map(|(credentials, phase, address)| (url.clone(), credentials, phase, address)),
         );
         h.close().await;
     }
@@ -271,7 +273,7 @@ async fn rotation_burst() -> Vec<(String, std::net::SocketAddr, String, String)>
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn simultaneous_depletion_consumes_once_with_one_handoff_for_get_and_post() {
-    rotation_burst().await;
+    rotation_burst(None).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -344,33 +346,29 @@ async fn tor_burst_child() {
         socks_endpoint: Some(proxy.address.into()),
         ..Default::default()
     });
-    let traces = rotation_burst().await;
-    let records = proxy.records.lock().unwrap();
+    let traces = rotation_burst(Some(proxy.records.clone())).await;
     let mut signed = 0;
     let mut rpc = 0;
-    for (url, peer, phase, address) in traces {
+    for (url, credentials, phase, address) in traces {
         if phase == "unsigned" {
             continue;
         }
-        let record = records
-            .iter()
-            .find(|r| r.upstream_peer == Some(peer))
-            .unwrap();
+        let credentials = credentials.unwrap();
         let id = IsolationId::evm(&address).unwrap();
         if phase == "signed" {
             let transport = network::global()
                 .http_participating(&id, &url, None, false, Default::default())
                 .unwrap();
             assert_eq!(
-                (record.user.clone(), record.password.clone()),
+                credentials,
                 network::global().credentials(&transport.scope),
                 "{phase}"
             );
-            assert_ne!(record.password, network::global().credentials(&id).1);
+            assert_ne!(credentials.1, network::global().credentials(&id).1);
             signed += 1;
         } else {
             assert_eq!(
-                (record.user.clone(), record.password.clone()),
+                credentials,
                 network::global().credentials(
                     &network::global()
                         .http_participating(
