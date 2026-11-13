@@ -1124,6 +1124,27 @@ an older revision, then uses a normal non-force push. The badge identifies its
 published source revision; a failing or still-running main revision can leave
 the prior successful coverage badge visible, alongside the current CI status.
 
+### Temporary CI diagnostics
+
+Automatic lifecycle GDB preparation and periodic capture in Linux checks are
+temporary during CI rollout. Keep them enabled until a main push passes Linux
+checks and coverage, publishes the coverage badge successfully, and both README
+badges show results for main. After that acceptance, make lifecycle capture opt-in
+by removing its automatic setup and `LIFECYCLE_DIAGNOSTICS` setting from routine
+CI. Preserve the normal check stages, stage logs, selected test profile and
+eight-thread configuration.
+
+Retain the diagnostic runner, Make's `LIFECYCLE_DIAGNOSTICS` option and the manual
+treasury-sync workflow for future investigations. Remove the `ci_coverage` push
+bootstrap triggers after integration while retaining `workflow_dispatch` for the
+focused diagnostic workflow. Verify ordinary CI without automatic capture and an
+explicit diagnostic invocation with capture and truthful exit status, then update
+this guide and the scripts guide to describe the resulting behavior.
+
+[Release follow-up D2](plans/deferred/release_followups.md#intended-future-work-and-acceptance)
+owns this cleanup independently of the active CI plan. Removing that plan after
+main badge acceptance does not remove the diagnostic retirement task.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency

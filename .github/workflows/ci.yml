@@ -45,6 +45,8 @@ jobs:
         run: scripts/ci-stage.sh check-default-remaining
       - name: Proving tests
         run: scripts/ci-stage.sh check-proving
+      # Temporary automatic capture; retire after main badge acceptance.
+      # Policy and retained tools: docs/testing.md#temporary-ci-diagnostics
       - name: Prepare lifecycle diagnostics
         run: |
           sudo apt-get update

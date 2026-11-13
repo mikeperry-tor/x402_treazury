@@ -2,6 +2,8 @@ name: Treasury sync diagnostics
 
 on:
   workflow_dispatch:
+  # Temporary bootstrap trigger; keep manual dispatch after main badge acceptance.
+  # See docs/testing.md#temporary-ci-diagnostics.
   push:
     branches: [ci_coverage]
     paths:
