@@ -33,14 +33,14 @@ You can set custom financial limits on all of these transactions.
 > You can also bind independent wallet groups to specific API collections, to reduce
 > content linkability.
 
-Each managed wallet group uses one small (~$2.50) Base USDC wallet pair, and an
+Each managed wallet group uses one small (~$2.50 USDC) wallet pair, and an
 optional custom-denomination large wallet pair.
 
-Every wallet group always maintains as least two USDC wallet addresses to
-ensure that no x402 calls are blocked or delayed by refill swaps: one or more
-active wallets, and at least one fully-funded reserve USDC wallet. Thus, even
-though Near Intents swaps can take some minutes to settle, your agent never
-notices, nor do you experience any delays.
+Every wallet group always maintains as least two USDC wallet addresses to ensure
+that no x402 calls are blocked or delayed by refill swaps: one active USDC
+wallet, one fully-funded reserve USDC wallet, and a collection of previously
+used low-balance wallets. Thus, even though Near Intents swaps can take some
+minutes to settle, your agent never notices, nor do you experience any delays.
 
 API catalog pricing data and cached paid API prices are used to choose the
 smallest sufficient USDC wallet address from a wallet group for each paid x402
