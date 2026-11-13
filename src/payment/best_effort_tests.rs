@@ -1153,13 +1153,20 @@ async fn tor_unsigned_status_retries_and_retained_promotion() {
     );
 }
 
-type TorRequest = (SocketAddr, Method, String, Vec<u8>, bool);
+type TorRequest = (
+    Option<crate::test_socks::Credentials>,
+    Method,
+    String,
+    Vec<u8>,
+    bool,
+);
 
 #[derive(Clone, Default)]
 struct TorScript {
     steps: Arc<Mutex<std::collections::VecDeque<TorStep>>>,
     observed: Arc<Mutex<Vec<TorRequest>>>,
     signed_payers: Arc<Mutex<Vec<alloy_primitives::Address>>>,
+    socks: Option<crate::test_socks::Records>,
 }
 
 #[derive(Clone)]
@@ -1177,6 +1184,87 @@ enum TorStep {
     Signed200(Vec<u8>),
 }
 
+fn scope_record(
+    peer: SocketAddr,
+    host: &str,
+    port: u16,
+    password: &str,
+) -> crate::test_socks::Record {
+    crate::test_socks::Record {
+        user: "owner".into(),
+        password: password.into(),
+        host: host.into(),
+        port,
+        address_type: 3,
+        upstream_peer: Some(peer),
+    }
+}
+
+#[test]
+fn scope_observation_matches_latest_peer_and_exact_destination() {
+    let peer = "127.0.0.1:12345".parse().unwrap();
+    let records = [
+        scope_record(peer, "api-a.example.com", 443, "old"),
+        scope_record(peer, "api-a.example.com", 443, "current"),
+        scope_record(peer, "api-b.example.com", 443, "other-host"),
+        scope_record(peer, "api-a.example.com", 444, "other-port"),
+    ];
+    assert_eq!(
+        crate::test_socks::credentials_for_peer(&records, peer, "api-a.example.com", 443),
+        Some(("owner".into(), "current".into()))
+    );
+    assert!(
+        crate::test_socks::credentials_for_peer(&records, peer, "missing.example.com", 443)
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn request_scope_observation_survives_later_peer_reuse() {
+    let peer = "127.0.0.1:12345".parse().unwrap();
+    let records = Arc::new(Mutex::new(vec![scope_record(
+        peer,
+        "api-a.example.com",
+        443,
+        "current",
+    )]));
+    let script = TorScript {
+        socks: Some(records.clone()),
+        ..Default::default()
+    };
+    script
+        .steps
+        .lock()
+        .unwrap()
+        .push_back(TorStep::Free200(vec![]));
+    let response = tor_script_handler(
+        State(script.clone()),
+        ConnectInfo(crate::test_tls::PeerAddr(peer)),
+        Method::GET,
+        "https://api-a.example.com/pay".parse().unwrap(),
+        HeaderMap::new(),
+        Bytes::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let expected = Some(("owner".into(), "current".into()));
+    assert_eq!(script.observed.lock().unwrap()[0].0, expected);
+    records
+        .lock()
+        .unwrap()
+        .push(scope_record(peer, "api-a.example.com", 443, "next"));
+    assert_eq!(
+        crate::test_socks::credentials_for_peer(
+            &records.lock().unwrap(),
+            peer,
+            "api-a.example.com",
+            443,
+        ),
+        Some(("owner".into(), "next".into()))
+    );
+    assert_eq!(script.observed.lock().unwrap()[0].0, expected);
+}
+
 async fn tor_script_handler(
     State(script): State<TorScript>,
     ConnectInfo(crate::test_tls::PeerAddr(peer)): ConnectInfo<crate::test_tls::PeerAddr>,
@@ -1185,12 +1273,23 @@ async fn tor_script_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let credentials = script.socks.as_ref().map(|records| {
+        crate::test_socks::credentials_for_peer(
+            &records.lock().unwrap(),
+            peer,
+            uri.host().expect("scripted Tor request has a destination"),
+            uri.port_u16().unwrap_or(443),
+        )
+        .expect("SOCKS record for the live origin connection")
+    });
     let is_signed = headers.contains_key("payment-signature");
-    script
-        .observed
-        .lock()
-        .unwrap()
-        .push((peer, method, uri.to_string(), body.to_vec(), is_signed));
+    script.observed.lock().unwrap().push((
+        credentials,
+        method,
+        uri.to_string(),
+        body.to_vec(),
+        is_signed,
+    ));
     if let Some(encoded) = headers.get("payment-signature") {
         let payload: Value =
             serde_json::from_slice(&STANDARD.decode(encoded.as_bytes()).unwrap()).unwrap();
@@ -1316,12 +1415,27 @@ async fn tor_unsigned_retry_child() {
         network::{IsolationId, Mode, NetworkContext, NetworkPolicy, SelectionPolicy},
         test_socks::{Fault, Socks},
     };
-    let script_a = TorScript::default();
-    let script_b = TorScript::default();
     let listener_a = crate::test_tls::listener().await;
     let addr_a = listener_a.local_addr().unwrap();
     let listener_b = crate::test_tls::listener().await;
     let addr_b = listener_b.local_addr().unwrap();
+    let proxy = Socks::start(
+        BTreeMap::from([
+            ("api-a.example.com".into(), addr_a),
+            ("api-b.example.com".into(), addr_b),
+            ("dead.example.com".into(), "127.0.0.1:1".parse().unwrap()),
+        ]),
+        Fault::None,
+    )
+    .await;
+    let script_a = TorScript {
+        socks: Some(proxy.records.clone()),
+        ..Default::default()
+    };
+    let script_b = TorScript {
+        socks: Some(proxy.records.clone()),
+        ..Default::default()
+    };
     let app_a = Router::new()
         .route("/pay", any(tor_script_handler))
         .with_state(script_a.clone());
@@ -1344,15 +1458,6 @@ async fn tor_unsigned_retry_child() {
         .await
         .unwrap()
     });
-    let proxy = Socks::start(
-        BTreeMap::from([
-            ("api-a.example.com".into(), addr_a),
-            ("api-b.example.com".into(), addr_b),
-            ("dead.example.com".into(), "127.0.0.1:1".parse().unwrap()),
-        ]),
-        Fault::None,
-    )
-    .await;
     let ctx = NetworkContext::new(NetworkPolicy {
         mode: Mode::Tor,
         socks_endpoint: Some(proxy.address.into()),
@@ -1363,13 +1468,8 @@ async fn tor_unsigned_retry_child() {
     .with_test_root(crate::test_tls::CA);
     crate::network::install_test_context(ctx);
 
-    let find_token = |peer: SocketAddr| -> (String, String) {
-        let records = proxy.records.lock().unwrap();
-        let rec = records
-            .iter()
-            .find(|r| r.upstream_peer == Some(peer))
-            .expect("SOCKS record for peer");
-        (rec.user.clone(), rec.password.clone())
+    let captured_credentials = |credentials: &Option<crate::test_socks::Credentials>| {
+        credentials.clone().expect("captured SOCKS credentials")
     };
 
     // 1. Status matrix (400, 403, 429, 503) before 402 -> paid 200 and before free 200,
@@ -1416,7 +1516,7 @@ async fn tor_unsigned_retry_child() {
                 let obs = script_a.observed.lock().unwrap().clone();
                 assert_eq!(obs.len(), fails + 2, "unsigned retries + 402 + signed 200");
                 let mut unsigned_tokens = Vec::new();
-                for (i, (peer, m, uri, body, signed)) in obs.iter().enumerate() {
+                for (i, (scope, m, uri, body, signed)) in obs.iter().enumerate() {
                     assert_eq!(body, &obs[0].3, "exact repeated wire bytes");
                     assert_eq!(m.as_str(), method);
                     let uri: axum::http::Uri = uri.parse().unwrap();
@@ -1434,7 +1534,7 @@ async fn tor_unsigned_retry_child() {
                     } else {
                         assert!(body.is_empty());
                     }
-                    let (user, pass) = find_token(*peer);
+                    let (user, pass) = captured_credentials(scope);
                     assert_eq!(user, legacy_creds.0, "canonical owner user stays pinned");
                     assert_ne!(pass, legacy_creds.1, "participating scope is fresh");
                     if i <= fails {
@@ -1496,11 +1596,11 @@ async fn tor_unsigned_retry_child() {
                     assert!(!entry.4);
                 }
                 assert_eq!(
-                    find_token(obs[0].0).1,
+                    captured_credentials(&obs[0].0).1,
                     winner,
                     "attempt 1 uses prior winner"
                 );
-                let free_winner = find_token(obs.last().unwrap().0).1;
+                let free_winner = captured_credentials(&obs.last().unwrap().0).1;
                 if fails > 0 {
                     assert_ne!(free_winner, winner);
                 } else {
@@ -1920,7 +2020,10 @@ async fn tor_unsigned_retry_child() {
         assert_eq!(script_a.observed.lock().unwrap().len(), 3);
         assert_eq!(script_a.signed_payers.lock().unwrap().len(), 1);
         let obs = script_a.observed.lock().unwrap().clone();
-        assert_eq!(find_token(obs[1].0), find_token(obs[2].0));
+        assert_eq!(
+            captured_credentials(&obs[1].0),
+            captured_credentials(&obs[2].0)
+        );
     }
 
     // 3c. Same-wallet other-origin and discovery identity on same origin remain untouched:
@@ -1965,7 +2068,7 @@ async fn tor_unsigned_retry_child() {
         "Legacy selection relay call makes 1 attempt"
     );
     assert_eq!(
-        find_token(relay_obs[0].0),
+        captured_credentials(&relay_obs[0].0),
         legacy_creds,
         "Legacy selection uses deterministic identity token"
     );
@@ -2010,8 +2113,8 @@ async fn tor_unsigned_retry_child() {
     let obs = script_a.observed.lock().unwrap().clone();
     assert_eq!(obs.len(), 3);
     assert_eq!(
-        find_token(obs[1].0).1,
-        find_token(obs[2].0).1,
+        captured_credentials(&obs[1].0).1,
+        captured_credentials(&obs[2].0).1,
         "in-flight call retains its winning challenge scope across competing promotion and cache eviction"
     );
 
@@ -2119,12 +2222,12 @@ async fn tor_unsigned_retry_child() {
         payers[0], payers[1],
         "handoff switches from wallet A to wallet B"
     );
-    let tok_a1 = find_token(obs_b[0].0);
-    let tok_a2 = find_token(obs_b[1].0);
-    let tok_a_signed = find_token(obs_b[2].0);
-    let tok_b1 = find_token(obs_b[3].0);
-    let tok_b2 = find_token(obs_b[4].0);
-    let tok_b_signed = find_token(obs_b[5].0);
+    let tok_a1 = captured_credentials(&obs_b[0].0);
+    let tok_a2 = captured_credentials(&obs_b[1].0);
+    let tok_a_signed = captured_credentials(&obs_b[2].0);
+    let tok_b1 = captured_credentials(&obs_b[3].0);
+    let tok_b2 = captured_credentials(&obs_b[4].0);
+    let tok_b_signed = captured_credentials(&obs_b[5].0);
     assert_eq!(tok_a1.0, tok_a2.0);
     assert_ne!(tok_a1.1, tok_a2.1);
     assert_eq!(
