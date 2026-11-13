@@ -73,6 +73,9 @@ esac
 case "$*" in
     'llvm-cov report '*)
         if [ "${FAIL_EXPORT:-}" = yes ]; then exit 44; fi
+        case "$*" in
+            *--lcov*) if [ "${FAIL_LCOV_EXPORT:-}" = yes ]; then exit 45; fi ;;
+        esac
         if [ "${SOURCE_DRIFT:-}" = yes ]; then echo changed >> Cargo.lock; fi ;;
 esac
 while [ "$#" -gt 0 ]; do
@@ -106,9 +109,11 @@ first=$(readlink target/coverage)
 test -f "$first/previous-report/legacy"
 test "$(cat "$first/status")" = complete
 test -s "$first/profiles.txt"
+test -s "$first/lcov.info"
 grep -q fixture-revision "$first/provenance.txt"
 # The application denominator excludes operational tools in their relocated homes.
 exclude=$(sed -n 's/^ignore_filename_regex=//p' "$first/provenance.txt")
+grep -Fq -- "--ignore-filename-regex $exclude --lcov --output-path $first/lcov.info" "$first/commands.txt"
 for source in /repo/tools/providers/snapshot_spec.rs /repo/tools/diagnostics/quote_near.rs /repo/tests/live/runner/driver.rs; do
     printf '%s\n' "$source" | grep -Eq "$exclude"
 done
@@ -119,6 +124,11 @@ if FAIL_COVERAGE_TEST=yes scripts/coverage.sh > failed.log 2>&1; then
     echo 'failed test run incorrectly succeeded' >&2; exit 1
 fi
 test "$(readlink target/coverage)" = "$first"
+if FAIL_LCOV_EXPORT=yes scripts/coverage.sh > lcov-failure.log 2>&1; then
+    echo 'failed LCOV export incorrectly succeeded' >&2; exit 1
+fi
+test "$(readlink target/coverage)" = "$first"
+test -s "$first/lcov.info"
 if EMPTY_COVERAGE_SELECTION=yes scripts/coverage.sh > empty.log 2>&1; then exit 1; fi
 test "$(readlink target/coverage)" = "$first"
 scripts/coverage.sh > second.log
@@ -129,9 +139,10 @@ while IFS= read -r profile; do test -s "$profile"; done < "$first/profiles.txt"
 test -f "$second/html/index.html"
 if scripts/coverage.sh --consensus all > invalid.log 2>&1; then exit 1; fi
 if scripts/coverage.sh --branch > nightly.log 2>&1; then exit 1; fi
+executions_before_financial=$(wc -l < executions.txt | tr -d ' ')
 CONDITION_FIXTURE=yes scripts/coverage.sh --condition-financial > financial.log
 financial=$(readlink target/coverage-condition-financial)
-test "$(wc -l < executions.txt | tr -d ' ')" = 5
+test "$(wc -l < executions.txt | tr -d ' ')" = "$((executions_before_financial + 3))"
 for filter in treasury::send::proving_tests treasury::lifecycle_tests synthetic_address_codec_is_scoped_to_its_test_client; do
     test "$(grep -c "$filter" executions.txt)" = 1
     test "$(grep -c "command: cargo llvm-cov test .* $filter " "$financial/commands.txt")" = 2

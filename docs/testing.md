@@ -958,7 +958,8 @@ while retaining the absence of target signing, RPC, funding and allocation.
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
 and isolation tests, an opt-in local provider replay, and measurement methodology.
 
-`make coverage` produces default line, region and function reports with
+`make coverage` produces default line, region and function reports, plus a filtered
+`lcov.info` for line-coverage reporting, with
 compiler/source/lockfile provenance. Generated reports stay under ignored `target/`;
 failed collection must not replace the latest successful report. Application
 filters exclude external/vendor/test/example paths, although inline test helpers

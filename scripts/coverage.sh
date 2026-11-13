@@ -185,6 +185,7 @@ esac
 run cargo llvm-cov report --ignore-filename-regex "$exclude" --html --output-dir "$run_dir"
 run cargo llvm-cov report --ignore-filename-regex "$exclude" --json --summary-only --output-path "$run_dir/summary.json"
 run cargo llvm-cov report --ignore-filename-regex "$exclude" > "$run_dir/summary.txt"
+run cargo llvm-cov report --ignore-filename-regex "$exclude" --lcov --output-path "$run_dir/lcov.info"
 # Reject source drift before publication; the unique run retains all evidence.
 shasum -a 256 -c "$run_dir/source-sha256.txt" > "$run_dir/source-verification.txt"
 echo complete > "$run_dir/status"
