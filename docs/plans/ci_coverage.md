@@ -148,6 +148,18 @@ writing this workflow.
   witness using existing inventory RPC controls. Keep hooks crate-private and
   test-only, preserve production cadence/authority and eight threads, review exact
   commits and combined consumers, then validate affected default-library behavior.
+- C19: Correct SDK loader/worker busy publication before task enqueueing, using
+  one private shared primitive. Force consumer completion before the publication
+  closure returns in a deterministic real-channel/thread regression, verify idle
+  completion and another dispatch, and retain a held-work positive control.
+  Include that exact source module from existing SDK compatibility tests; do not
+  expose SDK APIs or change workspace/dependency resolution. Fold the change into
+  the maintained Pepper progress patch and its exact provenance, allowing declared
+  patch-created files while retaining maintained hashes and strict restored
+  upstream inventory. Independently review exact changes and combined consumers;
+  run provenance controls, compiler/Clippy gates, compatibility, treasury-sync and
+  the two stalled lifecycle cases. Preserve all work, channel capacities, timers,
+  authorities, assertions and eight-thread settings.
 
 ## Review and validation gates
 
@@ -809,3 +821,50 @@ to 7/12 by replacing a clock loop with explicit synthetic setup; the startup
 installer is 0/1, zero-refresh remains 2/3 and inventory changes 4/13 to 5/14 for
 the ordering witness. No production scheduling responsibility was added.
 The active plan remains for hosted acceptance and its separate unfinished work.
+
+## SDK task-publication race
+
+C19 starts at `0e7a3a56`. Cancelled lifecycle diagnostic run `43451746068` at
+`51b80da5` uploaded 24 snapshots under
+`target/ci-diagnostics/43451746068/extracted/`. It completed 66 of 68 tests with
+no FAILED results. Birthday reorg-before-declared-coverage and pruned-checkpoint
+rebuild remained unfinished. CPU was busy during early work, then rose only about
+36 CPU-seconds over the final 81 wall-clock minutes, with the same 15 threads and
+two live scan runtimes. This establishes a persistent wait rather than ongoing
+proving. The isolated birthday baseline passed locally in 132.28 seconds, so that
+run did not reproduce the hang. The old run used the earlier pushed revision;
+later local commits did not alter it.
+
+Independent SDK and fixture audits excluded explicit fixture wallet guards,
+retained Store senders, stalled-response injection and a demonstrated repair-lock
+cycle. They found a concrete loader/worker publication race in
+`vendor/pepper-sync/src/scan/task.rs`: enqueue precedes busy=true, while a separate
+consumer can finish and publish false before enqueueing returns. A later true
+store loses that completion. Loader completion and further work are gated on idle,
+so the stale flag can leave even finished scans polling indefinitely. This code
+interleaving is proven; its occurrence in the captured CI future is not.
+
+Independent design review approved publishing busy before enqueueing via a small
+private std-only helper shared by both actual dispatch sites. Retain existing
+channel panic contracts, capacities and consumer completion stores; add no rollback
+state, timeout or recovery loop. Force an actual consumer to finish before the
+enqueue closure returns, assert idle and repeat, and verify held unfinished work
+remains busy. A negative mutation restoring the old order must fail.
+
+Direct `-p pepper-sync` testing was checked and is unavailable because the excluded
+dependency is not a workspace member. The reviewed alternative compiles the exact
+private module into existing `tests/sdk_compat.rs`; no implementation is copied,
+public API added, dependency checkout introduced or lock graph changed. A reversible
+creation hunk belongs in the existing progress patch. Remove only the redundant
+pre-reversal assumption that the patched inventory equals upstream: existing
+maintained-file hashes already enforce its inventory, and post-reversal inventory
+and hashes must still match upstream exactly. Add focused provenance rejection
+controls and update the owning SDK/checkout guides.
+
+Run socket-free deterministic/provenance tests, selected production compiler and
+all-target Clippy gates and focused source-matched SDK complexity review before
+broader runtime tests. Then SDK compatibility, real treasury-sync consumers and
+both stalled lifecycle cases execute sequentially on frozen sources. Generated
+evidence belongs under `target/ci-lifecycle-wait-validation/`; no real funds,
+consensus services or live Tor are selected. Hosted lifecycle/default acceptance
+and the separate mempool-notice channel issue remain unfinished. User retains push.
