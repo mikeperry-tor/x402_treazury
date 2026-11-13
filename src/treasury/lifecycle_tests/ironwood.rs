@@ -63,9 +63,7 @@ async fn relocated_ironwood_note_closes_expired_original_when_unspent_or_spent_c
         .unwrap();
         let address = ironwood_address(&mut owner).await;
         net.chain.write().await.mine_empty_blocks(20);
-        let funding = net
-            .funding_transaction(vec![(&address, 1_000_000, None)])
-            .await;
+        let funding = canonical_funding_transaction(&net, &address, 1_000_000).await;
         let funding_id = submission::decode(&funding).unwrap().txid();
         {
             let mut chain = net.chain.write().await;

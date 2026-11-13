@@ -165,6 +165,37 @@ async fn funded_fixture(confirmations: u64) -> (tempfile::TempDir, MockNet, Trea
     funded_fixture_amount(confirmations, 1_000_000).await
 }
 
+// Fixed SEED/account-zero receiver, Synthetic activation schedule and height 21.
+// Share only public transaction bytes; each fixture retains its own owner and scan.
+async fn canonical_funding_transaction(net: &MockNet, address: &str, amount: u64) -> Vec<u8> {
+    assert_eq!(
+        net.chain.read().await.tip(),
+        20,
+        "canonical funding height changed"
+    );
+    static STANDARD: tokio::sync::OnceCell<(String, Vec<u8>)> = tokio::sync::OnceCell::const_new();
+    static LOW: tokio::sync::OnceCell<(String, Vec<u8>)> = tokio::sync::OnceCell::const_new();
+    let funding = match amount {
+        1_000_000 => &STANDARD,
+        10_000 => &LOW,
+        _ => return net.funding_transaction(vec![(address, amount, None)]).await,
+    };
+    let (recipient, bytes) = funding
+        .get_or_init(|| async {
+            (
+                address.to_owned(),
+                net.funding_transaction(vec![(address, amount, None)]).await,
+            )
+        })
+        .await;
+    assert_eq!(
+        recipient.as_str(),
+        address,
+        "canonical funding receiver changed"
+    );
+    bytes.clone()
+}
+
 async fn funded_fixture_amount(
     confirmations: u64,
     amount: u64,
@@ -182,27 +213,7 @@ async fn funded_fixture_amount(
         .unwrap()
         .to_owned();
     net.chain.write().await.mine_empty_blocks(20);
-    let funding = if amount == 1_000_000 {
-        // This owner always uses SEED/account zero on the fixed Synthetic chain.
-        // The faucet uses this chain's activation schedule and next height 21.
-        // Share only public transaction bytes; each owner still scans its own chain.
-        static FUNDING: tokio::sync::OnceCell<(String, Vec<u8>)> =
-            tokio::sync::OnceCell::const_new();
-        let (recipient, bytes) = FUNDING
-            .get_or_init(|| async {
-                (
-                    address.clone(),
-                    net.funding_transaction(vec![(&address, amount, None)])
-                        .await,
-                )
-            })
-            .await;
-        assert_eq!(recipient, &address, "canonical funding receiver changed");
-        bytes.clone()
-    } else {
-        net.funding_transaction(vec![(&address, amount, None)])
-            .await
-    };
+    let funding = canonical_funding_transaction(&net, &address, amount).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![funding]);
