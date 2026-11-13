@@ -95,12 +95,11 @@ and main-only report storage excludes fork baseline writes.
 
 ## Handoff and remaining acceptance
 
-Local implementation and review are complete on `ci_coverage`. No application
-compiler/full-suite or real LLVM export was run for this workflow/tooling change;
-the workflow will supply Linux application validation when executed. No remote
-branch or badge was pushed, and no branch protection/settings were changed.
+The initial CI implementation and review are complete on `ci_coverage`. The
+operator's hosted branch run exposed the regression addressed in C4 below.
+The agent has not pushed a remote branch/badge or changed branch protection.
 
-After an authorized push, inspect the `ci_coverage` Actions check/coverage jobs,
+After the correction is pushed, inspect the `ci_coverage` Actions check/coverage jobs,
 nonzero failure propagation, summary and SVG/HTML artifacts without a main
 baseline; fix and independently review any concrete failures. Validate fork
 read-only behavior when such a PR is available. After integration, verify a
@@ -128,4 +127,15 @@ inheritance and existing help exclusion. Endpoint instruction assertions remain
 a separation check, not runtime listener-composition qualification. Validation is
 limited to the affected `credit_pricing` and `socialfetch` targets and changed-test
 Clippy; the unchanged full `config` target has socket fixtures and is not selected.
-The test repair is implemented; validation and exact-fixup/combined review remain.
+The test repair is committed as fixup `c79c70d5` against `920fced2`.
+`make fmt-check`, `make clippy CARGO_ARGS='--test credit_pricing'` and
+`make test CARGO_ARGS='--test credit_pricing --test socialfetch'` passed on macOS:
+12 credit-pricing and two SocialFetch tests executed, with no compiler/Clippy
+diagnostics. Logs are `clippy-fix.log` and `test-fix.log` beside the hosted evidence.
+Independent exact-fixup and combined review covered `c79c70d5` and accumulated
+changes from `fffa29e6`, including config/catalog/rendering and unchanged CI
+callchains: no material findings. Earlier workflow/tooling evidence remains valid.
+No instrumented coverage or full-suite rerun was performed; hosted retry and
+eventual main baseline/publication remain pending. The separate Linux-check job
+was still running when its status was inspected. No fix has been pushed by the
+agent.
