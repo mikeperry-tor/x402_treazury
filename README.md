@@ -80,7 +80,7 @@ multi-listener example documented there.
 maintained separately. It packages Hermes Agent, Tor-routed egress,
 validated TEE confidential inference, a code executor, and this project.
 It adds its own requirements (Docker Engine 28+ with Linux containers, Compose
-2.36+, make, Python 3), and it pins the versions of each componentt. Stack and
+2.36+, make, Python 3), and it pins the versions of each component. Stack and
 packaging issues belong there, and x402_treazury issues belong here.
 
 For the research desk, `$5 to start` means one initial bootstrap allocation; all APIs will work, but all will share an initial bootstrap wallet.
@@ -115,12 +115,13 @@ commands or wallet commands using `--state-dir`.
 
 The example listeners require `X402_TREAZURY_MCP_TOKEN`; missing, empty and
 whitespace-only values fail startup. To allow unauthenticated access explicitly,
-set `auth = false` and omit `bearer_token_env` on that listener. Host checking must
-remain enabled when authentication is disabled.
+set `auth = false` and omit `bearer_token_env` on that listener. Host header
+checking must remain enabled when authentication is disabled (this ensures
+that your browser's web pages can't access your MCP endpoints).
 
 Send $5 worth of ZEC to the shielded receive address printed by initialization to cover
-the $3 upper initial nominal USDC bound plus source fees and bridge costs. Keep
-additional funds for future replacements. Each x402 API payment is capped at
+the $3 upper initial nominal USDC bound plus source fees and bridge costs. Add
+additional funds for future USDC wallet replacement rotations. Each x402 API payment is capped at
 $0.50. Funding starts after the listener binds, so tools remain visible while
 funding is pending. Connect your MCP client with
 `Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
@@ -134,22 +135,35 @@ target/release/x402_treazury serve \
 ```
 
 `--network-config` replaces the complete `[network]` policy and, when present,
-`[relay_fallback]` for that invocation. This Tor example enables configured paid
-relay fallback for catalog, document reads and built-in directory/Coinbase searches
-using the deployment's existing payers. Actual API fallback requires explicit
-`api_requests = true`. Without the option, the managed starter uses its own
-settings. For treasury initialization over Tor, pass the same option to
+`[relay_fallback]` for that invocation.
+
+For treasury initialization over Tor, pass the same option to
 `wallet init`, or initialize using a deployment with the embedded policy.
 
-The default key file lives with treasury state at `state/managed/wallet.key`;
-protect that directory because it contains both state and decryption material.
-Run one serving process per treasury.
+This Tor config enables a paid relay fallback for catalog and x402 provider
+directory searches using the deployment's existing payers. This means that
+x402_treazury will use up to two x402 paid API calls to fetch catalogs and
+perform directory searches, if it experiences a captcha, 429, 503, or other Tor
+block by an API provider or directory service. Three separate Tor circuits will
+be used before these payments, so this fallback is very rarely needed.
 
-`x402_treazury wallet status`
-reads saved status alongside serving;
-other exclusive wallet administration requires stopping it. See
-[wallet administration](docs/wallet-cli.md) and the
-[example choices](examples/README.md).
+Actual API call data is not sent through these x402 relay providers; that
+requires explicit `api_requests = true`. This is off by default to avoid
+exposing API data to these paid relay providers. Additionally, no providers in
+our catalog have ever required this option for actual API calls; they all
+happily accept payment over Tor.
+
+The wallet key file lives with treasury state at `state/managed/wallet.key`;
+protect that directory because it contains both state and decryption material.
+
+Run one only serving process per state directory.
+
+`x402_treazury wallet status` reads saved wallet information, and can be used
+when serve is either running or not; other wallet administration requires
+stopping `serve`.
+
+See [wallet administration](docs/wallet-cli.md) and the [example choices](examples/README.md)
+for more details.
 
 ## Going further
 
