@@ -4,6 +4,17 @@ use pepper_sync::wallet::{OutputInterface, WalletTransaction};
 use serde_json::json;
 use zingo_status::confirmation_status::ConfirmationStatus;
 
+fn instructions_without_clock(
+    reply: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut instructions = reply["payment_instructions"].as_object().unwrap().clone();
+    let clock = instructions.remove("current_time_utc").unwrap();
+    let timestamp = chrono::DateTime::parse_from_rfc3339(clock.as_str().unwrap()).unwrap();
+    assert_eq!(timestamp.offset().local_minus_utc(), 0);
+    assert_eq!(clock, reply["current_time_utc"]);
+    instructions
+}
+
 #[tokio::test]
 async fn native_creation_recovers_reserved_request_and_reuses_only_its_own_address() {
     let (dir, owner) = unfunded_fixture().await;
@@ -66,8 +77,8 @@ async fn native_creation_recovers_reserved_request_and_reuses_only_its_own_addre
     let same = create(terms.clone()).await.unwrap();
     assert_eq!(same["operation"]["id"], reserved);
     assert_eq!(
-        same["payment_instructions"],
-        accepted["payment_instructions"]
+        instructions_without_clock(&same),
+        instructions_without_clock(&accepted)
     );
     let mut fresh_terms = terms;
     fresh_terms["request_id"] = json!("fresh");

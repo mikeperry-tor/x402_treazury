@@ -97,6 +97,7 @@ fn optional_timing_is_unknown_and_native_partials_have_no_expiry() {
     operation.terms["asset_id"] = json!(route::ZEC);
     operation.terms["chain"] = json!("zec");
     operation.quote = None;
+    let native = operation.clone();
     let display = instructions(&operation, Some(1000));
     assert_eq!(display["recipient"], "treasury-shielded-receiver");
     assert_eq!(display["amount_zatoshis"], "12345");
@@ -113,6 +114,21 @@ fn optional_timing_is_unknown_and_native_partials_have_no_expiry() {
     ] {
         assert!(display[field].is_null());
     }
+    let mut first = display.as_object().unwrap().clone();
+    let mut later = instructions(&operation, Some(1001))
+        .as_object()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        first.remove("current_time_utc"),
+        Some(json!("1970-01-01T00:16:40Z"))
+    );
+    assert_eq!(
+        later.remove("current_time_utc"),
+        Some(json!("1970-01-01T00:16:41Z"))
+    );
+    assert_eq!(first, later);
+    assert_eq!(operation, native);
     operation.kind = "send".into();
     assert!(instructions(&operation, Some(1000)).is_null());
 }

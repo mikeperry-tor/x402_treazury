@@ -58,6 +58,12 @@ actor-command barriers before journal inspection. These waits have no fixture
 wall-clock deadline; external lifecycle diagnostics observe long runs without
 interrupting valid work.
 
+Native invoice retries preserve every payment instruction apart from the fresh
+presentation clock. Tests validate each response's UTC clock independently and
+compare the remaining complete instruction objects; repeated calls need not occur
+within the same wall-clock second. Explicit-clock formatter coverage verifies this
+boundary without delaying a fixture or changing the production clock.
+
 Deposit fixtures exercising real `GrpcSubmission` use a managed funding job and
 saved quote so the operation has its required durable recipient identity.
 Preparation-only fixtures do not by themselves establish submission binding.
