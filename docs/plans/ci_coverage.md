@@ -888,3 +888,40 @@ both stalled lifecycle cases execute sequentially on frozen sources. Generated
 evidence belongs under `target/ci-lifecycle-wait-validation/`; no real funds,
 consensus services or live Tor are selected. Hosted lifecycle/default acceptance
 and the separate mempool-notice channel issue remain unfinished. User retains push.
+
+C19 implementation is `8ac2fa074079da621609558e28663b6083bf5a10`, a fixup to
+`ceff726a` where the maintained checkout first carried the faulty SDK ordering.
+No dependency pin, lockfile, transport, timeout, capacity or financial authority
+changed. The two publication controls pass; restoring enqueue-before-busy fails
+the forced-completion control as expected. Four provenance controls pass and the
+actual verifier restores all 35 pinned upstream files after reversing declared
+patches. Formatting passes. Patch-file blank context lines retain the spaces
+required by unified-diff syntax; they are not Rust trailing whitespace.
+
+Selected production compiler and all-target `zcash-regtest` Clippy warning gates
+pass with diagnostics inspected. `make check-compat` passes 33 tests across four
+targets, including five SDK compatibility tests and both exact-source controls.
+After the implementation commit, `treasury_sync` passes 27 tests with one
+explicit public-network qualification ignored, at eight threads in 34.57 seconds.
+Both previously unfinished lifecycle cases execute together with
+`--features zcash-testutils --lib`, both exact fully qualified filters and eight
+threads: two pass, zero fail in 130.58 seconds. The lifecycle build retains the
+documented macOS `__eh_frame` linker warning; it is not suppressed. These focused
+results do not establish hosted acceptance or reproduce the original CI future.
+
+Direct pinned source analysis covers three baseline and four current files,
+including SDK files excluded by the ordinary inventory. Parsing is complete;
+source hashes match. Dispatch has CogC/CycC 0/2 including its closure, and the
+shared helper 0/1. Unchanged `Loader::run` is 32/31: stream retry, block seams and
+load splitting remain one coherent operation; extracting them for this ordering
+repair removes no responsibility. No new or worsening production hotspot needs
+disposition. Generated metrics, mutation evidence, upstream metadata and runtime
+logs remain in `target/ci-lifecycle-wait-validation/`.
+
+Fresh nonauthor review `sdk_publication_final` examined exact implementation
+`8ac2fa07`, plan `f2ed5d99` and combined C19 against `0e7a3a56`, complete dispatch,
+consumer/result admission, completion and shutdown chains, provenance, upstream
+disposition and complexity. It found no material issue and independently checked
+source hashes plus provenance controls/restoration. Its initial source assessment
+preceded author rationale. Prior C1-C18 evidence remains scoped as recorded;
+hosted/default/main acceptance and the distinct mempool-notice hazard remain open.
