@@ -97,13 +97,14 @@ writing this workflow.
   the existing default-test remainder at eight threads. Commit as a fixup to
   `ac369750`; independently review the exact fixup and combined branch. Carry
   unchanged compatibility evidence forward without claiming full `make check`.
-- C14: Make the startup CLI diagnostic fixture request plain stderr explicitly,
-  preserving exact failure-stage, empty-stdout and private-address assertions.
-  Reproduce with inherited `NO_COLOR` absent, audit sibling diagnostic consumers,
-  document the fixture environment contract and validate the default remainder
-  without the locally inherited color override. Keep production formatting and
-  CI color settings unchanged. Independently review the exact fixup and combined
-  state; retain hosted acceptance for the user's push.
+- C14: Replace the startup failure fixture's redundant log-text assertions with
+  its functional CLI contract: unsuccessful exit, empty stdout and no private
+  address disclosure. Retain the adjacent structured-JSON parse-stage and absent-
+  inventory assertions. Reproduce with inherited `NO_COLOR` absent, audit sibling
+  diagnostic consumers and validate the default remainder without the locally
+  inherited color override. Keep production formatting and CI color settings
+  unchanged. Independently review the exact fixup and combined state; retain
+  hosted acceptance for the user's push.
 
 ## Review and validation gates
 
@@ -474,10 +475,17 @@ C14 starts at `e531c48b`. The reported startup assertion reproduces locally when
 enables ANSI by default unless that variable is nonempty; ANSI separates the
 field name, equals sign and value. The actual parse-stage diagnostic is correct.
 The inherited local `NO_COLOR=1` explains why earlier default-remainder evidence
-did not expose this environment dependency. Explicit child `NO_COLOR=1` preserves
-the literal diagnostic contract without changing runtime formatting or stripping
-output. Audit root CLI log consumers for the same formatting assumption; do not
-rewrite custom subscribers already using `with_ansi(false)` or plain error prose.
+did not expose this environment dependency. The original proposed correction was
+explicit child `NO_COLOR=1`; user review instead requested functional assertions
+under the existing testing-efficiency policy. Supersede that formatting patch:
+remove redundant lifecycle text matches, retain the failing CLI's unsuccessful
+exit, empty stdout and private-address exclusion, and rename the test accordingly.
+The adjacent qualification-snapshot test already asserts structured parse failure,
+an independently completed source and absence of partial inventory. No new parser,
+formatter override or duplicated scenario is needed. Document these actual
+boundaries in `tests/STARTUP.md`. The bounded root CLI audit found no additional
+demonstrated ANSI-sensitive assertion: custom subscribers disable ANSI and wallet
+birthday reason text also appears in the plain error cause chain.
 
 Run formatting and selected startup-test Clippy before the affected startup tests,
 then continue the default remainder with inherited `NO_COLOR` absent at eight
