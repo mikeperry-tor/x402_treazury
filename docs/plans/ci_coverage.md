@@ -562,3 +562,29 @@ compilation, plus cancellation-during-capture regression proving debugger and
 descendant termination. Explicit Bash selection preserves compilation pipeline
 failure propagation. These corrections are a fixup against `01b82fc3`; no
 application security policy or ordinary CI selections change.
+
+C15 correction is fixup `e9d96ca2`. Independent review cleared exact plan
+`dcee2e32`, implementation `01b82fc3`, that fixup and the bounded combined
+`fffa29e6..e9d96ca2` branch. The privileged-debugger finding is resolved; no
+material findings or compelling simplifications remain in the reviewed scope.
+Formatting and selected `treasury_sync` Clippy passed without diagnostics.
+The affected target passed 27 tests with one ignored in 34.60 seconds at eight
+threads with phase breadcrumbs enabled; Rust inputs stayed unchanged across the
+tooling-only fixup. Seven monitor regressions passed at `e9d96ca2`, including
+capture before cancellation teardown, cancellation during stalled debugger
+capture, debugger/fixture descendant cleanup, unrelated-process survival,
+original test status, exact Cargo selection, and process-group snapshot filtering.
+The actual pinned Make no-run JSON was also consumed successfully by the selector.
+Both workflows pass actionlint and diff checks pass. Local subprocess controls
+needed process-inspection permissions; their debugger and proc fixtures are
+synthetic. Logs are under `target/ci-hang-diagnostics-validation/`.
+
+Native Linux ptrace and the hosted hang remain unexecuted locally: the diagnostic
+workflow's bounded GDB smoke supplies native acceptance on the next scoped push.
+The agent has not pushed or dispatched a run. The user will push `ci_coverage`,
+inspect Treasury sync diagnostics and download `treasury-sync-diagnostics`, then
+use its last phase/process stacks to localize any reproduced stall. Existing CI
+runs alongside that bootstrap; the focused workflow can be retried independently.
+Force cancellation/runner loss can prevent evidence, and native stacks alone may
+not identify an async waiter. Hosted full checks, final coverage/main publication
+and active-plan cleanup remain pending; no deadlock fix is claimed.
