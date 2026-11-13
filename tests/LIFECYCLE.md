@@ -42,13 +42,15 @@ pool or application transparent-input shielding merely to prepare test capital.
 Raw SDK state and already accepted financial evidence retain generic decoding and
 canonical recovery. Tests do not claim unsupported funds become supported capital.
 
-The common funded fixture proves its canonical faucet transaction once per test
-process and reuses only the recipient and immutable raw bytes. It checks each
-fresh owner's first receiver against that recipient; the amount, memo, synthetic
-activation schedule and funding height remain fixed. Special amounts use their
-own faucet transactions. Every fixture retains a fresh SDK wallet, encrypted
-store and mock chain, inserts the funding transaction once, and performs real SDK
-scanning. No mutable wallet state, accepted journal or submission owner is shared.
+The common funded fixture and relocated-note journeys share canonical faucet
+transactions for 1,000,000 and 10,000 zatoshis, each proved once per test process.
+Only the recipient and immutable raw bytes are shared. Each fresh owner's first
+receiver is checked against the saved recipient; the amount, absent memo, synthetic
+activation schedule and funding height 21 remain fixed. Other amounts use their
+own faucet transactions. Every funded fixture retains a fresh SDK wallet,
+encrypted store and mock chain, mines its own initial funding block, and performs
+real SDK scanning. No mutable wallet state, accepted journal or submission owner
+is shared.
 
 Direct-send service fixtures await the actual submission notification and retain
 actor-command barriers before journal inspection. These waits have no fixture
