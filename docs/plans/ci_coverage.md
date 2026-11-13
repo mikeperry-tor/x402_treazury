@@ -97,6 +97,13 @@ writing this workflow.
   the existing default-test remainder at eight threads. Commit as a fixup to
   `ac369750`; independently review the exact fixup and combined branch. Carry
   unchanged compatibility evidence forward without claiming full `make check`.
+- C14: Make the startup CLI diagnostic fixture request plain stderr explicitly,
+  preserving exact failure-stage, empty-stdout and private-address assertions.
+  Reproduce with inherited `NO_COLOR` absent, audit sibling diagnostic consumers,
+  document the fixture environment contract and validate the default remainder
+  without the locally inherited color override. Keep production formatting and
+  CI color settings unchanged. Independently review the exact fixup and combined
+  state; retain hosted acceptance for the user's push.
 
 ## Review and validation gates
 
@@ -459,3 +466,21 @@ documented macOS large `__eh_frame` linker warning. Logs are under
 the unchanged preceding hosted compatibility evidence; it does not establish full
 `make check`, hosted Linux or instrumented coverage. Hosted acceptance and eventual
 main baseline/badge publication remain pending; the user retains pushing.
+
+## Diagnostic color-environment follow-up
+
+C14 starts at `e531c48b`. The reported startup assertion reproduces locally when
+`NO_COLOR` is removed from the test environment. Pinned tracing-subscriber 0.3.23
+enables ANSI by default unless that variable is nonempty; ANSI separates the
+field name, equals sign and value. The actual parse-stage diagnostic is correct.
+The inherited local `NO_COLOR=1` explains why earlier default-remainder evidence
+did not expose this environment dependency. Explicit child `NO_COLOR=1` preserves
+the literal diagnostic contract without changing runtime formatting or stripping
+output. Audit root CLI log consumers for the same formatting assumption; do not
+rewrite custom subscribers already using `with_ansi(false)` or plain error prose.
+
+Run formatting and selected startup-test Clippy before the affected startup tests,
+then continue the default remainder with inherited `NO_COLOR` absent at eight
+threads. Socket fixtures require socket-capable execution up front. Logs belong
+under `target/ci-startup-color-validation/`. Prior unchanged compatibility inputs
+remain valid; full `make check`, hosted Linux and coverage acceptance remain open.
