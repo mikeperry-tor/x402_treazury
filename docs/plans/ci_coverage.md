@@ -313,3 +313,10 @@ local default library run if focused tests pass, since the issue was exposed by
 that harness. Keep eight threads and existing child modes. Retain all exact
 financial no-replay/connection and actually-corrupted-byte assertions. Generated
 logs remain under ignored `target/ci-tls-failure/`.
+
+Exact plan `f18308c8` was independently reviewed with no material findings.
+The baseline isolated TLS fixture passed locally in all four child modes; the
+reported Linux scheduling was not reproduced. C10 is implemented in the test-only
+socket wrapper, with three deterministic writer controls and unchanged scenario
+assertions. Formatting, selected test-target Clippy, functional validation and
+exact-fixup/combined review remain pending.
