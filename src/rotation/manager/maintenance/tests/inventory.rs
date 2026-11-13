@@ -191,6 +191,9 @@ async fn recurrent_pending_failures_reach_later_pages_without_duplicate_active_r
 #[tokio::test]
 async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure() {
     let mut f = Inventory::new(false, false, true).await;
+    let startup = f.fixture.startup_completion();
+    let startup = startup.notified();
+    tokio::pin!(startup);
     let pool = f.fixture.pool.clone();
     let stop = CancellationToken::new();
     let stopped = stop.clone();
@@ -204,9 +207,17 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
                 "duplicate read before first release"
             );
         }
+        let healthy_sibling = format!("inventory-{}", WALLETS - 1);
+        while f.fixture.store.balance_due(&healthy_sibling).await <= Instant::now() {
+            tokio::task::yield_now().await;
+        }
     })
     .await
     .unwrap();
+    // A sibling has published its scalar, but the held first request still
+    // prevents the enclosing startup pass from completing.
+    assert_eq!(f.rpc.reads.lock().unwrap().active[&f.rpc.first_address], 1);
+    assert!(futures_util::poll!(startup.as_mut()).is_pending());
     // The first wallet is still in flight in both feeds, while every sibling,
     // including page two, has independently reached the real RPC server.
     f.fixture
@@ -217,6 +228,9 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
     assert!(!running.is_finished());
     assert_eq!(f.rpc.reads.lock().unwrap().calls[&f.rpc.first_address], 1);
     f.rpc.release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(15), startup)
+        .await
+        .unwrap();
     while f
         .rpc
         .reads
