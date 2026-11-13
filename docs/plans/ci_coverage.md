@@ -925,3 +925,14 @@ disposition and complexity. It found no material issue and independently checked
 source hashes plus provenance controls/restoration. Its initial source assessment
 preceded author rationale. Prior C1-C18 evidence remains scoped as recorded;
 hosted/default/main acceptance and the distinct mempool-notice hazard remain open.
+
+C19 follow-up fixes an existing verifier regression omitted by the earlier focused
+selection: `test_updated_snapshot_cannot_hide_added_file` rejected the extra file
+correctly but expected obsolete pre-reversal diagnostic wording. Independent design
+review approved asserting valid-fixture success, then rejection after adding the
+file and refreshing its maintained hashes. The corrected test matches no error or
+log text. Both vendor Python modules pass 13 tests; full tooling discovery passes
+all 117 tests in 38.517 seconds. Actual Pepper restoration and formatting pass.
+Evidence is retained in `target/ci-vendor-test-validation/`. This test-only fix
+preserves the prior Rust compiler, compatibility, synchronization and lifecycle
+evidence; hosted acceptance remains pending.

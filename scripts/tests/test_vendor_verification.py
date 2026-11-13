@@ -163,11 +163,12 @@ class PepperVerificationTests(unittest.TestCase):
                 self.refresh_snapshot()
 
     def test_updated_snapshot_cannot_hide_added_file(self):
+        valid = self.verify()
+        self.assertEqual(valid.returncode, 0, valid.stderr)
         self.root.joinpath("pepper-sync/extra.rs").write_text("// undeclared\n")
         self.refresh_snapshot()
         result = self.verify()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("upstream inventory differs", result.stderr)
 
     def test_modified_patch_is_rejected(self):
         self.root.joinpath(self.manifest["patches"][0]).write_text("changed patch\n")
