@@ -50,6 +50,11 @@ own faucet transactions. Every fixture retains a fresh SDK wallet, encrypted
 store and mock chain, inserts the funding transaction once, and performs real SDK
 scanning. No mutable wallet state, accepted journal or submission owner is shared.
 
+Direct-send service fixtures await the actual submission notification and retain
+actor-command barriers before journal inspection. These waits have no fixture
+wall-clock deadline; external lifecycle diagnostics observe long runs without
+interrupting valid work.
+
 Deposit fixtures exercising real `GrpcSubmission` use a managed funding job and
 saved quote so the operation has its required durable recipient identity.
 Preparation-only fixtures do not by themselves establish submission binding.
