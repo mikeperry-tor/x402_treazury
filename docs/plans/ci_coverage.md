@@ -777,3 +777,35 @@ library suite. Localhost fixtures require socket-capable execution up front.
 Evidence belongs under `target/ci-deployment-completion-validation/`. The separate
 slow lifecycle diagnostics remain independent, and no lifecycle failure fix is
 implied. The user retains pushing; hosted acceptance remains necessary.
+
+C18 fixups are `b1972ad4` against `a6428e3b`, `c22df140` against `116196f4`,
+and `950f4173` against `1d242e32`. Independent review cleared exact plan
+`54c65f96`, all three fixups and the bounded combined `fffa29e6..950f4173`
+branch. No material findings or compelling simplifications remain in this scope.
+The deployment fixture removes the unrelated clock responsibility and proves
+applied funding cancellation before creating fresh reconciliation work. The
+inventory witness proves sibling scalar publication versus blocked startup; it
+does not separately isolate a retirement-stage delay. Existing financial and
+forbidden-side-effect assertions remain intact.
+
+Formatting and selected library/test Clippy passed without diagnostics. The
+deployment fixture passed once in 0.06 seconds; the maintenance group passed 17
+tests with one isolated child ignored in 5.47 seconds. Continuing the failed named
+`make check-default-remaining` stage passed 2169 tests with 44 ignored across 59
+binaries, including all 1458 local default-library tests. Its only underlying
+compiler diagnostic was the documented macOS large `__eh_frame` linker warning.
+Hosted run `43451745762` executed baseline `51b80da5` and passed compatibility
+before failing default remainder; unchanged compatibility/production inputs
+retain that evidence across these cfg(test)-only fixes. This continuation is not
+full `make check`, hosted Linux success or a lifecycle-failure resolution. Logs
+and public run metadata are under `target/ci-deployment-completion-validation/`.
+
+Complexity is complete and source-matched at `950f4173`, compared to `54c65f96`,
+under `target/complexity-runs/20261113T160130Z-1ab71d2e/` (511 files, 11718
+callable spaces, no exclusions or advisory regressions). Independent review
+examined unchanged serving 32/43 and maintenance 54/60 CogC/CycC hotspots and
+complete owner/Store/retirement consumers. The deployment fixture changes 8/11
+to 7/12 by replacing a clock loop with explicit synthetic setup; the startup
+installer is 0/1, zero-refresh remains 2/3 and inventory changes 4/13 to 5/14 for
+the ordering witness. No production scheduling responsibility was added.
+The active plan remains for hosted acceptance and its separate unfinished work.
