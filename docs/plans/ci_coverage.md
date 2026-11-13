@@ -318,5 +318,24 @@ Exact plan `f18308c8` was independently reviewed with no material findings.
 The baseline isolated TLS fixture passed locally in all four child modes; the
 reported Linux scheduling was not reproduced. C10 is implemented in the test-only
 socket wrapper, with three deterministic writer controls and unchanged scenario
-assertions. Formatting, selected test-target Clippy, functional validation and
-exact-fixup/combined review remain pending.
+assertions. Validation and review evidence follow.
+
+C10 is fixup `b4f203e2` against `2c83d5c7`. Sources stayed frozen at `b4f203e2`
+for validation: formatting and `make clippy CARGO_ARGS='--lib --tests'` passed
+without diagnostics; all three socket-free writer controls passed. A focused
+network run passed 83 tests with one ignored, including the TLS parent that
+executes the four existing child modes. The full default library suite passed
+1457 tests, with zero failures and 24 ignored, using the unchanged eight threads.
+The test linker emitted the documented macOS large `__eh_frame` warning. Logs
+are under `target/ci-tls-failure/`.
+
+Independent review cleared exact plan `f18308c8`, exact fixup `b4f203e2` and the
+combined `fffa29e6..b4f203e2` branch. It verified pinned writer contracts, actual
+accepted-byte publication, no mutex guard across an await, complete header-prefix
+progress and every count snapshot. Relevant unchanged payment/acquisition/manual
+write, catalog/Base and earlier CI fixture consumers were inspected. Source-matched
+logs confirm all three new tests and the original TLS fixture executed. No material
+findings or compelling simplifications remain. These are local functional results,
+not reproduction of the reported Linux schedule, a full `make check`, coverage
+acceptance or live qualification. Production and concurrency policies are unchanged;
+hosted acceptance and eventual main coverage/badge publication await the user's push.
