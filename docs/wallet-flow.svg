@@ -32,9 +32,9 @@
 
   <!-- The reserve wallet, active wallet and retained stack share one horizontal row. -->
   <path class="edge" d="M 225 420 H 365" stroke-dasharray="6 5"/>
-  <text class="caption" x="295" y="400">low funds on Active</text>
+  <text class="caption" x="295" y="400">Low funds on Active</text>
   <path class="edge" d="M 575 420 H 750" stroke-dasharray="6 5"/>
-  <text class="caption" x="662" y="400">Below a call's cost</text>
+  <text class="caption" x="662" y="400">Low balance covers a call's cost</text>
   <path class="edge" d="M 470 450 V 530" mask="url(#active-call-label-gap)"/>
   <text class="caption" x="470" y="490">Higher-cost API calls</text>
   <path class="edge" d="M 865 450 V 510 Q 865 560 815 560 H 600"/>
@@ -44,7 +44,7 @@
   <rect class="card" x="320" y="20" width="260" height="60" rx="4"/>
   <text x="450" y="50">Shielded Zcash Treasury</text>
   <rect class="card" x="350" y="130" width="200" height="60" rx="4"/>
-  <text x="450" y="160">NEAR Intents USDC Swap</text>
+  <text x="450" y="160">NEAR Intents USDC Swaps</text>
   <rect class="card" x="130" y="240" width="200" height="60" rx="4"/>
   <text x="230" y="270">Small Wallet</text>
   <rect class="card" x="550" y="240" width="230" height="60" rx="4"/>
@@ -62,5 +62,5 @@
   <rect class="card" x="340" y="530" width="260" height="60" rx="4"/>
   <text x="470" y="560">Wallet-Isolated Tor Circuit</text>
   <rect class="card" x="355" y="640" width="230" height="60" rx="4"/>
-  <text x="470" y="670">API Provider Group</text>
+  <text x="470" y="670">API Provider</text>
 </svg>
