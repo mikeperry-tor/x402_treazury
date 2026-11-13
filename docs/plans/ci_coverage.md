@@ -706,3 +706,28 @@ selectors, actual Cargo JSON library selection and Actions syntax. No Rust sourc
 profile pin, test thread count or application timeout changes. Generated evidence
 belongs under `target/ci-lifecycle-diagnostics-validation/`. Hosted failure
 assertions and the root causes of remaining stalls still require real evidence.
+
+C17 is implementation `0104d1c1`, independently reviewed with exact plan
+`7381f986` and bounded combined `fffa29e6..0104d1c1`. No material findings or
+compelling simplifications remain in the reviewed scope. Eleven monitor controls
+and 20 Make regressions passed. They verify legacy timeout behavior, periodic
+continuation after capture errors, exact library/feature/filter/eight-thread
+selection, original nonzero completion during capture and cancellation without
+duplicate attachment. All three workflows pass actionlint and diff checks pass.
+Actual pinned Make no-run Cargo output selected the feature-enabled library
+executable, and harness listing confirmed 68 tests with zero benchmarks. Listing
+did not execute those tests. Compilation succeeded with the documented macOS
+large `__eh_frame` linker warning emitted in Cargo JSON. No expensive lifecycle
+rerun or Rust/profile change was selected for this tooling/visibility edit.
+Logs are under `target/ci-lifecycle-diagnostics-validation/`.
+
+A pinned-checkout applicability audit also excluded stable-tip MockNet EOF flooding
+as a cause of the separately identified notice-channel risk: its empty mempool
+subscription stays open until a later block ends it, and synchronous block batches
+close an existing subscription once. This does not diagnose the current lifecycle
+wait or retire the separate SDK hazard. The user will push the reviewed branch
+and inspect immediate panic details plus the lifecycle snapshots; a normal cancel
+after snapshots allows the artifact upload attempt without waiting for completion.
+The already-running ordinary job cannot acquire these diagnostics retroactively.
+No underlying failure/hang fix, native lifecycle capture or full CI success is
+claimed. Remaining SDK work and hosted/main acceptance remain explicit above.
