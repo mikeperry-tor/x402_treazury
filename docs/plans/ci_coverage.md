@@ -257,3 +257,24 @@ reproduce the CI interleaving; the repair addresses the demonstrated shared-pool
 sequencing fragility. C8 is implemented with fault payers 3/4/5, preserving the
 normal/second payer and discovery scenarios, exact signed counts and all padding
 checks. Implementation validation/review remain pending.
+
+C8 is fixup `535fe702` against `22f12389`; C9 is fixup `3bd89da8` against
+`47c99674`. Sources were frozen at `3bd89da8` for validation. `make fmt-check`
+and `make clippy CARGO_ARGS='--lib --tests'` passed without diagnostics. Focused
+cover protocol/startup execution passed 17 tests, including both changed fixtures.
+A full default library run with the established eight threads then passed 1454
+tests, with zero failures and 24 ignored. The test linker emitted the documented
+macOS large `__eh_frame` warning. Logs are under `target/ci-new-failures/`.
+This is local functional acceptance, not a Linux interleaving reproduction,
+concurrency benchmark, full `make check` or live qualification.
+
+Independent review cleared exact plan `c6fcc7e3`, both fixups and the combined
+`fffa29e6..3bd89da8` branch and relevant unchanged consumers. The reviewer verified
+actual child execution, exact signed counts/SOCKS identities, retained cache and
+privacy assertions and source-matched execution logs. No material findings or
+compelling simplifications remain. Related startup diagnostic consumers were
+checked: the warm diagnostic already uses the child guard; subscriberless cache
+fixtures need no diagnostic isolation themselves. No production policy or
+concurrency changes were made. Prior unaffected CI/compiler/complexity evidence
+is retained; hosted full-stage/coverage and main badge acceptance still await the
+user's push. The plan remains active for that remote acceptance.
