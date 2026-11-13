@@ -993,3 +993,53 @@ and orchestration locally, with its actual build/runtime outcome explicitly owne
 by the next hosted experiment. Preserve prior unchanged evidence and record any
 remaining validation limits. No push or merge is authorized, and plan cleanup
 remains pending hosted/main acceptance and the separate mempool-notice issue.
+
+C20 is implemented in exact fixups `6047695f` (both submission waits), `ad7730f5`
+(canonical funding reuse) and `dba87223` (unfunded rejection). C21/C22 are
+`85f29aaf`: Make retains lifecycle selection, the existing monitor optionally
+compiles through its pinned Cargo/protoc command before execution, and the main
+Linux lifecycle stage uses the opt-in optimized profile and periodic capture.
+The redundant standalone lifecycle workflow is removed. Fresh compilation JSON,
+`build-status.json`, execution `status.json`, runner facts and numbered captures
+are retained in the main `check-diagnostics` artifact, using `always()` upload.
+Capture/cancellation limits and optimization comparison caveats are in the owning
+testing, development, scripts and lifecycle guides.
+
+Validation at `85f29aaf`: 123 tooling tests pass in 33.576 seconds, including 22
+Make and 15 monitor controls. These cover profile/runner/argument preservation,
+failed compilation preventing stale-artifact execution, signal exit normalization
+and existing capture/cancellation/failure propagation. Both maintained workflows
+pass actionlint. Formatting, actual transport/Pepper provenance and production
+compiler/all-target `zcash-regtest` Clippy warning gates pass. A dependency-free
+private Cargo probe using the exact root profile definitions compiled and ran its
+assertion/overflow control: compiler metadata confirms optimization two, line-table
+debug information, debug assertions and overflow checks. This does not qualify
+the full optimized SDK graph or claim a hosted speedup.
+
+Pinned source analysis against `028e91e5` is complete, with no exclusions or
+warnings and all 511 source hashes matched. The canonical helper is test-only
+CogC/CycC 1/5, and its funded fixture consumer 0/1. Fresh nonauthor reviewer
+`lifecycle_changes_final` approved this complexity/design gate before runtime
+validation, and reviewed every exact implementation/fixup, plan `e5590105` and
+combined C20-C22, complete affected ownership/consumer paths and prior findings,
+with no material issue. Its initial source assessment preceded author rationale.
+
+Ten exact affected lifecycle cases then passed at eight threads, zero ignored,
+1559 filtered, in 85.23 seconds under the ordinary test profile. They cover both
+direct sends, both relocated-note journeys, unfunded shielding refusal, the
+20,000-zat fallback, two worker and three discovery consumers of shared funding.
+The documented macOS `__eh_frame` linker warning remains visible and unsuppressed;
+the selected compiler/Clippy gates were clean. No full lifecycle benchmark or
+full `make check` rerun is claimed. Logs/probe evidence remain under
+`target/ci-lifecycle-progress-validation/`; source metrics are in
+`target/complexity-runs/20261113T192814Z-9a0b3b82/`.
+
+An adjacent-timer audit preserved distinct synchronization/availability guards.
+The worker tick's 90-second timer spans proving structurally, but its caller
+pauses Tokio time and keeps a yielding task alive before releasing held quotes;
+elapsed virtual time is asserted zero during proving. Other examined waits
+observe held quote arrival, queued commands, already-prepared submission entry
+or MCP availability while calculation is held. No additional wall-clock proof
+deadline was demonstrated. Actual optimized application compilation, native Linux
+debugger capture and full hosted lifecycle/default/main acceptance remain pending
+the user's next push; no push or merge was performed.
