@@ -50,7 +50,8 @@ activation schedule and funding height 21 remain fixed. Other amounts use their
 own faucet transactions. Every funded fixture retains a fresh SDK wallet,
 encrypted store and mock chain, mines its own initial funding block, and performs
 real SDK scanning. No mutable wallet state, accepted journal or submission owner
-is shared.
+is shared. Unconditional transparent-shielding rejection uses an unfunded owner
+and preserves its snapshot, healthy state and absence of outgoing work.
 
 Direct-send service fixtures await the actual submission notification and retain
 actor-command barriers before journal inspection. These waits have no fixture
