@@ -291,7 +291,9 @@ It supplies protoc and detects Homebrew LLVM; `LLVM_COV` and `LLVM_PROFDATA` can
 select another matching installation. Rust 1.99.1 from Homebrew uses LLVM 23.1.3.
 
 Open `target/coverage/html/index.html`; text and machine-readable summaries are
-`target/coverage/summary.txt` and `target/coverage/summary.json`. The denominator
+`target/coverage/summary.txt`, `target/coverage/summary.json` and
+`target/coverage/lcov.info`. LCOV uses the same application exclusions as the
+summary and HTML reports. The denominator
 covers application source, excluding integration tests, examples, operational tools and vendored
 code; inline unit-test helpers can still count. Stable Rust reports line, region
 and function coverage, not branch coverage. Optional proving/Docker and live

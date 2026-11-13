@@ -56,5 +56,13 @@ authorization. Generated evidence belongs under ignored `target/`.
 
 ## Evidence and remaining work
 
-Design review requested; implementation, local validation and exact-SHA combined
-review pending. Push and merge are not authorized by plan completion.
+Independent design review covered exact plan SHA `5e187e9a` and the existing
+coverage/Makefile consumers. No material plan/C1 findings. C2 must pin octocov's
+binary and checksum, reject absent LCOV data, and serialize only badge publication
+with a current-main check so older runs cannot overwrite newer published badges.
+
+C1 implemented: LCOV shares summary exclusions and the existing atomic publication
+boundary. Offline regression includes LCOV-only failure preservation.
+`scripts/tests/coverage.sh`, shell syntax checks and `git diff --check` pass.
+Exact-SHA implementation review pending. Push and merge are not authorized by plan
+completion.

@@ -107,7 +107,7 @@ available directly.
 | `make toolchain` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
 | `make check` / `make check-*` | Ordered full check / individual stages; selections and continuation rules in the [testing guide](../docs/testing.md#validation-order-and-continuation) |
 | `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
-| `make coverage` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
+| `make coverage` | Default Zcash build coverage; HTML, JSON, text and LCOV under `target/coverage` |
 | `make coverage-condition` | Pinned condition-only default analysis; `target/coverage-condition` |
 | `make coverage-condition-financial` | Sequential proving/lifecycle/codec condition supplement; `target/coverage-condition-financial` |
 | `make coverage-branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
@@ -245,6 +245,8 @@ records the revision, dirty/untracked paths, lockfile hash, compiler/tool versio
 feature mode and exclusion rule. `commands.txt`, `tests.txt` and `test.log` capture
 exact commands, selected tests and outcomes. `full.json` and
 `unfiltered-summary.json` retain evidence excluded from `summary.json`/HTML.
+`lcov.info` uses the same application exclusions as `summary.json` and HTML;
+it can feed line-coverage reporting tools without another test run.
 `profiles.txt` inventories collected raw profiles, including CLI children that
 preserve `LLVM_PROFILE_FILE`. Abruptly exited children may not flush coverage;
 parent assertions establish their test outcomes independently. Run from a stable
