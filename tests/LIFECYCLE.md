@@ -241,6 +241,9 @@ publication/retirement futures before pausing time. The test-only completion
 signal requests no reads and does not clear pending work. Follow-up TLS and Store
 publication run with time resumed; scalar cooldown alone is not a startup-drain
 barrier.
+Retirement fixtures use that same startup-drained boundary before adding wallets
+to an initially empty inventory or checking that completed proof work stays idle.
+An owner-entry notification does not establish that the inventory was captured.
 The interrupted treasury command fixture synchronizes at the registered recovery
 sleep, advances its existing maintenance interval virtually, and resumes time
 before releasing SDK reconstruction. Cancellation, retained queue ownership and
