@@ -492,3 +492,19 @@ then continue the default remainder with inherited `NO_COLOR` absent at eight
 threads. Socket fixtures require socket-capable execution up front. Logs belong
 under `target/ci-startup-color-validation/`. Prior unchanged compatibility inputs
 remain valid; full `make check`, hosted Linux and coverage acceptance remain open.
+
+Independent revised-design review approved the functional simplification. Exact
+plans `0c39b05f`/`e83625bf` and fixup `e6d4214e` against `c673f4ea` received
+independent review, including the bounded combined `fffa29e6..e6d4214e` branch
+and complete startup failure/inspection consumers. No material findings remain.
+The renamed CLI test retains failure status, empty stdout and private-address
+exclusion; the neighboring structured snapshot test retains parse failure,
+independent completion and absent-inventory assertions. No formatting override
+was implemented. Formatting and selected startup-test Clippy passed without
+diagnostics. With inherited `NO_COLOR` absent, the startup target passed 19 tests
+with one ignored, and `make check-default-remaining` passed 2169 with 44 ignored
+across 59 binaries at `e6d4214e`, using unchanged eight threads. Logs are under
+`target/ci-startup-color-validation/`. This confirms the functional tests no longer
+depend on inherited color suppression; it is local continuation evidence, not
+hosted Linux, full `make check` or instrumented coverage acceptance. The retained
+plan still awaits hosted acceptance and eventual main baseline/badge publication.
