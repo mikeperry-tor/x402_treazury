@@ -1,7 +1,6 @@
 //! Single serialized registry snapshot; no wallet material or network activity.
 use super::{Record, State};
 use anyhow::{Context, Result, ensure};
-use fs2::FileExt;
 use rusqlite::Connection;
 use std::{
     fs::File,
@@ -9,7 +8,8 @@ use std::{
 };
 pub struct Store {
     db: Connection,
-    _lock: File,
+    // Keep ownership until SQLite has closed (fields drop in declaration order).
+    _lock: crate::private_fs::ExclusiveLock,
 }
 fn normalized(path: &Path) -> Result<PathBuf> {
     if path.is_relative() {
@@ -88,7 +88,7 @@ impl Store {
         }
         drop(open_or_create(&path)?);
         let lock = open_or_create(&PathBuf::from(format!("{}.owner.lock", path.display())))?;
-        lock.try_lock_exclusive()
+        let lock = crate::private_fs::ExclusiveLock::acquire(lock, "source_registry")
             .context("source registry already owned")?;
         let db = Connection::open(&path)?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -223,6 +223,21 @@ fn inspect_source(record: &Record) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn duplicate_descriptor_cannot_retain_registry_ownership_after_store_drops() {
+        let directory = crate::private_fs::tempdir().unwrap();
+        let path = directory.path().join("registry.sqlite");
+        let store = super::Store::open(&path, &[]).unwrap();
+        let duplicate = store._lock.try_clone().unwrap();
+        assert!(super::Store::open(&path, &[]).is_err());
+        drop(store);
+        let reopened = super::Store::open(&path, &[]).unwrap();
+        drop(duplicate);
+        assert!(super::Store::open(&path, &[]).is_err());
+        drop(reopened);
+        super::Store::open(&path, &[]).unwrap();
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn registry_parent_rejects_inheritable_grants_before_file_creation() {

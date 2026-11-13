@@ -912,7 +912,11 @@ The registry contains no wallet keys, but URLs and documents can reveal operator
 serving is stopped. Never delete or replace its ownership sidecar while serving.
 Registry files and sidecars cannot alias configuration or treasury paths. Each
 endpoint uses its own registry file; exclusive ownership prevents two endpoints
-from opening the same file. Saved records owned by another endpoint fail restoration
+from opening the same file. The shared private-storage guard explicitly releases
+ownership after SQLite closes, so duplicated descriptors or transient child-process
+inheritance cannot retain the lock after the owning Store ends. A live Manager
+still retains its registry ownership until all accepted work and owners are gone.
+Saved records owned by another endpoint fail restoration
 without altering the registry, including when all saved records are tombstones.
 A new empty database initializes the current registry format. Unsupported snapshot
 fields and malformed structure fail both restoration and inspection; neither path

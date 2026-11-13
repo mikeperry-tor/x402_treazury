@@ -1,5 +1,8 @@
 //! Owner-private storage. Creation permissions are established atomically, before
 //! a second principal could retain a descriptor to a subsequently populated file.
+mod ownership;
+pub(crate) use ownership::ExclusiveLock;
+
 use anyhow::{Result, ensure};
 use std::{fs::File, path::Path};
 

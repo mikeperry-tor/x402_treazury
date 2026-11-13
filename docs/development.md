@@ -75,6 +75,11 @@ No replacement of `fs2` based solely on age, blanket dependency unpinning, sourc
 removal or count-driven `unwrap`/`expect` rewrite is planned. File locks protect
 exclusive ownership; dependency pins preserve a reviewed compatible cohort; source
 hashes identify release inputs; panic counts alone establish no reachable failure.
+Registry and treasury storage share an explicit-unlock guard, released after the
+database closes. Descriptor duplication or temporary subprocess inheritance must
+not outlive logical ownership. Treasury Store handles retain the same shared guard
+through accepted work and worker failure; another owner remains excluded until
+the final legitimate handle releases it.
 Actual dependency-security updates have their own owner below, and concrete bugs
 remain ordinary maintenance. The default adjacent wallet key is an explicit
 [storage threat boundary](wallet-cli.md), with separate-key storage supported; it

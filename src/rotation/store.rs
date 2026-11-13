@@ -38,7 +38,6 @@ mod expiry;
 pub mod funding;
 pub(crate) mod history;
 pub(crate) mod inventory;
-mod ownership;
 mod reporting;
 mod reserve_replacement;
 pub(crate) mod source_reconciliation;
@@ -48,7 +47,7 @@ pub(crate) mod scheduling;
 pub(crate) mod selection;
 use super::error::AdmissionError;
 use super::transaction::{OperationStatus, TransactionFacts};
-use crate::payment::signer::EvmSigner;
+use crate::{payment::signer::EvmSigner, private_fs::ExclusiveLock};
 use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use chacha20poly1305::{
@@ -246,7 +245,7 @@ pub struct Store {
     direct_changes: std::sync::Arc<tokio::sync::Notify>,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
-    _lock: std::sync::Arc<ownership::Owner>,
+    _lock: std::sync::Arc<ExclusiveLock>,
     key: Zeroizing<[u8; 32]>,
     id: String,
 }
@@ -294,11 +293,11 @@ fn directory(path: &Path) -> Result<()> {
     })?;
     Ok(())
 }
-fn lock(path: &Path) -> Result<ownership::Owner> {
+fn lock(path: &Path) -> Result<ExclusiveLock> {
     directory(path)?;
     let path = path.join("owner.lock");
     let file = private_file(&path, !path.exists())?;
-    ownership::Owner::acquire(file)
+    ExclusiveLock::acquire(file, "treasury").context("state_in_use")
 }
 fn configure(db: &Connection) -> Result<()> {
     db.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -462,7 +461,9 @@ impl Store {
         expected_network: TreasuryNetwork,
     ) -> Result<Self> {
         directory(dir)?;
-        let owner = ownership::Owner::acquire(private_file(&dir.join("owner.lock"), false)?)?;
+        let owner =
+            ExclusiveLock::acquire(private_file(&dir.join("owner.lock"), false)?, "treasury")
+                .context("state_in_use")?;
         database_paths(dir)?;
         private_file(&dir.join("state.sqlite"), false)?;
         {
@@ -1211,7 +1212,7 @@ impl std::error::Error for WorkerStopped {}
 pub struct StoreHandle {
     sender: tokio::sync::mpsc::Sender<Work>,
     // Accepted consumers retain the original exclusive lock after worker death.
-    _lock: std::sync::Arc<ownership::Owner>,
+    _lock: std::sync::Arc<ExclusiveLock>,
     worker_stopped: tokio::sync::watch::Receiver<bool>,
     group_gates: GroupGates,
     treasury_changes: std::sync::Arc<tokio::sync::Notify>,
