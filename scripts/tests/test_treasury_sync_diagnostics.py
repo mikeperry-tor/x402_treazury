@@ -1,6 +1,8 @@
 """Exercise monitor ordering and isolation with small, socket-free processes."""
 
 import importlib.util
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -88,6 +90,67 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
             ["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True, check=False
         ).stdout.strip()
         self.assertTrue(not state or state.startswith("Z"), f"PID {pid} still running: {state}")
+
+    def compile_arguments(self, command):
+        return [str(SCRIPT), '--lifecycle', str(self.output / 'build.jsonl'),
+                str(self.output), '--build-command', *command]
+
+    def test_compilation_failure_prevents_test_execution_and_clears_old_artifacts(self):
+        self.output.mkdir()
+        (self.output / 'build.jsonl').write_text('stale executable metadata')
+        command = [sys.executable, '-c', 'import sys; sys.exit(23)']
+        with mock.patch.object(sys, 'argv', self.compile_arguments(command)), \
+                mock.patch.object(sys, 'platform', 'linux'), \
+                mock.patch.object(MODULE, 'test_executable') as select, \
+                mock.patch.object(MODULE, 'monitor') as monitor:
+            self.assertEqual(MODULE.main(), 23)
+        select.assert_not_called()
+        monitor.assert_not_called()
+        self.assertEqual((self.output / 'build.jsonl').read_bytes(), b'')
+        status = json.loads((self.output / 'build-status.json').read_text())
+        self.assertEqual(status['exit_status'], 23)
+        self.assertEqual(status['command'], command)
+        self.assertGreaterEqual(status['elapsed_seconds'], 0)
+
+    def test_compilation_selects_library_executable_and_retains_profile_and_test_failure(self):
+        self.tool(self.executable, 'pass\n')
+        arguments = self.root / 'arguments.json'
+        artifact = {'reason': 'compiler-artifact', 'target': {
+            'name': 'x402_treazury', 'kind': ['lib']}, 'profile': {'test': True},
+            'executable': str(self.executable)}
+        compiler = self.root / 'compiler.py'
+        compiler.write_text(
+            'import json, pathlib, sys\n'
+            f'pathlib.Path({str(arguments)!r}).write_text(json.dumps(sys.argv[1:]))\n'
+            f'print(json.dumps({artifact!r}))\n'
+        )
+        command = [sys.executable, str(compiler), '--profile', 'test-optimized']
+        with mock.patch.object(sys, 'argv', self.compile_arguments(command)), \
+                mock.patch.object(sys, 'platform', 'linux'), \
+                mock.patch.object(MODULE, 'monitor', return_value=17) as monitor:
+            self.assertEqual(MODULE.main(), 17)
+        monitor.assert_called_once_with(self.executable, self.output, lifecycle=True)
+        self.assertEqual(json.loads(arguments.read_text()), ['--profile', 'test-optimized'])
+        status = json.loads((self.output / 'build-status.json').read_text())
+        self.assertEqual(status['exit_status'], 0)
+        self.assertEqual(status['command'], command)
+        self.assertEqual(json.loads((self.output / 'build.jsonl').read_text()), artifact)
+
+    def test_compiler_signal_status_is_normalized(self):
+        command = [sys.executable, '-c',
+                   'import os, signal; os.kill(os.getpid(), signal.SIGTERM)']
+        status = MODULE.compile_test(command, self.output / 'build.jsonl', self.output)
+        self.assertEqual(status, 143)
+        self.assertEqual(json.loads((self.output / 'build-status.json').read_text())['exit_status'], 143)
+
+    def test_empty_build_command_is_rejected(self):
+        with mock.patch.object(sys, 'argv', self.compile_arguments([])), \
+                mock.patch.object(sys, 'platform', 'linux'), \
+                contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as result:
+            MODULE.main()
+        self.assertEqual(result.exception.code, 2)
+        self.assertFalse(self.output.exists())
 
     def test_success_and_failure_preserve_output_and_status(self):
         for code in (0, 17):

@@ -45,12 +45,40 @@ jobs:
         run: scripts/ci-stage.sh check-default-remaining
       - name: Proving tests
         run: scripts/ci-stage.sh check-proving
+      - name: Prepare lifecycle diagnostics
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gdb
+          sudo sysctl -w kernel.yama.ptrace_scope=0
+          mkdir -p target/ci-checks/lifecycle
+          git rev-parse HEAD > target/ci-checks/lifecycle/revision.txt
+          {
+            nproc
+            free -m
+            for resource in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do
+              if [[ -r "$resource" ]]; then
+                printf '%s: ' "$resource"
+                cat "$resource"
+              fi
+            done
+          } > target/ci-checks/lifecycle/runner.txt
+          sleep 30 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
+          timeout --signal=KILL 10s gdb -q -nx -batch \
+            -iex 'set auto-load off' -iex 'set debuginfod enabled off' \
+            -ex 'set print frame-arguments none' -ex 'thread apply all bt' \
+            -ex detach -p "$fixture_pid" \
+            > target/ci-checks/lifecycle/debugger-smoke.txt 2>&1
       - name: Treasury lifecycle tests
+        env:
+          LIFECYCLE_DIAGNOSTICS: target/ci-checks/lifecycle
+          LIFECYCLE_PROFILE: test-optimized
         run: scripts/ci-stage.sh check-lifecycle
       - name: Address codec test
         run: scripts/ci-stage.sh check-codec
       - name: Upload check stage diagnostics
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: check-diagnostics

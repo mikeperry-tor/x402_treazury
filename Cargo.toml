@@ -23,6 +23,13 @@ exclude = [
 [profile.dev]
 debug = "line-tables-only"
 
+# Opt-in lifecycle experiment; ordinary tests keep their existing profile.
+[profile.test-optimized]
+inherits = "test"
+opt-level = 2
+debug-assertions = true
+overflow-checks = true
+
 [profile.release]
 overflow-checks = true
 

@@ -97,7 +97,8 @@ else:
                         MAKE_TEST_LOG=str(self.log), MAKE_TEST_METADATA=str(self.metadata_file),
                         CARGO_INCREMENTAL='inherited')
         for key in ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'CARGO_ARGS', 'TEST_ARGS',
-                    'PROFILE', 'COMPLEXITY_BASE_REF', 'TEST', 'TEST_THREADS', 'PYTHON'):
+                    'PROFILE', 'COMPLEXITY_BASE_REF', 'TEST', 'TEST_THREADS', 'PYTHON',
+                    'LIFECYCLE_PROFILE', 'LIFECYCLE_DIAGNOSTICS'):
             self.env.pop(key, None)
 
     def make(self, *args, success=True, **env):
@@ -231,7 +232,8 @@ else:
                             '--bench', 'test_only_bench', '--test', 'bench_only', '--test', 'future',
                             '--', '--test-threads=8'),
             ],
-            **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--',
+            **{stage: [application('test', *(['--profile', 'test'] if stage == 'check-lifecycle' else []),
+                                  '--features', 'zcash-testutils', '--lib', case, '--',
                                   f'--test-threads={threads}', *(['--nocapture'] if stage == 'check-lifecycle' else []))]
                for stage, case, threads in (
                    ('check-proving', 'treasury::send::proving_tests', 1),
@@ -267,6 +269,31 @@ else:
         for _ in range(2):
             _, calls = self.make('-j8', 'check-lifecycle', 'check-codec')
             self.assertEqual(self.check_commands(calls), stages['check-lifecycle'] + stages['check-codec'])
+
+    def test_lifecycle_profile_preserves_selection_and_macos_runner(self):
+        _, calls = self.make('check-lifecycle', 'LIFECYCLE_PROFILE=test-optimized',
+                             'TEST_THREADS=1', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong',
+                             MAKE_TEST_PLATFORM='Darwin')
+        self.assertEqual(calls[-1][1], [
+            '--config', str(self.root / 'scripts/test-runner.toml'), 'test', '--locked',
+            '--manifest-path', 'Cargo.toml', '--profile', 'test-optimized',
+            '--features', 'zcash-testutils', '--lib', 'treasury::lifecycle_tests',
+            '--', '--test-threads=8', '--nocapture',
+        ])
+
+    def test_lifecycle_diagnostics_compiles_through_the_existing_runner(self):
+        _, calls = self.make('check-lifecycle', 'LIFECYCLE_PROFILE=test-optimized',
+                             'LIFECYCLE_DIAGNOSTICS=target/diagnostics with spaces',
+                             'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
+        self.assertEqual(calls[-1][0], 'python3')
+        self.assertEqual(calls[-1][1], [
+            'scripts/diagnose-treasury-sync.py', '--lifecycle',
+            'target/diagnostics with spaces/build.jsonl', 'target/diagnostics with spaces',
+            '--build-command', 'scripts/test-runner.sh', '--cargo', 'cargo', 'test',
+            '--locked', '--manifest-path', 'Cargo.toml', '--profile', 'test-optimized',
+            '--features', 'zcash-testutils', '--lib', '--no-run', '--message-format=json',
+        ])
+        self.assertEqual(calls[-1][3], '/fixture/protoc with spaces')
 
     def test_thread_override_changes_scheduling_without_narrowing_fixed_selection(self):
         for count in ('1', '2', '2 ignored'):

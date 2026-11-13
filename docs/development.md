@@ -189,6 +189,14 @@ Build targets select their incremental setting even when a value is inherited
 from the shell. Select profiles through `PROFILE`, rather than passing Cargo
 profile flags in `CARGO_ARGS`; `build-dev` always uses dev. `test`, `cargo-check`,
 and `clippy` retain normal Cargo profiles and respect the inherited environment.
+`make check-lifecycle LIFECYCLE_PROFILE=test-optimized` selects the opt-in lifecycle
+experiment. It inherits the test profile's debug information, enables optimization
+level two and explicitly retains debug assertions and overflow checks. Ordinary
+local lifecycle checks still select `test`; release and toolchain pins are
+unchanged. The [CI lifecycle diagnostics](testing.md#github-actions-and-coverage)
+record compilation and execution separately. Hosted measurements, including build
+cost, determine whether to retain this experiment; source changes and debugger
+sampling must be accounted for when comparing runs.
 To disable incremental compilation for tests:
 
 ```sh
