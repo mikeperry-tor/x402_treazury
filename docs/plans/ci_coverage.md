@@ -77,6 +77,19 @@ writing this workflow.
   all exact connection/call/flip counts and existing mode scenarios. Commit the
   correction as a fixup to `2c83d5c7`, independently review the exact fixup and
   combined branch, and retain hosted acceptance for the user's push.
+- C11: Reuse startup-drained notifications in the retirement fixture, replacing
+  the entry-plus-yield guess before allocating a later wallet and awaiting complete
+  startup retirement before idle-rescan assertions. Keep zero-scalar/request counts
+  and all financial assertions. Audit adjacent users of those boundaries; do not
+  replace distinct blocked-acquisition or SOCKS checks with the wrong signal.
+- C12: Add test-only final-Manager-drop acknowledgement and a shared registry-test
+  teardown helper. After listener shutdown, drain accepted Manager work, drop the
+  fixture handle and await real Store/lock destruction before reopening. Verify
+  a deliberately retained owner keeps teardown pending and registry locked, then
+  releases both without retrying open. Apply to the demonstrated HTTP/restart
+  fixture; audit nearby direct restarts without blanket conversion. Document
+  reusable completion-boundary testing guidance, review exact fixups and combined
+  state, then retain hosted acceptance for the user's push.
 
 ## Review and validation gates
 
@@ -339,3 +352,36 @@ findings or compelling simplifications remain. These are local functional result
 not reproduction of the reported Linux schedule, a full `make check`, coverage
 acceptance or live qualification. Production and concurrency policies are unchanged;
 hosted acceptance and eventual main coverage/badge publication await the user's push.
+
+## Completion-boundary testing follow-up
+
+Starting C11/C12 baseline is `1d3f6754`. The user requested a systematic pattern
+instead of waiting for individual flaky failures. The reported Linux run passed
+1452 tests and failed a registry restart with a retained exclusive lock and an
+empty-startup retirement test with one unexpected scalar request.
+
+Independent audits traced two concrete missing boundaries. The reconciliation
+entry hook fires before the awaited wallet-boundary capture, so yielding cannot
+prove the pass was empty; the existing startup-drained hook can. A second retirement
+fixture observes balance evidence before the enclosing retirement future finishes;
+it needs that same startup completion before its idle assertions. Distinct blocked
+nonce and SOCKS cases were examined and must not await a drain while intentionally
+holding active work.
+
+Pinned Axum graceful shutdown can signal connection closure before destroying its
+service/router and its Manager clone. A test-only sender declared last on Manager
+closes only after all prior fields, including Store lock files, are destroyed.
+Its receiver therefore acknowledges the actual ownership boundary. The helper
+will register that signal, drain accepted work, drop its Manager and await closure.
+A retained-owner negative control must prove the helper cannot complete or release
+the registry lock early. Neighboring direct awaited registration/restart cases
+showed no equivalent HTTP owner gap and are not mechanically rewritten.
+
+This is a bounded audit by failure class, not repository-wide assurance or a new
+fixture framework. Keep eight threads, production locks/cadence/authority and
+all existing assertions; add no sleeps, retry-open loops or assertion retries.
+Validate formatting and selected test-target Clippy, the controlled teardown
+regression, affected discovery/retirement/maintenance consumers and a full default
+library run. Localhost fixtures require socket-capable execution up front. Keep
+evidence under ignored `target/ci-completion-validation/` and independently review
+the plan, exact changes and combined branch before reporting completion.
