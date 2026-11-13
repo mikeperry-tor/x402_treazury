@@ -57,6 +57,17 @@ writing this workflow.
   acceptance; the user will push the branch. Evaluate compiled caching only after
   hosted stage timings establish its value. Keep the locally qualified eight
   test threads; no concurrency remeasurement or tuning is selected.
+- C8: Isolate each injected HTTP/2 paid-response fault with a distinct payer/client,
+  so a preceding GOAWAY cannot prevent the next fault's signed request from reaching
+  the fixture. Keep the shared-client stream-preemption scenario, exact one-signed-
+  request assertions, padding and SOCKS isolation checks. Update identity accounting
+  for the three separate fault payers and document the fixture boundary. Commit
+  as a fixup to `22f12389` and independently review the exact fixup and consumers.
+- C9: Put the cached-JSON diagnostic regression behind the existing exact-child
+  log-capture guard, preserving freshness, typed generation failure, severity and
+  private-prose/URL assertions. Commit as a fixup to `47c99674`; independently
+  review the exact fixup and final combined branch. Preserve eight test threads,
+  production transport/replay/cache/logging policy and retained CI stage selections.
 
 ## Review and validation gates
 
@@ -216,3 +227,26 @@ The plan stays active for the user's next push and eventual main publication.
 Compiled caching and concurrency remain unchanged; no new tuning measurement is
 selected. The remaining work is to inspect hosted stage/log artifacts and complete
 the already listed remote coverage/baseline/badge acceptance.
+
+## HTTP/2 fault and tracing follow-up
+
+Starting C8/C9 baseline is `ab19e36d`. The reported Linux library run passed 1449
+tests and failed the cover protocol fault fixture (`/lost` signed count absent)
+and cached-JSON diagnostic fixture (missing cache-hit DEBUG message). No replay
+or production cache failure is established by those assertions.
+
+Independent concern-specific design reviews traced pinned HTTP transport behavior
+and tracing/cache consumers. Automatic request retries are disabled; HTTP/2 GOAWAY
+pool teardown is asynchronous, so reusing that transport can prevent the next fault
+from reaching its signed dispatch. Separate existing payer identities isolate the
+faults without retries or weaker counts. The diagnostic callsite is shared with
+subscriberless cache tests; the maintained tracing policy requires the existing
+exact-child guard. No material design findings remain with those corrections.
+
+Validate formatting and selected test-target Clippy before focused runtime
+execution of the affected cover and startup modules. Use socket-capable execution
+up front for SOCKS/TLS fixtures. Inspect exact signed counts, actual child execution
+and retained privacy assertions; do not add timing sleeps, larger watchdogs or a
+concurrency benchmark. Preserve earlier source-matched compiler/workflow evidence
+where the test-only edits do not invalidate it. Hosted full-stage acceptance still
+requires the user's next push.
