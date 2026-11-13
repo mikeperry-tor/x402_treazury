@@ -180,6 +180,15 @@ writing this workflow.
   lifecycle checks on their existing profile. Record the selected command and
   compilation/execution timings; compare total hosted cost without attributing
   simultaneous fixture/debugger changes solely to compiler optimization.
+- C23: Share the existing treasury explicit-unlock guard through private storage
+  and use it for registry ownership too. A cloned or temporarily inherited file
+  descriptor must not retain ownership after the logical Store closes. Preserve
+  SQLite-before-unlock destruction, treasury StoreHandle/Arc retention, private
+  file creation and acquisition error contexts. Wrap acquisition before subsequent
+  fallible database initialization. Add a deterministic registry regression with
+  a duplicate descriptor and live-owner negative controls, prove it fails before
+  the fix, and preserve the moved treasury guard regression. No retries, delays,
+  lock-file removal or broader ownership changes are selected.
 
 ## Review and validation gates
 
@@ -1043,3 +1052,31 @@ or MCP availability while calculation is held. No additional wall-clock proof
 deadline was demonstrated. Actual optimized application compilation, native Linux
 debugger capture and full hosted lifecycle/default/main acceptance remain pending
 the user's next push; no push or merge was performed.
+
+## Registry duplicate-descriptor ownership release
+
+C23 starts at `e1a770c0` after a hosted default-library failure in
+`registry_tests::refresh_by_saved_name_keeps_id_and_replaces_accepted_bundled_contract`:
+maintenance succeeded, but immediate `read_records` could not acquire the registry
+lock. Unlike the earlier Manager teardown failure, this path creates no Manager.
+Independent audit `registry_lock_audit` traced maintenance, the scoped paid-work
+wrapper and pinned Tokio completion; the owning future's local Store has ended
+before its result is returned. Registry storage still closes a raw locked File,
+while treasury already explicitly unlocks to defeat duplicate/transient fork
+inheritance. The precise CI child is unknown; descriptor cloning provides a
+deterministic model of the same open-file-description retention.
+
+Independent design review approved moving the existing guard to private storage,
+preserving treasury Arc ownership and error contexts, acquiring the guard before
+fallible registry initialization, and retaining database-before-lock field order.
+Use a safe test-only descriptor clone for the registry regression; no fork, FFI,
+new dependency or timing guess is needed. Keep safe unlock-failure diagnostics
+with a fixed owner label rather than adding an error-policy framework.
+Update the persistence and portable-storage guides with current release semantics.
+Run the failing control before implementation, then focused ownership/registry
+tests, selected compiler/all-target Clippy gates and source-matched complexity
+review before broader consumers. Continue compatibility and the failed default
+remainder stage on frozen sources, preserving prior unchanged proving/lifecycle
+evidence. Independently review each exact fixup and final combined C23 call chain.
+Generated evidence belongs under `target/ci-registry-lock-validation/`; hosted
+optimized lifecycle and main publication remain pending and user retains push.
