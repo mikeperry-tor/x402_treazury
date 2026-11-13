@@ -1,0 +1,60 @@
+# GitHub CI and octocov
+
+## Intent and baseline
+
+Implement GitHub Actions test status and octocov default line coverage, with
+pre-merge results on `ci_coverage`. Start on `ci_coverage` at
+`fffa29e6ada98943dc9e83d7f4f92f5776c244a0`. No workflows currently exist;
+`make check` and `make coverage` already own validation and coverage collection.
+Preserve unrelated untracked files, application behavior, pinned toolchain,
+financial/network authority, test selections and coverage exclusions. No funded,
+live Tor or Docker qualification is selected. No dependency forks or runtime
+limits are introduced.
+
+Owning guides: [development](../development.md), [testing](../testing.md),
+[scripts](../../scripts/README.md), [complexity](../../tests/COMPLEXITY.md) and
+[planning workflow](../planning-workflow.md). The broader advisory automation and
+actual Linux execution acceptance in deferred release track D2 are not retired by
+writing this workflow.
+
+## Ordered implementation
+
+- C1: Export filtered LCOV within the existing atomic coverage publication path.
+  Extend the offline shell regression to verify the report/exclusions and failed
+  LCOV export preservation; document the new report in owning coverage guides.
+- C2: Add SHA-pinned Actions and octocov configuration, main and `ci_coverage`
+  push/PR triggers, independent Linux check and coverage jobs, summaries and
+  resolved report artifacts. Fetch merge-base history for complexity. Use the
+  pinned Rust toolchain, Python 3.11+ and matching LLVM tools. Store main coverage
+  baseline in Actions artifacts; publish the permanent coverage SVG from main
+  pushes only, through a separate job with contents-write authority. Branch
+  previews retain generated SVG and HTML artifacts. Document branch preview,
+  missing/expired baseline, fork permissions and exact coverage scope; add README
+  badges for main. No arbitrary coverage or test-time thresholds.
+- C3: Record validation/review evidence and completion status. If all acceptance
+  evidence is available, remove the completed plan with independent cleanup review;
+  otherwise retain it with concrete remaining acceptance work.
+
+## Review and validation gates
+
+Independent fresh-conversation design review precedes substantive implementation.
+Review each exact C1/C2 SHA and any fixup without rewriting history. Final combined
+review covers all accumulated commits, workflow permissions/triggers, coverage
+export/publication/failure paths and consuming documentation. No Rust refactor or
+new complexity architecture is selected, so no new Rust CogC/CycC analysis is
+needed locally; the CI workflow must run the existing analyzer stage.
+
+Run affected cheap checks first: `scripts/tests/coverage.sh`, relevant existing
+Python tooling tests and shell syntax; validate Actions syntax with actionlint and
+octocov configuration/LCOV compatibility where tools are available. No production
+Rust changes justify rebuilding the entire application locally for this edit.
+Hosted execution is separate evidence: after authorized push, inspect branch
+check results, coverage summary and downloadable SVG/HTML, failed-stage propagation
+and baseline-absent behavior. A successful main run establishes the comparison
+baseline and permanent badge. Do not claim remote success or publish without
+authorization. Generated evidence belongs under ignored `target/`.
+
+## Evidence and remaining work
+
+Design review requested; implementation, local validation and exact-SHA combined
+review pending. Push and merge are not authorized by plan completion.
