@@ -1170,3 +1170,47 @@ failed default stage and managed integration consumer. Evidence belongs under
 `target/ci-tor-scope-validation/`. No outer-thread change, production policy,
 new dependency, live Tor/funded qualification, push or merge is selected. Hosted
 execution and the optimized lifecycle experiment remain separate acceptance.
+
+C24 implementation is `bb6b13cb` (fixup to `7ece7f6c`) and `951f60aa` (fixup to
+`3c0d51c6`). The latter includes the coupled concurrency consumer introduced by
+`b28771d9`: its trace representation must change with the managed harness in one
+coherent commit. The four historical peer-only joins are gone. Successful SOCKS
+records are published complete before CONNECT success, with failed records still
+retained before terminal error; handler entry captures owned credentials before
+gates/delays. No production source, runtime/thread setting or financial policy
+changed. The separate prior-liability scripted handler explicitly omits peer
+observation and retains its independent SOCKS-wire checks.
+
+Restoring first-historical-peer lookup failed the new synchronous collision
+control; both corrected collision and handler-snapshot controls passed. The real
+isolated unsigned-retry parent passed (one matched test), and the exact
+prior-wallet-liability relay parent passed separately. Selected production compiler
+and all-target `zcash-regtest` Clippy gates passed with diagnostics inspected.
+Compatibility passed 33 tests. With `NO_COLOR` absent and
+`CARGO_TERM_COLOR=always`, `check-default-remaining` passed 2172 tests with 44
+intentional ignores across 59 harnesses. Its library passed 1461 with 24 ignored;
+managed integration passed 46 with three ignored, including the identity and Tor
+concurrent-rotation parents and the direct forced-overlap burst. Formatting passes.
+The documented macOS linker warning remains visible in the runtime build;
+compiler/Clippy and compatibility diagnostics were clean.
+
+Pinned source analysis against `cbf0b072` is complete: 511 files, 11729 callable
+spaces, no exclusions or advisory regressions, all source/baseline/lock hashes
+matched. The matrix is CogC/CycC 63/41 versus 63/42, managed RPC remains 41/61,
+and SOCKS serve is 15/40 versus 14/38. The added branch publishes failed-connect
+observations truthfully; removing mutable index tracking avoids another state
+responsibility. Existing scenario and RPC branches retain their owning contracts;
+extraction would not remove them. Fresh nonauthor `tor_scope_final` approved this
+complexity gate before broad runtime validation and reviewed exact fixups plus
+combined C24, with initial source assessment before rationale and no material
+finding or compelling simplification.
+
+Evidence remains in `target/ci-tor-scope-validation/` and
+`target/complexity-runs/20261113T204708Z-919b87dd/`. The original CI output did not
+record peer reuse, so this establishes a concrete unsafe observer and its
+correction rather than identifying the exact hosted TCP incarnation. A serial
+outer harness does not serialize the child's four-worker runtime, and the old
+lookup fails in a single synchronous control. Eight threads remain selected;
+no concurrency benchmark or speedup claim follows. Native Linux, actual Tor,
+funded qualification and the optimized hosted lifecycle remain outside this local
+validation; no full `make check`, push or merge is claimed.
