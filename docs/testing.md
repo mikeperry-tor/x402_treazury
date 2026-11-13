@@ -1124,6 +1124,28 @@ an older revision, then uses a normal non-force push. The badge identifies its
 published source revision; a failing or still-running main revision can leave
 the prior successful coverage badge visible, alongside the current CI status.
 
+### Potential SDK mempool shutdown hang
+
+The vendored Pepper sync has an unresolved shutdown cycle that can affect CI
+fixtures which repeatedly complete mempool streams while scanning is busy. The
+monitor can fill its bounded channel with `NewBlockMined` notices, then block
+sending another notice. These notices are not included in the pending transaction
+count, so the scanner can stop receiving and await the blocked monitor during
+shutdown. Test-thread serialization does not remove this internal task cycle.
+
+This is a source-audit finding, not a reproduced explanation of an observed CI
+hang. The treasury actor diagnostic fixture cannot trigger it: its mempool request
+waits before response headers. The loader/worker activity-ordering patch addresses
+a separate race and does not resolve this cycle.
+
+For a suspected occurrence, retain the diagnostic artifact, identify the last
+unfinished test and inspect its fixture's mempool stream completion behavior.
+Correlate scan/shutdown observations with the monitor send and receiver lifetime;
+parked native executor stacks alone do not establish this async wait cycle. A
+controlled full-notice-channel reproduction and a correction preserving transaction
+draining and accepted-work ownership remain assigned to
+[release follow-up D7](plans/deferred/release_followups.md#intended-future-work-and-acceptance).
+
 ### Temporary CI diagnostics
 
 Automatic lifecycle GDB preparation and periodic capture in Linux checks are
