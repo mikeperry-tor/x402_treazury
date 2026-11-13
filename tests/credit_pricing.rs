@@ -193,10 +193,30 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     assert_eq!(logs.matches("affected_operations=5").count(), 2, "{logs}");
 }
 #[tokio::test]
-async fn comprehensive_subsets_inherit_conversion_despite_endpoint_instruction_overrides() {
+async fn socialfetch_subsets_inherit_conversion_despite_endpoint_instruction_overrides() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("examples/deployments/comprehensive.toml");
-    let deployment = config::read_table(&path).await.unwrap();
+    let path = root.join("tests/credit_pricing.toml");
+    // Exercise provider inheritance independently of curated deployment choices.
+    let deployment: toml::Table = toml::from_str(
+        r#"
+[sources.social]
+extends = "../providers/socialfetch.toml"
+tags = ["Twitter", "Instagram"]
+exclude_tools = ["socialfetch_help"]
+
+[sources.webinfo]
+extends = "../providers/socialfetch.toml"
+tags = ["Web"]
+exclude_tools = ["socialfetch_help"]
+
+[servers.social]
+instructions_text = "Look up public social profiles and posts."
+
+[servers.web]
+instructions_text = "Search the web and retrieve answers."
+"#,
+    )
+    .unwrap();
     let document: Value =
         serde_json::from_str(include_str!("fixtures/socialfetch_openapi.json")).unwrap();
     for (id, endpoint, witnesses) in [
