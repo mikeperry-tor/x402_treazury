@@ -42,10 +42,19 @@ pub struct TreasuryHandle {
 }
 pub struct TreasuryCommands {
     receiver: mpsc::Receiver<Command>,
+    #[cfg(test)]
+    recovery_wait: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
 }
 pub fn channel() -> (TreasuryHandle, TreasuryCommands) {
     let (sender, receiver) = mpsc::channel(8);
-    (TreasuryHandle { sender }, TreasuryCommands { receiver })
+    (
+        TreasuryHandle { sender },
+        TreasuryCommands {
+            receiver,
+            #[cfg(test)]
+            recovery_wait: None,
+        },
+    )
 }
 impl TreasuryHandle {
     pub async fn recover_funding(
@@ -159,9 +168,23 @@ impl Treasury {
                     }
                     // An interrupted SDK must not turn reconstruction into a
                     // busy loop. Reuse the existing maintenance retry cadence.
+                    let retry = tokio::time::sleep(std::time::Duration::from_secs(
+                        super::publication::MAINTENANCE_SECONDS,
+                    ));
+                    tokio::pin!(retry);
+                    #[cfg(test)]
+                    if let Some((registered, resume)) = commands.recovery_wait.take() {
+                        std::future::poll_fn(|cx| {
+                            assert!(std::future::Future::poll(retry.as_mut(), cx).is_pending());
+                            std::task::Poll::Ready(())
+                        })
+                        .await;
+                        let _ = registered.send(());
+                        resume.await.unwrap();
+                    }
                     tokio::select! {
                         _=stop.cancelled()=>break Ok(()),
-                        _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{},
+                        _=&mut retry=>{},
                     }
                 }
             }
@@ -947,7 +970,10 @@ mod tests {
         owner.configure_sync(
             super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
         );
-        let (handle, commands) = channel();
+        let (handle, mut commands) = channel();
+        let (sleep_registered, wait_for_sleep) = oneshot::channel();
+        let (resume_recovery, recovery_resumed) = oneshot::channel();
+        commands.recovery_wait = Some((sleep_registered, recovery_resumed));
         let (entered, ready) = oneshot::channel();
         let (release, wait) = oneshot::channel();
         handle
@@ -968,9 +994,16 @@ mod tests {
         driver.abort();
         let _ = driver.await;
         drop(release);
-        // Keep this real recovery crossing: Interrupt's ACK precedes the panic,
-        // not registration of the retained owner's retry sleep. Advancing then
-        // would race that registration and offline SDK/Store reconstruction.
+        // Advance only the registered retry sleep, then restore real time before
+        // releasing offline SDK/Store reconstruction and the queued command.
+        wait_for_sleep.await.unwrap();
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(
+            super::super::publication::MAINTENANCE_SECONDS,
+        ))
+        .await;
+        tokio::time::resume();
+        resume_recovery.send(()).unwrap();
         let address = tokio::time::timeout(std::time::Duration::from_secs(75), reply)
             .await
             .unwrap()
