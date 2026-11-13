@@ -211,12 +211,9 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
         let stop = service_stop.clone();
         async move { service.run(stop).await }
     });
-    // Fixture hang guard; production source work retains its durable owner.
     assert!(
-        tokio::time::timeout(Duration::from_secs(180), broadcast.recv())
-            .await
-            .expect("persisted foreign source failed to submit without a NEAR backend")
-            .is_some()
+        broadcast.recv().await.is_some(),
+        "persisted foreign source failed to submit without a NEAR backend"
     );
     treasury.preview_address().await.unwrap(); // Command barrier after journal publication.
     service_stop.cancel();

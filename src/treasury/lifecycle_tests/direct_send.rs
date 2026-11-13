@@ -189,12 +189,10 @@ async fn native_service_submits_once_despite_diagnostic_failure_and_preserves_ac
             .is_err()
     );
     release.send(()).unwrap();
-    // This is a fixture hang guard, not an execution deadline. The handoff itself
-    // is the submitter's oneshot after the actual source-chain RPC returns.
-    let (submitted, original) = tokio::time::timeout(Duration::from_secs(180), sent)
+    // The submitter signals after the actual source-chain RPC returns.
+    let (submitted, original) = sent
         .await
-        .expect("service failed to submit after an advisory diagnostic write failed")
-        .unwrap();
+        .expect("service failed to submit after an advisory diagnostic write failed");
     assert!(submitted);
     // This command follows submission in the serialized actor and establishes
     // that its durable response publication has finished before inspection.
