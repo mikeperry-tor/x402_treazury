@@ -991,6 +991,33 @@ same ordering and fail-fast selections as `make check`. Stage output, elapsed
 seconds and exit status are retained in the `check-diagnostics` artifact, and
 outcomes are appended to the job summary even when a stage fails. Test concurrency
 remains eight; compiled-artifact caching requires evidence from hosted timings.
+The [treasury diagnostic workflow](../.github/workflows/treasury-sync-diagnostics.yml)
+runs only the offline `treasury_sync` integration target, at eight threads with
+`--nocapture`. Scoped pushes to `ci_coverage` bootstrap it before merge; its manual
+dispatch trigger requires default-branch workflow availability. Existing CI still
+runs alongside a diagnostic-triggering push. A diagnostic run can be retried from
+its Actions page without rerunning the separate ordinary CI workflow.
+
+Compilation through Make precedes the diagnostic clock. After five minutes of
+test-binary execution, the monitor records owned process/thread wait state and
+GDB backtraces before terminating that experiment, returning exit 124. This
+diagnostic-only bound is sized above the observed finite synthetic fixture run;
+it is not an application deadline or proof of deadlock. Normal completion retains
+the actual test exit status. The fixture's opt-in `X402_TEST_SYNC_DIAGNOSTICS=1`
+phase breadcrumbs identify scans, restart, cancellation and close; no assertion
+depends on their text. Ordinary tests do not enable them.
+
+Download `treasury-sync-diagnostics` from that workflow's run page. It contains
+revision/build metadata, `test.log`, `status.json`, and, after capture,
+`processes.json` plus `threads-*.txt` (or explicit capture errors). Stacks omit
+frame arguments and locals; no core, environment or wallet-state files are
+uploaded. Native stack collection requires Linux and GDB; it is not a portable
+Rust async-task dump, and parked executor stacks may require the phase markers
+to identify the awaited operation. Debugger collection has a 30-second aggregate
+budget. Cancellation requests shorten capture to at most four seconds before
+bounded process-group cleanup; artifact upload uses `always()`. Force cancellation,
+runner loss or GitHub's termination grace can still prevent complete evidence.
+
 The independent default-coverage job runs `make coverage` with matching LLVM
 tools and cargo-llvm-cov 0.9.1. Actions and octocov's binary version/checksum are
 pinned. Cargo download inputs are cached; application builds, financial state and

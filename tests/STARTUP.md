@@ -16,6 +16,14 @@ causes without an SDK wallet or network calls. Warnings show only safe top-level
 configuration errors, omit endpoint/header values and retain scoped degradation
 without allocating funding jobs.
 
+The treasury command-sync reuse fixture can emit static phase breadcrumbs with
+`X402_TEST_SYNC_DIAGNOSTICS=1` and `--nocapture`, covering initial scan, invalidation
+and restart scans, delayed/failed/cancelled probes and final close. These are
+diagnostic observations, not assertions. The focused Linux
+[hang workflow](../.github/workflows/treasury-sync-diagnostics.yml) preserves the
+whole target's eight-thread scheduling and captures owned native stacks before
+terminating a diagnostic run; see [limits and artifacts](../docs/testing.md#github-actions-and-coverage).
+
 `tests/startup.rs` checks direct downloads bypass Tor isolation capacity, the
 default two-scope setting, failure and caller cancellation closing every active
 direct request, inventory ordering independent of completion and the configured

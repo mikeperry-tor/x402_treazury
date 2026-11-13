@@ -1553,6 +1553,17 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
 async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_restart_or_chain_change()
  {
     use x402_treazury::treasury::submission::GrpcSubmission;
+    let diagnostics = std::env::var_os("X402_TEST_SYNC_DIAGNOSTICS").is_some_and(|v| v == "1");
+    let started = std::time::Instant::now();
+    let phase = |name: &str| {
+        if diagnostics {
+            eprintln!(
+                "treasury-sync fixture: {name}; elapsed_ms={}",
+                started.elapsed().as_millis()
+            );
+        }
+    };
+    phase("fixture setup");
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(Mutex::new(vec![]));
     let probe = Arc::new(ReuseProbe::default());
@@ -1593,18 +1604,22 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
         .await
         .unwrap();
     });
+    phase("create wallet");
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
     let settings = SyncSettings::new(endpoint.clone(), 3).unwrap();
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
+    phase("initial scan");
     treasury.sync_once(&stop).await.unwrap();
+    phase("initial scan complete");
     let mut sender = GrpcSubmission::new(endpoint.clone(), endpoint.clone()).unwrap();
     // A nonexistent operation stops after synchronization, before lookup/submission.
     let before = treasury.status().await.unwrap();
     let count = calls.lock().unwrap().len();
     peers.lock().unwrap().clear();
-    for _ in 0..3 {
+    for attempt in 0..3 {
+        phase(&format!("unchanged observation probe {attempt}"));
         assert!(
             treasury
                 .reconcile_prepared("absent".into(), &mut sender, &stop)
@@ -1628,12 +1643,15 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
         &["GetLightdInfo", "GetLatestBlock"].repeat(3)
     );
     for change in ["mutation", "restart", "tip", "hash", "missing_hash"] {
+        phase(&format!("apply {change}"));
         match change {
             "mutation" => {
                 treasury.derive_address().await.unwrap();
             }
             "restart" => {
+                phase("close before restart");
                 treasury.close().await.unwrap();
+                phase("reopen after restart");
                 treasury =
                     Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
                         .await
@@ -1653,6 +1671,7 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
             _ => unreachable!(),
         }
         let before = treasury.status().await.unwrap().snapshot_revision;
+        phase(&format!("scan after {change}"));
         assert!(
             treasury
                 .submit_prepared("absent".into(), &mut sender, false, &stop)
@@ -1668,13 +1687,16 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
             SyncPhase::Ready,
             "{change}"
         );
+        phase(&format!("scan after {change} complete"));
     }
     // A slow, progressing tip read cannot renew the starting observation.
     *probe.hash.lock().unwrap() = hash(TIP + 1);
     treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
+    phase("scan before delayed tip probe");
     treasury.sync_once(&stop).await.unwrap();
     let before = treasury.status().await.unwrap();
     probe.delay_once.store(true, Ordering::SeqCst);
+    phase("delayed tip probe");
     assert!(
         treasury
             .reconcile_prepared("absent".into(), &mut sender, &stop)
@@ -1688,10 +1710,12 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
         before.sync.unwrap().checked_at
     );
     treasury.configure_sync(settings);
+    phase("scan after delayed tip probe");
     treasury.sync_once(&stop).await.unwrap();
     // A failed unsigned preflight must not publish a new observation or start a send.
     let before = treasury.status().await.unwrap().snapshot_revision;
     probe.fail.store(true, Ordering::SeqCst);
+    phase("failed unsigned probe");
     let error = treasury
         .reconcile_prepared("absent".into(), &mut sender, &stop)
         .await
@@ -1709,6 +1733,7 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
         }
         cancel.cancel();
     });
+    phase("cancel stalled unsigned probe");
     let error = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         treasury.reconcile_prepared("absent".into(), &mut sender, &stop),
@@ -1721,6 +1746,7 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
     // Cancelling an unsigned probe must leave the owner/channel usable. A new
     // caller still verifies the chain without renewing the saved observation.
     probe.stall.store(false, Ordering::SeqCst);
+    phase("probe after cancellation");
     let count = calls.lock().unwrap().len();
     assert!(
         treasury
@@ -1742,8 +1768,10 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
             .is_empty()
     );
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    phase("final wallet close");
     treasury.close().await.unwrap();
     server.abort();
+    phase("complete");
 }
 
 #[tokio::test]
