@@ -105,6 +105,19 @@ writing this workflow.
   inherited color override. Keep production formatting and CI color settings
   unchanged. Independently review the exact fixup and combined state; retain
   hosted acceptance for the user's push.
+- C15: Add a focused Ubuntu treasury-sync diagnostic workflow, bootstrapped by
+  scoped `ci_coverage` pushes and manually dispatchable after default-branch
+  availability. Compile the exact integration executable through Make before
+  starting a diagnostic-only five-minute watchdog; execute the whole target at
+  eight threads with uncaptured output and opt-in static phase breadcrumbs.
+  Capture owned process state and GDB thread stacks before terminating stalled
+  fixtures. Keep cancellation capture within one short aggregate budget and
+  upload selected diagnostics with `always()`. Preserve real test exit status,
+  fail on diagnostic timeout, and document force-cancel/runner-loss limitations.
+  Validate the monitor with synthetic success/failure/stall/cancel/debugger-error
+  and process-group isolation controls, plus affected Rust lint/tests and workflow
+  syntax. Independently review exact commits and the combined branch. No push,
+  production timeout, test-thread tuning or deadlock-fix claim is authorized.
 
 ## Review and validation gates
 
@@ -508,3 +521,34 @@ across 59 binaries at `e6d4214e`, using unchanged eight threads. Logs are under
 depend on inherited color suppression; it is local continuation evidence, not
 hosted Linux, full `make check` or instrumented coverage acceptance. The retained
 plan still awaits hosted acceptance and eventual main baseline/badge publication.
+
+## Focused Linux hang diagnostics
+
+C15 starts at `1bfbbb4f`. Run `43389768250` passed line coverage but its Linux
+default-test stage remained active for over an hour at treasury command-sync reuse.
+That exact case passed locally in 30 seconds and its whole target passed 27 tests
+with one ignored in 35 seconds at eight threads. Successful serial hosted coverage
+executed that target in 172 seconds. These observations establish an abnormal
+stall, not a demonstrated deadlock or its cause. Private investigation evidence
+is under `target/ci-sync-hang-validation/`. The fixture audit found no mutex held
+across an await; production synchronization remains unchanged.
+
+Independent fresh-conversation design review approved focused Linux diagnostics
+with corrections: GDB must omit frame arguments as well as locals, disable
+auto-loading/debuginfod and target only the owned test process tree. Compilation
+precedes the five-minute fixture watchdog. Debugger collection has an aggregate
+budget and its own process group so failed attaches cannot block termination.
+Cancellation reaches the Python monitor directly using `exec`; write process
+state first and bound capture plus teardown inside GitHub's initial signal grace.
+Only artifact upload uses `always()`. Force cancellation or runner loss can still
+prevent artifacts. A scoped branch-push trigger handles initial availability;
+manual dispatch depends on default-branch workflow registration. Existing checks
+and coverage selections remain unchanged and may run alongside the bootstrap.
+
+Permanent usage and limits belong in `docs/testing.md`, `scripts/README.md` and
+`tests/STARTUP.md`. No fixture output is an assertion or a production diagnostic.
+Retain exact financial, cancellation, observation and forbidden-send assertions.
+Test the monitor with small socket-free subprocess fixtures, including descendants
+and an unrelated-process survivor. Lint the changed Rust target, run the affected
+treasury-sync target once, and check Actions syntax. Hosted reproduction, native
+Linux ptrace capture and eventual main acceptance remain separate evidence.
