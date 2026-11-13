@@ -64,7 +64,7 @@ writing this workflow.
   for the three separate fault payers and document the fixture boundary. Commit
   as a fixup to `22f12389` and independently review the exact fixup and consumers.
 - C9: Put the cached-JSON diagnostic regression behind the existing exact-child
-  log-capture guard, preserving freshness, typed generation failure, severity and
+  log-capture guard, preserving freshness, typed generation failure, DEBUG capture and
   private-prose/URL assertions. Commit as a fixup to `47c99674`; independently
   review the exact fixup and final combined branch. Preserve eight test threads,
   production transport/replay/cache/logging policy and retained CI stage selections.
@@ -250,3 +250,10 @@ and retained privacy assertions; do not add timing sleeps, larger watchdogs or a
 concurrency benchmark. Preserve earlier source-matched compiler/workflow evidence
 where the test-only edits do not invalidate it. Hosted full-stage acceptance still
 requires the user's next push.
+
+Exact plan `c6fcc7e3` received independent C8 and C9 concern-specific reviews with
+no material findings. One local baseline cover pass (0.22 seconds) did not
+reproduce the CI interleaving; the repair addresses the demonstrated shared-pool
+sequencing fragility. C8 is implemented with fault payers 3/4/5, preserving the
+normal/second payer and discovery scenarios, exact signed counts and all padding
+checks. Implementation validation/review remain pending.

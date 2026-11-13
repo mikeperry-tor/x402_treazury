@@ -393,6 +393,11 @@ truncated output cannot qualify a runner result; counters are not durable billin
 See [the integration runner](../tests/live/INTEGRATION.md) for the unsigned fixture
 and local distribution matrix. Local tests cover paid challenge/retry, managed
 promotion, SOCKS separation, actual h2 streams, HPACK, refusal/faults and cleanup.
+Injected paid-response faults use distinct payer transports so an earlier broken
+HTTP/2 connection cannot prevent the next fault's signed request from reaching
+the fixture. Stream-preemption checks retain their shared client. Each injected
+fault must observe exactly one signed request; an absent request is not replay
+evidence.
 Diagnostic cases retain capability transitions, request counts, no paid replay,
 cleanup races and scoped severity/privacy. They avoid complete message or field
 inventories; pure severity classification does not need repeated cached-capability
