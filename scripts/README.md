@@ -102,6 +102,10 @@ atomic report publication; invoke its public Make targets below. Specialized Pyt
 available directly.
 
 GitHub Actions uses these same entrypoints for Linux checks and default coverage.
+`scripts/ci-stage.sh CHECK_STAGE` runs one of the seven `make check` stages,
+streams combined output, and records its log, elapsed seconds and exit status
+under `target/ci-checks/`. With `GITHUB_STEP_SUMMARY`, it appends the outcome to
+the Actions summary. Make and log-write failures remain nonzero.
 See [CI and octocov](../docs/testing.md#github-actions-and-coverage) for branch
 previews, report artifacts, comparison baselines and main-only badge publication.
 

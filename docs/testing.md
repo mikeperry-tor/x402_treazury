@@ -962,6 +962,11 @@ pull requests targeting `main`. The `ci_coverage` push trigger supports pre-merg
 bootstrap; it can be removed once this work is integrated. Linux checks run
 `make check` in its existing order on Ubuntu 24.04, with the repository's pinned
 Rust, Python 3.13 and full Git history for comparison with `origin/main`.
+Each existing `check-*` stage is a separate sequential Actions step, with the
+same ordering and fail-fast selections as `make check`. Stage output, elapsed
+seconds and exit status are retained in the `check-diagnostics` artifact, and
+outcomes are appended to the job summary even when a stage fails. Test concurrency
+remains eight; compiled-artifact caching requires evidence from hosted timings.
 The independent default-coverage job runs `make coverage` with matching LLVM
 tools and cargo-llvm-cov 0.9.1. Actions and octocov's binary version/checksum are
 pinned. Cargo download inputs are cached; application builds, financial state and
@@ -984,7 +989,9 @@ Open the branch's Actions run or pull-request checks to see results. The
 `default-line-coverage` artifact contains `html/index.html`, the filtered LCOV and
 summaries, provenance and generated `coverage.svg`; download it for branch badge
 preview. Collection logs are retained separately as `coverage-diagnostics`,
-including on failed collection. Only selected resolved files are uploaded, since
+including on failed collection. Initial Cargo compilation/listing output is
+retained in `tests-*.txt` alongside the execution log. Only selected resolved
+files are uploaded, since
 the local `target/coverage` path is an absolute symlink to its successful run.
 For a branch-specific CI badge, use
 `ci.yml/badge.svg?branch=ci_coverage&event=push`. The README badges describe main.
