@@ -1254,3 +1254,27 @@ nonzero counts. Preserve unchanged broader evidence; no repeated full-suite
 benchmark is needed for this presentation-test correction. Generated evidence
 remains under `target/ci-native-receive-validation/`. User retains push, and final
 hosted lifecycle/address-codec/main publication acceptance remains unfinished.
+
+C25 implementation is `01050096`, a fixup to `494e575c`. The lifecycle helper
+requires a complete instruction object and clock field, parses RFC3339 UTC and
+checks it against the same reply's top-level clock, then removes only that field.
+All remaining instruction fields are compared. Every existing address, operation,
+ownership and forbidden-side-effect assertion remains. The existing formatter
+case now verifies distinct 1000/1001 UTC values, equality of all remaining fields
+and unchanged saved operation. No production source or dependency changed.
+
+All six receive formatter/service tests passed. Production compiler/all-target
+`zcash-regtest` Clippy gates passed with no diagnostics. The exact reported
+`zcash-testutils` lifecycle case passed once, zero ignored, 1571 filtered, in
+0.29 seconds, and formatting passed. The documented macOS linker warning remains
+visible in runtime build output. Prior broader evidence is retained rather than
+rerunning unaffected default/proving matrices for a test-only clock comparison.
+Logs remain under `target/ci-native-receive-validation/`.
+
+Fresh nonauthor `native_receive_final` independently reviewed exact `01050096`
+and combined C25 from `8ef97ea4`, tracing create/retry/status clock sampling,
+renderer inputs, helper field preservation, deterministic formatter coverage and
+documentation. Initial source assessment preceded plan rationale. No material
+finding or compelling simplification remains. Full hosted lifecycle and following
+codec/main publication acceptance still require the next pushed revision; no
+full `make check`, live/funded qualification, push or merge is claimed.
