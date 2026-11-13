@@ -145,17 +145,32 @@ async fn run() {
         .bytes,
         b"paid"
     );
-    for path in ["/reset", "/goaway", "/lost"] {
+    // A connection fault is not a barrier for client-pool invalidation. Keep
+    // each fault's signed-dispatch witness independent of earlier broken pools.
+    for (key, path) in [(3, "/reset"), (4, "/goaway"), (5, "/lost")] {
+        let fault_client = PaidClient::new(
+            Payer::new(&format!("{key:064x}"), SpendPolicy::dollars("1").unwrap()).unwrap(),
+        )
+        .with_cover(
+            Some(cfg.clone()),
+            Scope {
+                listener: "fault".into(),
+                source: "api".into(),
+            },
+        );
         assert!(
-            tokio::time::timeout(Duration::from_secs(3), client.execute_response(route(path)))
-                .await
-                .unwrap()
-                .is_err()
+            tokio::time::timeout(
+                Duration::from_secs(3),
+                fault_client.execute_response(route(path))
+            )
+            .await
+            .unwrap()
+            .is_err()
         );
         assert_eq!(
             signed.lock().unwrap().get(path),
             Some(&1),
-            "paid request replayed after {path}"
+            "fault {path} must receive exactly one signed request"
         );
     }
     let second = PaidClient::new(
@@ -195,8 +210,8 @@ async fn run() {
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         tokens.len(),
-        3,
-        "wallet and discovery identities must never share a SOCKS identity"
+        6,
+        "normal, fault, second-payer and discovery identities must stay separate"
     );
     crate::network::global()
         .cover
