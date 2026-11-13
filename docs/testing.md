@@ -203,6 +203,17 @@ tests; retain representative CLI/network/SDK boundaries and the recovery,
 concurrency and no-replay cases that need integration.
 
 Use paused/mock time for owned timer logic and barriers/notifications for ordering.
+Choose completion signals at the boundary an assertion depends on: startup
+inventory capture and its active work, client-side publication, or final resource
+owner destruction. Task entry, server request receipt, a completed response and
+listener shutdown can precede those boundaries. Restart fixtures must release all
+service-held owners before reopening exclusive state; a retained-owner negative
+control should prove that teardown cannot acknowledge release early.
+When a flaky failure exposes a missing boundary, audit nearby fixtures that use
+the same helper or lifecycle. Reuse a small completion helper for demonstrated
+matches; intentionally blocked work and unrelated protocol phases require their
+own signals. Additional successful smoke runs do not replace those controls or
+establish repository-wide freedom from flakes.
 Do not wait real seconds merely to let background work probably run. A real wait
 needs a named process, transport or external-clock invariant that mocked time cannot
 prove, with the smallest representative integration case. Tokio time does not

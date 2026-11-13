@@ -64,6 +64,37 @@ async fn manager(file: Option<PathBuf>) -> Arc<Manager> {
     manager_with(with_registry(listeners(persist), file)).await
 }
 
+async fn close_manager(manager: Arc<Manager>) {
+    let (released, closed) = tokio::sync::oneshot::channel();
+    {
+        let mut hook = manager.release_test_hook.lock().unwrap();
+        assert!(hook.is_none(), "manager teardown was already registered");
+        *hook = Some(released);
+    }
+    manager.drain_owned_work().await;
+    drop(manager);
+    // Nothing sends a value: final-field destruction closes the channel only
+    // after all registry lock files are gone, including transport-held owners.
+    closed
+        .await
+        .expect_err("manager release is acknowledged by sender destruction");
+}
+
+#[tokio::test]
+async fn registry_teardown_waits_for_retained_owner_before_immediate_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("registry.sqlite");
+    let manager = manager(Some(path.clone())).await;
+    let retained = manager.clone();
+    let closing = close_manager(manager);
+    tokio::pin!(closing);
+    assert!(futures_util::poll!(closing.as_mut()).is_pending());
+    assert!(store::Store::open(&path, &[]).is_err());
+    drop(retained);
+    closing.await;
+    store::Store::open(&path, &[]).unwrap();
+}
+
 fn spec() -> Value {
     json!({"openapi":"3.0.3","servers":[{"url":"https://api.example.com"}],"paths":{"/read":{"get":{"tags":["read"],"description":"Read item","parameters":[{"in":"query","name":"q","schema":{"type":"string"}}]}},"/write":{"post":{"tags":["write"],"description":"Write item"}}}})
 }
@@ -3335,12 +3366,12 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
             store::Store::open(&file, &[]).is_err(),
             "live registry ownership must exclude reopening"
         );
-        // Draining the listener also releases services held by established HTTP/2
-        // connections; aborting its accept task alone does not establish that.
+        // Stop listener work before awaiting the actual final Manager release;
+        // graceful HTTP completion can precede connection-service destruction.
         shutdown.cancel();
         http_task.await.unwrap();
         drop(endpoint);
-        drop(m);
+        close_manager(m).await;
         let restored = manager_with(configured.clone()).await;
         let filtered = restored
             .search_tools(
