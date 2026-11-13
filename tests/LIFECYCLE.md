@@ -236,6 +236,11 @@ existing barrier in scheduler tests. Resume real time before awaiting existing
 fixture failure timeouts when an idle blocking Store worker would prevent paused
 automatic time advancement. These tests verify production owners and forbidden
 side effects, without introducing runtime deadlines or a separate test framework.
+Maintenance fixtures await the finite startup inventory and all active client
+publication/retirement futures before pausing time. The test-only completion
+signal requests no reads and does not clear pending work. Follow-up TLS and Store
+publication run with time resumed; scalar cooldown alone is not a startup-drain
+barrier.
 
 Run the offline application suite:
 
