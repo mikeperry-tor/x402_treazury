@@ -591,7 +591,9 @@ fixture cannot make every negative test pass.
 
 CLI contract fixtures count catalog/API requests and assert inspection output,
 credential/error order and the absence of unsolicited pricing requests. Authored
-prices and credit conversions retain focused rendering coverage; actual-call
+prices and credit conversions retain focused rendering coverage. SocialFetch
+credit inheritance uses synthetic source/endpoint subsets, so curated deployment
+provider selections do not own that regression. Actual-call
 challenge tests cover passive hint validation and wallet selection. Stdio and
 shutdown suites exercise accepted-call ownership.
 

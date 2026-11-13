@@ -34,6 +34,12 @@ writing this workflow.
 - C3: Record validation/review evidence and completion status. If all acceptance
   evidence is available, remove the completed plan with independent cleanup review;
   otherwise retain it with concrete remaining acceptance work.
+- C4: Repair a stale credit-pricing regression exposed by hosted coverage. Keep
+  provider inheritance, tag-subset selection, estimated/observed rendering and
+  operator override assertions, using a small synthetic source/endpoint table
+  instead of the comprehensive deployment's changing provider inventory. Review
+  the design independently, commit the correction as a fixup to `920fced2`, run
+  affected test/lint consumers and review the exact fixup plus combined state.
 
 ## Review and validation gates
 
@@ -102,3 +108,24 @@ successful main baseline and badge publication, then remove this completed plan
 and repair its deferred-plan reference through independently reviewed cleanup.
 Hosted acceptance remains missing evidence, so the plan is retained. The broader
 D2 advisory automation remains separately deferred.
+
+## Hosted failure follow-up
+
+Run `43364436717`, coverage job `131685388054`, executed source `4a56753b`.
+The `coverage-diagnostics` artifact retained the actual failure: after 1451 library
+tests passed, `credit_pricing` failed at a missing `sources.social` lookup in
+`comprehensive_subsets_inherit_conversion_despite_endpoint_instruction_overrides`.
+`920fced2` removed the example's SocialFetch sources without adapting that test.
+Coverage export and octocov were not reached; no coverage percentage is available.
+Run metadata and extracted diagnostics are private ignored evidence under
+`target/ci-diagnostics/43364436717/`. Public metadata/artifacts were read without
+changing the run or repository.
+
+Independent C4 design review covered source `4a56753b`, removal commit `920fced2`,
+provider/config composition and complete rendering assertions. No material design
+findings. The inline two-source table keeps actual SocialFetch settings/fixture
+inheritance and existing help exclusion. Endpoint instruction assertions remain
+a separation check, not runtime listener-composition qualification. Validation is
+limited to the affected `credit_pricing` and `socialfetch` targets and changed-test
+Clippy; the unchanged full `config` target has socket fixtures and is not selected.
+The test repair is implemented; validation and exact-fixup/combined review remain.
