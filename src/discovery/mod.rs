@@ -227,6 +227,9 @@ pub struct Manager {
     fetches: Mutex<BTreeMap<FetchKey, FetchCell>>,
     additions: Mutex<AdditionOwners>,
     mutations: Arc<Semaphore>,
+    // Keep last: sender closure acknowledges destruction of every Store/lock.
+    #[cfg(test)]
+    release_test_hook: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -454,6 +457,8 @@ impl Manager {
             fetches: Mutex::new(BTreeMap::new()),
             additions: Mutex::new(BTreeMap::new()),
             mutations: Arc::new(Semaphore::new(16)),
+            #[cfg(test)]
+            release_test_hook: Mutex::new(None),
         });
         let m = manager.clone();
         tokio::task::spawn_blocking(move || m.restore()).await??;

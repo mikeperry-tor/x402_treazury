@@ -385,3 +385,12 @@ regression, affected discovery/retirement/maintenance consumers and a full defau
 library run. Localhost fixtures require socket-capable execution up front. Keep
 evidence under ignored `target/ci-completion-validation/` and independently review
 the plan, exact changes and combined branch before reporting completion.
+
+Exact plan `e458db68` received separate independent C11 and C12 design clearance.
+C11 is fixup `5cf61b3e` against `a0d8d3e8`, reusing one retirement fixture helper
+in two demonstrated startup/idle cases. C12 uses the real Manager's final test-only
+field rather than a proxy service sentinel or a new service wrapper. Declaration-
+order destruction makes channel closure follow registry lock destruction; the
+helper asserts that its signal slot is unused and requires that expected closure.
+Source changes and the retained-owner control are implemented. Validation and
+exact-fixup/combined review remain pending.

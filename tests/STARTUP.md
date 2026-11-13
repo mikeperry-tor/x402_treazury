@@ -80,6 +80,10 @@ whose unsupported header schema prevents generation, and shared failures preserv
 safe acquisition stages and status. The cached-generation diagnostic runs in an
 exact child process so subscriberless sibling tests cannot disable its shared
 tracing callsite; freshness, typed issues and privacy checks remain in that child.
+Discovery-help restart coverage waits for final Manager destruction after HTTP
+shutdown and accepted-work drain, before reopening its exclusive registry. A
+retained-owner control proves that teardown and registry unlock cannot finish
+while another service still owns that Manager.
 Existing accepted-relay-payment cancellation and
 panic fixtures also run with default waiting and verify drain/Store ownership.
 `deployment::lifecycle_tests::funding_failure_keeps_listeners_and_base_reconciliation_available`
