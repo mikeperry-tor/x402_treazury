@@ -50,22 +50,22 @@ description = "Search Costco products by keyword. Prices are location-dependent 
 description = "Read a Costco product's item number, name, description, pricing fields and availability."
 
 [overrides.openweb_realtime_ecommerce_data_google_shopping_product_reviews]
-description = "List product reviews aggregated across retailers for a Google Shopping product identifier, with ratings, sources and a rating distribution."
+description = "List product reviews aggregated across retailers for a Google Shopping product identifier, with ratings, sources and a rating distribution. limit is at most 100 (default 10); use cursor for more."
 
 [overrides.openweb_realtime_ecommerce_data_google_shopping_store_reviews]
-description = "List merchant service reviews for a store domain, sorted by recency or helpfulness. Some reviews carry a rating without text."
+description = "List merchant service reviews for a store domain, sorted by recency or helpfulness. limit is at most 100 (default 10); some reviews carry a rating without text."
 
 [overrides.openweb_real_time_walmart_data_product_reviews]
-description = "List Walmart product reviews with ratings, text, photos, dates and a rating breakdown."
+description = "List Walmart product reviews with ratings, text, photos, dates and a rating breakdown. limit is at most 50 (default 10); page is at most 100."
 
 [overrides.openweb_realtime_homedepot_data_product_reviews]
-description = "List Home Depot product reviews with ratings, text, verified-purchase markers, merchant responses and a rating histogram."
+description = "List Home Depot product reviews with ratings, text, verified-purchase markers, merchant responses and a rating histogram. items_per_page is at most 100 (default 20); total_reviews is metadata, not returned rows."
 
 [overrides.openweb_real_time_wayfair_data_product_reviews]
-description = "List Wayfair product reviews with ratings, text, photos, an AI review summary and aspect sentiment counts."
+description = "List Wayfair product reviews with ratings, text, photos, an AI review summary and aspect sentiment counts. Returns 10 reviews per page; total_reviews is metadata, not returned rows."
 
 [overrides.openweb_real_time_ebay_data_seller_feedback]
-description = "List eBay seller feedback with ratings, comments, verified-purchase markers and item context."
+description = "List eBay seller feedback with ratings, comments, verified-purchase markers and item context. Returns 25 reviews per page; page selects the set."
 
 [overrides.openweb_yelp_business_data_business_search]
 description = "Search Yelp businesses by keyword and location. Use the returned identifier for details and reviews."
@@ -74,13 +74,13 @@ description = "Search Yelp businesses by keyword and location. Use the returned 
 description = "Read a Yelp business profile: categories, rating, review count, price range, hours, location and contact fields."
 
 [overrides.openweb_yelp_business_data_business_reviews]
-description = "List public Yelp reviews for a business identifier, with ratings, text, author context and a language breakdown."
+description = "List public Yelp reviews for a business identifier, with ratings, text, author context and a language breakdown. page_size defaults to 10; num_pages controls how many pages are returned."
 
 [overrides.openweb_trustpilot_company_and_reviews_company_details]
 description = "Read a Trustpilot company profile for a domain: TrustScore, star rating, review counts, categories and contact fields."
 
 [overrides.openweb_trustpilot_company_and_reviews_company_reviews]
-description = "List Trustpilot reviews for a company domain, with ratings, text, dates, verification markers and a rating distribution."
+description = "List Trustpilot reviews for a company domain, with ratings, text, dates, verification markers and a rating distribution. Returns 20 reviews per page; page selects the set."
 
 [overrides.openweb_realtime_events_data_search_events]
 description = "Search Google Events for public local or virtual events by keyword and date, with venue details and ticket links."
