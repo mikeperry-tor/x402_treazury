@@ -29,6 +29,32 @@ const TIP: u64 = 2_000_000;
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
+fn sync_diagnostics(fixture: &'static str) -> impl Fn(&str) {
+    let enabled = std::env::var_os("X402_TEST_SYNC_DIAGNOSTICS").is_some_and(|v| v == "1");
+    if enabled {
+        static SUBSCRIBER: std::sync::Once = std::sync::Once::new();
+        SUBSCRIBER.call_once(|| {
+            // The focused, unfunded experiment needs events from spawned SDK
+            // runtimes. Keep other SDK, transport and application targets off.
+            tracing_subscriber::fmt()
+                .with_env_filter("off,x402_treazury::treasury=debug,pepper_sync::sync=info")
+                .with_ansi(false)
+                .with_writer(std::io::stderr)
+                .try_init()
+                .expect("install focused treasury diagnostic subscriber");
+        });
+    }
+    let started = std::time::Instant::now();
+    move |phase| {
+        if enabled {
+            eprintln!(
+                "treasury-sync fixture {fixture}: {phase}; elapsed_ms={}",
+                started.elapsed().as_millis()
+            );
+        }
+    }
+}
+
 // Minimal protobuf/gRPC fixture for an empty synthetic mainnet chain. No external
 // endpoints, proving parameters, transactions or submission methods are involved.
 fn varint(mut n: u64) -> Vec<u8> {
@@ -109,6 +135,7 @@ fn framed(message: Vec<u8>) -> Vec<u8> {
 }
 #[derive(Clone)]
 struct Mock {
+    diagnostic_label: Option<&'static str>,
     chain: &'static str,
     tip: u64,
     final_tip: Option<u64>,
@@ -139,6 +166,19 @@ struct ReuseProbe {
 async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse {
     let method = uri.path().rsplit('/').next().unwrap().to_owned();
     mock.calls.lock().unwrap().push(method.clone());
+    let diagnostic = |phase: &str| {
+        if let Some(label) = mock.diagnostic_label
+            && std::env::var_os("X402_TEST_SYNC_DIAGNOSTICS").is_some_and(|v| v == "1")
+        {
+            let method = match method.as_str() {
+                "GetLightdInfo" | "GetLatestBlock" | "GetBlock" | "GetBlockRange"
+                | "GetTreeState" | "GetSubtreeRoots" | "GetMempoolStream" => method.as_str(),
+                _ => "unsupported method",
+            };
+            eprintln!("treasury-sync fixture {label}: RPC {method}: {phase}");
+        }
+    };
+    diagnostic("entered");
     if let Some(probe) = &mock.reuse_probe
         && method == "GetLightdInfo"
     {
@@ -152,6 +192,7 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             let mut headers = HeaderMap::new();
             headers.insert("content-type", "application/grpc".parse().unwrap());
             headers.insert("grpc-status", "14".parse().unwrap());
+            diagnostic("unavailable response prepared");
             return (headers, vec![]);
         }
     }
@@ -293,6 +334,7 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
         }
         "GetSubtreeRoots" => vec![],
         "GetMempoolStream" => {
+            diagnostic("intentionally pending before response headers");
             std::future::pending::<()>().await;
             vec![]
         }
@@ -300,12 +342,14 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             let mut headers = HeaderMap::new();
             headers.insert("content-type", "application/grpc".parse().unwrap());
             headers.insert("grpc-status", "12".parse().unwrap());
+            diagnostic("unsupported response prepared");
             return (headers, vec![]);
         }
     };
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/grpc".parse().unwrap());
     headers.insert("grpc-status", "0".parse().unwrap());
+    diagnostic("response prepared");
     (
         headers,
         messages.into_iter().flat_map(framed).collect::<Vec<u8>>(),
@@ -344,7 +388,7 @@ async fn mock_with_tip_change(
     tokio::task::JoinHandle<()>,
     Arc<AtomicBool>,
 ) {
-    mock_with_delay(chain, tip, ironwood, final_tip, false).await
+    mock_with_delay(chain, tip, ironwood, final_tip, false, None).await
 }
 async fn mock_with_delay(
     chain: &'static str,
@@ -352,6 +396,7 @@ async fn mock_with_delay(
     ironwood: &'static [u8],
     final_tip: Option<u64>,
     delay: bool,
+    diagnostic_label: Option<&'static str>,
 ) -> (
     String,
     Arc<Mutex<Vec<String>>>,
@@ -363,6 +408,7 @@ async fn mock_with_delay(
     let calls = Arc::new(Mutex::new(vec![]));
     let stall_blocks = Arc::new(AtomicBool::new(false));
     let app = axum::Router::new().fallback(rpc).with_state(Mock {
+        diagnostic_label,
         chain,
         tip,
         final_tip,
@@ -753,6 +799,7 @@ async fn checkpoint_waiting_for_pepper_wallet_lock_does_not_stop_engine_progress
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let app = axum::Router::new().fallback(rpc).with_state(Mock {
+        diagnostic_label: None,
         chain: "main",
         tip: TIP,
         final_tip: None,
@@ -1238,18 +1285,24 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
         rotation::transaction::PrepareRequest,
         treasury::{actor, submission::GrpcSubmission},
     };
+    let phase = sync_diagnostics("actor-dispatch");
+    phase("fixture setup");
     let dir = tempfile::tempdir().unwrap();
-    let (endpoint, calls, server, _) = mock("main").await;
+    let (endpoint, calls, server, _) =
+        mock_with_delay("main", TIP, b"000000", None, false, Some("actor-dispatch")).await;
+    phase("create wallet");
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
     treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
     let (handle, commands) = actor::channel();
     let stop = CancellationToken::new();
+    phase("start owner");
     let owner = tokio::spawn(treasury.run_commands(
         commands,
         GrpcSubmission::new(endpoint.clone(), endpoint).unwrap(),
         stop.clone(),
     ));
+    phase("prepare command");
     let error = handle
         .prepare(PrepareRequest {
             managed_funding: None,
@@ -1264,27 +1317,34 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
         .await
         .err()
         .unwrap();
+    phase("prepare command returned");
     // This indexer mock cannot supply real proposal input/witness coverage.
     // Typed SDK insufficient-funds selection is covered by the proving fixture.
     assert!(
         error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
         "{error:#}"
     );
+    phase("submit command");
     assert!(
         handle
             .submit(uuid::Uuid::new_v4().to_string(), false)
             .await
             .is_err()
     );
+    phase("submit command returned; reconcile command");
     assert!(
         handle
             .reconcile(uuid::Uuid::new_v4().to_string())
             .await
             .is_err()
     );
+    phase("reconcile command returned; explicit sync command");
     handle.sync().await.unwrap(); // Failed commands did not kill the healthy owner.
+    phase("explicit sync returned; cancel owner");
     stop.cancel();
+    phase("join owner");
     owner.await.unwrap().unwrap();
+    phase("owner joined; reopen wallet");
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     let reopened = Treasury::open(dir.path().join("state"), dir.path().join("key"), id)
         .await
@@ -1297,8 +1357,10 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
             .treasury_operations
             .is_empty()
     );
+    phase("final wallet close");
     reopened.close().await.unwrap();
     server.abort();
+    phase("complete");
 }
 
 #[cfg(unix)]
@@ -1470,7 +1532,8 @@ async fn birthday_uses_older_observation_when_tip_moves_between_reads() {
 #[tokio::test]
 async fn slow_initial_scan_finishes_without_an_age_restart() {
     let dir = tempfile::tempdir().unwrap();
-    let (endpoint, calls, server, _) = mock_with_delay("main", TIP, b"000000", None, true).await;
+    let (endpoint, calls, server, _) =
+        mock_with_delay("main", TIP, b"000000", None, true, None).await;
     let mut treasury = wallet(dir.path()).await;
     treasury.configure_sync(SyncSettings::new(endpoint, 7).unwrap());
     let before = x402_treazury::rotation::base::now().unwrap();
@@ -1553,16 +1616,7 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
 async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_restart_or_chain_change()
  {
     use x402_treazury::treasury::submission::GrpcSubmission;
-    let diagnostics = std::env::var_os("X402_TEST_SYNC_DIAGNOSTICS").is_some_and(|v| v == "1");
-    let started = std::time::Instant::now();
-    let phase = |name: &str| {
-        if diagnostics {
-            eprintln!(
-                "treasury-sync fixture: {name}; elapsed_ms={}",
-                started.elapsed().as_millis()
-            );
-        }
-    };
+    let phase = sync_diagnostics("command-reuse");
     phase("fixture setup");
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(Mutex::new(vec![]));
@@ -1572,6 +1626,7 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let app = axum::Router::new().fallback(rpc).with_state(Mock {
+        diagnostic_label: None,
         chain: "main",
         tip: TIP,
         final_tip: None,

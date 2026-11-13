@@ -1004,8 +1004,13 @@ GDB backtraces before terminating that experiment, returning exit 124. This
 diagnostic-only bound is sized above the observed finite synthetic fixture run;
 it is not an application deadline or proof of deadlock. Normal completion retains
 the actual test exit status. The fixture's opt-in `X402_TEST_SYNC_DIAGNOSTICS=1`
-phase breadcrumbs identify scans, restart, cancellation and close; no assertion
-depends on their text. Ordinary tests do not enable them.
+phase breadcrumbs identify scans, individual actor commands, restart, cancellation
+and close; no assertion depends on their text. The opt-in experiment also enables
+existing treasury DEBUG and Pepper sync INFO events through one process subscriber,
+including spawned runtimes. Other log targets remain disabled. Actor RPC markers
+use known method names and distinguish handler entry, prepared responses and its
+intentionally pending mempool request. They do not prove receipt or cancellation.
+Ordinary tests do not enable this subscriber or these breadcrumbs.
 
 Download `treasury-sync-diagnostics` from that workflow's run page. It contains
 revision/build metadata, `test.log`, `status.json`, and, after capture,

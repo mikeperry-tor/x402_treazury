@@ -120,6 +120,7 @@ async fn regressed_block_identity_preserves_sdk_headers_and_rejects_unbound_resp
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let app = axum::Router::new().fallback(rpc).with_state(Mock {
+        diagnostic_label: None,
         chain: "main",
         tip: TIP,
         final_tip: None,
