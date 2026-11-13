@@ -189,6 +189,16 @@ writing this workflow.
   a duplicate descriptor and live-owner negative controls, prove it fails before
   the fix, and preserve the moved treasury guard regression. No retries, delays,
   lock-file removal or broader ownership changes are selected.
+- C24: Correlate SOCKS fixture credentials at HTTP handler entry using the newest
+  matching peer, destination host and port, then retain the credentials with each
+  request observation. Replace historical peer lookups in the unsigned-retry matrix
+  and the two demonstrated managed-payment/concurrency consumers. Preserve every
+  actual wire, payer, cache-promotion, isolation, liability and no-replay assertion.
+  Force stale-peer and destination collisions in a cheap shared-helper regression,
+  and verify actual handler observations survive later history changes. Restore
+  the old algorithm as a negative control. Keep eight outer test threads and the
+  isolated child's existing runtime; serial execution does not fix reused socket
+  addresses. No production transport or financial behavior changes are selected.
 
 ## Review and validation gates
 
@@ -1117,3 +1127,37 @@ the optimized hosted lifecycle still require the next pushed run; an earlier
 default-stage failure prevents the later lifecycle diagnostic step from starting.
 Unchanged calculation/proving evidence is carried forward; no full `make check`,
 funded/live/Tor/consensus qualification, push or merge is claimed.
+
+## SOCKS fixture request-to-scope correlation
+
+C24 starts at `cbf0b072` after the isolated unsigned-retry child failed its live
+cache-versus-observed-scope assertion. Its parent invokes one exact ignored child
+with a cleared environment; that child retains its own four-worker Tokio runtime.
+Independent audit/design reviewer `tor_scope_audit` found first-historical-peer
+lookups in the payment matrix, managed identity fixture and concurrent rotation
+fixture. A TCP source address is not a permanent connection identity: historical
+reuse or different destinations can produce ambiguous matches. Both challenge
+and signed observations can resolve to the same stale credentials, passing their
+equality assertion while disagreeing with the current cache. This matches the
+failure pattern, but the reported run did not retain evidence of peer reuse.
+The sequential matrix has one stable cache key; source review found no supported
+production promotion, eviction or key-mismatch explanation before this assertion.
+
+The independently approved design captures the actual proxy credentials before
+the HTTP handler's first await and stores them in the existing observation slot.
+One small SOCKS helper matches newest peer plus exact host and port. Configured
+SOCKS observation must fail if no record matches; direct/unobserved fixtures keep
+None explicitly. Reuse the existing trace storage instead of adding parallel
+ledgers, global state or new counters. A four-record control must reject historical
+first-match and destination-blind reverse lookup. A scripted-handler control must
+verify its original captured credentials both before and after a later history
+entry. Actual isolated SOCKS/TLS tests retain their complete assertions.
+
+Commit the correction and adjacent concrete matches as fixups to introducing
+changes where identified, then independently review exact SHAs and combined C24
+consumers. Freeze sources for mutation-negative/positive controls, selected test
+Clippy, source-matched complexity review and compatibility before continuing the
+failed default stage and managed integration consumer. Evidence belongs under
+`target/ci-tor-scope-validation/`. No outer-thread change, production policy,
+new dependency, live Tor/funded qualification, push or merge is selected. Hosted
+execution and the optimized lifecycle experiment remain separate acceptance.
