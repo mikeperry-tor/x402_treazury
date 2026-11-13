@@ -142,12 +142,15 @@ publication dates.
 
 OpenWeb Ninja supplies marketplace search, product details, offers, Google
 Shopping and Google Lens/OCR across Amazon, Walmart, eBay, Home Depot, Wayfair and
-Costco. ShopSocial supplies Instagram, TikTok, YouTube, Facebook, Threads,
-Pinterest and Telegram reads shared with social. Prices, availability, delivery
-and sponsorship fields are marketplace state, not guarantees; identifiers and
-currencies differ by marketplace. OpenWeb Ninja's Trustpilot search remains
-unselected because company-name queries can return ambiguous entities;
-CompanyRecords supplies the selected Trustpilot reviews on business.
+Costco. Product sentiment comes from Google Shopping's cross-retailer reviews,
+Walmart, Home Depot and Wayfair product reviews; eBay seller feedback covers seller
+vetting, and Google Shopping store reviews cover merchant service. ShopSocial
+supplies Instagram,
+TikTok, YouTube, Facebook, Threads, Pinterest and Telegram reads shared with
+social. Prices, availability, delivery and sponsorship fields are marketplace
+state, not guarantees; identifiers and currencies differ by marketplace. Reviews
+are individual opinion, not representative surveys. OpenWeb Ninja supplies
+domain-scoped Trustpilot company details and reviews on business.
 
 ### World
 
@@ -187,11 +190,14 @@ Seats.aero awards; 2s supplies flight status, airport boards and route schedules
 over shared FlightAware data; HALOWERK supplies route matrices. HealthTravel adds
 hotel prices and Amtrak; ShopSocial adds hiking and FlixBus/FlixTrain; Maxwell
 adds resort lodging, lift access, menus, rentals and local tips; APEX adds cached
-Aviasales deals. EV chargers are directory data rather than live occupancy;
-hiking is OpenStreetMap rather than user reviews. Flix searches cover one adult
-one way. Rappi menus need a store ID/URL and cannot discover stores. Published
-prices and schedules are not held inventory. Verify community-maintained visa
-references with the destination authority.
+Aviasales deals. OpenWeb Ninja adds Yelp business search, details and reviews plus
+local and virtual event search with venue and ticket links. EV chargers are
+directory data rather than live occupancy; hiking is OpenStreetMap rather than user
+reviews. Yelp and Google Maps reviews are individual opinion and can cover the same
+business differently. Flix searches cover one adult one way. Rappi menus need a
+store ID/URL and cannot discover stores. Published prices and schedules are not
+held inventory. Verify community-maintained visa references with the destination
+authority.
 
 ### Health
 
@@ -211,8 +217,13 @@ and Slovak ID lookups and EU regulation search; MiCA checks are excluded because
 the registers are unavailable. 2s supplies NY/CO/CT state company records and FCC
 proceedings.
 CompanyRecords supplies NY registry records, weekly Swedish snapshots, known-ID
-Polish KRS extracts, CourtListener opinions and Trustpilot reviews. Maxwell adds
-broad company and registry discovery; court search is selected through
+Polish KRS extracts and CourtListener opinions. OpenWeb Ninja supplies
+domain-scoped Trustpilot company details and reviews; company-name search remains
+unselected because it can return ambiguous entities. OpenWeb Ninja also supplies
+Google Play app listings, reviews, exact install and rating counts, and free,
+grossing and paid charts; chart ranks cover only the labeled head and can omit
+major apps, so use repeated install and rating totals for adoption trends. Maxwell
+adds broad company and registry discovery; court search is selected through
 CompanyRecords and 2s, not Maxwell. Atlas Google Patents, 2s
 USPTO/EPO operations and Maxwell cached search cover patents; neither a document
 index nor a legal-event list establishes full document retrieval or current legal

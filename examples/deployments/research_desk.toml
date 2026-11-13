@@ -620,14 +620,38 @@ send_tools = [
     "real_time_wayfair_data_product_details",
     "realtime_costco_data_search",
     "realtime_costco_data_product_details",
+    # Product sentiment aggregated across retailers, merchant-level reviews and seller feedback.
+    "realtime_ecommerce_data_google_shopping_product_reviews",
+    "realtime_ecommerce_data_google_shopping_store_reviews",
+    "real_time_walmart_data_product_reviews",
+    "real_time_ebay_data_seller_feedback",
+    "realtime_homedepot_data_product_reviews",
+    "real_time_wayfair_data_product_reviews",
   ] },
   # Zillow and Redfin listings, estimates, agents and market trends.
   { to = "property", tools = ["realtime_zillow_data_*", "real_time_redfin_data_*"] },
   # Job search, salary estimates and employer reviews/salary data.
   { to = "business", tools = ["jsearch_*", "realtime_glassdoor_data_*"] },
-  # Google Maps local business research, driving directions and Waze traffic.
+  # Domain-scoped Trustpilot company details and reviews; company-name search stays unselected.
+  { to = "business", tools = [
+    "trustpilot_company_and_reviews_company_details",
+    "trustpilot_company_and_reviews_company_reviews",
+  ] },
+  # Google Play app adoption, store listings, reviews and chart positioning.
+  { to = "business", tools = [
+    "play_store_apps_search",
+    "play_store_apps_app_details",
+    "play_store_apps_app_reviews",
+    "play_store_apps_categories",
+    "play_store_apps_top_free_apps",
+    "play_store_apps_top_grossing_apps",
+    "play_store_apps_top_paid_apps",
+  ] },
+  # Google Maps and Yelp local business research, events, directions and Waze traffic.
   { to = "travel", tools = [
     "local_business_data_*",
+    "yelp_business_data_*",
+    "realtime_events_data_*",
     "driving_directions_get_directions",
     "waze_*",
   ] },
@@ -1215,8 +1239,9 @@ send_tools = [
 extends = "../../providers/companyrecords.toml"
 send_tools = [
   { to = ["business", "social"], tools = ["b2b_linkedin_company_profiles"] },
+  # OpenWeb Ninja supplies domain-scoped Trustpilot reviews; this Apify path is unselected.
   { to = "business", tools = [
-    "b2b_trustpilot_reviews", "b2b_ny_business_entity", "b2b_bolagsverket_sweden_companies",
+    "b2b_ny_business_entity", "b2b_bolagsverket_sweden_companies",
     "gov_krs_poland", "gov_justia_case_law",
     # Dataset keyword search only; no dedicated dataset-ID retrieval.
     "gov_canada_open_data", "gov_australia_data_gov_au", "gov_govdata_germany",

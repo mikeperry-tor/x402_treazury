@@ -54,6 +54,7 @@ macro_rules! provider_manifest {
             ("newsgurus", "providers/newsgurus/provider.toml", Some("providers/newsgurus/openapi.json")),
             ("oneshot", "providers/oneshot.toml", None),
             ("openverbs", "providers/openverbs.toml", None),
+            ("openwebninja", "providers/openwebninja.toml", None),
             ("otto", "providers/otto.toml", None),
             ("pdl", "providers/pdl.toml", None),
             ("readfetch", "providers/readfetch.toml", Some("providers/readfetch-openapi.json")),

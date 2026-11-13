@@ -2770,10 +2770,25 @@ empty arrays, so it is not a usable library source. EV charge search can return
 stations but empty `connectors`.
 
 Marketplace search, product details, product offers, Google Shopping, Google Lens
-visual matches, local business, Glassdoor employer search, `jsearch`, Zillow search
-and image tools are supported. This does not establish every operation or a durable
-marketplace contract. Trustpilot search is not selected: a company-name query can
-return ambiguous and unrelated entities, so it requires domain-scoped resolution.
+visual matches, local business, Yelp, events, Glassdoor employer search, `jsearch`,
+Zillow search and image tools are supported. This does not establish every
+operation or a durable marketplace contract. Product reviews are individual
+opinion, not representative surveys; sources, authors and text can be masked or
+absent, and Google Shopping aggregates reviews collected by retailers and
+manufacturers. Trustpilot company details and reviews require a company domain;
+company-name search is not selected because it can return ambiguous and unrelated
+entities.
+
+Google Play search and app details expose point-in-time exact install and rating
+totals, so adoption comparisons require repeated snapshots; the API returns no
+historical series. Chart endpoints return ordered lists but label only the head
+(about ten ranks), and major apps can be missing from a category chart, so a chart
+position is not a comprehensive ranking. App data-safety fields are developer
+declarations, not verified behavior.
+
+Marketplace operations fail independently upstream: a failed search does not mean
+that details or reviews are unavailable for an already known identifier, and a
+known identifier should be used rather than retrying the search blindly.
 
 Offer lists can repeat the same offer, and price, availability, delivery and
 sponsorship fields are marketplace state rather than guarantees. Response

@@ -1,4 +1,4 @@
-description = "Commerce search, product details and offers across major marketplaces, plus realtime local business, jobs and real-estate APIs."
+description = "Commerce search, product details, offers, reviews and seller feedback across major marketplaces, plus realtime local business, Yelp, events, Google Play app charts, jobs and real-estate APIs."
 spec = "https://x402.openwebninja.com/openapi.json"
 name = "OpenWeb Ninja"
 base_url = "https://x402.openwebninja.com"
@@ -26,7 +26,7 @@ exclude = [
 ]
 read_timeout_seconds = 90
 help_url = "https://x402.openwebninja.com/llms.txt"
-instructions_text = "Prices, availability, delivery estimates and sponsored placements are sampled offers, not guarantees. Offer lists can repeat the same offer and identifiers differ per marketplace. Use search to obtain the marketplace identifier, then request details or offers. Amazon reviews requires a caller-supplied Amazon cookie, so it is not a managed tool."
+instructions_text = "Prices, availability, delivery estimates and sponsored placements are sampled offers, not guarantees. Offer lists can repeat the same offer and identifiers differ per marketplace. Use search to obtain the marketplace identifier, then request details or offers. Amazon product reviews require a caller-supplied Amazon cookie, so they are not managed tools. Reviews are individual opinion, not representative surveys, and review sources or authors can be masked. App-store installs, ratings and chart positions are point-in-time snapshots; chart ranks can be partial."
 
 [overrides.openweb_realtime_ecommerce_data_google_shopping_search]
 description = "Search Google Shopping listings for prices, offers, ratings, sponsored placements and filters."
@@ -43,11 +43,71 @@ description = "Search current Google Shopping deals with pagination."
 [overrides.openweb_realtime_ecommerce_data_google_lens_visual_matches]
 description = "Find visually similar products and pages for a public image URL, with retailer prices when available."
 
-[overrides.openweb_realtime_ecommerce_data_costco_search]
+[overrides.openweb_realtime_costco_data_search]
 description = "Search Costco products by keyword. Prices are location-dependent sale/list fields, not a checkout quote."
 
-[overrides.openweb_realtime_ecommerce_data_costco_product_details]
+[overrides.openweb_realtime_costco_data_product_details]
 description = "Read a Costco product's item number, name, description, pricing fields and availability."
+
+[overrides.openweb_realtime_ecommerce_data_google_shopping_product_reviews]
+description = "List product reviews aggregated across retailers for a Google Shopping product identifier, with ratings, sources and a rating distribution."
+
+[overrides.openweb_realtime_ecommerce_data_google_shopping_store_reviews]
+description = "List merchant service reviews for a store domain, sorted by recency or helpfulness. Some reviews carry a rating without text."
+
+[overrides.openweb_real_time_walmart_data_product_reviews]
+description = "List Walmart product reviews with ratings, text, photos, dates and a rating breakdown."
+
+[overrides.openweb_realtime_homedepot_data_product_reviews]
+description = "List Home Depot product reviews with ratings, text, verified-purchase markers, merchant responses and a rating histogram."
+
+[overrides.openweb_real_time_wayfair_data_product_reviews]
+description = "List Wayfair product reviews with ratings, text, photos, an AI review summary and aspect sentiment counts."
+
+[overrides.openweb_real_time_ebay_data_seller_feedback]
+description = "List eBay seller feedback with ratings, comments, verified-purchase markers and item context."
+
+[overrides.openweb_yelp_business_data_business_search]
+description = "Search Yelp businesses by keyword and location. Use the returned identifier for details and reviews."
+
+[overrides.openweb_yelp_business_data_business_details]
+description = "Read a Yelp business profile: categories, rating, review count, price range, hours, location and contact fields."
+
+[overrides.openweb_yelp_business_data_business_reviews]
+description = "List public Yelp reviews for a business identifier, with ratings, text, author context and a language breakdown."
+
+[overrides.openweb_trustpilot_company_and_reviews_company_details]
+description = "Read a Trustpilot company profile for a domain: TrustScore, star rating, review counts, categories and contact fields."
+
+[overrides.openweb_trustpilot_company_and_reviews_company_reviews]
+description = "List Trustpilot reviews for a company domain, with ratings, text, dates, verification markers and a rating distribution."
+
+[overrides.openweb_realtime_events_data_search_events]
+description = "Search Google Events for public local or virtual events by keyword and date, with venue details and ticket links."
+
+[overrides.openweb_realtime_events_data_event_details]
+description = "Read a public event's details by event identifier, including dates, venue, price and ticket links."
+
+[overrides.openweb_play_store_apps_search]
+description = "Search Google Play apps and read listing fields, exact install and rating counts, and any chart placement."
+
+[overrides.openweb_play_store_apps_app_details]
+description = "Read a Google Play app's listing, exact installs, rating counts and distribution, version, release and data-safety fields."
+
+[overrides.openweb_play_store_apps_app_reviews]
+description = "List Google Play app reviews filtered by rating, device, region or sort order."
+
+[overrides.openweb_play_store_apps_categories]
+description = "List Google Play app category identifiers for chart queries."
+
+[overrides.openweb_play_store_apps_top_free_apps]
+description = "List a Google Play top free apps chart, optionally by category. Explicit ranks are limited to the labeled head of the chart."
+
+[overrides.openweb_play_store_apps_top_grossing_apps]
+description = "List a Google Play top grossing apps chart, optionally by category. Explicit ranks are limited to the labeled head of the chart; major apps can be absent."
+
+[overrides.openweb_play_store_apps_top_paid_apps]
+description = "List a Google Play top paid apps chart, optionally by category. Explicit ranks are limited to the labeled head of the chart."
 
 [pricing]
 source = "catalog"

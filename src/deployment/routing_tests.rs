@@ -58,6 +58,7 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         ),
         ("companyrecords", "gov_justia_case_law", Some("business")),
         ("companyrecords", "b2b_ny_business_entity", Some("business")),
+        ("companyrecords", "b2b_trustpilot_reviews", None),
         (
             "companyrecords",
             "b2b_bolagsverket_sweden_companies",
@@ -148,6 +149,41 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         ("openweb_waze_alerts_and_jams", "travel"),
         ("openweb_realtime_image_search_search", "web"),
         ("openweb_reverse_image_search_reverse_image_search", "web"),
+        ("openweb_yelp_business_data_search", "travel"),
+        ("openweb_yelp_business_data_business_details", "travel"),
+        ("openweb_yelp_business_data_business_reviews", "travel"),
+        ("openweb_realtime_events_data_search_events", "travel"),
+        ("openweb_realtime_events_data_event_details", "travel"),
+        (
+            "openweb_trustpilot_company_and_reviews_company_details",
+            "business",
+        ),
+        (
+            "openweb_trustpilot_company_and_reviews_company_reviews",
+            "business",
+        ),
+        (
+            "openweb_realtime_ecommerce_data_google_shopping_product_reviews",
+            "shopping",
+        ),
+        (
+            "openweb_realtime_ecommerce_data_google_shopping_store_reviews",
+            "shopping",
+        ),
+        ("openweb_real_time_walmart_data_product_reviews", "shopping"),
+        ("openweb_real_time_ebay_data_seller_feedback", "shopping"),
+        (
+            "openweb_realtime_homedepot_data_product_reviews",
+            "shopping",
+        ),
+        ("openweb_real_time_wayfair_data_product_reviews", "shopping"),
+        ("openweb_play_store_apps_search", "business"),
+        ("openweb_play_store_apps_app_details", "business"),
+        ("openweb_play_store_apps_app_reviews", "business"),
+        ("openweb_play_store_apps_categories", "business"),
+        ("openweb_play_store_apps_top_free_apps", "business"),
+        ("openweb_play_store_apps_top_grossing_apps", "business"),
+        ("openweb_play_store_apps_top_paid_apps", "business"),
     ] {
         assert_eq!(compiled.decision(name).targets, [target], "{name}");
     }
@@ -155,6 +191,10 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         "openweb_realtime_books_data_search",
         "openweb_realtime_ecommerce_data_google_shopping_product_price_history",
         "openweb_realtime_amazon_data_product_reviews",
+        "openweb_trustpilot_company_and_reviews_company_search",
+        "openweb_play_store_apps_top_free_games",
+        "openweb_play_store_apps_top_grossing_games",
+        "openweb_play_store_apps_top_paid_games",
     ] {
         assert!(compiled.decision(name).excluded, "{name}");
     }
