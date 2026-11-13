@@ -767,6 +767,11 @@ mod deferred_tests {
 
     #[tokio::test]
     async fn cached_json_can_fail_generation_with_a_safe_specific_reason() {
+        if crate::test_log_capture::run_in_child(
+            "deployment::startup::deferred_tests::cached_json_can_fail_generation_with_a_safe_specific_reason",
+        ) {
+            return;
+        }
         use crate::http_cache::{Entry, Metadata, Slot};
         let dir = tempfile::tempdir().unwrap();
         let cfg = catalog::Config {
