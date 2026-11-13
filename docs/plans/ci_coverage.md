@@ -199,6 +199,13 @@ writing this workflow.
   the old algorithm as a negative control. Keep eight outer test threads and the
   isolated child's existing runtime; serial execution does not fix reused socket
   addresses. No production transport or financial behavior changes are selected.
+- C25: Correct native-invoice idempotency assertions to compare every payment
+  instruction except the fresh presentation clock. Require and validate each
+  reply's UTC timestamp independently, without ordering or same-second assumptions.
+  Extend existing explicit-clock renderer coverage across adjacent seconds,
+  retaining all instruction and saved-operation assertions. Audit adjacent whole-
+  response comparisons. No production clock, serial scheduling, sleep or new
+  clock-injection interface is selected.
 
 ## Review and validation gates
 
@@ -1214,3 +1221,36 @@ lookup fails in a single synchronous control. Eight threads remain selected;
 no concurrency benchmark or speedup claim follows. Native Linux, actual Tor,
 funded qualification and the optimized hosted lifecycle remain outside this local
 validation; no full `make check`, push or merge is claimed.
+
+## Native invoice presentation clock
+
+C25 starts at `8ef97ea4`. Hosted run `43507660251` completed preceding static,
+compiler/Clippy, compatibility, default remainder and proving stages successfully.
+The optimized lifecycle compiled successfully in 787.343 seconds and executed in
+366.999 seconds (2343-second historical debug stage is not an isolated optimizer
+comparison). Its one periodic native capture succeeded. Compiler metadata confirms
+optimization two, line-table debug information, debug assertions and overflow
+checks. This establishes actual hosted build/capture execution, not complete CI
+acceptance: native invoice creation failed a whole-instruction equality check.
+The objects differ only in `current_time_utc`, at consecutive wall-clock seconds;
+recipient and all payment terms are identical. Artifacts are retained under
+`target/ci-native-receive-validation/`.
+
+Fresh independent design/audit `native_receive_design` traced both create paths
+through status's independent SystemTime sample and the explicit-clock renderer.
+It approved removing only the presentation clock from cloned comparison objects,
+validating the clocks independently and preserving every other field. Do not
+assert monotonic wall time, which can be adjusted. Extend the existing native
+renderer case using explicit 1000/1001 timestamps and unchanged saved operation;
+no sleep or global clock hook is justified. Adjacent foreign lifecycle comparisons
+use saved operation objects without presentation time, and formatter tests already
+exercise explicit-clock countdowns. No other matching whole-instruction comparison
+was found in the searched consumers.
+
+Commit a focused fixup to the introducing native receive change, independently
+review its exact SHA and combined C25 consumers, and run formatter cases, selected
+feature-enabled test lint and the exact reported synthetic lifecycle case with
+nonzero counts. Preserve unchanged broader evidence; no repeated full-suite
+benchmark is needed for this presentation-test correction. Generated evidence
+remains under `target/ci-native-receive-validation/`. User retains push, and final
+hosted lifecycle/address-codec/main publication acceptance remains unfinished.
