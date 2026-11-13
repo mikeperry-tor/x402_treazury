@@ -160,6 +160,26 @@ writing this workflow.
   run provenance controls, compiler/Clippy gates, compatibility, treasury-sync and
   the two stalled lifecycle cases. Preserve all work, channel capacities, timers,
   authorities, assertions and eight-thread settings.
+- C20: Remove proof-spanning fixture timers from native and foreign direct sends,
+  awaiting their existing actual submission channels and retaining all subsequent
+  publication, ownership, fee, duplicate and restart assertions. Extract the
+  canonical immutable faucet helper, cache the two fixed common amounts separately,
+  and reuse it in both relocated-note journeys. Keep fresh wallets/stores/chains,
+  fixed receivers and funding height. Use an unfunded owner for unconditional
+  shielding rejection and assert behavior without diagnostic-string matching.
+- C21: Compile and periodically monitor the actual Linux lifecycle stage through
+  Make and the existing diagnostic runner. Preserve normal macOS runner behavior,
+  fixed feature/filter/eight-thread selection, compile/test failure propagation and
+  capture privacy. Record compile and runtime phases separately. Retire the
+  redundant standalone lifecycle diagnostic workflow and upload the main job's
+  retained diagnostics even on cancellation, subject to runner termination limits.
+- C22: Add an explicit opt-in `test-optimized` profile inheriting `test`, with
+  optimization level two and debug assertions/overflow checks enabled. Keep all
+  existing toolchain/dependency/release profiles and debug information. Select this
+  profile for the authorized hosted lifecycle experiment, leaving ordinary local
+  lifecycle checks on their existing profile. Record the selected command and
+  compilation/execution timings; compare total hosted cost without attributing
+  simultaneous fixture/debugger changes solely to compiler optimization.
 
 ## Review and validation gates
 
@@ -936,3 +956,40 @@ all 117 tests in 38.517 seconds. Actual Pepper restoration and formatting pass.
 Evidence is retained in `target/ci-vendor-test-validation/`. This test-only fix
 preserves the prior Rust compiler, compatibility, synchronization and lifecycle
 evidence; hosted acceptance remains pending.
+
+## Lifecycle progress, fixture consolidation and optimized experiment
+
+C20-C22 start at `028e91e5e35c941e042caff6d7a954884fae3b4a` on `ci_coverage`.
+User authorized all three after reviewing completed run `43480618369` at that
+revision. Its lifecycle stage ran 2343 seconds including compilation: 66 passed,
+one failed and one intentionally ignored; test execution was 2341.53 seconds.
+Both prior stalled SDK cases completed. The sole failure was the direct native
+send's 180-second submission wait, which includes real calculation, publication
+and RPC work. This proves expiration before notification, not which phase was
+slow or that the pending event would eventually arrive. Artifacts remain under
+`target/ci-lifecycle-performance/`; no source changes preceded that completed run.
+
+Fresh independent design review `lifecycle_changes_design` approved functional
+waits, two explicit immutable caches, unfunded rejection setup and the opt-in
+optimized profile. Keep every financial assertion, fresh mutable fixture state,
+eight test threads and no new runtime deadline. Main-job diagnostics must replace
+the automatically duplicated lifecycle experiment rather than run a second suite.
+The historical debug timing is a combined baseline, not an isolated optimizer
+benchmark. Read-only audits identified six removable faucet calculations and
+confirmed pinned dependencies already cache proving keys and use internal Rayon
+parallelism; no thread retuning or additional proving-key cache is selected.
+
+Commit C20 fixture corrections as fixups to their introducing changes where
+identified; C21/C22 form one coherent tooling/profile implementation with owning
+documentation. Independently review exact commits/fixups and combined affected
+call chains, including compilation failure, nonzero test exit, cancellation,
+artifact selection and normal Make/macOS execution. Review source-matched
+CogC/CycC for the Rust helper changes before broad runtime validation. Run affected
+cheap tooling/format/provenance checks, selected test Clippy and compatibility
+consumers, then execute the changed synthetic lifecycle cases sequentially with
+feature configurations frozen. Avoid compiling a second full optimized dependency
+graph locally merely to estimate hosted performance: validate profile resolution
+and orchestration locally, with its actual build/runtime outcome explicitly owned
+by the next hosted experiment. Preserve prior unchanged evidence and record any
+remaining validation limits. No push or merge is authorized, and plan cleanup
+remains pending hosted/main acceptance and the separate mempool-notice issue.
