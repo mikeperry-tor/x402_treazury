@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 720" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1090 720" role="img" aria-labelledby="title description">
   <title id="title">Wallet funding and payment flow</title>
-  <desc id="description">Shielded Zcash funds small and optional large wallets through NEAR Intents. A first payment makes either wallet active. A dashed arrow labeled low funds on Active points right from the reserve USDC wallet to the active USDC wallet. A dashed arrow labeled Below a call's cost points right from the active wallet to a stack of low balance wallets. The active wallet serves higher-cost API calls, and low balance wallets serve matching low-cost API calls. Both connect through wallet-isolated Tor circuits to the API provider group.</desc>
+  <desc id="description">Shielded Zcash funds small and optional large wallets through NEAR Intents. A first payment makes either wallet active. A dashed arrow labeled Low funds on Active points right from the reserve USDC wallet to the active USDC wallet. A dashed arrow labeled Low balance covers call cost points right from the active wallet to a stack of low balance wallets. The active wallet serves higher-cost API calls, and low balance wallets serve matching low-cost API calls. Both connect through wallet-isolated Tor circuits to the API provider group.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
@@ -33,12 +33,12 @@
   <!-- The reserve wallet, active wallet and retained stack share one horizontal row. -->
   <path class="edge" d="M 225 420 H 365" stroke-dasharray="6 5"/>
   <text class="caption" x="295" y="400">Low funds on Active</text>
-  <path class="edge" d="M 575 420 H 750" stroke-dasharray="6 5"/>
-  <text class="caption" x="662" y="400">Low balance covers a call's cost</text>
+  <path class="edge" d="M 575 420 H 820" stroke-dasharray="6 5"/>
+  <text class="caption" x="697.5" y="400">Low balance covers call cost</text>
   <path class="edge" d="M 470 450 V 530" mask="url(#active-call-label-gap)"/>
   <text class="caption" x="470" y="490">Higher-cost API calls</text>
-  <path class="edge" d="M 865 450 V 510 Q 865 560 815 560 H 600"/>
-  <text class="caption" x="725" y="585">Matching low-cost API calls</text>
+  <path class="edge" d="M 935 450 V 510 Q 935 560 885 560 H 600"/>
+  <text class="caption" x="760" y="585">Matching low-cost API calls</text>
   <path class="edge" d="M 470 590 V 640"/>
 
   <rect class="card" x="320" y="20" width="260" height="60" rx="4"/>
@@ -52,10 +52,10 @@
 
   <rect class="card" x="15" y="390" width="210" height="60" rx="4"/>
   <text x="120" y="420">Reserve USDC Wallet</text>
-  <rect class="card" x="762" y="378" width="230" height="60" rx="4"/>
-  <rect class="card" x="756" y="384" width="230" height="60" rx="4"/>
-  <rect class="card" x="750" y="390" width="230" height="60" rx="4"/>
-  <text x="865" y="420">Low Balance Wallets</text>
+  <rect class="card" x="832" y="378" width="230" height="60" rx="4"/>
+  <rect class="card" x="826" y="384" width="230" height="60" rx="4"/>
+  <rect class="card" x="820" y="390" width="230" height="60" rx="4"/>
+  <text x="935" y="420">Low Balance Wallets</text>
   <rect class="card" x="365" y="390" width="210" height="60" rx="4"/>
   <text x="470" y="420">Active USDC Wallet</text>
 
