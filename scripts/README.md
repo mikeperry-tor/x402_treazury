@@ -51,14 +51,25 @@ remain visible in the artifact. The workflow installs GDB and sets
 fixture and debugger run as the runner user, allowing reliable group cleanup.
 See [diagnostic artifacts and cancellation limits](../docs/testing.md#github-actions-and-coverage).
 
-The [lifecycle diagnostic workflow](../.github/workflows/treasury-lifecycle-diagnostics.yml)
-builds the library harness with `zcash-testutils` through Make, then uses the same
-monitor's `--lifecycle` mode. It keeps the fixed lifecycle filter and eight threads,
-prints failures immediately and takes periodic process/CPU/thread snapshots while
-letting real proving finish. There is no five-minute test deadline in this mode.
-Snapshots go under `target/ci-diagnostics/treasury-lifecycle/snapshot-N/`; CPU
-counters use seconds and resident memory uses bytes. Cancellation capture and
-native debugger permissions retain the limitations described in the testing guide.
+The main [Linux checks](../.github/workflows/ci.yml) monitor their actual lifecycle
+stage; no second lifecycle job is needed. `make check-lifecycle` keeps the fixed
+`zcash-testutils` library filter, eight threads and immediate panic output.
+`LIFECYCLE_DIAGNOSTICS=target/ci-checks/lifecycle` enables the Linux monitor and
+JSON compilation through the existing pinned Cargo/protoc entrypoint. Compilation
+failure prevents execution. `build.jsonl` records executable metadata and
+`build-status.json` records the command, elapsed compilation seconds and exit
+status; `status.json` separately records execution. Periodic `snapshot-N/` CPU,
+memory and native stacks observe long work without a lifecycle test deadline.
+The main `check-diagnostics` artifact retains these files even on cancellation,
+subject to runner termination limits. Native capture needs GDB and same-user
+ptrace permission, configured only on the ephemeral Linux runner.
+
+Ordinary `make check-lifecycle` uses the existing `test` profile and macOS copy
+runner. `LIFECYCLE_PROFILE=test-optimized` selects an opt-in profile inheriting
+`test`, with optimization level two, debug assertions and overflow checks. Linux
+CI selects it for the lifecycle performance experiment. Compare compilation plus
+execution, including capture overhead; fixture changes and runner differences
+prevent attributing a historical runtime difference solely to optimization.
 
 Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
 `run` accepts both Cargo and application arguments in `CARGO_ARGS`, separated by

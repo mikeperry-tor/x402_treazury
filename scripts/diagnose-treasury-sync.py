@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in Linux test diagnostics; never used by ordinary application checks."""
+"""Linux test diagnostics with periodic lifecycle capture and optional compilation."""
 
 import argparse
 import json
@@ -235,15 +235,42 @@ def monitor(executable, output, after=300, capture_budget=30, grace=1, lifecycle
             signal.signal(sig, handler)
 
 
+def compile_test(command, build_log, output):
+    """Retain a fresh Cargo artifact log and separate compilation timing."""
+    output.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    status = None
+    try:
+        with build_log.open("wb") as log:
+            status = subprocess.run(command, stdout=log, check=False).returncode
+            if status < 0:
+                status = 128 - status
+        return status
+    finally:
+        (output / "build-status.json").write_text(json.dumps({
+            "command": command,
+            "exit_status": status,
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+        }, indent=2) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build_log", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--lifecycle", action="store_true",
                         help="Run the lifecycle library filter and take periodic snapshots without a test deadline")
+    parser.add_argument("--build-command", nargs=argparse.REMAINDER,
+                        help="Compile first, retaining Cargo JSON and compilation timing")
     args = parser.parse_args()
     if sys.platform != "linux":
         parser.error("Native stack capture requires the focused Linux runner")
+    if args.build_command is not None:
+        if not args.build_command:
+            parser.error("--build-command requires a command")
+        status = compile_test(args.build_command, args.build_log, args.output)
+        if status:
+            return status
     return monitor(test_executable(args.build_log, args.lifecycle), args.output, lifecycle=args.lifecycle)
 
 

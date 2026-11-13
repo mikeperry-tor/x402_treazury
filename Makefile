@@ -7,6 +7,8 @@ SHELL := /bin/sh
 PYTHON ?= python3
 PROFILE ?= release
 TEST_THREADS ?= 8
+LIFECYCLE_PROFILE ?= test
+LIFECYCLE_DIAGNOSTICS ?=
 TEST_ARGS ?= --test-threads='$(TEST_THREADS)'
 COMPLEXITY_BASE_REF ?= main
 override COMPAT_TESTS := sdk_compat payments server crypto_vectors
@@ -121,7 +123,11 @@ check-proving: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
 
 check-lifecycle: toolchain
-	@$(call application_cargo,test,--features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=8 --nocapture)
+ifeq ($(strip $(LIFECYCLE_DIAGNOSTICS)),)
+	@$(call application_cargo,test,--profile '$(LIFECYCLE_PROFILE)' --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=8 --nocapture)
+else
+	@$(call application_cargo,test,--profile '$(LIFECYCLE_PROFILE)' --features zcash-testutils --lib --no-run --message-format=json,$(PYTHON) scripts/diagnose-treasury-sync.py --lifecycle '$(LIFECYCLE_DIAGNOSTICS)/build.jsonl' '$(LIFECYCLE_DIAGNOSTICS)' --build-command)
+endif
 
 check-codec: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib synthetic_address_codec_is_scoped_to_its_test_client -- --test-threads=1)

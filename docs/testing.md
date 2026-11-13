@@ -997,6 +997,10 @@ same ordering and fail-fast selections as `make check`. Stage output, elapsed
 seconds and exit status are retained in the `check-diagnostics` artifact, and
 outcomes are appended to the job summary even when a stage fails. Test concurrency
 remains eight; compiled-artifact caching requires evidence from hosted timings.
+The lifecycle stage selects the opt-in `test-optimized` profile: optimization level
+two with debug assertions, overflow checks and existing debug information retained.
+Other check stages and ordinary local `make check-lifecycle` retain their existing
+profiles. This is a hosted performance experiment, not a measured speedup claim.
 The [treasury diagnostic workflow](../.github/workflows/treasury-sync-diagnostics.yml)
 runs only the offline `treasury_sync` integration target, at eight threads with
 `--nocapture`. Scoped pushes to `ci_coverage` bootstrap it before merge; its manual
@@ -1033,9 +1037,13 @@ budget. Cancellation requests shorten capture to at most four seconds before
 bounded process-group cleanup; artifact upload uses `always()`. Force cancellation,
 runner loss or GitHub's termination grace can still prevent complete evidence.
 
-The [lifecycle diagnostic workflow](../.github/workflows/treasury-lifecycle-diagnostics.yml)
-uses that monitor's `--lifecycle` mode with the exact `zcash-testutils` library
-filter and eight threads. Compilation remains outside sampling. Real proving and
+The actual Linux lifecycle stage uses that monitor's `--lifecycle` mode through
+Make, with the exact `zcash-testutils` library filter and eight threads. There is
+no separate lifecycle diagnostic workflow. The opt-in
+`LIFECYCLE_DIAGNOSTICS=target/ci-checks/lifecycle` command retains fresh Cargo JSON
+compilation metadata and `build-status.json` with command, elapsed time and status;
+failed compilation prevents test execution. Compilation remains outside sampling.
+Real proving and
 accepted-work drains can be long, so this mode has no five-minute test deadline:
 it takes a numbered `snapshot-N/` after each five minutes of execution since the
 previous capture completed, then lets tests continue. Each snapshot contains
@@ -1044,15 +1052,19 @@ are expressed in seconds and resident memory in bytes; successive captures help
 distinguish active computation from parked waits without claiming progress merely
 from CPU usage. Capture errors are retained without stopping valid test work.
 
-Download `treasury-lifecycle-diagnostics` from its Actions run. It also includes
-runner CPU/memory facts, immediate panic output in `test.log`, build metadata and
-final status. Scoped branch pushes bootstrap the workflow; manual dispatch has
-the same default-branch requirement. Cancellation uses the existing short capture
+Download `check-diagnostics` from the CI run and inspect its `lifecycle/` directory.
+It includes runner CPU/memory facts, immediate panic output in `test.log`,
+compilation metadata and final execution `status.json`. Stage timing includes both
+compilation and execution; use the separate phase records for comparison and
+include debugger overhead. Simultaneous fixture, profile and runner differences
+prevent attributing a historical timing change solely to optimization.
+Cancellation uses the existing short capture
 budget and does not start a second attach if a periodic capture is already active.
 The original test exit status is retained, including completion during capture.
-Force cancellation or runner loss can still prevent upload. GDB temporarily
-suspends threads and can affect fixture timing, so the focused experiment provides
-diagnostic evidence rather than replacing ordinary lifecycle qualification.
+The check artifact uses `always()`, but force cancellation or runner loss can still
+prevent upload. GDB temporarily suspends threads and can affect fixture timing;
+CPU counters and stacks provide diagnostic evidence, not proof that a scan is
+making progress or that a parked task is deadlocked.
 
 The independent default-coverage job runs `make coverage` with matching LLVM
 tools and cargo-llvm-cov 0.9.1. Actions and octocov's binary version/checksum are
