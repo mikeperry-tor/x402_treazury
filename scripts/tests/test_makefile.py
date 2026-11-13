@@ -231,7 +231,8 @@ else:
                             '--bench', 'test_only_bench', '--test', 'bench_only', '--test', 'future',
                             '--', '--test-threads=8'),
             ],
-            **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', f'--test-threads={threads}')]
+            **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--',
+                                  f'--test-threads={threads}', *(['--nocapture'] if stage == 'check-lifecycle' else []))]
                for stage, case, threads in (
                    ('check-proving', 'treasury::send::proving_tests', 1),
                    ('check-lifecycle', 'treasury::lifecycle_tests', 8),

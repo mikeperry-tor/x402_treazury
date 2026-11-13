@@ -310,7 +310,10 @@ serial execution for `make test`, `make check-default` and
 way. `TEST_ARGS` still replaces the whole harness argument
 list for focused `make test` runs, while `check-default` retains its complete target
 selection. The lifecycle stage uses eight threads; proving and codec stages keep
-one thread. Feature builds remain sequential.
+one thread. Lifecycle uses `--nocapture` so panic details appear when a test fails,
+rather than waiting for the entire library harness to finish. Deliberate panic
+controls can also print panic-hook output while passing; the test result remains
+authoritative. Feature builds remain sequential.
 
 The combined compatibility/remainder partition uses the same root lockfile,
 default features, test profile and runner. Cargo metadata supplies current targets
@@ -1026,6 +1029,27 @@ monitor can terminate its whole process group. A bounded attach to a disposable
 budget. Cancellation requests shorten capture to at most four seconds before
 bounded process-group cleanup; artifact upload uses `always()`. Force cancellation,
 runner loss or GitHub's termination grace can still prevent complete evidence.
+
+The [lifecycle diagnostic workflow](../.github/workflows/treasury-lifecycle-diagnostics.yml)
+uses that monitor's `--lifecycle` mode with the exact `zcash-testutils` library
+filter and eight threads. Compilation remains outside sampling. Real proving and
+accepted-work drains can be long, so this mode has no five-minute test deadline:
+it takes a numbered `snapshot-N/` after each five minutes of execution since the
+previous capture completed, then lets tests continue. Each snapshot contains
+elapsed seconds, owned process/thread state and native stacks. Process CPU counters
+are expressed in seconds and resident memory in bytes; successive captures help
+distinguish active computation from parked waits without claiming progress merely
+from CPU usage. Capture errors are retained without stopping valid test work.
+
+Download `treasury-lifecycle-diagnostics` from its Actions run. It also includes
+runner CPU/memory facts, immediate panic output in `test.log`, build metadata and
+final status. Scoped branch pushes bootstrap the workflow; manual dispatch has
+the same default-branch requirement. Cancellation uses the existing short capture
+budget and does not start a second attach if a periodic capture is already active.
+The original test exit status is retained, including completion during capture.
+Force cancellation or runner loss can still prevent upload. GDB temporarily
+suspends threads and can affect fixture timing, so the focused experiment provides
+diagnostic evidence rather than replacing ordinary lifecycle qualification.
 
 The independent default-coverage job runs `make coverage` with matching LLVM
 tools and cargo-llvm-cov 0.9.1. Actions and octocov's binary version/checksum are

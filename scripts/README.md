@@ -51,6 +51,15 @@ remain visible in the artifact. The workflow installs GDB and sets
 fixture and debugger run as the runner user, allowing reliable group cleanup.
 See [diagnostic artifacts and cancellation limits](../docs/testing.md#github-actions-and-coverage).
 
+The [lifecycle diagnostic workflow](../.github/workflows/treasury-lifecycle-diagnostics.yml)
+builds the library harness with `zcash-testutils` through Make, then uses the same
+monitor's `--lifecycle` mode. It keeps the fixed lifecycle filter and eight threads,
+prints failures immediately and takes periodic process/CPU/thread snapshots while
+letting real proving finish. There is no five-minute test deadline in this mode.
+Snapshots go under `target/ci-diagnostics/treasury-lifecycle/snapshot-N/`; CPU
+counters use seconds and resident memory uses bytes. Cancellation capture and
+native debugger permissions retain the limitations described in the testing guide.
+
 Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
 `run` accepts both Cargo and application arguments in `CARGO_ARGS`, separated by
 `--`. These are trusted shell fragments, not a structured argument API. Quote the
