@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main, ci_coverage]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  check:
+    name: Linux checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Install the repository's pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-inputs-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'tools/protoc/Cargo.lock') }}
+      - name: Run the ordered application checks
+        run: make check COMPLEXITY_BASE_REF=origin/main
+
+  coverage:
+    name: Default line coverage
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write # Store octocov baselines and retire replaced report artifacts.
+      pull-requests: write # Fork PR tokens remain read-only; summaries still work.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install the repository's pinned Rust and matching LLVM tools
+        run: |
+          rustup show active-toolchain
+          rustup component add llvm-tools-preview
+          make toolchain
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-inputs-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'tools/protoc/Cargo.lock') }}
+      - name: Install the pinned coverage collector
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      - name: Collect default coverage
+        run: make coverage
+      - name: Stage the resolved report for download
+        id: stage
+        run: |
+          report_dir=$(realpath target/coverage)
+          grep -q '^SF:' "$report_dir/lcov.info"
+          grep -q '^DA:' "$report_dir/lcov.info"
+          mkdir -p target/ci-coverage
+          cp -R "$report_dir/html" target/ci-coverage/
+          cp "$report_dir/lcov.info" "$report_dir/summary.json" "$report_dir/summary.txt" \
+            "$report_dir/provenance.txt" "$report_dir/commands.txt" "$report_dir/tests.txt" \
+            "$report_dir/status" target/ci-coverage/
+      - name: Report coverage with octocov
+        uses: k1LoW/octocov-action@a339ff297f3f6773aad1117d7ef2294fdd46b963 # v1
+        with:
+          version: v0.83.5
+          checksum: 3aa6973a8e68036b640dac6ef0c5456dda12289c7abbdaf7b919a036555d8e9c
+      - name: Verify the coverage badge was generated
+        run: test -s target/ci-coverage/coverage.svg
+      - name: Upload the coverage report and branch badge preview
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: default-line-coverage
+          path: target/ci-coverage/
+          if-no-files-found: error
+      - name: Upload collection diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-diagnostics
+          path: |
+            target/coverage-runs/*/status
+            target/coverage-runs/*/test.log
+            target/coverage-runs/*/provenance.txt
+            target/coverage-runs/*/commands.txt
+          if-no-files-found: ignore
+
+  publish-badge:
+    name: Publish main coverage badge
+    needs: [check, coverage]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # Serialize writes to the shared branch, without cancelling running checks.
+    concurrency:
+      group: main-coverage-badge
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: default-line-coverage
+          path: target/badge-report
+      - name: Publish the badge for the current main revision
+        run: |
+          main_sha=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$main_sha" != "$GITHUB_SHA" ]; then
+            echo 'Main has advanced; a newer run will publish its coverage badge.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git ls-remote --heads origin refs/heads/badges > "$RUNNER_TEMP/badges-ref"
+          if [ -s "$RUNNER_TEMP/badges-ref" ]; then
+            git fetch origin refs/heads/badges
+            git switch --force-create badges FETCH_HEAD
+          else
+            git switch --orphan badges
+          fi
+          cp target/badge-report/coverage.svg coverage.svg
+          printf '%s\n' "$GITHUB_SHA" > source-revision.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --force coverage.svg source-revision.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Publish default line coverage for $GITHUB_SHA"
+          git push origin HEAD:refs/heads/badges
