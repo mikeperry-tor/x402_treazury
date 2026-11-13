@@ -90,6 +90,13 @@ writing this workflow.
   fixture; audit nearby direct restarts without blanket conversion. Document
   reusable completion-boundary testing guidance, review exact fixups and combined
   state, then retain hosted acceptance for the user's push.
+- C13: Correct the public-demo integration test's stale default reserve ceiling
+  from $4 to the documented $3, preserving independent literal financial and
+  offline-inspection assertions. Audit related profile/default consumers, document
+  configuration-contract synchronization, and validate integration targets plus
+  the existing default-test remainder at eight threads. Commit as a fixup to
+  `ac369750`; independently review the exact fixup and combined branch. Carry
+  unchanged compatibility evidence forward without claiming full `make check`.
 
 ## Review and validation gates
 
@@ -416,3 +423,23 @@ does not claim repository-wide flake freedom or reproduce every Linux scheduling
 interleaving. No production authority, locking, retry, timer or concurrency policy
 changed. Hosted Linux full-stage/coverage acceptance and eventual main badge
 publication remain pending for the user's push; the active plan is retained.
+
+## Demo configuration-contract follow-up
+
+C13 starts at `92712ffb`. The reported failure is deterministic configuration/test
+drift, distinct from scheduling failures. Independent fresh-conversation design
+review traced `ac369750`: it lowered the default small maximum and updated the
+profile comment and other contract tests, but omitted this integration assertion.
+Related managed-config defaults already assert $2–$3; explicit synthetic ranges
+and live API-reservation totals express different contracts and remain unchanged.
+Keep the literal $3 expectation independent of the configuration being tested.
+Add the profile's documented zero retirement tolerance to its safety assertions.
+
+Recent broad local evidence covered the library, which cannot execute root
+integration targets. Run selected test-target Clippy and the demo/config/CLI
+consumers first, then complete `make check-default-remaining` with socket-capable
+execution. The reported hosted run already passed its preceding compatibility
+stage; this test/documentation-only correction does not invalidate those inputs.
+This continuation is not full `make check`, hosted Linux, or coverage acceptance.
+Logs belong under ignored `target/ci-profile-validation/`. No runtime defaults,
+financial authority, test selection or concurrency setting changes.
