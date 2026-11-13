@@ -178,3 +178,10 @@ selected compiler/lint checks before runtime suites, and freeze sources during
 validation. No full-suite performance or GitHub speedup is claimed from local
 functional checks. New hosted stage timings, compiled-cache value and final
 coverage/badge publication remain remote evidence.
+
+Exact revised plan `2338a7ce` independently reviewed with no material findings.
+C5 implements seven sequential steps and the allowlisted stage helper, with
+combined output, elapsed/status files and failure summaries. Six new subprocess
+regressions and 28 existing Make/target-selection tests pass, as do actionlint,
+Bash syntax and diff checks. No compiled cache or concurrency changes were made.
+C5 exact-commit review and C6 compiler/runtime validation remain pending.

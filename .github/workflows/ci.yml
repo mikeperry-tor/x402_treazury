@@ -17,6 +17,8 @@ jobs:
   check:
     name: Linux checks
     runs-on: ubuntu-24.04
+    env:
+      COMPLEXITY_BASE_REF: origin/main
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -33,8 +35,27 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-inputs-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'tools/protoc/Cargo.lock') }}
-      - name: Run the ordered application checks
-        run: make check COMPLEXITY_BASE_REF=origin/main
+      - name: Static checks
+        run: scripts/ci-stage.sh check-static
+      - name: Compiler and Clippy checks
+        run: scripts/ci-stage.sh check-clippy
+      - name: Compatibility tests
+        run: scripts/ci-stage.sh check-compat
+      - name: Remaining default tests
+        run: scripts/ci-stage.sh check-default-remaining
+      - name: Proving tests
+        run: scripts/ci-stage.sh check-proving
+      - name: Treasury lifecycle tests
+        run: scripts/ci-stage.sh check-lifecycle
+      - name: Address codec test
+        run: scripts/ci-stage.sh check-codec
+      - name: Upload check stage diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: check-diagnostics
+          path: target/ci-checks/
+          if-no-files-found: ignore
 
   coverage:
     name: Default line coverage
@@ -97,6 +118,7 @@ jobs:
           path: |
             target/coverage-runs/*/status
             target/coverage-runs/*/test.log
+            target/coverage-runs/*/tests-*.txt
             target/coverage-runs/*/provenance.txt
             target/coverage-runs/*/commands.txt
           if-no-files-found: ignore
