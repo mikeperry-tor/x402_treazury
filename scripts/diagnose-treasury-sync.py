@@ -86,7 +86,7 @@ def capture(group, output, budget, interrupted):
             try:
                 debugger = subprocess.Popen(
                     [
-                        "sudo", "-n", "gdb", "-q", "-nx", "-batch",
+                        "gdb", "-q", "-nx", "-batch",
                         "-iex", "set auto-load off",
                         "-iex", "set debuginfod enabled off",
                         "-ex", "set pagination off",

@@ -552,3 +552,13 @@ Test the monitor with small socket-free subprocess fixtures, including descendan
 and an unrelated-process survivor. Lint the changed Rust target, run the affected
 treasury-sync target once, and check Actions syntax. Hosted reproduction, native
 Linux ptrace capture and eventual main acceptance remain separate evidence.
+
+C15 exact implementation `01b82fc3` received independent review. One material
+finding invalidated the initial privileged-debugger cleanup assumption: a
+runner-owned process cannot reliably SIGKILL UID-0 GDB through sudo. The reviewed
+replacement enables same-user ptrace once on the dedicated ephemeral diagnostic
+runner and keeps GDB unprivileged. Add a bounded native attach smoke check before
+compilation, plus cancellation-during-capture regression proving debugger and
+descendant termination. Explicit Bash selection preserves compilation pipeline
+failure propagation. These corrections are a fixup against `01b82fc3`; no
+application security policy or ordinary CI selections change.

@@ -45,8 +45,10 @@ and passes the saved Cargo output to `diagnose-treasury-sync.py`. The monitor
 selects exactly that executable and runs eight threads with `--nocapture`.
 Compilation is outside its five-minute diagnostic experiment; timed-out fixtures
 are captured before process-group termination and fail with exit 124. GDB and
-passwordless `sudo` are required for native Linux attach; debugger failures remain
-visible in the artifact. The workflow installs GDB on its ephemeral runner.
+same-user ptrace permission are required for native Linux attach; debugger failures
+remain visible in the artifact. The workflow installs GDB and sets
+`kernel.yama.ptrace_scope=0` only on its ephemeral diagnostic runner. Both the
+fixture and debugger run as the runner user, allowing reliable group cleanup.
 See [diagnostic artifacts and cancellation limits](../docs/testing.md#github-actions-and-coverage).
 
 Do not include the separating `--` in `TEST_ARGS`; Make supplies it.

@@ -1013,7 +1013,11 @@ revision/build metadata, `test.log`, `status.json`, and, after capture,
 frame arguments and locals; no core, environment or wallet-state files are
 uploaded. Native stack collection requires Linux and GDB; it is not a portable
 Rust async-task dump, and parked executor stacks may require the phase markers
-to identify the awaited operation. Debugger collection has a 30-second aggregate
+to identify the awaited operation. The ephemeral diagnostic runner enables
+same-user ptrace (`kernel.yama.ptrace_scope=0`); GDB stays unprivileged so the
+monitor can terminate its whole process group. A bounded attach to a disposable
+`sleep` process verifies native GDB before application compilation; its output is
+`debugger-smoke.txt`. Debugger collection has a 30-second aggregate
 budget. Cancellation requests shorten capture to at most four seconds before
 bounded process-group cleanup; artifact upload uses `always()`. Force cancellation,
 runner loss or GitHub's termination grace can still prevent complete evidence.

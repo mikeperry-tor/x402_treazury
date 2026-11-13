@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "diagnose-treasury-sync.py"
@@ -27,7 +28,7 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
         self.executable = self.root / "test-fixture"
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.tool(self.bin / "sudo", "import sys\nprint('synthetic stack')\nsys.exit(0)\n")
+        self.tool(self.bin / "gdb", "import sys\nprint('synthetic stack')\nsys.exit(0)\n")
         # Use the actual process-control code on both development hosts. Native
         # /proc and GDB acceptance remains a separate Linux check.
         self.runner = self.root / "run.py"
@@ -120,7 +121,7 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
     def test_cancellation_captures_before_termination(self):
         ready = self.root / "ready"
         self.tool(
-            self.bin / "sudo",
+            self.bin / "gdb",
             "import pathlib, sys, os, signal\n"
             "pid = int(sys.argv[-1])\nos.kill(pid, 0)\n"
             f"pathlib.Path({str(self.root / 'captured-alive')!r}).write_text(str(pid))\n"
@@ -146,12 +147,30 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
     def test_failed_and_stalled_debuggers_do_not_prevent_cleanup(self):
         for debugger in ("import sys; sys.exit(9)", "import time; time.sleep(30)"):
             with self.subTest(debugger=debugger):
-                self.tool(self.bin / "sudo", debugger + "\n")
+                self.tool(self.bin / "gdb", debugger + "\n")
                 child = self.start("import time; time.sleep(30)\n")
                 status = self.result(child, 124)
                 self.assert_not_running(status["test_pid"])
                 text = (self.output / f"threads-{status['test_pid']}.txt").read_text()
                 self.assertTrue("status: 9" in text or "budget exhausted" in text, text)
+
+    def test_cancel_during_capture_kills_debugger_and_its_descendants(self):
+        ready = self.root / "debugger-pids"
+        self.tool(
+            self.bin / "gdb",
+            "import os, pathlib, subprocess, sys, time\n"
+            "descendant = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+            f"pathlib.Path({str(ready)!r}).write_text(f'{{os.getpid()}} {{descendant.pid}}')\n"
+            "time.sleep(30)\n",
+        )
+        child = self.start("import time; time.sleep(30)\n", CAPTURE_BUDGET="30")
+        self.wait_for(ready)
+        child.send_signal(signal.SIGINT)
+        status = self.result(child, 130)
+        self.assertEqual(status["reason"], "cancelled")
+        self.assert_not_running(status["test_pid"])
+        for pid in ready.read_text().split():
+            self.assert_not_running(int(pid))
 
     def test_cargo_selection_rejects_missing_and_ambiguous_executables(self):
         build = self.root / "build.jsonl"
@@ -173,6 +192,23 @@ class TreasuryDiagnosticsTests(unittest.TestCase):
         build.write_text(json.dumps({**artifact, "executable": str(self.root / "missing")}))
         with self.assertRaisesRegex(ValueError, "missing"):
             MODULE.test_executable(build)
+
+    def test_proc_snapshot_selects_owned_group_and_tolerates_exited_threads(self):
+        proc = self.root / "proc"
+        for pid, group in ((10, 10), (11, 10), (12, 12)):
+            entry = proc / str(pid)
+            entry.mkdir(parents=True)
+            (entry / "stat").write_text(f"{pid} (fixture (worker)) S 1 {group} 0\n")
+            task = entry / "task" / str(pid)
+            task.mkdir(parents=True)
+            (task / "wchan").write_text("futex_wait\n")
+        (proc / "10/task/exited").mkdir()
+        (proc / "999").mkdir()  # Process disappeared before stat could be read.
+        with mock.patch.object(MODULE, "Path", return_value=proc):
+            members = MODULE.group_members(10)
+        self.assertEqual(set(members), {10, 11})
+        self.assertEqual(members[10]["name"], "fixture (worker)")
+        self.assertEqual(members[10]["threads"], {"10": "futex_wait"})
 
 
 if __name__ == "__main__":
