@@ -38,6 +38,19 @@ the complete suite. `TEST_THREADS` selects libtest concurrency for `make test` a
 `check-default` / `check-default-remaining` (default 8); use `TEST_THREADS=1`
 for a serial run. `TEST_ARGS` replaces the complete default harness argument list,
 including that thread setting.
+For a Linux treasury hang investigation, the focused
+[diagnostic workflow](../.github/workflows/treasury-sync-diagnostics.yml) compiles
+with `make test CARGO_ARGS='--test treasury_sync --no-run --message-format=json'`
+and passes the saved Cargo output to `diagnose-treasury-sync.py`. The monitor
+selects exactly that executable and runs eight threads with `--nocapture`.
+Compilation is outside its five-minute diagnostic experiment; timed-out fixtures
+are captured before process-group termination and fail with exit 124. GDB and
+same-user ptrace permission are required for native Linux attach; debugger failures
+remain visible in the artifact. The workflow installs GDB and sets
+`kernel.yama.ptrace_scope=0` only on its ephemeral diagnostic runner. Both the
+fixture and debugger run as the runner user, allowing reliable group cleanup.
+See [diagnostic artifacts and cancellation limits](../docs/testing.md#github-actions-and-coverage).
+
 Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
 `run` accepts both Cargo and application arguments in `CARGO_ARGS`, separated by
 `--`. These are trusted shell fragments, not a structured argument API. Quote the

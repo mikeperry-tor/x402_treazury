@@ -1,0 +1,77 @@
+name: Treasury sync diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci_coverage]
+    paths:
+      - '.github/workflows/treasury-sync-diagnostics.yml'
+      - 'scripts/diagnose-treasury-sync.py'
+      - 'scripts/tests/test_treasury_sync_diagnostics.py'
+      - 'tests/treasury_sync.rs'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  diagnose:
+    name: Treasury sync at eight threads
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned Rust and native debugger
+        run: |
+          rustup show active-toolchain
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gdb
+          # Same-user attach on this ephemeral diagnostic runner. GDB stays
+          # unprivileged so the monitor can always terminate its process group.
+          sudo sysctl -w kernel.yama.ptrace_scope=0
+      - name: Verify native debugger attachment
+        run: |
+          mkdir -p target/ci-diagnostics/treasury-sync
+          sleep 30 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
+          timeout --signal=KILL 10s gdb -q -nx -batch \
+            -iex 'set auto-load off' -iex 'set debuginfod enabled off' \
+            -ex 'set print frame-arguments none' -ex 'thread apply all bt' \
+            -ex detach -p "$fixture_pid" \
+            > target/ci-diagnostics/treasury-sync/debugger-smoke.txt 2>&1
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-inputs-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'tools/protoc/Cargo.lock') }}
+      - name: Compile the treasury integration target
+        run: |
+          mkdir -p target/ci-diagnostics/treasury-sync
+          git rev-parse HEAD > target/ci-diagnostics/treasury-sync/revision.txt
+          make test CARGO_ARGS='--test treasury_sync --no-run --message-format=json' \
+            2> >(tee target/ci-diagnostics/treasury-sync/build.stderr >&2) \
+            | tee target/ci-diagnostics/treasury-sync/build.jsonl
+      - name: Run with capture before terminating a stalled fixture
+        run: |
+          exec python3 scripts/diagnose-treasury-sync.py \
+            target/ci-diagnostics/treasury-sync/build.jsonl \
+            target/ci-diagnostics/treasury-sync
+      - name: Upload treasury diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: treasury-sync-diagnostics
+          path: target/ci-diagnostics/treasury-sync/
+          if-no-files-found: ignore
