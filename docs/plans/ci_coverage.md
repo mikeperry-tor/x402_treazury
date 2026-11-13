@@ -1153,6 +1153,15 @@ first-match and destination-blind reverse lookup. A scripted-handler control mus
 verify its original captured credentials both before and after a later history
 entry. Actual isolated SOCKS/TLS tests retain their complete assertions.
 
+Design review also identified that appending before `TcpStream::connect` and
+later updating an index does not order history by successful connections.
+Overlapping connects can finish out of order. Publish each complete successful
+record once after connection, before acknowledging CONNECT, and retain failed
+attempt records before refusal/error completion. This removes mutable index
+tracking and its clear-versus-update hazard. The independent consumer audit found
+no examined test requiring records while upstream connection is still pending;
+existing response/handler/error-boundary counts must continue to pass.
+
 Commit the correction and adjacent concrete matches as fixups to introducing
 changes where identified, then independently review exact SHAs and combined C24
 consumers. Freeze sources for mutation-negative/positive controls, selected test
