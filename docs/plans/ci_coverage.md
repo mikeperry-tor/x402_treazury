@@ -1080,3 +1080,40 @@ remainder stage on frozen sources, preserving prior unchanged proving/lifecycle
 evidence. Independently review each exact fixup and final combined C23 call chain.
 Generated evidence belongs under `target/ci-registry-lock-validation/`; hosted
 optimized lifecycle and main publication remain pending and user retains push.
+
+C23 implementation is `edb38f22`, a fixup to registry introduction `551abec0`.
+The existing treasury guard now lives in `private_fs::ownership::ExclusiveLock`;
+callers preserve acquisition contexts and static owner labels distinguish safe
+unlock-failure diagnostics. Registry acquisition immediately wraps the descriptor
+before database initialization. Both database-before-lock declaration order and
+treasury Store/StoreHandle Arc retention are unchanged.
+
+The new registry duplicate-descriptor regression failed before implementation,
+then passed with the shared guard. It also verifies live-owner exclusion and that
+closing the old duplicate cannot release a replacement owner's lock. Three
+focused ownership controls passed, including accepted treasury consumer retention
+after worker loss; the broader registry/storage/worker selection passed 16 tests.
+Compiler and all-target `zcash-regtest` Clippy warning gates passed. Compatibility
+passed 33 tests across four targets. With `NO_COLOR` absent and
+`CARGO_TERM_COLOR=always`, the complete `check-default-remaining` continuation
+passed 2170 tests with 44 intentional ignores across 59 harnesses; its library
+passed 1459 with 24 ignored, including the reported saved-name refresh regression.
+Formatting passes. The documented macOS linker warning remains visible in the
+runtime build; compiler/Clippy and compatibility diagnostics were clean.
+
+Source analysis against exact `e1a770c0` is complete: 511 files, 11721 callable
+spaces, no exclusions/warnings, and source/lock hashes matched. Relocated acquire
+CogC/CycC 0/2 and drop 1/2 are unchanged; affected registry and treasury constructor
+and worker metrics are unchanged. Fresh nonauthor `registry_lock_final` reviewed
+exact implementation `edb38f22`, plan `9d246ffb` and combined C23 with initial
+assessment before rationale, complete constructor/failure/drop/accepted-consumer
+chains and prior findings. No material issue or compelling simplification remains.
+The reviewer approved the complexity gate before broader runtime checks.
+
+Evidence remains in `target/ci-registry-lock-validation/` and
+`target/complexity-runs/20261113T195857Z-b0bfc70e/`. This establishes the concrete
+descriptor-retention mechanism, not the identity of a CI child. Native Linux and
+the optimized hosted lifecycle still require the next pushed run; an earlier
+default-stage failure prevents the later lifecycle diagnostic step from starting.
+Unchanged calculation/proving evidence is carried forward; no full `make check`,
+funded/live/Tor/consensus qualification, push or merge is claimed.
