@@ -34,7 +34,7 @@ use crate::{
     },
 };
 
-use super::{ScanResults, scan};
+use super::{ScanResults, scan, task_publication::publish_task};
 
 const MAX_WORKER_POOLSIZE: usize = 2;
 const MAX_LOAD_NULLIFIERS: usize = 2usize.pow(14);
@@ -645,12 +645,13 @@ where
 
     fn add_scan_task(&self, scan_task: ScanTask) {
         tracing::trace!("Adding scan task to loader:\n{:#?}", &scan_task);
-        self.scan_task_sender
-            .clone()
-            .expect("loader should be running")
-            .try_send(scan_task)
-            .expect("loader should never be sent multiple tasks at one time");
-        self.is_loading.store(true, atomic::Ordering::Release);
+        publish_task(&self.is_loading, || {
+            self.scan_task_sender
+                .clone()
+                .expect("loader should be running")
+                .try_send(scan_task)
+                .expect("loader should never be sent multiple tasks at one time");
+        });
     }
 
     fn update_load_store(&mut self) {
@@ -864,12 +865,13 @@ where
 
     fn add_scan_task(&self, scan_task: ScanTask) {
         tracing::trace!("Adding scan task to worker {}:\n{:#?}", self.id, &scan_task);
-        self.scan_task_sender
-            .clone()
-            .expect("worker should be running")
-            .try_send(scan_task)
-            .expect("worker should never be sent multiple tasks at one time");
-        self.is_scanning.store(true, atomic::Ordering::Release);
+        publish_task(&self.is_scanning, || {
+            self.scan_task_sender
+                .clone()
+                .expect("worker should be running")
+                .try_send(scan_task)
+                .expect("worker should never be sent multiple tasks at one time");
+        });
     }
 
     /// Shuts down worker by dropping the sender to the worker task and awaiting the handle.

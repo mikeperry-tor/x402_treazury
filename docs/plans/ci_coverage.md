@@ -861,6 +861,26 @@ maintained-file hashes already enforce its inventory, and post-reversal inventor
 and hashes must still match upstream exactly. Add focused provenance rejection
 controls and update the owning SDK/checkout guides.
 
+Upstream investigation confirms the same race in Zingolib commit
+`3bc86bec73db704e5fba242dc6221497da73e429` (November 12): its commit message
+describes final scan completion overwritten by the dispatcher's later busy store
+and shutdown-on-completion polling forever. Follow-up `4f411a573c792925aa4a58ad9fca166e72e7a379`
+and subsequent encapsulation replace shared flags with scanner-owned keyed task
+activity. Published tag `zingolib_v8.0.0`, resolved to `0df84af1016d243f9bf932a829756d87ce0a74e2`,
+still contains both faulty enqueue-before-store sites. Inspected dev
+`f930d80b6310a35c06e52408045f372f3c8ae261` is 72 commits and 71 files ahead of
+our pin. No existing `reference_repos` checkout was available; primary upstream
+sources and commit patches were inspected directly without creating one.
+
+Independent design assessment retains the minimal local ordering correction:
+the existing scanner dispatches only after observing idle, so publishing busy
+first cannot be cleared by a preceding still-running task. Upstream's final
+protocol also changes result-consumption and ended-runner behavior and is a
+candidate for a separately qualified coherent cohort upgrade. This correction is
+not an upstream cherry-pick, and neither it nor upstream confirmation establishes
+which future the captured CI run awaited. Existing checkout retirement blockers
+and the separate mempool-notice channel hazard remain open.
+
 Run socket-free deterministic/provenance tests, selected production compiler and
 all-target Clippy gates and focused source-matched SDK complexity review before
 broader runtime tests. Then SDK compatibility, real treasury-sync consumers and
