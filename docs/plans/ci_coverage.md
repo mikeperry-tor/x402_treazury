@@ -443,3 +443,19 @@ stage; this test/documentation-only correction does not invalidate those inputs.
 This continuation is not full `make check`, hosted Linux, or coverage acceptance.
 Logs belong under ignored `target/ci-profile-validation/`. No runtime defaults,
 financial authority, test selection or concurrency setting changes.
+
+Independent review cleared exact C13 plan `8a3cd126` and fixup `4d008b78`
+against `ac369750`, including the bounded combined `fffa29e6..4d008b78` branch,
+profile/default serialization, inspection consumers and accumulated prior findings.
+No material findings or compelling simplifications remain in that scope.
+Formatting and selected `public_demo_profiles` Clippy passed without diagnostics;
+the only subsequent Rust edit was formatting. Focused CLI/config/demo execution
+passed 22 tests. `make check-default-remaining` completed successfully at
+`4d008b78`: 2169 passed, 44 ignored across 59 test binaries, including 1458
+library tests and the formerly failing demo integration test. Eight threads and
+the fixed stage selection were unchanged. Its only compiler diagnostic was the
+documented macOS large `__eh_frame` linker warning. Logs are under
+`target/ci-profile-validation/`. This is local default-remainder evidence, carrying
+the unchanged preceding hosted compatibility evidence; it does not establish full
+`make check`, hosted Linux or instrumented coverage. Hosted acceptance and eventual
+main baseline/badge publication remain pending; the user retains pushing.
