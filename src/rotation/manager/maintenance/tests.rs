@@ -517,7 +517,8 @@ async fn exited_reconciliation_task_reacquires_same_gate_and_stops_without_anoth
 
 #[tokio::test]
 async fn zero_refresh_completes_and_idle_wallet_has_no_recurring_reads() {
-    let f = fixture(false, false).await;
+    let mut f = fixture(false, false).await;
+    let startup = f.startup_completion();
     f.rpc.zero.store(true, Ordering::SeqCst);
     let stop = CancellationToken::new();
     let stopped = stop.clone();
@@ -529,6 +530,7 @@ async fn zero_refresh_completes_and_idle_wallet_has_no_recurring_reads() {
     f.wait_completion().await;
     assert!(!f.status().await.low_balance);
     f.finish_observations(U256::ZERO).await;
+    startup.notified().await;
     let calls = f.rpc.calls.load(Ordering::SeqCst);
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(600)).await;
