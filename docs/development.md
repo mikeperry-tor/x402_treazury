@@ -45,8 +45,10 @@ Qualification connectivity probes use Rust ErrorKind to distinguish permission
 denial, refusal and timeout. These portable reporting controls do not establish
 OS confinement. Strict byte-exact vendor reconstruction and portable test fixtures
 remain in use. Current dependency-security evaluation and accepted findings belong
-to the [advisory disposition](#locked-graph-advisory-disposition); Linux CI automation and
-future platform acceptance belong to the [deferred release plan](plans/deferred/release_followups.md).
+to the [advisory disposition](#locked-graph-advisory-disposition).
+[GitHub CI and coverage](testing.md#github-actions-and-coverage) use the existing
+Make entrypoints. Remaining Linux CI acceptance/advisory automation and future
+platform acceptance belong to the [deferred release plan](plans/deferred/release_followups.md).
 
 ## Review decisions and unfinished assessments
 

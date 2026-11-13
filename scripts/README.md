@@ -101,6 +101,10 @@ Coverage keeps an internal shell helper for provenance, failure preservation and
 atomic report publication; invoke its public Make targets below. Specialized Python tools remain
 available directly.
 
+GitHub Actions uses these same entrypoints for Linux checks and default coverage.
+See [CI and octocov](../docs/testing.md#github-actions-and-coverage) for branch
+previews, report artifacts, comparison baselines and main-only badge publication.
+
 | Tool | Purpose |
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |

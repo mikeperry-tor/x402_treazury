@@ -64,5 +64,19 @@ with a current-main check so older runs cannot overwrite newer published badges.
 C1 implemented: LCOV shares summary exclusions and the existing atomic publication
 boundary. Offline regression includes LCOV-only failure preservation.
 `scripts/tests/coverage.sh`, shell syntax checks and `git diff --check` pass.
-Exact-SHA implementation review pending. Push and merge are not authorized by plan
-completion.
+Push and merge are not authorized by plan completion.
+
+C1 exact SHA `81333766` independently reviewed, including common coverage modes,
+failure trap, source verification and report consumers: no material findings.
+C2 implemented with pinned action SHAs, cargo-llvm-cov 0.9.1 and octocov 0.83.5
+plus archive checksum. Publication alone is serialized, skips superseded main
+revisions and never force-pushes. The publisher's exact inline shell was exercised
+in disposable local Git repositories: empty-branch bootstrap, update with retained
+history, stale-revision skip and unchanged repeat all passed. No user remote was
+written. Exact octocov config and synthetic LCOV were parsed by checksum-verified
+octocov 0.83.5 on macOS, producing the expected 1/2-line report and 50.0% badge.
+Actions syntax passes actionlint 1.7.7; 32 existing Makefile/default-target/compiler
+warning tooling tests pass. Shell syntax and diff checks pass. These are local
+tooling checks, not a hosted run or application-coverage measurement. C2 exact-SHA
+and combined integration review pending. Hosted branch execution, baseline absence,
+fork behavior and eventual main publication require remote evidence.

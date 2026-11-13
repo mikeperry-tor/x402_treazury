@@ -1,0 +1,30 @@
+coverage:
+  paths:
+    - target/ci-coverage/lcov.info
+  badge:
+    path: target/ci-coverage/coverage.svg
+    label: default line coverage
+
+diff:
+  if: is_pull_request
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+
+comment:
+  if: is_pull_request
+  updatePrevious: true
+
+summary:
+  if: true
+  message: >-
+    Default-build line coverage. Optional proving, consensus, Tor and live-funded
+    qualification are separate. Download default-line-coverage for the LLVM HTML
+    report and badge preview. Comparisons need a retained main-branch baseline.
+
+report:
+  if: is_default_branch
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+
+# Keep report browsing in GitHub, without using the optional octocov.dev viewer.
+viewer: artifact

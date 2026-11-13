@@ -953,6 +953,58 @@ have no shared hint, so the actual relay offer earns an unsigned sibling handoff
 It pins the exact unchanged relay requests, signing owners and authorization journal
 while retaining the absence of target signing, RPC, funding and allocation.
 
+## GitHub Actions and coverage
+
+[CI](../.github/workflows/ci.yml) runs on pushes to `main` and `ci_coverage`, and
+pull requests targeting `main`. The `ci_coverage` push trigger supports pre-merge
+bootstrap; it can be removed once this work is integrated. Linux checks run
+`make check` in its existing order on Ubuntu 24.04, with the repository's pinned
+Rust, Python 3.13 and full Git history for comparison with `origin/main`.
+The independent default-coverage job runs `make coverage` with matching LLVM
+tools and cargo-llvm-cov 0.9.1. Actions and octocov's binary version/checksum are
+pinned. Cargo download inputs are cached; application builds, financial state and
+private local reports are not cached or uploaded. Hosted resource suitability
+requires actual run evidence; this workflow is not release reproducibility or
+live settlement qualification. The remaining advisory automation and Linux
+acceptance work is owned by [release follow-up D2](plans/deferred/release_followups.md).
+
+[Octocov configuration](../.octocov.yml) consumes the filtered LCOV report, writes
+a job summary and generates a **default line coverage** SVG. The denominator
+excludes vendor code, integration harnesses and operational tools; inline unit-test
+helpers may contribute. Optional proving, consensus, Tor and funded qualification
+are not included in this percentage. There is no percentage or test-time gate.
+Coverage collection, export and publication failures fail the coverage job;
+octocov comments and summaries are best-effort reporting. Linux checks remain a
+separate check, and must be selected as a required check in repository settings
+if merging should be blocked on their result.
+
+Open the branch's Actions run or pull-request checks to see results. The
+`default-line-coverage` artifact contains `html/index.html`, the filtered LCOV and
+summaries, provenance and generated `coverage.svg`; download it for branch badge
+preview. Collection logs are retained separately as `coverage-diagnostics`,
+including on failed collection. Only selected resolved files are uploaded, since
+the local `target/coverage` path is an absolute symlink to its successful run.
+For a branch-specific CI badge, use
+`ci.yml/badge.svg?branch=ci_coverage&event=push`. The README badges describe main.
+
+Main runs store octocov comparison reports in Actions artifacts. Pull requests
+can show coverage deltas once a main baseline exists; missing or expired baseline
+artifacts leave absolute coverage available without a historical comparison.
+Fork pull requests retain read-only tokens: summaries and downloadable reports
+remain available, while posting PR comments may be skipped. The workflow does not
+use `pull_request_target` or run fork code under a privileged follow-up workflow.
+Octocov's optional external viewer is disabled in favor of GitHub artifacts.
+
+After both jobs succeed on a main push, a separate publisher updates `coverage.svg`
+and `source-revision.txt` on the dedicated `badges` branch. Repository Actions
+policy and branch rules must permit that job's `contents: write` token to push.
+The permanent badge does not exist until this first successful publication. Only
+publication is serialized: running test jobs are not cancelled, but GitHub may
+replace a superseded pending publisher. A publisher checks current main and skips
+an older revision, then uses a normal non-force push. The badge identifies its
+published source revision; a failing or still-running main revision can leave
+the prior successful coverage badge visible, alongside the current CI status.
+
 ## Coverage and complexity
 
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency

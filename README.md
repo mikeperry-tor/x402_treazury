@@ -1,5 +1,8 @@
 # x402_treazury
 
+[![CI](https://github.com/mikeperry-tor/x402_treazury/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/mikeperry-tor/x402_treazury/actions/workflows/ci.yml)
+[![Default line coverage](https://raw.githubusercontent.com/mikeperry-tor/x402_treazury/badges/coverage.svg)](docs/testing.md#github-actions-and-coverage)
+
 **Privacy-enhanced x402 payments for AI agents.**
 
 [x402 micropayments](https://x402.org/) have a privacy problem. When you reuse your
