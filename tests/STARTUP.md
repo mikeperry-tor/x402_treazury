@@ -24,7 +24,11 @@ strict-limit/timeout separation, shared-download cancellation and fresh loads,
 per-alias overrides/filters/wallets, strict configuration, and JSON stdout with
 progress on stderr. The CLI boundary regression parses the complete tool inventory,
 checks its tool count, and retains meaningful stderr progress without exposing
-endpoint addresses. Readiness remains INFO; routine local reads, cache policies,
+endpoint addresses. A malformed catalog makes `catalog tools` exit unsuccessfully
+with empty stdout and no endpoint-address disclosure on stderr. A separate
+qualification-snapshot case checks structured parse failure, independent source
+completion and absence of partial inventory, without matching lifecycle log text.
+Readiness remains INFO; routine local reads, cache policies,
 origin fetches and alias sharing remain DEBUG under the logging policy. The
 synchronous unsigned-serving loader can omit optional
 remote failures with explicit unavailable status; required sources, inspection and

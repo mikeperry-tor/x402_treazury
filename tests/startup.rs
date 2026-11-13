@@ -470,7 +470,7 @@ fn alias_config(
 }
 
 #[tokio::test]
-async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
+async fn cli_parse_failure_returns_no_inventory_or_private_address() {
     tls::install_trust();
     let fixture = Fixture::new(1, Some(0)).await;
     fixture.release(0);
@@ -493,10 +493,6 @@ async fn cli_reports_parse_failure_stage_without_publishing_inventory() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let log = String::from_utf8(output.stderr).unwrap();
-    assert!(!log.contains("Catalog response body complete"));
-    assert!(log.contains("Catalog load failed; complete inventory unavailable"));
-    assert!(log.contains("failure_stage=\"parse\""), "{log}");
-    assert!(!log.contains("Catalog JSON parse complete"));
     assert!(!log.contains(&fixture.address.to_string()));
 }
 
