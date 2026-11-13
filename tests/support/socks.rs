@@ -28,11 +28,31 @@ pub struct Record {
     pub address_type: u8,
     pub upstream_peer: Option<SocketAddr>,
 }
+pub type Credentials = (String, String);
+pub type Records = Arc<Mutex<Vec<Record>>>;
+
+/// Observe while the origin connection is live, then retain this snapshot.
+/// Source ports can recur in history and across different destinations.
+pub fn credentials_for_peer(
+    records: &[Record],
+    peer: SocketAddr,
+    host: &str,
+    port: u16,
+) -> Option<Credentials> {
+    records
+        .iter()
+        .rev()
+        .find(|record| {
+            record.upstream_peer == Some(peer) && record.host == host && record.port == port
+        })
+        .map(|record| (record.user.clone(), record.password.clone()))
+}
+
 pub struct Socks {
     pub address: SocketAddr,
     #[cfg(unix)]
     pub unix_path: Option<std::path::PathBuf>,
-    pub records: Arc<Mutex<Vec<Record>>>,
+    pub records: Records,
     pub accepted: Arc<std::sync::atomic::AtomicUsize>,
     stop: CancellationToken,
 }
@@ -181,20 +201,16 @@ where
         _ => return Err(std::io::Error::other("invalid address type")),
     };
     let port = socket.read_u16().await?;
-    let record_index = {
-        let mut logs = records.lock().unwrap();
-        let index = logs.len();
-        logs.push(Record {
-            user,
-            password,
-            host: host.clone(),
-            port,
-            address_type: head[3],
-            upstream_peer: None,
-        });
-        index
+    let mut record = Record {
+        user,
+        password,
+        host: host.clone(),
+        port,
+        address_type: head[3],
+        upstream_peer: None,
     };
     if matches!(fault, Fault::Refuse) {
+        records.lock().unwrap().push(record);
         socket.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
         return Ok(());
     }
@@ -208,11 +224,20 @@ where
         .or_else(|| routes.get(&host))
         .or(loopback.as_ref());
     let Some(target) = target else {
+        records.lock().unwrap().push(record);
         socket.write_all(&[5, 4, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
         return Ok(());
     };
-    let mut remote = TcpStream::connect(target).await?;
-    records.lock().unwrap()[record_index].upstream_peer = Some(remote.local_addr()?);
+    let connected = TcpStream::connect(target)
+        .await
+        .and_then(|remote| Ok((remote.local_addr()?, remote)));
+    if let Ok((peer, _)) = &connected {
+        record.upstream_peer = Some(*peer);
+    }
+    // Publish once in connection order, before acknowledging CONNECT. No later
+    // vector-index update can race a clear or reorder overlapping connections.
+    records.lock().unwrap().push(record);
+    let (_, mut remote) = connected?;
     socket.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await?;
     tokio::io::copy_bidirectional(&mut socket, &mut remote).await?;
     Ok(())

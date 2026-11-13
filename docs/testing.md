@@ -53,6 +53,17 @@ winning scope's actual fixture disclosure. Existing promotion/key/eviction tests
 retain their separate ownership contracts; these fixtures add no production
 coalescing, timeout or scope-history framework.
 
+SOCKS wire-identity fixtures capture credentials at HTTP handler entry, before
+waiting on gates or delays. Correlation selects the newest matching proxy peer,
+destination host and port; the observation retains those credentials rather than
+looking up a historical socket address afterward. Source ports can be reused,
+including across destinations. The proxy publishes completed connection records
+before acknowledging CONNECT, without a later mutable-index update; failed
+attempts remain recorded before error completion. Configured SOCKS observation requires a matching
+record; direct fixtures explicitly omit it. Stale-history and later-reuse controls
+preserve exact scope, signer, promotion and no-replay assertions without relying
+on libtest thread scheduling.
+
 Catalog acceptance fixtures exercise ordinary inspection, serving and deferred
 startup with fresh acquisition owners: semantically rejected JSON is not cached,
 restart can reach a recovered origin, and rejected downloads or HTTP 304 content
