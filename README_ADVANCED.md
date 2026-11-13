@@ -211,6 +211,41 @@ large range. Ensuring payments stay below 25% of the wallet target reduces
 fragmentation; retained balances can still serve smaller calls. See
 [reserve sizing](docs/configuration.md#reserve-sizing-and-fragmentation).
 
+## Adding API Providers
+
+The [provider catalog](providers/README.md) contains reusable TOML definitions,
+including curated catalogs for APIs that need adaptation. Providers carry specific
+reliability tags for observed issues, including Tor-related failures; startup prints
+corresponding warnings. Tags describe known observations, not current availability
+or proof that Tor caused a failure.
+
+For a compatible OpenAPI provider, a source can start with just its specification URL:
+
+```toml
+[sources.my_api]
+spec = "https://api.example.com/openapi.json"
+```
+
+Add `my_api` to a server's `sources`. Some providers also need a `base_url`, tool
+filters, schema overrides or payment compatibility settings. Reuse bundled settings
+with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage guide.
+Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
+entire large catalog to the agent.
+
+For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to provide the agent with search+call wrapper tools instead of every API schema. Agents retrieve full
+descriptions and schemas as needed via the `x402_treazury_tools_search()` tool, and can
+make calls to discovered tools via the `x402_treazury_tool_call()` tool.
+See [on-demand discovery](docs/agent-sources.md).
+
+Provider management lets agents find bundled providers or APIs through
+[x402 List](https://x402-list.com) and Coinbase resource search, then add tools to an
+MCP endpoint themselves. The feature is disabled by default; enable local
+management, remote management and raw URL calls independently on an endpoint with
+an explicit existing `wallet`. Optional `source_registry_file` enables persistence.
+Agent tools cannot change configured API sources, wallet settings or spending
+limits. See [configuration and authority](docs/agent-sources.md#configuration-and-authority)
+and the [agent tool table](docs/agent-sources.md#agent-tools).
+
 ## Packaged stack
 
 [Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) packages

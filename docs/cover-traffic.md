@@ -4,8 +4,11 @@ See [Wallet selection and network isolation](architecture.md#wallet-selection-an
 for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
 
 Treazury can add bounded unsigned range reads and randomized request headers to
-operator-selected API calls. Cover defaults on in Tor mode and off in direct mode;
-it remains experimental.
+operator-selected API calls. Cover defaults on in Tor mode for eligible configured
+sources and off in direct mode. Explicit profiles can add randomized request-header
+padding and tune concurrency and sampling distributions. This is a research vehicle
+for traffic-shape experiments, **not a demonstrated defense against traffic
+analysis**.
 It uses the same identity-bound network factory and reqwest pools as real calls.
 Pooling permits multiplexing but does not guarantee a shared physical connection.
 No production same-channel or resistance-to-traffic-analysis claim is made.
@@ -18,7 +21,8 @@ file, set the top-level `cover_traffic_enabled = false` to disable both ranges a
 padding for that provider. A deployment source can set the same field beside
 `extends` to override an inherited provider policy. Provider true cannot override
 global false. `config show` shows the effective network switch and authored
-source overrides without opening secrets.
+source overrides without opening secrets. Some bundled providers opt out for
+compatibility.
 
 For authored static sources without a `[cover_traffic]` table, the default uses the
 same-origin HTTPS `help_url` (often `llms.txt`) first, with the same-origin

@@ -167,62 +167,12 @@ for more details.
 
 ## Going further
 
-- [Advanced deployments](README_ADVANCED.md): research desk and comprehensive walkthroughs, Tor, bootstrap and relay details.
+- [Advanced deployments](README_ADVANCED.md): configuration walkthroughs, Tor, bootstrap, relay details, adding new providers.
 - [Large reserves and expensive APIs](docs/configuration.md#reserve-sizing-and-fragmentation): sizing, fragmentation and the separate large-wallet rationale.
 - [Wallet sharing and automatic assignment](docs/configuration.md#multiple-mcp-ports-from-one-configuration): templates, scopes and examples.
 - [Agent Zcash payments and swaps](docs/configuration.md#direct-swap-control): optional receive/send tools and limits.
 - [Agent-added API providers](docs/agent-sources.md#agent-tools): discovery, registration and direct calls.
 - [Wallet CLI](docs/wallet-cli.md): treasury operations, funding limits and recovery.
-
-## Adding API Providers
-
-The [provider catalog](providers/README.md) contains reusable TOML definitions,
-including curated catalogs for APIs that need adaptation. Providers carry specific
-reliability tags for observed issues, including Tor-related failures; startup prints
-corresponding warnings. Tags describe known observations, not current availability
-or proof that Tor caused a failure.
-
-For a compatible OpenAPI provider, a source can start with just its specification URL:
-
-```toml
-[sources.my_api]
-spec = "https://api.example.com/openapi.json"
-```
-
-Add `my_api` to a server's `sources`. Some providers also need a `base_url`, tool
-filters, schema overrides or payment compatibility settings. Reuse bundled settings
-with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage guide.
-Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
-entire large catalog to the agent.
-
-For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to provide the agent with search+call wrapper tools instead of every API schema. Agents retrieve full
-descriptions and schemas as needed via the `x402_treazury_tools_search()` tool, and can
-make calls to discovered tools via the `x402_treazury_tool_call()` tool.
-See [on-demand discovery](docs/agent-sources.md).
-
-Provider management lets agents find bundled providers or APIs through
-[x402 List](https://x402-list.com) and Coinbase resource search, then add tools to an
-MCP endpoint themselves. The feature is disabled by default; enable local
-management, remote management and raw URL calls independently on an endpoint with
-an explicit existing `wallet`. Optional `source_registry_file` enables persistence.
-Agent tools cannot change configured API sources, wallet settings or spending
-limits. See [configuration and authority](docs/agent-sources.md#configuration-and-authority)
-and the [agent tool table](docs/agent-sources.md#agent-tools).
-
-## Experimental HTTP/2 cover traffic
-
-Tor mode enables bounded unsigned range traffic by default for eligible configured
-sources. Explicit profiles can add randomized request-header padding and tune
-concurrency and sampling distributions. This is a
-research vehicle for traffic-shape experiments, **not a demonstrated defense against
-traffic analysis**. It shares the real request's isolation scope and prioritizes paid
-traffic.
-
-Set `network.cover_traffic_enabled = false` to disable it globally, or
-`cover_traffic_enabled = false` in a provider/source definition to disable it for that
-provider. Some bundled providers already opt out for compatibility. Agent-added
-sources do not automatically authorize cover traffic. See the
-[cover traffic guide](docs/cover-traffic.md) for distributions, bounds and qualification.
 
 ## Documentation and status
 
