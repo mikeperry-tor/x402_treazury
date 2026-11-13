@@ -184,4 +184,35 @@ C5 implements seven sequential steps and the allowlisted stage helper, with
 combined output, elapsed/status files and failure summaries. Six new subprocess
 regressions and 28 existing Make/target-selection tests pass, as do actionlint,
 Bash syntax and diff checks. No compiled cache or concurrency changes were made.
-C5 exact-commit review and C6 compiler/runtime validation remain pending.
+C5 is committed as `331feab4`. C6 fixups are `aba81b37` against `dac55936`
+(cancellation fixture and shared completion signal), `2eae8f43` against
+`116196f4` (startup-failure fixture), and `f4ab8e20` against `8da347fd`
+(interrupted actor recovery fixture). No production interval, authority, queue
+or observation selection changed. Sources were frozen at `f4ab8e20` for validation.
+
+The source-matched complexity comparison against `844bc2ac` is complete with no
+exclusions (511 files), retained under
+`target/complexity-runs/20261113T050534Z-df5b806b/`. Independent complexity review
+dispositioned the sole increase, `ManagedPool::maintenance` CogC 52 to 54/CycC 57
+to 60, as the test-only drained-state notification. Keeping the signal beside the
+existing completion boundary avoids a new scheduler/observer responsibility;
+extracting it would only move decisions. Actor ownership and unchanged observation,
+retirement and Store consumers were reviewed as well.
+
+At `f4ab8e20`, `make check-clippy` passed both production compiler and all-target
+`zcash-regtest` Clippy checks without diagnostics; `make fmt-check` passed.
+Focused library execution selected maintenance and treasury actor modules with
+eight test threads: 28 passed and two isolated child fixtures were ignored at the
+top level and invoked by their passing parents. All three changed fixtures ran.
+The test linker emitted the already documented macOS large `__eh_frame` warning;
+no runtime failure occurred. Logs are under `target/ci-timing-validation/`.
+This is functional validation, not a concurrency or GitHub speedup measurement.
+
+Independent review cleared every exact C5/C6 commit/fixup and the combined
+`fffa29e6..f4ab8e20` branch, reconciling prior findings and source-matched validation.
+No material findings or compelling simplifications remain locally. C5/C6 are
+implemented and locally validated/reviewed; C7 hosted acceptance remains pending.
+The plan stays active for the user's next push and eventual main publication.
+Compiled caching and concurrency remain unchanged; no new tuning measurement is
+selected. The remaining work is to inspect hosted stage/log artifacts and complete
+the already listed remote coverage/baseline/badge acceptance.
