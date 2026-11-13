@@ -612,6 +612,15 @@ provider selections do not own that regression. Actual-call
 challenge tests cover passive hint validation and wallet selection. Stdio and
 shutdown suites exercise accepted-call ownership.
 
+Tests of real deployment profiles retain independent literal expectations for
+their documented financial and offline-inspection contracts. When changing a
+default or profile, update its contract assertions and owning guide together;
+deriving expectations from the input would hide unintended changes. Keep generic
+behavior tests on small synthetic inputs when curated example selections are not
+the contract. Run affected root integration targets explicitly: `--lib` does not
+execute them. Use the existing default-test stage when validating the combined
+default suite, or its remainder when compatibility evidence remains valid.
+
 Capacity lifecycle fixtures call `consumed_reserve` with claim, retained-wallet,
 retirement, vacant-replacement and allocated-replacement matrices. They pin exact
 funding correlations, readiness support and first-error order, including existing
