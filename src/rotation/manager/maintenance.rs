@@ -106,6 +106,8 @@ impl ManagedPool {
         let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
         let mut qualification_due = Instant::now();
         let mut qualification_active = false;
+        #[cfg(test)]
+        let mut startup_completed = self.reconciliation_startup_test_hook.clone();
         loop {
             if stop.is_cancelled() {
                 break;
@@ -229,6 +231,15 @@ impl ManagedPool {
                     limit_reads = BALANCE_READS,
                     "Advisory balance observation capacity reached; remaining inventory retained for a later pass"
                 );
+            }
+            #[cfg(test)]
+            if initial.is_none()
+                && reads.is_empty()
+                && let Some(ready) = startup_completed.take()
+            {
+                // Observe full client publication/retirement and sibling startup
+                // completion without creating another observation.
+                ready.notify_one();
             }
             if one_pass && initial.is_none() && reads.is_empty() {
                 let pool = self.pool.clone();

@@ -36,6 +36,13 @@ struct Fixture {
     rpc: Rpc,
 }
 impl Fixture {
+    fn startup_completion(&mut self) -> Arc<tokio::sync::Notify> {
+        let ready = Arc::new(tokio::sync::Notify::new());
+        Arc::get_mut(&mut self.pool)
+            .unwrap()
+            .reconciliation_startup_test_hook = Some(ready.clone());
+        ready
+    }
     /// Join client publication, including the retained proof stage, before a
     /// fixture advances virtual time. Server handler counters are insufficient.
     async fn finish_observations(&self, expected: U256) {
@@ -268,7 +275,8 @@ async fn qualification_history_pages_keep_bad_rows_scoped_and_include_retired_at
 }
 #[tokio::test]
 async fn cancelled_waiter_keeps_owned_read_and_new_failure_requires_follow_up() {
-    let f = fixture(true, false).await;
+    let mut f = fixture(true, false).await;
+    let startup = f.startup_completion();
     let pool = f.pool.clone();
     let stop = CancellationToken::new();
     let stopped = stop.clone();
@@ -292,6 +300,7 @@ async fn cancelled_waiter_keeps_owned_read_and_new_failure_requires_follow_up() 
         tokio::task::yield_now().await;
     }
     f.wait_completion().await;
+    startup.notified().await;
     assert!(f.status().await.low_balance);
     assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 1);
     tokio::time::pause();
@@ -316,12 +325,9 @@ async fn cancelled_waiter_keeps_owned_read_and_new_failure_requires_follow_up() 
     // before the wallet is due. Allow its next tick without requiring dispatch
     // at the earliest permitted instant.
     tokio::time::advance(CADENCE).await;
-    for _ in 0..1000 {
-        if !f.status().await.low_balance {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    // Follow-up TLS and blocking Store publication need running time.
+    tokio::time::resume();
+    f.wait_completion().await;
     let status = f.status().await;
     assert_eq!(status.confirmed_balance, "33");
     assert!(!status.low_balance);

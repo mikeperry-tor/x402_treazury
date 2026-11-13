@@ -80,6 +80,8 @@ pub struct ManagedPool {
     #[cfg(test)]
     reconciliation_test_hook: Option<Arc<dyn Fn() + Send + Sync>>,
     #[cfg(test)]
+    reconciliation_startup_test_hook: Option<Arc<tokio::sync::Notify>>,
+    #[cfg(test)]
     test_admission_hook: Option<AdmissionTestHook>,
 }
 struct Offer {
@@ -171,6 +173,8 @@ impl ManagedPool {
             reconciliation: store.reconciliation_gate(&pool)?,
             #[cfg(test)]
             reconciliation_test_hook: None,
+            #[cfg(test)]
+            reconciliation_startup_test_hook: None,
             #[cfg(test)]
             test_admission_hook: None,
             store,
