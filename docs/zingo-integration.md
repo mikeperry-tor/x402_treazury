@@ -13,9 +13,10 @@ Pepper snapshot file, its ordered patches, original upstream file hashes and the
 copied-code license notice.
 `python3 vendor/verify_pepper.py` verifies those files and rejects unexpected Pepper
 files. It reverses all patches in a temporary copy and compares the complete
-restored tree with the pinned upstream Git source.
-`pepper-sync-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
-changes; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
+restored tree with the pinned upstream Git source. Declared patches may create
+files, which must disappear during reversal before that comparison.
+`pepper-sync-progress.patch` covers Pepper's `client.rs`, `scan.rs`, `scan/task.rs`
+and private `scan/task_publication.rs`; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
 `sync.rs`, `wallet/traits.rs` and `witness.rs`. `pepper-sync-reorg.patch` keeps
 the upstream 1000-block rolling rollback/checkpoint/transparent-discovery horizon
 and repairs derived chain state when retained rollback boundaries are unavailable. The payload accepted by the public
@@ -163,7 +164,17 @@ Financial authority, retained bytes, publication and recovery remain in [wallet 
 
 The progress patch removes complete-message timers on sync streams and retains
 loader/worker ownership while draining, with periodic stage diagnostics instead
-of forced timeout success. Header/body inactivity remains in the application
+of forced timeout success. Both dispatch paths publish busy before enqueueing:
+a fast consumer cannot finish and then have its idle state overwritten by the
+dispatcher. Deterministic regressions compile the exact private publication
+primitive into `tests/sdk_compat.rs`.
+
+Upstream confirms this race in
+[`3bc86bec`](https://github.com/zingolabs/zingolib/commit/3bc86bec73db704e5fba242dc6221497da73e429).
+Its subsequent [scanner-owned activity protocol](https://github.com/zingolabs/zingolib/commit/4f411a573c792925aa4a58ad9fca166e72e7a379)
+is a candidate for a coherent SDK upgrade. The maintained patch is a narrow local
+publication-order correction, not a cherry-pick of that broader protocol.
+Header/body inactivity remains in the application
 transport. Resource-related gRPC codes (`OutOfRange` and `ResourceExhausted`)
 emit safe WARNs at the existing stream-consumption points before recovery can
 replace the original status. The application adapter reports the same codes for

@@ -107,7 +107,12 @@
      const IRONWOOD_ACTIVATION: u32 = 300;
 --- a/pepper-sync/src/scan/task.rs
 +++ b/pepper-sync/src/scan/task.rs
-@@ -38,8 +38,6 @@
+@@ -34,12 +34,10 @@
+     },
+ };
+ 
+-use super::{ScanResults, scan};
++use super::{ScanResults, scan, task_publication::publish_task};
  
  const MAX_WORKER_POOLSIZE: usize = 2;
  const MAX_LOAD_NULLIFIERS: usize = 2usize.pow(14);
@@ -186,7 +191,27 @@
  
                              match first_msg_res {
                                  Ok(b) => b,
-@@ -703,17 +691,18 @@
+@@ -657,12 +645,13 @@
+ 
+     fn add_scan_task(&self, scan_task: ScanTask) {
+         tracing::trace!("Adding scan task to loader:\n{:#?}", &scan_task);
+-        self.scan_task_sender
+-            .clone()
+-            .expect("loader should be running")
+-            .try_send(scan_task)
+-            .expect("loader should never be sent multiple tasks at one time");
+-        self.is_loading.store(true, atomic::Ordering::Release);
++        publish_task(&self.is_loading, || {
++            self.scan_task_sender
++                .clone()
++                .expect("loader should be running")
++                .try_send(scan_task)
++                .expect("loader should never be sent multiple tasks at one time");
++        });
+     }
+ 
+     fn update_load_store(&mut self) {
+@@ -703,17 +692,18 @@
              drop(receiver);
          }
  
@@ -213,7 +238,27 @@
              }
          }
  
-@@ -893,18 +882,18 @@
+@@ -875,12 +865,13 @@
+ 
+     fn add_scan_task(&self, scan_task: ScanTask) {
+         tracing::trace!("Adding scan task to worker {}:\n{:#?}", self.id, &scan_task);
+-        self.scan_task_sender
+-            .clone()
+-            .expect("worker should be running")
+-            .try_send(scan_task)
+-            .expect("worker should never be sent multiple tasks at one time");
+-        self.is_scanning.store(true, atomic::Ordering::Release);
++        publish_task(&self.is_scanning, || {
++            self.scan_task_sender
++                .clone()
++                .expect("worker should be running")
++                .try_send(scan_task)
++                .expect("worker should never be sent multiple tasks at one time");
++        });
+     }
+ 
+     /// Shuts down worker by dropping the sender to the worker task and awaiting the handle.
+@@ -893,18 +884,18 @@
              drop(sender);
          }
  
@@ -241,3 +286,78 @@
              }
          }
      }
+--- a/pepper-sync/src/scan.rs
++++ b/pepper-sync/src/scan.rs
+@@ -31,6 +31,7 @@
+ 
+ pub(crate) mod compact_blocks;
+ pub(crate) mod task;
++mod task_publication;
+ pub(crate) mod transactions;
+ 
+ #[derive(Debug, Clone)]
+--- /dev/null
++++ b/pepper-sync/src/scan/task_publication.rs
+@@ -0,0 +1,62 @@
++//! Publish ownership before a consumer can observe and finish accepted work.
++use std::sync::atomic::{AtomicBool, Ordering};
++
++pub(super) fn publish_task(busy: &AtomicBool, enqueue: impl FnOnce()) {
++    busy.store(true, Ordering::Release);
++    enqueue();
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::{
++        sync::{Arc, mpsc as acknowledgement},
++        thread,
++    };
++    use tokio::sync::mpsc;
++
++    #[test]
++    fn completed_consumer_cannot_be_marked_busy_again() {
++        let busy = Arc::new(AtomicBool::new(false));
++        let (sender, mut receiver) = mpsc::channel(1);
++        let (completed, completion) = acknowledgement::channel();
++        let consumer_busy = busy.clone();
++        let consumer = thread::spawn(move || {
++            while receiver.blocking_recv().is_some() {
++                consumer_busy.store(false, Ordering::Release);
++                completed.send(()).unwrap();
++            }
++        });
++        for _ in 0..2 {
++            publish_task(&busy, || {
++                sender.try_send(()).unwrap();
++                // Force completion before enqueue returns to its publisher.
++                completion.recv().unwrap();
++            });
++            assert!(!busy.load(Ordering::Acquire), "finished work remained busy");
++        }
++        drop(sender);
++        consumer.join().unwrap();
++    }
++
++    #[test]
++    fn accepted_unfinished_work_remains_busy() {
++        let busy = Arc::new(AtomicBool::new(false));
++        let (sender, mut receiver) = mpsc::channel(1);
++        let (started, entered) = acknowledgement::channel();
++        let (release, released) = acknowledgement::channel();
++        let consumer_busy = busy.clone();
++        let consumer = thread::spawn(move || {
++            receiver.blocking_recv().unwrap();
++            started.send(()).unwrap();
++            released.recv().unwrap();
++            consumer_busy.store(false, Ordering::Release);
++        });
++        publish_task(&busy, || sender.try_send(()).unwrap());
++        entered.recv().unwrap();
++        assert!(busy.load(Ordering::Acquire));
++        release.send(()).unwrap();
++        consumer.join().unwrap();
++        assert!(!busy.load(Ordering::Acquire));
++    }
++}

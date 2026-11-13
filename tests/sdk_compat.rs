@@ -2,6 +2,10 @@ use pepper_sync::wallet::traits::SyncWallet;
 use std::num::NonZeroU32;
 #[path = "support/sdk_merge.rs"]
 mod sdk_merge;
+// Compile the maintained private primitive itself: dependency unit tests are
+// excluded from ordinary workspace selection, and no public SDK shim is needed.
+#[path = "../vendor/pepper-sync/src/scan/task_publication.rs"]
+mod task_publication;
 use x402_treazury::payment::{Payer, SpendPolicy};
 use zingolib::{
     config::{ClientConfig, WalletConfig},

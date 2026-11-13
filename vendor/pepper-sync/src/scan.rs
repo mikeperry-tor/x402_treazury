@@ -31,6 +31,7 @@ use self::{
 
 pub(crate) mod compact_blocks;
 pub(crate) mod task;
+mod task_publication;
 pub(crate) mod transactions;
 
 #[derive(Debug, Clone)]

@@ -24,9 +24,8 @@ if errors:
 
 source = root / "pepper-sync"
 expected = manifest["original_files"]
-actual = {path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file()}
-if actual != set(expected):
-    raise SystemExit(f"Pepper upstream inventory differs: {actual ^ set(expected)}")
+# The maintained inventory above may include files created by declared patches.
+# Reversal must still restore the exact upstream inventory and bytes below.
 with tempfile.TemporaryDirectory() as directory:
     restored = Path(directory) / "pepper-sync"
     shutil.copytree(source, restored)
