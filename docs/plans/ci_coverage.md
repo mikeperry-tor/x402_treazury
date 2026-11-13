@@ -129,6 +129,15 @@ writing this workflow.
   selected test Clippy and the full eight-thread treasury target before the user's
   next hosted diagnostic run. Do not infer an async wait location from a wrapper
   stack frame or claim an unproven deadlock fix.
+- C17: Make lifecycle panic output immediate and add a focused lifecycle diagnostic
+  workflow using the existing monitor. Preserve `zcash-testutils`, the library
+  lifecycle filter and eight threads. Unlike the finite treasury-sync experiment,
+  lifecycle diagnostics take numbered CPU/memory/thread snapshots every five
+  minutes without terminating active proving. Keep actual test exits, bounded
+  capture/cancellation cleanup and artifact privacy. Independently review exact
+  changes and combined consumers; validate synthetic monitor controls, fixed Make
+  selection, Cargo artifact selection and Actions syntax without repeating the
+  expensive lifecycle suite solely for output/tooling changes.
 
 ## Review and validation gates
 
@@ -658,3 +667,42 @@ focused workflow triggers on this fixture change. A local pass does not reproduc
 the captured stall, and no application deadlock fix is claimed. The separately
 identified SDK notice-channel cycle remains concrete unfinished work. Hosted
 checks and eventual main publication/plan cleanup also remain pending.
+
+## Lifecycle progress and failure visibility
+
+C17 starts at `a343a838`. Focused run `43436700710` passed all 27 treasury-sync
+tests with one ignored in 36 seconds, including both previously implicated cases.
+Ordinary CI run `43436700708` passed static, compiler/Clippy, compatibility, default
+remainder and proving stages, then remained in lifecycle testing for over 52
+minutes. User output showed two failed direct-service tests and later successful
+terminal/worker/reorg tests, followed by at least five minutes without a new
+completion. The API cannot expose this running console or its remaining test set.
+Private public-API/artifact evidence is under `target/ci-diagnostics/43436700708/`
+and `target/ci-diagnostics/43436700710/`.
+
+There are 68 authored lifecycle test attributes. Real cryptographic proofs, scans
+and accepted-work drains make this stage heavier than default coverage; elapsed
+time alone does not prove a hang. Both failed direct-service tests have existing
+180-second submission handoff guards, but no panic details are available yet.
+Already reported failures have completed their test wrappers; they are not proof
+that those wrappers remain blocked in teardown. Independent read-only triage found
+no demonstrated release-gate cycle. Preserve financial assertions and limits.
+
+Independent design review approved `--nocapture` for the existing lifecycle stage
+and one lifecycle mode in the existing monitor. Compile through Make before
+sampling; select exactly the feature-enabled library executable. Take snapshots
+every 300 seconds after the preceding capture completes, including process CPU
+ticks/RSS with explicit units. Do not apply the treasury-sync termination policy
+to real proving. On cancellation during a periodic capture, shorten that same
+capture and proceed to cleanup without another attach. Preserve zero and nonzero
+test exits, including test completion while captured; record capture errors and
+continue valid work. Use scoped branch-push bootstrap, native attach smoke and
+`always()` upload. GDB can perturb fixture timing, so this experiment does not
+replace ordinary lifecycle qualification.
+
+Validate the monitor's continuation, failed capture, completion-during-capture,
+nonzero exit and cancellation paths with small subprocesses. Verify exact Make
+selectors, actual Cargo JSON library selection and Actions syntax. No Rust source,
+profile pin, test thread count or application timeout changes. Generated evidence
+belongs under `target/ci-lifecycle-diagnostics-validation/`. Hosted failure
+assertions and the root causes of remaining stalls still require real evidence.
