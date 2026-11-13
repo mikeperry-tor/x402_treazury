@@ -68,6 +68,15 @@ writing this workflow.
   private-prose/URL assertions. Commit as a fixup to `47c99674`; independently
   review the exact fixup and final combined branch. Preserve eight test threads,
   production transport/replay/cache/logging policy and retained CI stage selections.
+- C10: Repair TLS fault-fixture publication and partial-write ordering. Protect
+  corrupted TCP acceptance, count publication and count snapshots with one local
+  mutex, held only during synchronous polling. Release the body header gate only
+  after the complete original TLS output chunk is accepted. Use a generic private
+  fixture writer to test pending, zero, failed and partial writes and publication
+  exclusion deterministically without sockets. Preserve real ciphertext corruption,
+  all exact connection/call/flip counts and existing mode scenarios. Commit the
+  correction as a fixup to `2c83d5c7`, independently review the exact fixup and
+  combined branch, and retain hosted acceptance for the user's push.
 
 ## Review and validation gates
 
@@ -278,3 +287,29 @@ fixtures need no diagnostic isolation themselves. No production policy or
 concurrency changes were made. Prior unaffected CI/compiler/complexity evidence
 is retained; hosted full-stage/coverage and main badge acceptance still await the
 user's push. The plan remains active for that remote acceptance.
+
+## TLS fault publication follow-up
+
+Starting C10 baseline is `741bae98`. The reported Linux library run passed 1450
+tests and failed the isolated TLS retry child in `tor1`: the header-corruption
+counter was zero rather than one. Independent low-level and scenario audits found
+no scenario identity/fault-selection defect. The wrapper exposes corrupted bytes
+before publishing its atomic counter, allowing a different runtime worker to
+observe the client failure before that publication. Atomic memory ordering alone
+cannot close this interval. Partial initial header writes also release the body
+gate before the original chunk is completely accepted.
+
+The design uses accepted-byte bookkeeping under a shared synchronous mutex,
+never counting an attempted mutation as delivered. Header-prefix progress is
+retained across partial and pending polls. Pinned Tokio-rustls completes and
+flushes the handshake before returning the accepted stream; pinned Rustls drains
+accepted prefixes of its first output chunk. No parser, timer, scenario split,
+production retry or concurrency change is selected. The exact reported Linux
+interleaving is not claimed to be reproduced by source inspection.
+
+Validate focused socket-free write regressions and test-target lint/format checks
+before the existing TLS retry and affected network/socket tests. Include a full
+local default library run if focused tests pass, since the issue was exposed by
+that harness. Keep eight threads and existing child modes. Retain all exact
+financial no-replay/connection and actually-corrupted-byte assertions. Generated
+logs remain under ignored `target/ci-tls-failure/`.
