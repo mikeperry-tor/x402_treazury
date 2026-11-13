@@ -118,6 +118,17 @@ writing this workflow.
   and process-group isolation controls, plus affected Rust lint/tests and workflow
   syntax. Independently review exact commits and the combined branch. No push,
   production timeout, test-thread tuning or deadlock-fix claim is authorized.
+- C16: Use the captured Linux wait state to instrument the newly implicated
+  actor-dispatch fixture. Share opt-in command phase breadcrumbs with the existing
+  reuse fixture; add an optional static Mock label for closed-name RPC entry and
+  prepared-response observations, including its intentionally pending mempool
+  request. Enable only existing treasury DEBUG and Pepper sync INFO events through
+  one diagnostic-only process subscriber so spawned runtimes report their stages.
+  Preserve ordinary-test logging, all financial/ownership assertions and runtime
+  behavior. Independently review exact changes and combined consumers; validate
+  selected test Clippy and the full eight-thread treasury target before the user's
+  next hosted diagnostic run. Do not infer an async wait location from a wrapper
+  stack frame or claim an unproven deadlock fix.
 
 ## Review and validation gates
 
@@ -588,3 +599,38 @@ runs alongside that bootstrap; the focused workflow can be retried independently
 Force cancellation/runner loss can prevent evidence, and native stacks alone may
 not identify an async waiter. Hosted full checks, final coverage/main publication
 and active-plan cleanup remain pending; no deadlock fix is claimed.
+
+## Actor scan wait localization
+
+C16 starts at `6ff61887`. Diagnostic run `43402324149`, job `131807960376`,
+executed that revision and captured the actor-dispatch fixture after 301 seconds.
+The command-reuse case completed in 31 seconds. Native smoke/ptrace and GDB capture
+succeeded (debugger exit zero), with artifacts retained privately under
+`target/ci-diagnostics/43402324149/`. This supplies C15's native capture evidence;
+it does not establish cancellation capture or eliminate the observed stall.
+
+The live `SyncSession::run` stack is inside `runtime.block_on` at treasury/mod.rs
+724, before runtime teardown. The Store worker is idle. Parked executor threads
+do not expose suspended async futures; the test wrapper's ending line cannot
+identify which actor command is waiting. Independent command-chain and SDK-lock
+audits found no wallet/store lock cycle for this fixture. Prepare, submit,
+reconcile, explicit sync and startup can each request a scan, so the next evidence
+must distinguish those commands and their request boundaries.
+
+Independent design review approved a shared opt-in phase helper, one narrowly
+filtered global subscriber only in the diagnostic experiment, and optional static
+Mock labels with defaults in existing constructors. Record only known RPC method
+names, entry/prepared response and the deliberate pre-header mempool wait; no
+URLs, request bodies, headers, arbitrary method strings or cancellation inference.
+Existing treasury events show outer scan/checkpoint stages; Pepper INFO shows
+scan start/end, not every SDK-internal wait. Avoid RAII tracking or a new framework.
+Use existing five-minute capture and unchanged eight threads, with logs under
+`target/ci-actor-diagnostics-validation/`; hosted reproduction remains required.
+
+The SDK audit also identified a separate bounded mempool-notice shutdown cycle:
+`NewBlockMined` can block sending to a full channel after the scan stops draining
+and joins its monitor. The actor fixture cannot exercise it because its mempool
+handler never returns headers. Keep this outside the actor-cause claim. Concrete
+remaining SDK work is a controlled full-notice-channel shutdown reproduction,
+followed by independently reviewed correction/provenance and transaction-drain
+regressions; it is not resolved by this diagnostic-only change.
