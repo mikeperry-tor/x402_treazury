@@ -241,6 +241,10 @@ publication/retirement futures before pausing time. The test-only completion
 signal requests no reads and does not clear pending work. Follow-up TLS and Store
 publication run with time resumed; scalar cooldown alone is not a startup-drain
 barrier.
+The interrupted treasury command fixture synchronizes at the registered recovery
+sleep, advances its existing maintenance interval virtually, and resumes time
+before releasing SDK reconstruction. Cancellation, retained queue ownership and
+no-replay assertions still execute through the real owner and Store.
 
 Run the offline application suite:
 
