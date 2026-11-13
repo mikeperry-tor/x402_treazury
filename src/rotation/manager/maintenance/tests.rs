@@ -615,7 +615,8 @@ async fn retired_requested_wallet_is_not_discovered_or_reactivated() {
 
 #[tokio::test]
 async fn failed_startup_pass_reports_failure_without_requesting_a_watcher() {
-    let f = fixture(false, true).await;
+    let mut f = fixture(false, true).await;
+    let startup = f.startup_completion();
     let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
     db.execute("UPDATE wallets SET low_balance=0,refresh_pending=0", [])
         .unwrap();
@@ -625,6 +626,7 @@ async fn failed_startup_pass_reports_failure_without_requesting_a_watcher() {
     let pool = f.pool.clone();
     let running = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
     f.wait_completion().await;
+    startup.notified().await;
     assert_eq!(
         f.status().await.balance_refresh_error.as_deref(),
         Some("observation_unavailable")
@@ -643,6 +645,7 @@ async fn failed_startup_pass_reports_failure_without_requesting_a_watcher() {
         tokio::task::yield_now().await;
     }
     assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 1);
+    tokio::time::resume();
     stop.cancel();
     running.await.unwrap().unwrap();
     f.close().await;
