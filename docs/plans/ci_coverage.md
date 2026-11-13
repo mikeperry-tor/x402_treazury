@@ -77,6 +77,28 @@ written. Exact octocov config and synthetic LCOV were parsed by checksum-verifie
 octocov 0.83.5 on macOS, producing the expected 1/2-line report and 50.0% badge.
 Actions syntax passes actionlint 1.7.7; 32 existing Makefile/default-target/compiler
 warning tooling tests pass. Shell syntax and diff checks pass. These are local
-tooling checks, not a hosted run or application-coverage measurement. C2 exact-SHA
-and combined integration review pending. Hosted branch execution, baseline absence,
-fork behavior and eventual main publication require remote evidence.
+tooling checks, not a hosted run or application-coverage measurement.
+
+Independent final integration review covered exact C2 SHA `3d27cf54` and all
+accumulated commits from `fffa29e6`, including the complete Make/coverage/report/
+publication chains and documentation. No material findings or compelling
+simplifications remain. The reviewer independently passed coverage shell regression,
+shell syntax, actionlint and diff checks. Inspection of pinned octocov source
+confirmed that missing baselines and fork comment/viewer failures are nonfatal,
+and main-only report storage excludes fork baseline writes.
+
+## Handoff and remaining acceptance
+
+Local implementation and review are complete on `ci_coverage`. No application
+compiler/full-suite or real LLVM export was run for this workflow/tooling change;
+the workflow will supply Linux application validation when executed. No remote
+branch or badge was pushed, and no branch protection/settings were changed.
+
+After an authorized push, inspect the `ci_coverage` Actions check/coverage jobs,
+nonzero failure propagation, summary and SVG/HTML artifacts without a main
+baseline; fix and independently review any concrete failures. Validate fork
+read-only behavior when such a PR is available. After integration, verify a
+successful main baseline and badge publication, then remove this completed plan
+and repair its deferred-plan reference through independently reviewed cleanup.
+Hosted acceptance remains missing evidence, so the plan is retained. The broader
+D2 advisory automation remains separately deferred.
