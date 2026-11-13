@@ -44,6 +44,13 @@ struct Fixture {
     rpc: Arc<Rpc>,
 }
 impl Fixture {
+    fn startup_completion(&mut self) -> Arc<Notify> {
+        let ready = Arc::new(Notify::new());
+        Arc::get_mut(&mut self.pool)
+            .unwrap()
+            .reconciliation_startup_test_hook = Some(ready.clone());
+        ready
+    }
     async fn new(tolerance: u64, credited: bool, retained: bool, authorizations: usize) -> Self {
         Self::with_predecessor(tolerance, credited, retained, authorizations, false).await
     }
@@ -633,7 +640,8 @@ async fn disconnected_sync_waiter_does_not_cancel_accepted_authorization_proof()
 
 #[tokio::test]
 async fn latest_above_tolerance_finishes_low_saved_minimum_work_across_idle_rescans() {
-    let f = Fixture::new(1_000, true, true, 0).await;
+    let mut f = Fixture::new(1_000, true, true, 0).await;
+    let startup = f.startup_completion();
     {
         let mut rpc = f.rpc.state.lock().unwrap();
         // Credit arrives between the startup scalar and its canonical stage.
@@ -671,6 +679,7 @@ async fn latest_above_tolerance_finishes_low_saved_minimum_work_across_idle_resc
     })
     .await
     .unwrap();
+    startup.notified().await;
     assert_eq!(f.role(), "RETAINED");
     let saved: String = f
         .db()
@@ -1240,20 +1249,14 @@ fn stopped_records_warn_once_with_safe_cause_while_proof_retries_remain_recovera
 #[tokio::test]
 async fn empty_serving_start_discovers_later_retained_candidate_without_scalar_demand() {
     let mut f = Fixture::empty().await;
-    let started = Arc::new(Notify::new());
-    let notify = started.clone();
-    Arc::get_mut(&mut f.pool).unwrap().reconciliation_test_hook =
-        Some(Arc::new(move || notify.notify_one()));
+    let startup = f.startup_completion();
     let stop = tokio_util::sync::CancellationToken::new();
     let serving = {
         let pool = f.pool.clone();
         let stopped = stop.clone();
         tokio::spawn(async move { pool.run_reconciliation(stopped).await })
     };
-    started.notified().await;
-    for _ in 0..100 {
-        tokio::task::yield_now().await;
-    }
+    startup.notified().await;
     assert_eq!(f.counts(), (0, 0, 0));
     let group = f.pool.pool.clone();
     let (wallet, query) = f
