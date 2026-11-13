@@ -118,6 +118,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | RegimeShift | `regimeshift.toml` | Vendor OpenAPI |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
 | StableEnrich | `stableenrich.toml` | Synchronous JSON/image catalog; specific lifecycle paths excluded |
+| StableNinja | `stableninja.toml` | Vendor OpenAPI backup; selected marketplace, Yelp, Waze and Google Play reads with `/api` naming anchor |
 | StableTravel | `stabletravel/provider.toml` | Full flight-data catalog with authored path-parameter repairs; cash fares, cached awards and operational reads |
 | Straits | `straits/provider.toml` | Authored free/premium JSON, CSV, RSS and HTML contracts |
 | Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |

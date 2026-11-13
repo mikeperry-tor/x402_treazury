@@ -963,6 +963,22 @@ not funded settlement or every upstream.
 The [deferred polling plan](../docs/plans/deferred/polling_tool_support.md) records
 the new SIWX, JWT-token, mixed synchronous/asynchronous and paid-poll patterns.
 
+## stableninja.toml — StableNinja selected data APIs
+
+The [vendor OpenAPI](https://stableninja.dev/openapi.json) exposes selected
+marketplace, Yelp, Waze and Google Play reads at a fixed $0.01 per successful call.
+It overlaps the selected OpenWeb Ninja coverage and is a backup definition, not a
+routed research endpoint. `/api` is a naming anchor, so tools use the family names
+rather than an `api_` segment.
+
+Search returns identifiers for details, offers and reviews. Yelp reviews allow
+`page_size` up to 50 and `num_pages` up to 10.
+Google Play chart ranks cover only the labeled head and can omit major apps, and
+install/rating totals are point-in-time snapshots. Amazon reviews are exposed as
+managed reads without a caller cookie; that does not establish durable upstream
+access. Reviews are individual opinion, and marketplace prices, availability and
+delivery remain sampled state.
+
 ## agent402.toml — Agent402.Tools
 
 The [vendor OpenAPI](https://agent402.tools/openapi.json) provides a broad

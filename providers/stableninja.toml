@@ -1,0 +1,104 @@
+description = "Marketplace search, product details, offers, reviews and app-store data for a backup research path, plus Yelp business data and Waze traffic."
+# Selected marketplace, Yelp, Waze and Google Play operations from a vendor OpenAPI.
+# `/api` is a naming anchor; every operation is under it.
+spec = "https://stableninja.dev/openapi.json"
+name = "StableNinja"
+base_url = "https://stableninja.dev"
+prefix = "stableninja"
+include = ["/api", ""]
+read_timeout_seconds = 90
+help_url = "https://stableninja.dev/llms.txt"
+instructions_text = "Use search to obtain the marketplace, business, app or product identifier, then request details, offers or reviews. Reviews are individual opinion, not representative surveys. App install and rating totals are point-in-time snapshots and chart ranks cover only the labeled head, so repeated samples are needed for trends. Prices, availability and delivery are sampled marketplace state, not checkout quotes."
+
+[overrides.stableninja_yelp_business_search]
+description = "Search Yelp businesses by query and location. Use the returned identifier for details and reviews."
+
+[overrides.stableninja_yelp_business_details]
+description = "Read a Yelp business profile: categories, rating, review count, price range, hours, location and contact fields."
+
+[overrides.stableninja_yelp_business_reviews]
+description = "List Yelp reviews for a business identifier. page_size is at most 50 and num_pages at most 10."
+
+[overrides.stableninja_waze_autocomplete]
+description = "Resolve place-like queries to Waze locations with a coordinate bias."
+
+[overrides.stableninja_waze_alerts_and_jams]
+description = "List live Waze alerts and traffic jams for a bounding box or a center and radius."
+
+[overrides.stableninja_waze_venues]
+description = "List Waze venues inside a bounding box."
+
+[overrides.stableninja_play_store_apps_search]
+description = "Search Google Play apps by keyword. Returns app identifiers and chart placement when present."
+
+[overrides.stableninja_play_store_apps_app_details]
+description = "Read a Google Play listing with exact installs, rating counts and distribution, version and release fields."
+
+[overrides.stableninja_play_store_apps_app_reviews]
+description = "List Google Play app reviews with rating, device, region and sort filters. limit is at most 100; use cursor for more."
+
+[overrides.stableninja_play_store_apps_categories]
+description = "List Google Play category identifiers for chart queries."
+
+[overrides.stableninja_play_store_apps_top_free_apps]
+description = "List the Google Play top free apps chart. limit is at most 100; explicit ranks cover only the labeled head."
+
+[overrides.stableninja_play_store_apps_top_paid_apps]
+description = "List the Google Play top paid apps chart. limit is at most 100; explicit ranks cover only the labeled head."
+
+[overrides.stableninja_play_store_apps_top_grossing_apps]
+description = "List the Google Play top grossing apps chart. limit is at most 100; major apps can be absent and explicit ranks cover only the labeled head."
+
+[overrides.stableninja_play_store_apps_top_free_games]
+description = "List the Google Play top free games chart. limit is at most 100; explicit ranks cover only the labeled head."
+
+[overrides.stableninja_play_store_apps_top_paid_games]
+description = "List the Google Play top paid games chart. limit is at most 100; explicit ranks cover only the labeled head."
+
+[overrides.stableninja_play_store_apps_top_grossing_games]
+description = "List the Google Play top grossing games chart. limit is at most 100; explicit ranks cover only the labeled head."
+
+[overrides.stableninja_walmart_search]
+description = "Search Walmart products by keyword and page through results."
+
+[overrides.stableninja_walmart_products_by_category]
+description = "Browse Walmart products in a category identifier."
+
+[overrides.stableninja_walmart_product_details]
+description = "Read a Walmart product by product identifier: name, pricing, availability and listing fields."
+
+[overrides.stableninja_walmart_product_offers]
+description = "List seller offers for a Walmart product identifier."
+
+[overrides.stableninja_walmart_product_reviews]
+description = "List Walmart product reviews with ratings and text. limit is at most 50; page selects the set."
+
+[overrides.stableninja_wayfair_search]
+description = "Search Wayfair products by query, category or manufacturer. Use the SKU for details."
+
+[overrides.stableninja_wayfair_product_details]
+description = "Read a Wayfair product by SKU: name, brand, pricing, rating, availability and features."
+
+[overrides.stableninja_amazon_search]
+description = "Search Amazon products by keyword, with country, page and sort selection."
+
+[overrides.stableninja_amazon_product_details]
+description = "Read an Amazon product by ASIN: price, availability, media, facts and variants."
+
+[overrides.stableninja_amazon_product_reviews]
+description = "List Amazon product reviews by ASIN with page, sort, star and verified-purchase filters."
+
+[overrides.stableninja_amazon_product_offers]
+description = "List Amazon seller offers and buying options for an ASIN."
+
+[overrides.stableninja_amazon_best_sellers]
+description = "List Amazon best sellers for a category, paged."
+
+[overrides.stableninja_amazon_todays_deals]
+description = "List current Amazon deals, optionally by category and page."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

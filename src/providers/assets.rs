@@ -65,6 +65,7 @@ macro_rules! provider_manifest {
             ("smartperps", "providers/smartperps.toml", None),
             ("socialfetch", "providers/socialfetch.toml", None),
             ("stableenrich", "providers/stableenrich.toml", None),
+            ("stableninja", "providers/stableninja.toml", None),
             ("stabletravel", "providers/stabletravel/provider.toml", Some("providers/stabletravel/openapi.json")),
             ("straits", "providers/straits/provider.toml", Some("providers/straits/openapi.json")),
             ("strale", "providers/strale.toml", Some("providers/strale-openapi.json")),
