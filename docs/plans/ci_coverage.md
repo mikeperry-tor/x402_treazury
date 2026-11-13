@@ -392,5 +392,27 @@ in two demonstrated startup/idle cases. C12 uses the real Manager's final test-o
 field rather than a proxy service sentinel or a new service wrapper. Declaration-
 order destruction makes channel closure follow registry lock destruction; the
 helper asserts that its signal slot is unused and requires that expected closure.
-Source changes and the retained-owner control are implemented. Validation and
-exact-fixup/combined review remain pending.
+Source changes and the retained-owner control are implemented; validation and
+review evidence follow.
+
+C12 is fixup `25627905` against `801ad389`; comment-only fixup `8518af01`
+clarifies that HTTP graceful completion precedes the final-owner acknowledgement.
+Selected test-target Clippy passed without diagnostics at `25627905`, with valid
+carry-forward across that comment-only change. Formatting, the retained-owner
+control (one test), and 199 affected discovery/retirement/maintenance tests passed
+at `8518af01`. Four isolated child cases were ignored at the affected parent level.
+The full default library run passed 1458 tests with zero failures and 24 ignored,
+using the unchanged eight threads. The linker emitted the documented macOS large
+`__eh_frame` warning. Logs are under `target/ci-completion-validation/`.
+
+Independent review cleared exact plan `e458db68`, fixups `5cf61b3e`, `25627905`
+and `8518af01`, and the combined `fffa29e6..8518af01` branch. It verified actual
+source-matched execution, the retained-owner negative and immediate-reopen positive
+controls, all scalar/retirement assertions and final-field destruction ordering.
+No material findings or compelling simplifications remain in this bounded scope.
+The broader pattern is documented in the testing guide: identify the true completion
+event, add a controlled ordering witness, and audit demonstrated matches. This
+does not claim repository-wide flake freedom or reproduce every Linux scheduling
+interleaving. No production authority, locking, retry, timer or concurrency policy
+changed. Hosted Linux full-stage/coverage acceptance and eventual main badge
+publication remain pending for the user's push; the active plan is retained.
