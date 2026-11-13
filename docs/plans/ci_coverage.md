@@ -40,6 +40,23 @@ writing this workflow.
   instead of the comprehensive deployment's changing provider inventory. Review
   the design independently, commit the correction as a fixup to `920fced2`, run
   affected test/lint consumers and review the exact fixup plus combined state.
+- C5: Expose all seven existing check stages as separate sequential Actions steps.
+  Capture each stage's stdout/stderr, elapsed time and exit status under
+  `target/ci-checks/`, summarize outcomes and retain logs after failure. Preserve
+  exact Make selections and failure propagation. Retain initial coverage listing
+  logs (`tests-*.txt`) as diagnostics too. Update owning CI/tooling documentation.
+- C6: Synchronize the maintenance fixtures before pausing time, using a test-only
+  signal after the finite initial inventory and active read/retirement futures
+  drain. Resume time before subsequent TLS or teardown. Synchronize the treasury
+  interruption fixture at the actual registered recovery sleep, advance the
+  existing interval virtually and resume before SDK reconstruction. Preserve
+  all financial, cancellation, ownership and forbidden-replay assertions and
+  production cadence. Keep test hooks private and absent from production builds.
+- C7: Independently review exact C5/C6 commits and any fixups plus the complete
+  combined branch. Carry valid prior evidence forward. Retain the plan for hosted
+  acceptance; the user will push the branch. Evaluate compiled caching only after
+  hosted stage timings establish its value. Keep the locally qualified eight
+  test threads; no concurrency remeasurement or tuning is selected.
 
 ## Review and validation gates
 
@@ -139,3 +156,25 @@ No instrumented coverage or full-suite rerun was performed; hosted retry and
 eventual main baseline/publication remain pending. The separate Linux-check job
 was still running when its status was inspected. No fix has been pushed by the
 agent.
+
+## CI timing and fixture follow-up
+
+Starting C5/C6 baseline is `844bc2ac` on `ci_coverage`. User authorization covers
+stage visibility, diagnostics and test synchronization; the user retains pushing.
+The locally qualified eight-thread setting stays unchanged, without remeasurement.
+Independent design review inspected the Make sequence, complete maintenance
+observation/retirement chains, actor unwind/recovery and pinned Tokio timers.
+The design requires fully drained initial observations before paused time, and
+registration/release synchronization around the real recovery Sleep before
+virtual advancement. Neither hook requests work or changes production authority.
+No material design findings remain with those corrections incorporated.
+
+Validate C5 with actionlint, focused subprocess fixtures for stage logging,
+nonzero exit propagation and summaries, plus existing tooling checks. Validate C6
+with formatting, selected library-test Clippy, source-matched complexity review of
+affected hook-bearing callables and focused maintenance/actor consumers. Localhost
+fixtures require socket-capable execution up front. Complete design/complexity and
+selected compiler/lint checks before runtime suites, and freeze sources during
+validation. No full-suite performance or GitHub speedup is claimed from local
+functional checks. New hosted stage timings, compiled-cache value and final
+coverage/badge publication remain remote evidence.
