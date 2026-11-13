@@ -634,3 +634,27 @@ handler never returns headers. Keep this outside the actor-cause claim. Concrete
 remaining SDK work is a controlled full-notice-channel shutdown reproduction,
 followed by independently reviewed correction/provenance and transaction-drain
 regressions; it is not resolved by this diagnostic-only change.
+
+C16 is implementation `891d0a70`, independently reviewed with exact plan
+`244e7858` and the bounded combined branch. No material implementation findings
+or compelling simplifications remain. Formatting and selected treasury-test Clippy
+passed without diagnostics. The full target passed 27 tests with one ignored in
+34.62 seconds at eight threads with diagnostic logging enabled; actor command/RPC
+and existing scan events all executed. The actor fixture also passed individually
+with the diagnostic flag absent (one test, 6.19 seconds). Runtime inputs match
+`891d0a70`; logs are under `target/ci-actor-diagnostics-validation/`.
+
+Complexity comparison against `244e7858` is complete and source-matched at
+`target/complexity-runs/20261113T134246Z-9193388f/` (511 files, 11717 spaces).
+The independent review dispositioned test-only RPC inclusive CogC 26→31/CycC
+40→46: its own scores remain 21/27; the added closure owns only gated, closed-name
+telemetry and adds no functional or concurrency responsibility. Extracting it
+would move complexity without removing that necessary privacy responsibility.
+The shared helper is 3/6; reuse-fixture scores improve from 7/14 to 5/11, while
+actor-dispatch remains 0/1. No production warning or source changed.
+
+Push the updated branch to obtain command/scan/RPC evidence from Linux; the existing
+focused workflow triggers on this fixture change. A local pass does not reproduce
+the captured stall, and no application deadlock fix is claimed. The separately
+identified SDK notice-channel cycle remains concrete unfinished work. Hosted
+checks and eventual main publication/plan cleanup also remain pending.
