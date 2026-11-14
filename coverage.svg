@@ -18,7 +18,7 @@
         
         <text aria-hidden="true" x="805" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)">default line coverage</text>
         <text x="805" y="140" transform="scale(.1)" fill="#fff">default line coverage</text>
-        <text aria-hidden="true" x="1705" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)">95.2%</text>
-        <text x="1705" y="140" transform="scale(.1)" fill="#fff">95.2%</text>
+        <text aria-hidden="true" x="1705" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)">95.1%</text>
+        <text x="1705" y="140" transform="scale(.1)" fill="#fff">95.1%</text>
     </g>
 </svg>
