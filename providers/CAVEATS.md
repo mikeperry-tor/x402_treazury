@@ -451,6 +451,21 @@ to 300s — run with `--read-timeout-seconds 320`.
 x402_treazury serve --provider providers/regimeshift.toml --read-timeout-seconds 320
 ```
 
+## keenable.toml — Keenable (api.keenable.ai)
+
+The exact x402 allowlist is `POST /v1/x402/search` and `GET /v1/x402/fetch`.
+API-key, keyless `/public` and auth routes are outside this provider. The pinned
+0.1.33 x402 catalog publishes only those two operations. X402 SELECT, a GET search
+form and the `session_id` parameter are not selected; extending the exact
+allowlist requires a reviewed catalog update.
+Fetch returns main text as Markdown for ordinary pages; `live=false` prefers an
+indexed copy, `live=true` fetches the source. Ordinary JavaScript pages render;
+Cloudflare challenges and bot walls return 403 without bypass. PDF URLs return
+extracted plain text rather than structured Markdown. Search results include long
+extracted snippets; set `snippet_max_length` to control context. `prompt` returns
+only a model extraction. Prices are stated in the 402 offer ($0.01 per request by
+default); the catalog has no pricing extension.
+
 ## kronos.toml — Kronos Crypto Data (kronossignals.com)
 
 Crypto market data under `/api/v1` includes per-asset
@@ -572,6 +587,19 @@ example CNPJ values, so mapping requires one unique configured method/template
 match at the same origin. Ambiguous records remain unknown; no method is inferred
 from GET/POST preference. Free-operation prose does not seed a monetary estimate.
 
+
+## brave-search.toml — Brave Search Proxy (search.agent.s.brave.app)
+
+Pay-per-request proxy in front of Brave Search. Every sold path costs 5000 base
+units ($0.005) and accepts only x402 v2 USDC on Base; the signed payment is the
+credential. The catalog has no `servers` entry, so the provider pins the origin.
+
+`llm_context` is search-grounded passage retrieval, not a URL fetcher: it selects
+passages from the top search results and groups them by source URL. It does not
+execute JavaScript live, parse PDFs or bypass bot walls. Web search returns ranked
+web results plus related news, video, discussion and FAQ blocks. The proxy sells
+search only; the Answers, autosuggest, spellcheck and summarizer paths are not
+payable routes.
 
 ## genuinegood.toml — Genuine Good Grants (genuinegood.online)
 
@@ -832,6 +860,15 @@ query/body arguments collide. This is agent-facing schema information, not a new
 runtime JSON-Schema validator; other arbitrary root body predicates are not
 claimed to be supported. The vendor still validates requests. Routing tests pin
 nested JSON unchanged and the client-visible required alternatives.
+
+Dynamic Highlights is still header-gated in the current spec:
+`contents.highlights.dynamic` and `verbosity` carry a beta lifecycle and require
+`Exa-Beta: dynamic-highlights-2026-08-28`. The generated Search/Contents tools
+expose those fields but have no header argument and do not inject the header, so
+requests that set `dynamic` are rejected. A header-bearing request path works.
+Exa's 3.0 announcement describes Dynamic Highlights as generally available at no
+additional charge, while the spec and highlights guide still state the beta-header
+requirement. No dynamic-specific surcharge is specified or observed.
 
 Search supports SSE when `stream=true` is combined with structured output.
 Instructions and the parameter description tell agents to omit it or use false;

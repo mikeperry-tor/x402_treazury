@@ -1,0 +1,57 @@
+description = "Brave Search proxy for web, news, video, image and local search plus search-grounded page context."
+# The catalog omits a servers entry; pin the x402 deployment origin explicitly.
+spec = "https://search.agent.s.brave.app/openapi.json"
+name = "Brave Search Proxy"
+base_url = "https://search.agent.s.brave.app"
+prefix = "brave"
+include = ["/res/v1"]
+pricing_key = "x-payment-info"
+help_url = "https://search.agent.s.brave.app/llms.txt"
+instructions_text = "Paid Brave Search proxy: $0.005 per request in USDC on Base; this deployment sells the x402 v2 rail only. Query parameters forward to Brave. Use llm_context for search-grounded page passages, not an arbitrary URL fetch. Preserve source URLs and dates; no API key or account is used."
+
+[overrides.brave_web_search]
+description = "Search Brave's independent web index. Returns ranked web results plus related news, video, discussion and FAQ blocks. Use it for discovery and source URLs, not full page text."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_web_search.params]
+count = "Number of web results to return (1-20, default 20)."
+offset = "Pages of count results to skip (0-9)."
+freshness = "pd, pw, pm, py, or a date range such as 2026-01-01to2026-06-30."
+
+[overrides.brave_llm_context]
+description = "Search Brave's index and return the passages most relevant to q, grouped by source URL, for grounding an answer. Size with maximum_number_of_tokens and maximum_number_of_urls. This does not fetch an arbitrary URL, execute JavaScript or parse a PDF."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_llm_context.params]
+maximum_number_of_urls = "Maximum source URLs to include (1-50, default 20)."
+maximum_number_of_tokens = "Approximate context-token budget (1024-32768, default 8192)."
+
+[overrides.brave_news_search]
+description = "Search recent news over Brave's independent index. Returns article titles, URLs, sources and ages; use freshness for recency."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_videos_search]
+description = "Search videos over Brave's independent index. Returns titles, URLs, durations, creators and publishers."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_images_search]
+description = "Search images over Brave's independent index. Returns the page URL, image URL, thumbnail and dimensions."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_local_place_search]
+description = "Find businesses and points of interest by query and location or coordinates. Returns a temporary place id for the local detail reads."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_local_pois]
+description = "Read address, hours, phone, rating and reviews for place ids returned by web or place search. Ids expire after about 8 hours."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_local_pois.params]
+ids = "Repeat ids=a&ids=b; up to 20 location ids valid for about 8 hours."
+
+[overrides.brave_local_descriptions]
+description = "Generate short AI descriptions for place ids returned by web or place search. Ids expire after about 8 hours."
+pricing_description = "Cost: $0.005/call [spec]."
+
+[overrides.brave_local_descriptions.params]
+ids = "Repeat ids=a&ids=b; up to 20 location ids valid for about 8 hours."

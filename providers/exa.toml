@@ -22,7 +22,7 @@ pricing_description = "Base per search [vendor guide]: lite/instant $0.004; auto
 type = "Use auto for general search, lite for lower-cost indexed search without live fetching, or deep-lite/deep for research. Lite accepts a restricted argument set; omit summaries and live-fetch controls. instant/fast/deep-reasoning are legacy."
 stream = "Omit or set false for a completed response."
 numResults = "Requested result count; x402 searches return at most 10 even if a larger count is requested."
-contents = "Choose text, highlights or summary only as needed; summary adds a per-result charge. For freshness, contents.maxAgeHours omitted allows cached pages, -1 uses cache only, 0 fetches fresh and a positive value bounds cache age in hours. Prefer highlights.maxCharacters over deprecated numSentences."
+contents = "Choose text, highlights or summary only as needed; summary adds a per-result charge. For freshness, contents.maxAgeHours omitted allows cached pages, -1 uses cache only, 0 fetches fresh and a positive value bounds cache age in hours. Prefer highlights.maxCharacters over deprecated numSentences. Dynamic highlights require the Exa-Beta header and are unavailable through this tool; use standard highlights."
 startCrawlDate = "Ignored by Exa; omit. Use publication-date filters for publication dates."
 endCrawlDate = "Ignored by Exa; omit. Use publication-date filters for publication dates."
 context = "Deprecated; request contents.highlights or contents.text instead."
@@ -38,7 +38,7 @@ maxAgeHours = "Maximum cache age in hours. Omit to use cached content when avail
 snapshotAsOf = "Retrieve the newest stored version at or before an ISO date/time; a date alone means midnight UTC. Historical retrieval never fetches the live page."
 livecrawl = "Deprecated; use maxAgeHours instead. Do not combine them."
 context = "Deprecated; request highlights or text instead."
-highlights = "Request concise excerpts with true or options such as query and maxCharacters. Prefer maxCharacters over deprecated numSentences. Each page incurs a highlights charge."
+highlights = "Request concise excerpts with true or options such as query and maxCharacters. Prefer maxCharacters over deprecated numSentences. Each page incurs a highlights charge. Dynamic highlights require the Exa-Beta header and are unavailable through this tool; use standard highlights."
 text = "Request page text with true or text options. Each page incurs a text charge."
 summary = "Request generated summaries only when needed; each page incurs a summary charge."
 

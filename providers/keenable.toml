@@ -1,0 +1,36 @@
+description = "Web search and clean Markdown page fetch on Keenable's own index, with optional live fetch and prompt extraction."
+# Exact x402 allowlist: API-key, keyless, auth and SELECT routes are omitted.
+spec = "https://api.keenable.ai/openapi.json"
+name = "Keenable"
+base_url = "https://api.keenable.ai"
+prefix = "keenable"
+include = ["/v1/x402"]
+include_operations = ["POST /v1/x402/search", "GET /v1/x402/fetch"]
+# Live source fetches and prompt extraction can exceed the default read window.
+read_timeout_seconds = 90
+help_url = "https://docs.keenable.ai/llms.txt"
+instructions_text = "Fetch returns main page text as Markdown. live=false uses an indexed copy when available; live=true fetches the source now. Ordinary JavaScript pages render, but bot walls and Cloudflare challenges are not bypassed. PDF extraction returns plain text rather than structured Markdown. Search returns long extracted snippets, so cap snippet_max_length for agent context. prompt extracts only the requested part."
+
+[overrides.keenable_search]
+description = "Search Keenable's web index with date, site and point-in-time filters. Returns ranked results with long extracted snippets. Cap snippet_max_length to control context; use mode=realtime for latency or pro for deeper retrieval."
+pricing_description = "Cost: $0.01/call [402 offer]."
+
+[overrides.keenable_search.params]
+query = "Search query. Supports quoted phrases, site: filters and OR in capitals."
+mode = "pro (deeper retrieval, default) or realtime (fastest). Both bill as search."
+snippet_max_length = "Maximum characters per result snippet (180-10000). Set a lower cap to control agent context; the default can be large."
+max_results = "Maximum number of results to return (1-50, default 10)."
+published_after = "Lower bound on page publish time."
+published_before = "Upper bound on page publish time."
+site = "Restrict results to one domain."
+query_time = "Upper time bound for a point-in-time search; it is not a recency filter."
+
+[overrides.keenable_fetch]
+description = "Fetch a known URL and return its main text as clean Markdown. live=false returns an indexed copy when available; live=true fetches the current source. Ordinary JavaScript pages render, but bot walls and Cloudflare challenges are not bypassed. PDFs return plain text. max_chars truncates with truncated and total_chars."
+pricing_description = "Cost: $0.01/call [402 offer]."
+
+[overrides.keenable_fetch.params]
+url = "Absolute http or https URL. Cite the returned final url after redirects."
+live = "false uses Keenable's indexed copy when available; true fetches the current source. Neither mode bypasses bot walls."
+max_chars = "Hard cap on returned content characters. Longer content is cut; truncated and total_chars report the cut."
+prompt = "Optional extraction instruction. The response content becomes only the model's answer instead of the full page."

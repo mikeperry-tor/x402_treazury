@@ -80,6 +80,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
 | CoinMarketCap | `coinmarketcap/provider.toml` | Authored union of all public keyless routes and four x402 counterparts |
 | botsmith | `botsmith.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
+| Brave Search Proxy | `brave-search.toml` | Vendor proxy catalog; fixed $0.005 searches; x402 v2 only |
 | Brazilayer | `brazilayer.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Curl HTTP Request | `curl/provider.toml` | Local schema; POST `/curl` returns status, headers and body text; advertised $0.01 |
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |
@@ -102,6 +103,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | SiteCheck Web Intel | `webintel.toml` | Full news, web, scholarly and security catalog |
 | Google Patents (x402 Atlas) | `google-patents.toml` | Full two-operation search/details catalog; claims and family data |
 | IPIntel.ai | `ipintel.toml` | Domain/DNS/IP, satellite and developer tools; core lookup recommendations |
+| Keenable | `keenable.toml` | Exact x402 search/fetch allowlist; Markdown fetch with indexed and live modes; SELECT, API-key and keyless routes omitted |
 | Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Unified catalog with direct service URLs, including public previews/feeds; research recommendations |
