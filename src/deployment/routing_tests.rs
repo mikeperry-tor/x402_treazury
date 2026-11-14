@@ -147,6 +147,7 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         ),
         ("openweb_local_business_data_search", "travel"),
         ("openweb_waze_alerts_and_jams", "travel"),
+        ("openweb_realtime_books_data_search", "web"),
         ("openweb_realtime_image_search_search", "web"),
         ("openweb_reverse_image_search_reverse_image_search", "web"),
         ("openweb_yelp_business_data_search", "travel"),
@@ -188,7 +189,6 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         assert_eq!(compiled.decision(name).targets, [target], "{name}");
     }
     for name in [
-        "openweb_realtime_books_data_search",
         "openweb_realtime_ecommerce_data_google_shopping_product_price_history",
         "openweb_realtime_amazon_data_product_reviews",
         "openweb_trustpilot_company_and_reviews_company_search",
