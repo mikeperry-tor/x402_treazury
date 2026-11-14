@@ -82,9 +82,14 @@ fn warnings(
             }
         }
     }
-    // Temporary evidence is shared by every selector in this report, never
-    // retained in runtime state. One witness per filter explains the cause.
-    let removals = selection_removals(name, server, sources)?;
+    // Optional removal evidence must not suppress known selection failures when
+    // a partially compatible catalog cannot reconstruct its complete inventory.
+    // One temporary witness per filter explains the cause when available.
+    let removals = if unmatched.is_empty() {
+        BTreeMap::new()
+    } else {
+        selection_removals(name, server, sources).unwrap_or_default()
+    };
     let mut warnings: Vec<_> = unmatched.into_iter().map(|(setting, selector, pattern)| {
         let causes = removal_causes(&removals, &pattern);
         let subject = if setting == "exclude_tools" {
@@ -427,6 +432,62 @@ mod tests {
             "{logs}"
         );
         assert!(!logs.contains("WARN") && !logs.contains("INFO"), "{logs}");
+    }
+
+    #[tokio::test]
+    async fn partial_catalog_removal_evidence_does_not_suppress_endpoint_coverage_errors() {
+        if crate::test_log_capture::run_in_child(
+            "deployment::selection_diagnostics::tests::partial_catalog_removal_evidence_does_not_suppress_endpoint_coverage_errors",
+        ) {
+            return;
+        }
+        let (_, logs) = crate::limits::tests::capture(async {
+            let cfg: Config = toml::from_str(
+                "prefix='vendor'\nbase_url='https://example.com'\ninclude_tools=['vendor_read']",
+            )
+            .unwrap();
+            let partial = Source::from_document(
+                "alias",
+                cfg,
+                std::sync::Arc::new(json!({"paths":{
+                    "/read":{"get":{}},
+                    "/unsupported":{"post":{"parameters":[{
+                        "name":"session","in":"cookie","schema":{"type":"string"}
+                    }]}}
+                }})),
+            )
+            .unwrap();
+            assert_eq!(partial.tools.len(), 1);
+            assert_eq!(partial.tools[0].name, "vendor_read");
+            assert_eq!(partial.issues.len(), 1);
+            let sources = BTreeMap::from([("alias".into(), partial)]);
+            let mut server = listener();
+            server.include_tools = vec!["vendor_missing*".into()];
+            assert!(selection_removals("main", &server, &sources).is_err());
+            let actual = warnings("main", &server, &sources).unwrap();
+            assert_eq!(actual.len(), 2);
+            assert_eq!(actual[0].setting, "include_tools");
+            assert_eq!(actual[0].selector, "vendor_missing*");
+            assert_eq!(actual[1].setting, "tool_filters");
+            report_completed(
+                &BTreeMap::from([("main".into(), server)]),
+                &sources,
+                &BTreeMap::new(),
+                Some("alias"),
+            );
+        })
+        .await;
+        for expected in ["setting=\"include_tools\"", "No static API tools"] {
+            assert!(
+                logs.lines()
+                    .any(|line| line.contains("ERROR") && line.contains(expected)),
+                "{logs}"
+            );
+        }
+        assert!(
+            !logs.contains("Listener selection diagnostics could not be generated"),
+            "{logs}"
+        );
     }
 
     #[tokio::test]

@@ -603,6 +603,9 @@ and selector, without failing the source, endpoint or strict inspection. This
 covers provider/source `exclude_tools`, `send_tools` exclusion rules and listener
 `exclude_tools`, for both exact names and wildcards. Listener diagnostics wait for
 that listener's source loads to settle and retain unavailable-source context.
+Explanatory evidence about earlier filter removals is optional; a partial catalog
+that cannot reconstruct it must still report known unmatched selectors and empty
+endpoint inventories from the accepted tools.
 Unmatched endpoint inclusions and empty static inventories emit ERROR for reduced
 coverage in ordinary serving, without disabling the endpoint. Source assignment
 notices are reported by the source owner; shadowed distribution rules remain DEBUG.
