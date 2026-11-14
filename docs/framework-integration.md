@@ -184,7 +184,7 @@ selections and empty endpoint inventories emit ERROR diagnostics after their
 catalogs settle or a replacement is published; these describe reduced coverage,
 not endpoint failure. No inventory history is required to distinguish a typo from
 provider drift. Inspection and qualification remain strict.
-See [catalog startup](configuration.md#multiple-mcp-ports-from-one-configuration)
+See [catalog startup](configuration.md#catalog-loading-and-listener-startup)
 for endpoint readiness settings.
 
 After starting serving, probe authenticated MCP initialize/list on every configured

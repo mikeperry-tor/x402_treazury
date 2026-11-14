@@ -121,8 +121,8 @@ explicit uncertainty, without dated probe or sample journals.
   [catalog startup](docs/configuration.md#catalog-loading-and-listener-startup)
   and the [framework integration contract](docs/framework-integration.md).
   Ready endpoints remain usable while managed funding is pending or degraded;
-  catalog failures disable only dependent waiting endpoints and emit ERROR.
-  Strict inspection and separately
+  catalog failures disable only dependent waiting endpoints that did not opt into
+  `allow_catalog_failure`, and emit ERROR. Strict inspection and separately
   authorized qualification retain their completeness and authority requirements.
 
 Read the

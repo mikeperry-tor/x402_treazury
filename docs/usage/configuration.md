@@ -68,6 +68,7 @@ and keep Host checking enabled.
 | `wallet` | Default wallet group for this listener's sources |
 | `sources` | Source names exposed on this listener |
 | `discover_on_demand` | Advertise search/call wrappers instead of individual API schemas |
+| `wait_for_catalogs` | Wait for this endpoint's configured catalogs before serving (default `true`) |
 | `instructions_text` | Endpoint guidance shown to the agent |
 
 Host checking defaults to `localhost`, `127.0.0.1`, and `::1`. Add the hostname
@@ -100,7 +101,8 @@ focused and context small.
 
 Name filters run after tag and path selection, so removing one tool does not rename
 its siblings. Exclusions win over inclusions. An allowlist that removes every tool
-fails catalog loading.
+leaves no tools from that source; ordinary serving reports reduced coverage, while
+`catalog tools` and `config check` reject the empty selection.
 
 The separate `send_tools` setting distributes one source's tools to named listeners
 instead of filtering them. See [source tool distribution](../configuration.md#source-tool-distribution).
@@ -116,6 +118,31 @@ discover_on_demand = true
 Agents then use `x402_treazury_tools_search` to find a tool and
 `x402_treazury_tool_call` to invoke it. Filtering, wallet routing, and payment
 limits still apply.
+
+### Keeping tools through catalog outages
+
+By default, an endpoint that waits for a required remote catalog also waits for
+that source. If the source cannot be loaded, the endpoint stays unavailable until
+you restart it. For sources that may be temporarily unreachable, let the endpoint
+start with the remaining tools:
+
+```toml
+[sources.flaky]
+spec = "https://api.example.com/openapi.json"
+allow_catalog_failure = true
+```
+
+The failed source is omitted as a unit, and the endpoint reports it in its MCP
+instructions. Tools from healthy sources remain usable. With
+`wait_for_catalogs = false`, failed remote sources are omitted regardless of this
+setting. Local configuration and parsing errors remain fatal.
+
+Ordinary serving also keeps endpoints available when authored selections produce
+no tools, such as a missing tag or an empty filtered inventory. It reports reduced
+coverage instead of widening the selection. `catalog tools`, `config check`, and
+qualification remain strict and report the incomplete inventory. Framework authors
+should follow the [framework integration contract](../framework-integration.md)
+when treating catalog preparation and endpoint readiness as separate results.
 
 ### Letting the agent add providers
 

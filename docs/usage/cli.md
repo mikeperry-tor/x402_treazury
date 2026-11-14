@@ -183,6 +183,21 @@ x402_treazury config check --config deployment.toml
 `catalog tools` prints the selected tools and authored prices. `catalog tags` helps
 choose tag filters. `catalog warm` downloads and caches catalogs; add `--direct` to
 fetch without the configured Tor policy for that dedicated warming process.
+Warming never starts listeners or funding workers, and configured relay warming may
+make payments.
+
+Warming prints one JSON summary with `outcome: "ok"` or `outcome: "degraded"`.
+`ok` means every selected source is usable; `degraded` means some sources,
+selections, pricing, or cache storage are incomplete. Both outcomes exit zero when
+the attempts finish, so inspect `outcome` and each source's `status` instead of
+assuming a zero exit means complete coverage. Invalid configuration or state,
+cancellation, and internal failures exit nonzero. Compatible partial catalogs may
+be cached with omissions, while `catalog tools` and `config check` remain strict.
+
+If another framework starts and stops this process, treat a valid `ok` or
+`degraded` summary as completed catalog preparation. The
+[framework integration contract](../framework-integration.md) describes the
+readiness and financial separation in full.
 
 `config show` resolves file settings and wallet bindings offline. `config check`
 loads catalogs and validates selections without signing, probing prices, or
