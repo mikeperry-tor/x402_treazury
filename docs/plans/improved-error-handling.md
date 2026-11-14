@@ -9,7 +9,7 @@ their remaining tools. Frameworks must distinguish completed preparation,
 current MCP availability, catalog coverage and successful paid API execution.
 
 This is an active implementation plan. C1/C2 are implemented and validated;
-G1 is approved; C3 is committed and validated; G2 remains pending.
+G1 and G2 are approved; C1/C2/C3 are committed and validated. C4 cleanup remains.
 The user has authorized executing this plan. Live paid calls remain outside scope.
 
 - Working branch: `flaky_provider_resiliance`.
@@ -461,3 +461,19 @@ No live Tor, paid provider, financial settlement, or native Podman qualification
 is claimed; these are explicit coverage limits, not passed checks. Final G2 will
 review both exact branches, all native fixups, permanent contract ownership and
 consumer pin before completed-plan cleanup.
+
+
+G2 independently approved exact native
+`967647d5425f4d072691e79fd2ca7f4476402ca4` with all accumulated baseline changes,
+plan commits and unsquashed fixups, and consumer
+`30d74b8ab5ee1a797352967788c7beeecb5157b9` including native pin `3125dcac`.
+The fresh read-only reviewer traced the complete affected native/consumer chains,
+verified every complexity source hash and inspected the recorded compiler,
+Clippy, focused native, 172 consumer and five container results. No material
+findings or compelling simplifications remain. No tests were rerun by reviewers.
+The explicit coverage limits and source-bundle transport difference above remain;
+no untested qualification or publication is claimed. Enduring rules reside in
+`docs/framework-integration.md`, configuration, architecture and consumer guides,
+with the documentation index and AGENTS link updated. C4 now removes this plan,
+retaining all evidence in unsquashed Git ancestry, followed by independent exact
+cleanup-SHA and final combined review.
