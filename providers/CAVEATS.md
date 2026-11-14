@@ -1416,6 +1416,13 @@ The table records supported provider fields. Atomic payment authority and
 unsupported mechanisms retain their independent checks.
 Local signing regressions do not prove live settlement.
 
+HaloWerk's `extra.asset = "USDC"`, `network_name`, `decimals` and nested
+`eip712Domain` are annotations; its actual Base USDC contract and signing domain
+come from the ordinary offer fields. Authority-looking annotation names do not
+require provider-specific admission exceptions. Its v2
+`extra.assetTransferMethod = "eip3009"` is a real mechanism selector and remains
+subject to the shared EIP-3009 boundary.
+
 ## Curl HTTP Request
 
 `curl/provider.toml` pins the vendor's public OpenAPI schema for `POST /curl`.

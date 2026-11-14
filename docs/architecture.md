@@ -847,8 +847,8 @@ still apply.
 
 Offer annotations are distinct from top-level extensions. Informational fields,
 including vendor annotations and display prices, remain opaque and are preserved
-in the accepted offer. `outputSchema` must be an object or boolean; its contents
-are not evaluated and references are not fetched.
+in the accepted offer. `outputSchema` is opaque JSON metadata; its shape and
+contents are not evaluated and references are not fetched.
 
 For v2, `amount` alone determines the atomic amount signed and checked against
 the payment cap. A top-level legacy `maxAmountRequired` is preserved as opaque
@@ -856,8 +856,15 @@ metadata, without requiring equality or interpreting it as payment authority.
 V1 continues to use its required `maxAmountRequired` field.
 
 Admission validates the actual network, asset, payee, atomic amount, transfer
-mechanism and USDC domain. Duplicated or conflicting authority fields in `extra`
-and unsupported transfer/flow mechanisms are rejected. Display prices and nested annotations
+mechanism and USDC domain at the locations consumed by the pinned SDK. Unknown
+offer fields and unknown `extra` fields are preserved, including names that
+resemble authority fields: the SDK does not flatten them into the actual terms.
+For v2 exact offers, `extra.assetTransferMethod` selects the mechanism and must be
+absent or `eip3009`; Permit2 and unknown or malformed selector values remain
+unsupported. The v1 exact signer does not consume that selector. Other
+authority-looking annotations, including nested domain objects, do not change
+the actual terms. Signing regressions independently recover the signature against
+the Base USDC domain and authorization. Display prices and nested annotations
 cannot override these checks or the payment cap. SDK serialization must preserve
 the selected offer, and the signed authorization uses its atomic amount.
 OpenAPI `x-*` pricing/discovery annotations belong to catalog interpretation;

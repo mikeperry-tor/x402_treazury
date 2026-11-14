@@ -1039,7 +1039,7 @@ async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() 
 }
 
 // Captured unsigned challenges: top-level extension omission is deliberately
-// separate from rejecting unreviewed metadata inside payment offers.
+// separate from preserving opaque metadata inside payment offers.
 #[tokio::test]
 async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
     install_network(Default::default());
@@ -1077,18 +1077,14 @@ async fn provider_challenges_distinguish_extensions_from_payment_metadata() {
     }
 }
 #[tokio::test]
-async fn output_schema_is_opaque_metadata_and_invalid_shapes_fail_before_admission() {
+async fn output_schema_metadata_is_preserved_without_interpretation() {
     install_network(Default::default());
     let h = Harness::new().await;
-    for schema in [json!(null), json!("object"), json!([]), json!(1)] {
-        let mut c = challenge("1");
-        c["accepts"][0]["outputSchema"] = schema;
-        *h.f.challenge.lock().unwrap() = c;
-        assert!(h.client.execute(h.route()).await.is_err());
-    }
-    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0);
-    assert!(h.f.signed.lock().unwrap().is_empty());
     for schema in [
+        json!(null),
+        json!("object"),
+        json!([]),
+        json!(1),
         json!(true),
         json!(false),
         json!({"$ref": "http://127.0.0.1:1/must-not-fetch", "amount": "0",
@@ -1103,6 +1099,7 @@ async fn output_schema_is_opaque_metadata_and_invalid_shapes_fail_before_admissi
         assert_eq!(payload["accepted"]["outputSchema"], schema);
         assert_eq!(payload["payload"]["authorization"]["value"], "1");
         assert_eq!(payload["accepted"]["extra"]["name"], "USD Coin");
+        signatures::recover_exact(payload);
     }
     h.close().await;
 }
@@ -1116,6 +1113,27 @@ async fn opaque_annotations_and_display_prices_preserve_atomic_payment_terms() {
     c["accepts"][0]["extra"]["totalUsd"] = json!("0.000001");
     c["accepts"][0]["extra"]["breakdown"] = json!({"search": "display only"});
     c["accepts"][0]["extra"]["merchant"] = json!({"name": "vendor"});
+    // These names are inert outside the exact SDK's actual field locations.
+    c["accepts"][0]["flow"] = json!("permit2");
+    c["accepts"][0]["assetTransferMethod"] = json!("permit2");
+    c["accepts"][0]["extensions"] = json!({"annotation": true});
+    c["accepts"][0]["permit2Authorization"] = json!({"amount":"999999999"});
+    for (key, value) in [
+        ("asset", json!("USDC")),
+        ("amount", json!("999999999")),
+        ("network", json!("eip155:1")),
+        ("payTo", json!("0x0000000000000000000000000000000000000004")),
+        ("maxTimeoutSeconds", json!(999999)),
+        ("flow", json!("transfer")),
+        ("extensions", json!({"annotation": true})),
+        ("permit2Authorization", json!({})),
+        (
+            "eip712Domain",
+            json!({"name":"wrong","version":"9","chainId":1,"verifyingContract":"0x0000000000000000000000000000000000000004"}),
+        ),
+    ] {
+        c["accepts"][0]["extra"][key] = value;
+    }
     *h.f.challenge.lock().unwrap() = c.clone();
     let started = now().unwrap();
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
@@ -1133,6 +1151,7 @@ async fn opaque_annotations_and_display_prices_preserve_atomic_payment_terms() {
             signed.last().unwrap()["payload"]["authorization"]["value"],
             "1"
         );
+        signatures::recover_exact(signed.last().unwrap());
     }
     h.close().await;
 }
@@ -1188,9 +1207,10 @@ async fn informational_metadata_cannot_override_payment_safety() {
     install_network(Default::default());
     let h = Harness::new().await;
     for (key, value) in [
-        ("amount", json!("0")),
-        ("permit2Authorization", json!({})),
         ("assetTransferMethod", json!("permit2")),
+        ("assetTransferMethod", json!("future")),
+        ("assetTransferMethod", json!(null)),
+        ("assetTransferMethod", json!({})),
         ("name", json!("GatewayWalletBatched")),
     ] {
         let mut c = challenge("1");
@@ -1304,10 +1324,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
         "v1_with_v2_offer",
         "upto",
         "permit2",
-        "flow",
         "malformed_extensions",
-        "offer_extensions",
-        "extra_extensions",
         "asset",
         "chain",
         "zero",
@@ -1323,10 +1340,7 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
             "v1_with_v2_offer" => c["x402Version"] = json!(1),
             "upto" => c["accepts"][0]["scheme"] = json!("upto"),
             "permit2" => c["accepts"][0]["extra"]["assetTransferMethod"] = json!("permit2"),
-            "flow" => c["accepts"][0]["extra"]["flow"] = json!("upfront"),
             "malformed_extensions" => c["extensions"] = json!([]),
-            "offer_extensions" => c["accepts"][0]["extensions"] = json!({"unknown": {}}),
-            "extra_extensions" => c["accepts"][0]["extra"]["extensions"] = json!({"unknown": {}}),
             "asset" => {
                 c["accepts"][0]["asset"] = json!("0x0000000000000000000000000000000000000001")
             }

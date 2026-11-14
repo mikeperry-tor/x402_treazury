@@ -623,13 +623,8 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
     {
         let parsed = (|| -> Result<Offer> {
             ensure!(raw.is_object(), "malformed offer");
-            ensure!(
-                raw.get("outputSchema")
-                    .is_none_or(|v| v.is_object() || v.is_boolean()),
-                "malformed output schema metadata"
-            );
-            // Bounded opaque annotations are preserved in the accepted payload.
-            // Only authority-bearing fields below determine compatibility.
+            // Preserve opaque annotations. Admission follows the fields consumed
+            // by the pinned SDK, not the names of unrelated metadata keys.
             let amount_raw = if version == 1 {
                 ensure!(
                     raw["network"] == "base"
@@ -637,8 +632,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
                         && raw["description"].is_string()
                         && raw
                             .get("mimeType")
-                            .is_none_or(|v| v.is_null() || v.is_string())
-                        && raw.get("amount").is_none(),
+                            .is_none_or(|v| v.is_null() || v.is_string()),
                     "unsupported offer"
                 );
                 &raw["maxAmountRequired"]
@@ -653,49 +647,18 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
                         .is_some_and(|v| v.eq_ignore_ascii_case(USDC)),
                 "unsupported offer"
             );
-            for location in [raw, raw.get("extra").unwrap_or(&Value::Null)] {
+            let extra = raw["extra"].as_object().context("missing USDC domain")?;
+            if version == 2 {
+                // This extra field really selects the v2 signing mechanism.
+                // The SDK's untagged parser otherwise treats unknown tags as
+                // implicit EIP-3009; do not silently reinterpret that request.
                 ensure!(
-                    location
+                    extra
                         .get("assetTransferMethod")
                         .is_none_or(|v| v == "eip3009"),
                     "unsupported transfer method"
                 );
-                ensure!(
-                    location.get("flow").is_none_or(|v| v == "authorization"),
-                    "unsupported flow"
-                );
-                ensure!(
-                    location
-                        .get("extensions")
-                        .is_none_or(|v| v.as_object().is_some_and(|m| m.is_empty())),
-                    "unsupported extensions"
-                );
             }
-            ensure!(
-                ["permit2", "permit2Authorization", "spender", "approval"]
-                    .iter()
-                    .all(|key| raw.get(*key).is_none()),
-                "unsupported transfer mechanism"
-            );
-            let extra = raw["extra"].as_object().context("missing USDC domain")?;
-            ensure!(
-                [
-                    "scheme",
-                    "network",
-                    "asset",
-                    "amount",
-                    "maxAmountRequired",
-                    "payTo",
-                    "maxTimeoutSeconds",
-                    "permit2",
-                    "permit2Authorization",
-                    "spender",
-                    "approval"
-                ]
-                .iter()
-                .all(|key| !extra.contains_key(*key)),
-                "conflicting payment authority metadata"
-            );
             ensure!(
                 extra.get("name").is_some_and(|v| v == "USD Coin")
                     && extra.get("version").is_some_and(|v| v == "2"),
@@ -1209,7 +1172,7 @@ mod offer_tests {
         }
     }
     #[test]
-    fn v1_base_exact_offer_selection_requires_v1_fields_and_forbids_conflicting_amounts() {
+    fn v1_offer_uses_its_protocol_amount_and_preserves_ignored_metadata() {
         let valid_v1 = serde_json::json!({
             "scheme": "exact",
             "network": "base",
@@ -1220,21 +1183,16 @@ mod offer_tests {
             "mimeType": "application/json",
             "payTo": format!("0x{:040x}", 1),
             "maxTimeoutSeconds": 300,
-            "extra": {"name": "USD Coin", "version": "2"},
+            "amount": "1",
+            "extra": {"name": "USD Coin", "version": "2", "maxAmountRequired":"1"},
             "outputSchema": {"input": {"type": "http"}}
         });
         let mut bad_mime = valid_v1.clone();
         bad_mime["maxAmountRequired"] = serde_json::json!("1");
         bad_mime["mimeType"] = serde_json::json!(123);
-        let mut bad_dual_amount = valid_v1.clone();
-        bad_dual_amount["maxAmountRequired"] = serde_json::json!("1");
-        bad_dual_amount["amount"] = serde_json::json!("1");
-        let mut bad_extra = valid_v1.clone();
-        bad_extra["maxAmountRequired"] = serde_json::json!("1");
-        bad_extra["extra"]["maxAmountRequired"] = serde_json::json!("1");
         let challenge = serde_json::json!({
             "x402Version": 1,
-            "accepts": [bad_mime, bad_dual_amount, bad_extra, valid_v1]
+            "accepts": [bad_mime, valid_v1]
         });
         let selected = select_offer(
             &challenge,
@@ -1245,7 +1203,67 @@ mod offer_tests {
         .unwrap();
         assert_eq!(selected.version, 1);
         assert_eq!(selected.amount, U256::from(50000));
-        assert_eq!(selected.raw, challenge["accepts"][3]);
+        assert_eq!(selected.raw, challenge["accepts"][1]);
+    }
+
+    #[tokio::test]
+    async fn sdk_ignores_annotations_when_signing_exact_usdc_authority() {
+        let signer = Arc::new(EvmSigner::from_slice(&[91; 32]).unwrap());
+        for version in [1, 2] {
+            let mut raw = offer("1", 1);
+            raw["assetTransferMethod"] = serde_json::json!("permit2");
+            raw["outputSchema"] = serde_json::json!([null, "opaque", 42]);
+            raw["extra"]["asset"] = serde_json::json!("USDC");
+            raw["extra"]["network"] = serde_json::json!("eip155:1");
+            raw["extra"]["payTo"] = serde_json::json!(format!("0x{:040x}", 2));
+            raw["extra"]["amount"] = serde_json::json!("999999999");
+            raw["extra"]["eip712Domain"] = serde_json::json!({
+                "name":"wrong", "version":"9", "chainId":1,
+                "verifyingContract":format!("0x{:040x}",2)
+            });
+            if version == 1 {
+                raw["network"] = "base".into();
+                raw["maxAmountRequired"] = "1".into();
+                raw["amount"] = "999999999".into();
+                raw["extra"]["assetTransferMethod"] = "permit2".into();
+                raw["resource"] = "https://example.com/pay".into();
+                raw["description"] = "test".into();
+            } else {
+                raw["extra"]["assetTransferMethod"] = "eip3009".into();
+            }
+            let envelope = serde_json::json!({"x402Version":version,
+                "resource":{"url":"https://example.com/pay"},"accepts":[raw.clone()]});
+            let response = reqwest::Response::from(
+                axum::http::Response::builder()
+                    .status(402)
+                    .header("payment-required", STANDARD.encode(envelope.to_string()))
+                    .body(Vec::<u8>::new())
+                    .unwrap(),
+            );
+            let (challenge, selected, _) = prepare_challenge(
+                &response,
+                &SpendPolicy {
+                    max_atomic: Some(U256::from(1)),
+                },
+            )
+            .unwrap();
+            assert_eq!(selected.raw, raw);
+            let candidates = if version == 1 {
+                crate::payment::BoundedClient(crate::payment::V1ExactClient::new(signer.clone()))
+                    .accept(&challenge)
+            } else {
+                crate::payment::BoundedClient(V2Eip155ExactClient::new(signer.clone()))
+                    .accept(&challenge)
+            };
+            let signed = selected.select(&candidates).unwrap().sign().await.unwrap();
+            let payload: Value = serde_json::from_slice(&STANDARD.decode(signed).unwrap()).unwrap();
+            validate_payload(&payload, &selected, &signer.address().to_string()).unwrap();
+            assert_eq!(payload["payload"]["authorization"]["value"], "1");
+            assert_eq!(
+                crate::test_signatures::recover_exact(&payload),
+                signer.address()
+            );
+        }
     }
 }
 
