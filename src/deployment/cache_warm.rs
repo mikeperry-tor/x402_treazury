@@ -181,6 +181,9 @@ pub async fn warm_cache_with_network(
         if let Some(funding) = &mut config.funding {
             funding.auto_fund = false;
         }
+        tracing::info!(
+            "Catalog warming uses existing wallets; new wallet funding is disabled for this command; the deployment configuration is unchanged"
+        );
         let deployment = Deployment {
             direct_history: None,
             catalog_capacity: std::sync::Arc::new(crate::network::DiscoveryCapacity::new(
@@ -262,6 +265,7 @@ pub async fn warm_cache_with_network(
         } else {
             "ok"
         };
+        tracing::info!(sources = sources.len(), outcome, "Catalog warming finished");
         Ok(CacheWarmSummary {
             direct,
             outcome,

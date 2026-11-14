@@ -383,6 +383,12 @@ sources=['api']
         })
         .await
         .expect("supervisor must finish draining after the accepted response completes");
+        assert!(
+            !std::fs::read_to_string(log.path())
+                .unwrap()
+                .contains("Catalog warming finished sources="),
+            "cancelled warming must not announce completed warming"
+        );
         assert_eq!(catalogs.load(Ordering::SeqCst), 2);
     } else if mode == "warm" {
         // Disabling metadata cannot purchase a catalog through sibling defaults.
@@ -1122,4 +1128,88 @@ fn warming_does_not_classify_local_pricing_failures_as_optional_outages() {
     assert!(!warm_remote_failure(&local));
     let unavailable = anyhow::anyhow!("remote response unavailable");
     assert!(warm_remote_failure(&unavailable));
+}
+
+#[tokio::test]
+async fn warming_reports_info_progress_and_only_completed_outcomes() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::startup::warm_tests::warming_reports_info_progress_and_only_completed_outcomes",
+    ) {
+        return;
+    }
+    let log = tempfile::NamedTempFile::new().unwrap();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_env_filter("warn,x402_treazury=info")
+            .with_writer(log.reopen().unwrap())
+            .finish(),
+    )
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployment.toml");
+    let mut config = warming_config(
+        dir.path(),
+        "[sources.api]\nspec='private-catalog.json'\nbase_url='https://api.example.com'\n",
+    );
+    config.servers.get_mut("test").unwrap().sources = vec!["api".into()];
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    let healthy = serde_json::json!({"paths":{"/read":{"get":{
+        "description":"private catalog content"
+    }}}});
+    let mut partial = healthy.clone();
+    partial["paths"]["/unsupported"] = serde_json::json!({"get":{
+        "parameters":[{"name":"session","in":"cookie","schema":{"type":"string"}}]
+    }});
+    for (document, expected) in [
+        (healthy.to_string(), Some(("ok", "ready"))),
+        (partial.to_string(), Some(("degraded", "partial"))),
+        ("not JSON".to_owned(), None),
+    ] {
+        std::fs::write(dir.path().join("private-catalog.json"), document).unwrap();
+        let offset = std::fs::read_to_string(log.path()).unwrap().len();
+        let result = super::super::cache_warm::warm_cache(&path, &[], false).await;
+        if expected.is_some() {
+            assert!(result.is_ok(), "{}", result.as_ref().err().unwrap());
+        }
+        let text = std::fs::read_to_string(log.path()).unwrap();
+        let text = &text[offset..];
+        assert!(
+            text.contains("INFO") && text.contains("Warming selected catalogs"),
+            "{text}"
+        );
+        if let Some((outcome, status)) = expected {
+            let summary = result.unwrap();
+            assert_eq!(summary.outcome, outcome);
+            assert_eq!(summary.sources.len(), 1);
+            assert_eq!(summary.sources[0].status, status);
+            assert!(text.contains("Catalog warming source finished"), "{text}");
+            assert!(text.contains("completed=1 total=1"), "{text}");
+            let completion = text
+                .lines()
+                .find(|line| line.contains("Catalog warming finished sources="))
+                .unwrap();
+            assert!(
+                completion.contains("INFO")
+                    && completion.contains(&format!("outcome=\"{outcome}\"")),
+                "{text}"
+            );
+            assert_eq!(text.contains("ERROR"), outcome == "degraded", "{text}");
+        } else {
+            assert!(result.is_err());
+            assert!(
+                !text.contains("Catalog warming finished sources="),
+                "{text}"
+            );
+        }
+        for private in [
+            "private-catalog",
+            "private catalog content",
+            "api.example.com",
+        ] {
+            assert!(!text.contains(private), "{text}");
+        }
+        assert!(!text.contains("DEBUG"), "{text}");
+    }
 }

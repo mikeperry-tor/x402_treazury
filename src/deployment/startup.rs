@@ -724,6 +724,8 @@ pub(super) async fn warm(
         configured.push((id, cfg));
     }
     let mut loads = Vec::with_capacity(configured.len());
+    tracing::info!(target: "x402_treazury::startup", total = selected.len(),
+        "Warming selected catalogs");
     for (id, cfg) in configured {
         let downloads = &downloads;
         loads.push(async move {
@@ -737,7 +739,13 @@ pub(super) async fn warm(
     let mut local_error = None;
     while let Some((id, remote, result)) = pending.next().await {
         match result {
-            Ok(result) => results.push(result),
+            Ok(result) => {
+                tracing::info!(target: "x402_treazury::startup", source = id,
+                    status = result.status, degraded = result.degraded(),
+                    completed = results.len() + 1, total = selected.len(),
+                    "Catalog warming source finished");
+                results.push(result);
+            }
             Err(error) if remote && warm_remote_failure(&error) => {
                 let failure = catalog_failure(&error, "acquisition");
                 tracing::error!(

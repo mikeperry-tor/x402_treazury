@@ -1231,8 +1231,12 @@ impl Deployment {
                         client: near,
                         funding: f,
                     } = near;
-                    tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
-                        "{}", if f.auto_fund { "Automatic wallet funding enabled; new transfers use spendable treasury funds" } else { "Automatic wallet funding disabled; new funding transfers are paused" });
+                    if restriction
+                        != crate::rotation::restriction::FundingRestriction::DenyNewFunding
+                    {
+                        tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
+                            "{}", if f.auto_fund { "Automatic wallet funding enabled; new transfers use spendable treasury funds" } else { "Automatic wallet funding disabled; new funding transfers are paused" });
+                    }
                     let backend = crate::rotation::funding::Backend {
                         treasury: handle,
                         store: store.clone(),

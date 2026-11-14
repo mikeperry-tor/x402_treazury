@@ -509,6 +509,12 @@ Catalog file reads, origin fetches, cache configuration/policy, cache hits and
 writes, shared downloads and retained catalog-load handoffs are DEBUG. These
 implementation details do not announce readiness. Per-source catalog readiness,
 initial loading summaries and endpoint waiting/ready transitions remain INFO.
+Explicit catalog warming also logs its start, per-source results and completion
+at INFO. Completion follows accepted relay work draining and wallet-owner cleanup;
+degraded completion retains its source ERROR diagnostics and reports its outcome.
+Command-restricted wallet initialization does not announce the deployment's
+automatic-funding policy; warming explains that its funding pause applies only
+to that command and leaves the deployment configuration unchanged.
 When remote loads remain pending, the initial summary says catalogs are still
 loading and waiting endpoints will start when their required catalogs are ready;
 it does not announce that startup discovery has finished.

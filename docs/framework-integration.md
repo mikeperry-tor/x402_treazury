@@ -51,6 +51,10 @@ Strict inspection and qualification retain inventory and completeness checks.
 Stdout contains one JSON document; diagnostics go to stderr. `direct` is a boolean,
 `outcome` is `ok` or `degraded`, and `sources` contains exactly one result for each
 selected authored source ID, sorted by ID.
+The default INFO logs report warming start, per-source results and completion.
+Completion includes an `ok` or `degraded` outcome after accepted relay work drains
+and wallet cleanup succeeds. `RUST_LOG` overrides the default filter; fetch and
+cache details remain DEBUG.
 
 ```json
 {
