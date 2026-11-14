@@ -177,11 +177,10 @@ for more details.
 - [Agent-added API providers](docs/agent-sources.md#agent-tools): discovery, registration and direct calls.
 - [Wallet CLI](docs/wallet-cli.md): treasury operations, funding limits and recovery.
 
-## Documentation and status
+## Developer Documentation (Warning: Heavy LLM-isms)
 
 | Guide | What it covers |
 | --- | --- |
-| [Advanced deployments](README_ADVANCED.md) | Research desk, comprehensive example, Tor and bootstrap walkthroughs |
 | [Examples](examples/README.md) | Deployment choices, wallet groups, ports and source selections |
 | [Configuration](docs/configuration.md) | Sources, listeners, filters, pricing and transport options |
 | [Wallet CLI](docs/wallet-cli.md) | Treasury operations, funding limits and recovery |
