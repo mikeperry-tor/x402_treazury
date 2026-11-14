@@ -258,7 +258,7 @@ call owner. It adds no cache, readiness queue or provider breaker. Static metada
 source wallet bindings, shared result/failure state and existing readiness
 notifications. Each accepted static exchange retains its provider gate through
 decoding and publication after waiter cancellation. Shared state locking is brief:
-cache/gate-map/stopped-state access and publication. It spans no I/O or waiting,
+cache/gate-map access and publication. It spans no I/O or waiting,
 so cached results and independent providers remain available. Active capacity
 covers individual HTTP attempts and their bodies, releasing before retry delays
 or wallet traversal. Missing-payer waiting reserves no request capacity and allocates no wallet or funding. The initial
@@ -279,19 +279,22 @@ startup/warming authority.
 
 Each authored position permits at most one logical acquisition. Relay-service
 unsigned requests participate in the same Tor status/transport sequence (one
-attempt direct), with recursive fallback disabled. The separate static
-three-attempt counter and one-second backoff are removed. After definitive
-pre-payment provider failure or an attributable target outcome permitted by the
-consumer, traversal may advance. Validated relay truncation is distinguishable
+attempt direct), with recursive fallback disabled. No separate static
+attempt counter or independent backoff exists. Relay-service HTTP/transport
+failures, including the service's own HTTP `402`, malformed envelopes and incomplete
+outer delivery can advance to the next provider after possible payment.
+Attributable target outcomes retain the consumer's advancement policy. Validated
+relay truncation is distinguishable
 from malformed envelopes and local size rejection. Known target status and
 headers remain available when a relay also reports failed delivery: target `402`,
 unsolicited catalog `304` and partial-document rejection remain terminal despite
 delivery-error or truncation metadata, and valid `Retry-After` still
 applies to an authorized continuation. Delivered target errors can already be
-billed; every authorization retains its possible liability. An uncertain paid
-failure or invalid/unattributable paid envelope stops the sequence. Static
-uncertainty disables that provider for the run without disabling an independent
-provider. No signed pre-send or timeout exception permits replay.
+billed; every authorization retains its possible liability. Local authority,
+destination and byte-limit rejections remain terminal. Static uncertainty stays
+with the accepted provider-position/request outcome: it prevents repurchasing
+that acquisition but does not disable unrelated targets or later providers.
+No signed pre-send or timeout exception permits replay of an authorization.
 
 Catalog fallback diagnostics identify relays by format and their one-based
 position in the original configured method list, without endpoint URLs or
@@ -301,7 +304,7 @@ and possible payment liability. The final WARN identifies the last failed or
 unavailable relay and distinguishes an exhausted list from a stopped fallback.
 `failure_location` distinguishes the relay-service request, target response
 reported by the relay, target delivery failure, relay response validation, local
-response policy and a relay unavailable after earlier uncertain work. An HTTP
+response policy. An HTTP
 status at the relay-service location is the outer service status; at the target
 response location it is the decoded target status. DEBUG records individual
 acquisitions and outcomes, including permitted advancement and successful
@@ -354,7 +357,8 @@ files inherited with `extends` can override the network read default, including
 for discovery. Each relay uses its own provider settings. Relay request
 failures report a fixed reason, available HTTP status, elapsed time, possible
 submission state, and its configured read/byte limits without upstream prose.
-An uncertain paid failure stops the sequence and disables that static provider for the run.
+Possible relay charges survive advancement to other providers; service failures
+do not disable unrelated static acquisitions through that provider.
 
 All outbound HTTP uses `read_timeout_seconds`, defaulting to 60 seconds in both
 direct and Tor mode. Each successful response read renews the inactivity budget;
@@ -935,7 +939,7 @@ financial or qualification authority.
 | Direct payment source/provider observation | One owner per saved operation retains independent source and provider progress. Foreign provider reads use configured funding polling plus operation jitter; failure backoff has the existing 60-second floor and 300-second ceiling. Source preparation/submission uses the existing treasury journal and canonical recovery, with local handoffs continuing without a polling delay. Native sends make no NEAR request or provider deadline; native local observation uses the positive configured funding cadence or existing default when absent. SDK scans retain the shared consensus cadence. Disclosed foreign invoices also request SDK scans until terminal provider outcome and, for success, one subsequent completed scan. Native invoices request shared SDK scans until confirmed receipt of the requested amount, without transparent-address RPCs. Foreground status reads saved facts and may refresh native receipts from a newer saved SDK snapshot. No whole-payment deadline or new concurrency cap. |
 | Import success retention 300 seconds / failure backoff one second | Applies after completion only; active coalesced fetches cannot age out. |
 | Catalog structural bounds and dynamic import ownership | Depth 64, 500,000 nodes and 64 MiB string/key traversal and copy work guard local/downloaded/cached/relay/direct-Value catalogs before recursive conversion or cache publication. Used media-name parsing (including invalid/unsupported declarations), wildcard synthesis, selected media output and candidate/range/parameter comparisons share the same node/byte accounting. Explicit candidate names and sort keys stay borrowed. Schema projection charges each actual pointer lookup once and checks increasing depth before every descent; opaque annotations and unused authored definitions are charged before copying without reference interpretation. Projection recursion and pending physical/import cursors remain bounded by depth. Structural-budget rejection emits WARN at the shared guard with fixed reason and numeric usage/bounds, including when another candidate remains or a caller catches the error. Dynamic import retains stricter references. No separate per-listener, global-import or active-cache admission quota; foreground ownership retains accepted work without an aggregate count bound. Active aliases coalesce without eviction. Completed retention alone is trimmed to four entries on lookup/completion; completed-entry pressure eviction logs DEBUG without rejecting active work. Sixteen mutation jobs; dynamic registration saturation WARNs and rejects, while static publication logs DEBUG with limit 16 and retains the same wait. No tool-count admission quota. Tool lists above 500 advertised definitions emit one advisory WARN whose message states the endpoint name and current tool count and suggests explicit `discover_on_demand = true`; each listing may repeat it. On-demand counts only wrappers. [Agent sources](agent-sources.md#limits-and-network-policy) lists remaining document/registry bounds and WARN diagnostics. |
-| Relay-service unsigned acquisition | One direct attempt, or `1 + network.tor_isolation_retries` Tor attempts per authored provider position. No separate relay attempt counter/backoff. Readiness without I/O consumes no attempt. Definitive provider/target failure can advance once through the configured list; uncertain paid outcomes stop without signed replay. |
+| Relay-service unsigned acquisition | One direct attempt, or `1 + network.tor_isolation_retries` Tor attempts per authored provider position. No separate relay attempt counter/backoff. Readiness without I/O consumes no attempt. Eligible service delivery failures and malformed/incomplete outer responses advance through the list even after possible payment, retaining prior liabilities without replaying an authorization. Decoded target outcomes retain their own advancement policy; local authority, destination and byte limits remain terminal. |
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Normal expiry is ordinary freshness policy. HTTP disk cache limits are 128 MiB / 4,096 entries / 16 KiB metadata / 144 MiB database; pressure eviction logs DEBUG, while persistence/read failures WARN. Store Busy/Locked failures WARN before command reply; this grants no mutation retry. Cache persistence failure does not invalidate a complete response. |
 | Optional cover episode bounds | Bound optional unsigned work; cannot cut off the real paid call. Actual process-budget refusals WARN; owner-cache pressure eviction logs DEBUG; ordinary completed episode budgets/deadlines and cached refusals use DEBUG; fresh retained resource refusals and optional task/sampling failures use INFO. Local deadlines/preemption preserve successful qualification and return interrupted checks to unknown after cleanup, without renewing episode/process budgets. The three-second cleanup wait in `wait_experiment_idle` is a test-only fixture bound; production cleanup has no such cutoff. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. Actual deadline expiry WARNs with a safe stage and numeric allowance. |

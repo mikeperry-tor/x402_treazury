@@ -124,6 +124,20 @@ fn shipped_examples_use_explicit_relay_lists() {
             .map(PathBuf::from)
         );
     }
+    let research: x402_treazury::deployment::MetaConfig =
+        toml::from_str(include_str!("../examples/deployments/research_desk.toml")).unwrap();
+    let relay = research.relay_fallback.unwrap();
+    for method in ["GET", "POST", "HEAD"] {
+        assert_eq!(
+            relay.relays()[method],
+            [
+                "../../providers/readfetch.toml",
+                "../../providers/curl/provider.toml",
+                "../../providers/agproxy.toml"
+            ]
+            .map(PathBuf::from)
+        );
+    }
 }
 
 #[test]

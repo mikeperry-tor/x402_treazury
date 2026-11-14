@@ -270,7 +270,7 @@ in unsigned recovery while recursive fallback is disabled.
 
 Static relay exchanges serialize per provider across wallets, retaining that
 provider's gate through payment, decoding and publication after waiter cancellation.
-The shared state mutex covers only cache/gate-map/stopped-state access and
+The shared state mutex covers only cache/gate-map access and
 publication; it is released during I/O and waits. Cached results and independent
 providers remain available during another exchange. Relay request capacity covers
 each HTTP attempt and its body, releasing before retry delays or wallet traversal;
@@ -280,10 +280,13 @@ logical call owner but release provider gates. This partitions existing
 serialization without adding a resource cap. Cache/failure identity includes
 adapter/provider, authored position, payer and request scope. Readiness waits
 consume no network attempt. There is no separate static request counter/backoff.
-Definitive eligible provider/target outcomes may advance through the list once;
-uncertain paid failure or an unattributable envelope stops. Static uncertainty
-disables that provider for the run without disabling independent providers.
-Delivered target errors/truncation may already be billed, and every authorization
+Provider-service HTTP/transport failures, malformed envelopes and incomplete
+outer delivery can advance through the list even after possible payment.
+Decoded target outcomes retain their own advancement policy; local authority,
+destination and byte-limit rejections remain terminal. Static uncertainty stays
+with the accepted provider-position/request outcome rather than disabling that
+provider for unrelated targets. Fresh reads retain uncertain outcomes rather
+than repurchasing them. Delivered errors/truncation may already be billed, and every authorization
 retains its liability. No relayed challenge reaches target signing. Relay content never promotes an origin transport.
 
 Configured relays may follow redirects remotely while origin HTTP remains

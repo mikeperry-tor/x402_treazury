@@ -534,7 +534,7 @@ Explicit document origin failures and selection of their configured paid fallbac
 are INFO. Catalog, API and directory-search fallback owners also report selection
 at INFO. Selection does not promise a new request, payment or successful retrieval:
 preparation, existing authority, readiness and possible cached work still apply.
-Individual relay exchanges, unsigned relay failures and routine payment completion
+Individual relay exchanges, relay-service failures and routine payment completion
 are DEBUG. Optional discovery probes keep their acquisition and fallback detail
 at DEBUG, including successful paid relay calls.
 The complete document acquisition emits WARN only when no usable paid fallback is
@@ -545,9 +545,12 @@ blocked responses. Enable `RUST_LOG=warn,x402_treazury=debug` for these probe
 diagnostics; oversized origin candidates also use DEBUG with resource, setting
 and byte limit, while terminal explicit document rejection retains WARN. The tool
 response retains per-URL outcomes. No URLs, hosts, arguments or upstream error
-prose are logged. Terminal ordinary payment failures and terminal potentially
-chargeable relay failures retain WARN and possible-charge facts, including when
-an optional probe's payment fails. These levels do not grant retry or payment authority.
+prose are logged. Internal relay-service failures remain DEBUG even after possible
+payment because the owning traversal decides continuation. Final explicit
+catalog, document, API and directory owners report terminal failures at WARN with
+possible-charge facts; optional probes retain their DEBUG acquisition policy.
+Standalone relay-provider API tools remain ordinary calls whose terminal failure
+is WARN. These levels do not grant retry or payment authority.
 Payment WARN events retain fixed provider-reported categories for settlement
 failure, invalid request bodies, temporary lookup unavailability and failed inline
 data refreshes. They include

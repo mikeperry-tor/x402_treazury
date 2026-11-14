@@ -1462,7 +1462,7 @@ Bodyless HEAD remains valid regardless of representation MIME. Redirects are aut
 the requested URL, final URL and every reported redirect hop under the caller's
 destination and origin policies. The documented request cannot forward
 conditional headers, and binary bodies, body-size limits and completeness are not
-qualified. No paid delivery or Tor qualification has been performed. The discovery
+qualified. The text envelope does not establish live settlement or Tor isolation. The discovery
 adapter accepts only faithfully representable unsigned target requests from its
 configured method lists. Enabling the provider as an MCP source also exposes the
 vendor's target-method choices. Reported URLs cannot prove hidden intermediate

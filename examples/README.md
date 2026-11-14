@@ -67,6 +67,11 @@ health changes to its own $0.50 cap; financial uses $1. Initial general setup is
 $2-3 nominal, while the eventual four-group initial range is $8-12, before fees,
 headroom and later replacements.
 
+Its paid relay order is readFetch, Curl, then AGProxy, using published price hints
+of $0.003, $0.01 and $0.0156–$0.0372. These are advisory; actual offers govern each
+payment. Curl supplies a public text-fetch alternative and skips requests with
+required headers or nonempty bodies. Ordinary API relay remains disabled.
+
 | Endpoint | Port | Group | Scope |
 | --- | --- | --- | --- |
 | toolbox | 3010 | general | Provider management, raw calls and agent-added APIs |

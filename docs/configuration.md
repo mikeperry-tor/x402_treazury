@@ -2329,13 +2329,22 @@ cleanup errors.
 After exhausted origin attempts, each authored position has at most one logical
 acquisition. Its unsigned relay-service requests use the same configured Tor
 count, or one attempt in direct mode; signed requests never gain generic replay.
-A proven pre-payment provider failure or complete attributable failed target
-result can advance according to the consumer contract. Validated relay-declared
-truncation can advance; malformed/unattributable envelopes after possible payment
-stop. Delivered error/truncated results may already be billed. A refund promise,
+A relay-service HTTP or eligible transport failure, incomplete outer delivery,
+or malformed relay envelope advances to the next configured provider even after
+possible payment. This includes a relay service's own HTTP `402`; a decoded target
+`402` remains terminal. Complete attributable failed target results and declared
+truncation advance according to the consumer contract. Local authority,
+destination and download-policy rejections remain terminal. Delivered error or
+truncated results and failed relay purchases may already be billed. A refund promise,
 timeout or vendor prose cannot prove nonpayment. Every actual authorization retains
 ordinary per-payment authority and possible liability; no cumulative spending
-counter is added. Local bounds/policy failures are terminal.
+counter is added.
+
+Static acquisition retains each accepted provider-position/request outcome.
+An uncertain outcome is not repurchased by a fresh read of that same acquisition;
+traversal can still use later providers, and unrelated targets remain eligible.
+Possible charges from earlier providers survive later success, exhaustion and
+wallet-readiness errors. There is no provider-wide failure blackout.
 
 A relayed challenge never authorizes target signing.
 
@@ -2390,11 +2399,10 @@ with the same wallet, catalog contract, authored provider position and
 target URL share their first process acquisition and outcome. A terminal decoded
 body-bound failure from that acquisition remains shared even if a later alias
 allows a larger body; changing the bound does not authorize a second fee. Reusing
-a successful cached response still checks the requesting alias's bound. An uncertain
-paid failure stops that provider for the run, without disabling an independent
-provider; malformed paid envelopes likewise stop the sequence. There is no separate
-three-attempt counter or one-second backoff. Independent targets retain access after
-a definitive failure. Strict inspection/warming still require complete selected
+a successful cached response still checks the requesting alias's bound. Uncertain
+paid outcomes stay with that acquisition while later providers and unrelated
+targets remain eligible. There is no separate attempt counter or independent
+backoff. Strict inspection/warming still require complete selected
 results; ordinary serving can expose a failed catalog as unavailable. Successful cached results remain usable.
 
 Outer provider and decoded target bounds are separate allocations. JSON escaping

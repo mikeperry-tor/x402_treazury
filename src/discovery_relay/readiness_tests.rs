@@ -1,4 +1,4 @@
-use super::tests::{TARGET, envelope, fixture, set_endpoint, set_stopped};
+use super::tests::{TARGET, envelope, fixture, set_endpoint};
 use super::*;
 use crate::rotation::{
     base::BaseRpc,
@@ -215,7 +215,6 @@ async fn fixed_bootstrap_cap_refusal_is_terminal_and_never_uses_destination_auth
         assert_eq!(calls.calls.load(Ordering::SeqCst), 1);
         assert_eq!(calls.signed.load(Ordering::SeqCst), 0);
     }
-    assert!(relay.state.lock().await.stopped.is_empty());
     store
         .call(move |s| {
             assert!(!s.has_bootstrap_demand(&destination.0)?);
@@ -268,6 +267,60 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     );
     let (mut relay, f, task) = fixture(envelope(TARGET), false, false).await;
     Arc::get_mut(&mut relay).unwrap().client = PaidClient::managed(manager.clone());
+    // A previous uncertain provider outcome survives both a missing payer and a
+    // terminal readiness error at the next authored position, including freshness.
+    let first = relay.sequence.entries["GET"][0].clone();
+    let mut next = first.clone();
+    next.key.push_str(":next");
+    next.position = 1;
+    Arc::get_mut(&mut relay)
+        .unwrap()
+        .sequence
+        .entries
+        .get_mut("GET")
+        .unwrap()
+        .push(next);
+    let scope = static_scope(&relay.key, "catalog");
+    let key = relay.sequence.cache_keys(&scope)[0].clone();
+    relay.state.lock().await.outcomes.insert(
+        (key, TARGET.into()),
+        Err(TargetFailure {
+            definitive: false,
+            possible: true,
+            ..TargetFailure::new("invalid_relay_envelope", None, true)
+                .at_relay(&first, "relay response validation")
+        }),
+    );
+    for terminal in [false, true] {
+        if terminal {
+            Arc::get_mut(&mut relay).unwrap().client = PaidClient::unsigned();
+        }
+        let error = relay
+            .fetch_fresh(TARGET, 4096, "max_spec_bytes", vec![], None)
+            .await
+            .err()
+            .unwrap();
+        assert!(error.is::<document::PossiblePayment>());
+        assert_eq!(
+            RetryDisposition::from_error(&error),
+            if terminal {
+                RetryDisposition::Terminal
+            } else {
+                RetryDisposition::DependencyWait
+            }
+        );
+        assert_eq!(f.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(f.signed.load(Ordering::SeqCst), 0);
+    }
+    Arc::get_mut(&mut relay)
+        .unwrap()
+        .sequence
+        .entries
+        .get_mut("GET")
+        .unwrap()
+        .truncate(1);
+    Arc::get_mut(&mut relay).unwrap().client = PaidClient::managed(manager.clone());
+    *relay.state.lock().await = State::default();
     for _ in 0..8 {
         let error = relay
             .fetch(TARGET, 4096, "max_spec_bytes")
@@ -279,23 +332,11 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
             RetryDisposition::DependencyWait
         );
         let state = relay.state.lock().await;
-        assert!(state.stopped.is_empty());
         assert!(state.outcomes.is_empty());
         assert_eq!(f.calls.load(Ordering::SeqCst), 0);
         assert_eq!(f.signed.load(Ordering::SeqCst), 0);
     }
     assert!(store.call(|s| s.funding_jobs()).await.unwrap().is_empty());
-    set_stopped(&relay, true).await;
-    let error = relay
-        .fetch(TARGET, 4096, "max_spec_bytes")
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(
-        RetryDisposition::from_error(&error),
-        RetryDisposition::Terminal
-    );
-    set_stopped(&relay, false).await;
     let mut blocked = Box::pin(relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes"));
     assert!(
         tokio::time::timeout(Duration::from_millis(20), &mut blocked)
@@ -303,22 +344,21 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
             .is_err()
     );
     let (mut sibling, sibling_fixture, sibling_task) = fixture(envelope(TARGET), true, false).await;
-    Arc::get_mut(&mut sibling).unwrap().state = relay.state.clone();
+    let inner = Arc::get_mut(&mut sibling).unwrap();
+    inner.state = relay.state.clone();
+    inner.key = "independent-paying-profile".into();
     assert!(sibling.fetch(TARGET, 4096, "max_spec_bytes").await.is_err());
-    let error = tokio::time::timeout(Duration::from_secs(5), &mut blocked)
-        .await
-        .unwrap()
-        .err()
-        .unwrap();
-    assert_eq!(
-        RetryDisposition::from_error(&error),
-        RetryDisposition::Terminal
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), &mut blocked)
+            .await
+            .is_err(),
+        "another wallet's uncertain work cannot make this payer terminal"
     );
     assert_eq!(sibling_fixture.signed.load(Ordering::SeqCst), 1);
     drop(blocked);
     sibling.drain().await;
     sibling_task.abort();
-    // Isolated breaker fixture completed. Resume the independent readiness case.
+    // Resume the independent readiness case with an empty cache.
     *relay.state.lock().await = State::default();
     // Cancelling an unsigned dependency waiter owns no financial work or attempt.
     assert!(
@@ -332,7 +372,6 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     {
         let state = relay.state.lock().await;
         assert!(state.outcomes.is_empty());
-        assert!(state.stopped.is_empty());
     }
     assert_eq!(f.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.signed.load(Ordering::SeqCst), 0);
@@ -426,7 +465,6 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
             state.outcomes.is_empty(),
             "lost readiness cannot publish a terminal provider failure"
         );
-        assert!(state.stopped.is_empty());
     }
     assert!(super::tests::is_idle(&relay));
     assert_eq!(f.calls.load(Ordering::SeqCst), 0);
@@ -484,7 +522,6 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         let state = relay.state.lock().await;
         assert_eq!(state.outcomes.len(), 1);
         assert!(state.outcomes.values().all(Result::is_ok));
-        assert!(state.stopped.is_empty());
     }
     assert_eq!(f.calls.load(Ordering::SeqCst), 2);
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
@@ -552,10 +589,6 @@ async fn definitive_unsigned_failure_is_published_once_without_a_second_retry_lo
             "published failure cannot redispatch accepted work"
         );
     }
-    assert!(
-        relay.state.lock().await.stopped.is_empty(),
-        "definitive unsigned failure cannot poison the provider"
-    );
     let error = relay
         .fetch(
             "https://example.com/independent.json",
@@ -598,7 +631,6 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
     {
         let state = relay.state.lock().await;
         assert!(state.outcomes.is_empty());
-        assert!(state.stopped.is_empty());
     }
     assert_eq!(f.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.signed.load(Ordering::SeqCst), 0);
@@ -629,14 +661,14 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
     tokio::time::timeout(Duration::from_secs(2), relay.drain())
         .await
         .unwrap();
-    assert!(!relay.state.lock().await.stopped.is_empty());
+    assert_eq!(relay.state.lock().await.outcomes.len(), 1);
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-    assert!(
-        relay
-            .fetch("https://other.example.com/spec", 4096, "max_spec_bytes")
-            .await
-            .is_err()
-    );
+    let error = relay
+        .fetch(TARGET, 4096, "max_spec_bytes")
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is::<document::PossiblePayment>());
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     task.abort();
 }

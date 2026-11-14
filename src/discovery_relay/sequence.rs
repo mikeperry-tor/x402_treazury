@@ -379,12 +379,6 @@ impl Prepared {
                     }
                     last = failure;
                 }
-                Admission::Unavailable => {
-                    last = TargetFailure::new("provider_unavailable", None, true).at_relay(
-                        entry,
-                        "relay unavailable after an earlier uncertain payment",
-                    );
-                }
                 Admission::Ready(_) => return None,
             }
         }
@@ -431,27 +425,23 @@ impl Prepared {
             };
             let outcome = match admission {
                 Admission::Cached(outcome) => outcome,
-                Admission::Unavailable => {
-                    last = TargetFailure::new("provider_unavailable", None, true).at_relay(
-                        entry,
-                        "relay unavailable after an earlier uncertain payment",
-                    );
-                    continue;
-                }
                 Admission::Ready(guard) => {
                     // This is a current readiness query, never a funding wait.
                     // DependencyWait releases the gate before the caller waits on
                     // its existing readiness notification.
                     if cache.is_some()
-                        && !client
-                            .discovery_ready()
-                            .await
-                            .map_err(|e| RelayFailure::from_error(&e))?
+                        && !document::with_payment_context(
+                            any_payment,
+                            client
+                                .discovery_ready()
+                                .await
+                                .map_err(|e| RelayFailure::from_error(&e).into()),
+                        )?
                     {
-                        return Err(RetryDisposition::DependencyWait.into());
-                    }
-                    if let Some(cache) = &cache {
-                        cache.reserve(entry).await;
+                        return document::with_payment_context(
+                            any_payment,
+                            Err(RetryDisposition::DependencyWait.into()),
+                        );
                     }
                     let exchange = entry
                         .exchange(
@@ -572,7 +562,7 @@ fn checked_cached(
     Ok(response)
 }
 /// A single provider exchange owns payment evidence and envelope validation.
-/// The ordered traversal alone owns static publication and provider availability.
+/// The ordered traversal alone owns static publication.
 struct ExchangeFailure {
     failure: TargetFailure,
     definitive: bool,
@@ -630,12 +620,12 @@ impl Entry {
             }
             failure.possible = possible;
             failure.response = crate::payment::ResponseFacts::from_error(&error);
-            failure.advance = !possible
-                && (typed.is_some_and(|f| f.fallback)
-                    || cause
-                        .downcast_ref::<reqwest::Error>()
-                        .is_some_and(crate::network::eligible_retry_transport)
-                    || http.is_some_and(|f| f.status != StatusCode::PAYMENT_REQUIRED));
+            failure.advance = typed.is_some_and(|f| f.fallback)
+                || cause
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(crate::network::eligible_retry_transport)
+                || http.is_some()
+                || cause.is::<crate::payment::IncompleteRelayResponse>();
             failure.retry_after = typed.and_then(|f| f.retry_after);
             tracing::debug!(
                 relay_format = label(self.format),
@@ -671,9 +661,7 @@ impl Entry {
                 } else {
                     ("invalid_relay_envelope", "relay response validation")
                 };
-                let mut failure =
-                    TargetFailure::new(reason, None, attributable || (!possible && !local))
-                        .at_relay(self, location);
+                let mut failure = TargetFailure::new(reason, None, !local).at_relay(self, location);
                 failure.possible = possible;
                 failure.response = provider_status.map(crate::payment::ResponseFacts::provider);
                 if error.is::<crate::limits::DownloadLimit>() {
@@ -773,7 +761,6 @@ pub(super) struct StaticRequest<'a> {
 }
 enum Admission {
     Cached(std::result::Result<Arc<Response>, TargetFailure>),
-    Unavailable,
     Ready(Option<tokio::sync::OwnedMutexGuard<()>>),
 }
 impl<'a> StaticRequest<'a> {
@@ -822,29 +809,14 @@ impl<'a> StaticRequest<'a> {
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
                 .clone()
         };
-        // An active provider's temporary stopped marker is not proof that it
-        // failed. Wait outside State, then observe its complete publication.
+        // Wait outside State, then observe the active provider's publication.
         let guard = gate.lock_owned().await;
         let state = self.state.lock().await;
         if let Some(outcome) = retained(&state) {
             Admission::Cached(outcome)
-        } else if state.stopped.contains(&entry.provider_key) {
-            tracing::debug!(
-                relay_format = label(entry.format),
-                relay_position = entry.position + 1,
-                "Configured paid relay is unavailable after earlier uncertain work; no request was sent"
-            );
-            Admission::Unavailable
         } else {
             Admission::Ready(Some(guard))
         }
-    }
-    async fn reserve(&self, entry: &Entry) {
-        self.state
-            .lock()
-            .await
-            .stopped
-            .insert(entry.provider_key.clone());
     }
     async fn publish(
         &self,
@@ -853,9 +825,6 @@ impl<'a> StaticRequest<'a> {
         definitive: bool,
     ) {
         let mut state = self.state.lock().await;
-        if definitive {
-            state.stopped.remove(&entry.provider_key);
-        }
         if let Err(failure) = &mut outcome {
             failure.definitive = definitive;
         }

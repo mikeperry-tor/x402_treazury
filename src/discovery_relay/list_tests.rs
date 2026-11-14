@@ -21,12 +21,19 @@ struct Event {
     signed: bool,
     body: Value,
 }
+#[derive(Clone, Copy, Debug)]
+enum SignedFault {
+    Status(StatusCode),
+    Body,
+    Partial,
+    ContentRange,
+}
 #[derive(Clone)]
 struct Fixture {
     events: Arc<Mutex<Vec<Event>>>,
     responses: Arc<Vec<Value>>,
     stall_first_unsigned_501: bool,
-    first_signed_status: Option<StatusCode>,
+    first_signed_fault: Option<SignedFault>,
 }
 async fn handler(
     AxumState(fixture): AxumState<Fixture>,
@@ -62,9 +69,22 @@ async fn handler(
     }
     if signed {
         if provider == 0
-            && let Some(status) = fixture.first_signed_status
+            && let Some(fault) = fixture.first_signed_fault
         {
-            return (status, "PRIVATE_UPSTREAM_DETAIL").into_response();
+            return match fault {
+                SignedFault::Status(status) => (status, "PRIVATE_UPSTREAM_DETAIL").into_response(),
+                SignedFault::Body => HttpResponse::new(axum::body::Body::from_stream(
+                    futures_util::stream::once(async {
+                        Err::<axum::body::Bytes, _>(std::io::Error::other(
+                            "fixture interrupted body",
+                        ))
+                    }),
+                )),
+                SignedFault::Partial => StatusCode::PARTIAL_CONTENT.into_response(),
+                SignedFault::ContentRange => {
+                    ([("content-range", "bytes 0-1/10")], "{}").into_response()
+                }
+            };
         }
         return axum::Json(fixture.responses[provider].clone()).into_response();
     }
@@ -157,6 +177,19 @@ impl Harness {
         stall_first_unsigned_501: bool,
         first_signed_status: Option<StatusCode>,
     ) -> Self {
+        Self::start_fault(
+            entries,
+            stall_first_unsigned_501,
+            first_signed_status.map(SignedFault::Status),
+        )
+        .await
+    }
+
+    async fn start_fault(
+        entries: Vec<(Format, Value)>,
+        stall_first_unsigned_501: bool,
+        first_signed_fault: Option<SignedFault>,
+    ) -> Self {
         let events = Arc::default();
         let fixture = Fixture {
             events: Arc::clone(&events),
@@ -167,7 +200,7 @@ impl Harness {
                     .collect(),
             ),
             stall_first_unsigned_501,
-            first_signed_status,
+            first_signed_fault,
         };
         let listener = crate::test_tls::listener().await;
         let base = format!("https://{}", listener.local_addr().unwrap());
@@ -338,7 +371,6 @@ async fn search_rejects_status_and_body_then_retains_each_paid_outcome_without_r
     {
         let retained = state.lock().await;
         assert_eq!(retained.outcomes.len(), 3);
-        assert!(retained.stopped.is_empty());
         for (key, reason) in keys.iter().zip(["http_status", "response_rejected"]) {
             let failure = retained.outcomes[&(key.clone(), TARGET.into())]
                 .as_ref()
@@ -436,19 +468,19 @@ async fn absent_or_empty_method_list_never_dispatches_an_implicit_provider() {
 }
 
 #[tokio::test]
-async fn malformed_paid_envelope_stops_but_explicit_delivery_truncation_advances() {
+async fn malformed_paid_envelope_and_explicit_delivery_truncation_advance() {
     let malformed = Harness::new(vec![
         (Format::Curl, json!({"body":"unattributable"})),
-        (Format::Agproxy, agproxy(200, "must not buy", false)),
+        (Format::Agproxy, agproxy(200, "{}", false)),
     ])
     .await;
-    let error = malformed
+    let response = malformed
         .acquire(&target(Method::GET), Contract::Catalog, 4096, None)
         .await
-        .err()
         .unwrap();
-    assert!(format!("{error:#}").contains("may still charge"));
-    malformed.assert_order(&[(0, false), (0, true)]);
+    assert_eq!(response.body, b"{}");
+    assert!(response.payment_may_have_occurred);
+    malformed.assert_order(&[(0, false), (0, true), (1, false), (1, true)]);
     let truncated = Harness::new(vec![
         (Format::Agproxy, agproxy(200, "partial", true)),
         (Format::Agproxy, agproxy(200, "{\"complete\":true}", false)),
@@ -736,10 +768,6 @@ async fn static_provider_failure_and_result_caches_remain_independent() {
             .filter(|outcome| outcome.is_ok())
             .count(),
         1
-    );
-    assert!(
-        state.lock().await.stopped.is_empty(),
-        "a definitive failure cannot disable its sibling"
     );
     let entries = harness.sequence.entries["GET"].clone();
     harness
@@ -1164,39 +1192,44 @@ async fn paid_provider_retry_after_leaves_shared_cached_work_available() {
 }
 
 #[tokio::test]
-async fn disabled_paid_provider_rejects_new_target_without_waiting_for_origin_delay() {
-    for reject in [false, true] {
-        let body = if reject {
-            super::tests::envelope(super::tests::TARGET)
-        } else {
-            json!({"body": "unattributable paid response"})
-        };
-        let (relay, fixture, task) = super::tests::fixture(body, reject, false).await;
-        assert!(
-            relay
-                .fetch(super::tests::TARGET, 4096, "max_spec_bytes")
-                .await
-                .is_err()
-        );
-        assert!(super::tests::is_idle(&relay));
-        let outcome = tokio::time::timeout(
-            std::time::Duration::from_millis(30),
-            relay.fetch_with_capacity(
+async fn uncertain_paid_provider_preserves_each_target_and_its_handoff_delay() {
+    let (relay, fixture, task) =
+        super::tests::fixture(json!({"body":"unattributable"}), false, false).await;
+    assert!(
+        relay
+            .fetch(super::tests::TARGET, 4096, "max_spec_bytes")
+            .await
+            .is_err()
+    );
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_millis(30),
+        relay.fetch_with_capacity(
+            "https://example.com/different-target.json",
+            4096,
+            "max_spec_bytes",
+            Vec::new(),
+            Some(crate::network::RetryAfter::BeyondClock),
+        ),
+    )
+    .await;
+    assert!(
+        outcome.is_err(),
+        "new target must honor its origin handoff delay"
+    );
+    assert!(super::tests::is_idle(&relay));
+    assert_eq!(fixture.signed.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        relay
+            .fetch(
                 "https://example.com/different-target.json",
                 4096,
-                "max_spec_bytes",
-                Vec::new(),
-                Some(crate::network::RetryAfter::BeyondClock),
-            ),
-        )
-        .await
-        .expect("a disabled provider must reject before entering the origin handoff delay");
-        assert!(outcome.is_err());
-        assert!(super::tests::is_idle(&relay));
-        assert_eq!(fixture.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
-        assert_eq!(fixture.signed.load(std::sync::atomic::Ordering::SeqCst), 1);
-        task.abort();
-    }
+                "max_spec_bytes"
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(fixture.signed.load(std::sync::atomic::Ordering::SeqCst), 2);
+    task.abort();
 }
 
 #[tokio::test]
@@ -1257,18 +1290,18 @@ async fn catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome() 
             agproxy(200, "{}", false),
             Some(StatusCode::SERVICE_UNAVAILABLE),
             4096,
-            Some("relay service request"),
-            Some("fallback stopped"),
-            vec![(0, false), (0, true)],
+            None,
+            None,
+            vec![(0, false), (0, true), (1, false), (1, true)],
         ),
         (
             json!({"untrusted": "PRIVATE_UPSTREAM_DETAIL"}),
             agproxy(200, "{}", false),
             None,
             4096,
-            Some("relay response validation"),
-            Some("fallback stopped"),
-            vec![(0, false), (0, true)],
+            None,
+            None,
+            vec![(0, false), (0, true), (1, false), (1, true)],
         ),
         (
             curl(200, "too large PRIVATE_UPSTREAM_DETAIL"),
@@ -1328,8 +1361,11 @@ async fn catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome() 
             "{logs}"
         );
         if advanced {
-            assert!(logs.contains("relay_format=\"curl\" relay_position=1 failure_location=\"target response reported by relay\""), "{logs}");
-            assert!(logs.contains("http_status=503"), "{logs}");
+            assert!(
+                logs.contains("relay_format=\"curl\" relay_position=1"),
+                "{logs}"
+            );
+            assert!(logs.contains("possible_submission=true"), "{logs}");
         }
         if let Some(outcome) = expected_outcome {
             let warning = logs
@@ -1373,18 +1409,29 @@ async fn catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome() 
 }
 
 #[tokio::test]
-async fn unavailable_relays_are_identified_without_another_acquisition() {
+async fn retained_uncertain_relays_are_identified_without_another_acquisition() {
     let harness = Harness::new(vec![
         (Format::Curl, curl(200, "unused")),
         (Format::Agproxy, agproxy(200, "unused", false)),
     ])
     .await;
     let state = Arc::new(tokio::sync::Mutex::new(State::default()));
-    state.lock().await.stopped.extend(
-        harness.sequence.entries["GET"]
-            .iter()
-            .map(|entry| entry.provider_key.clone()),
-    );
+    for (entry, key) in harness.sequence.entries["GET"]
+        .iter()
+        .zip(harness.sequence.cache_keys("wallet"))
+    {
+        let failure = TargetFailure {
+            possible: true,
+            definitive: false,
+            ..TargetFailure::new("invalid_relay_envelope", None, true)
+                .at_relay(entry, "relay response validation")
+        };
+        state
+            .lock()
+            .await
+            .outcomes
+            .insert((key, TARGET.into()), Err(failure));
+    }
     let target = target(Method::GET);
     let prepared = harness.sequence.prepare(&target, 4096).unwrap();
     let cached_error = prepared
@@ -1401,12 +1448,149 @@ async fn unavailable_relays_are_identified_without_another_acquisition() {
     for error in [cached_error, error] {
         let failure = error.downcast_ref::<TargetFailure>().unwrap();
         assert_eq!(failure.relay, Some(("agproxy", 2)));
-        assert_eq!(
-            failure.location,
-            "relay unavailable after an earlier uncertain payment"
-        );
+        assert_eq!(failure.location, "relay response validation");
         assert!(failure.advance);
-        assert!(!failure.possible);
+        assert!(failure.possible);
+        assert!(error.is::<document::PossiblePayment>());
     }
     harness.assert_order(&[]);
+}
+
+#[tokio::test]
+async fn paid_relay_service_failures_advance_without_replaying_the_authorization() {
+    for fault in [
+        SignedFault::Status(StatusCode::SERVICE_UNAVAILABLE),
+        SignedFault::Status(StatusCode::PAYMENT_REQUIRED),
+        SignedFault::Body,
+        SignedFault::Partial,
+        SignedFault::ContentRange,
+    ] {
+        let harness = Harness::start_fault(
+            vec![
+                (Format::Curl, curl(200, "unused")),
+                (Format::Agproxy, json!({"invalid":"envelope"})),
+                (Format::Agproxy, agproxy(200, "{}", false)),
+            ],
+            false,
+            Some(fault),
+        )
+        .await;
+        let state = Arc::new(tokio::sync::Mutex::new(State::default()));
+        let response = harness
+            .acquire(
+                &target(Method::GET),
+                Contract::Catalog,
+                4096,
+                Some(state.clone()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.body, b"{}", "{fault:?}");
+        assert!(response.payment_may_have_occurred, "{fault:?}");
+        for failure in state
+            .lock()
+            .await
+            .outcomes
+            .values()
+            .filter_map(|outcome| outcome.as_ref().err())
+        {
+            assert!(
+                failure.advance && failure.possible && !failure.definitive,
+                "{fault:?}: {failure:?}"
+            );
+        }
+        harness
+            .acquire(
+                &target(Method::GET),
+                Contract::Catalog,
+                4096,
+                Some(state.clone()),
+            )
+            .await
+            .unwrap();
+        harness.assert_order(&[
+            (0, false),
+            (0, true),
+            (1, false),
+            (1, true),
+            (2, false),
+            (2, true),
+        ]);
+        // Fresh acquisition may repurchase a completed success, but neither uncertain
+        // accepted failure is granted another authorization by cache freshness.
+        let prepared = harness
+            .sequence
+            .prepare(&target(Method::GET), 4096)
+            .unwrap();
+        let target = target(Method::GET);
+        prepared
+            .acquire(
+                harness.client.clone(),
+                &target,
+                Contract::Catalog,
+                4096,
+                "max_response_bytes",
+                None,
+                4096,
+                Some(std::time::Duration::from_secs(2)),
+                &[],
+                Some(
+                    sequence::StaticRequest::new(state, "wallet", &target)
+                        .since(Some(Instant::now())),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        harness.assert_order(&[
+            (0, false),
+            (0, true),
+            (1, false),
+            (1, true),
+            (2, false),
+            (2, true),
+            (2, false),
+            (2, true),
+        ]);
+    }
+}
+
+#[tokio::test]
+async fn uncertain_failures_exhaust_the_authored_list_and_preserve_all_possible_fees() {
+    let harness = Harness::start(
+        vec![
+            (Format::Curl, curl(200, "unused")),
+            (Format::Agproxy, json!({"invalid":"envelope"})),
+            (Format::Agproxy, agproxy(503, "unavailable", false)),
+        ],
+        false,
+        Some(StatusCode::SERVICE_UNAVAILABLE),
+    )
+    .await;
+    let state = Arc::new(tokio::sync::Mutex::new(State::default()));
+    for _ in 0..2 {
+        let error = harness
+            .acquire(
+                &target(Method::GET),
+                Contract::Catalog,
+                4096,
+                Some(state.clone()),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(error.is::<document::PossiblePayment>());
+        let failure = error.downcast_ref::<TargetFailure>().unwrap();
+        assert_eq!(failure.relay, Some(("agproxy", 3)));
+        assert!(failure.advance);
+    }
+    harness.assert_order(&[
+        (0, false),
+        (0, true),
+        (1, false),
+        (1, true),
+        (2, false),
+        (2, true),
+    ]);
+    assert_eq!(state.lock().await.outcomes.len(), 3);
 }

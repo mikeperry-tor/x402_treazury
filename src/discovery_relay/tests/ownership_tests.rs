@@ -165,7 +165,7 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 );
             }
 
-            // A second wallet shares the breaker, but cannot borrow the first
+            // A second wallet shares serialization, but cannot borrow the first
             // wallet's paid response. No same-provider I/O can start before publication.
             let other_url = "https://other.example.com/spec";
             let (mut other, other_fixture, other_server) =
@@ -190,18 +190,18 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(result.is_err(), matches!(outcome, Outcome::RelayFailure));
-            assert_eq!(
-                other_fixture.signed.load(Ordering::SeqCst),
-                usize::from(!matches!(outcome, Outcome::RelayFailure))
+            assert!(
+                result.is_ok(),
+                "unrelated accepted work was blocked: {outcome:?}"
             );
+            assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 1);
             assert_eq!(
                 f.signed.load(Ordering::SeqCst),
                 usize::from(!matches!(outcome, Outcome::UnsignedFailure))
             );
 
             // Lost delivery must publish success, a definitive provider/target
-            // failure, or the provider's uncertainty breaker before repetition.
+            // failure retaining its scoped uncertainty before repetition.
             let calls = f.calls.load(Ordering::SeqCst);
             let repeated = relay.fetch(TARGET, 4096, "max_spec_bytes").await;
             assert_eq!(repeated.is_ok(), matches!(outcome, Outcome::Success));

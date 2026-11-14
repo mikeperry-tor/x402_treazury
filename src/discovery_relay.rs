@@ -281,7 +281,6 @@ pub(crate) struct State {
     dependency_wait: Option<Arc<tokio::sync::Notify>>,
     changes: Arc<tokio::sync::Notify>,
     providers: BTreeMap<String, Arc<tokio::sync::Mutex<()>>>,
-    stopped: std::collections::BTreeSet<String>,
     outcomes: BTreeMap<(String, String), std::result::Result<Arc<Response>, TargetFailure>>,
 }
 /// Redacted definitive target/provider facts retained by the static acquisition owner.
@@ -612,18 +611,11 @@ impl Relay {
         {
             return cached;
         }
-        let client = self.client.capture_effective(false).await?;
-        if !client
-            .discovery_ready()
-            .await
-            .map_err(|e| RelayFailure::from_error(&e))?
-        {
-            return Err(RetryDisposition::DependencyWait.into());
-        }
         // The origin's handoff delay precedes accepted relay work. Cancellation
         // here cannot abandon a relay authorization or retain serialization.
         crate::network::sleep_retry_after(retry_after).await;
         let relay = self.clone();
+        let client = self.client.clone();
         self.client
             .run_owned(async move { relay.fetch_owned(request, capacity, client).await })
             .await?
@@ -879,13 +871,6 @@ pub(crate) mod tests {
     pub(crate) fn provider_key(relay: &Relay) -> String {
         relay.sequence.entries["GET"][0].provider_key.clone()
     }
-    pub(crate) async fn set_stopped(relay: &Relay, stopped: bool) {
-        if stopped {
-            relay.state.lock().await.stopped.insert(provider_key(relay));
-        } else {
-            relay.state.lock().await.stopped.clear();
-        }
-    }
     pub(crate) async fn dependency_wait_signal(relay: &Relay) -> Arc<tokio::sync::Notify> {
         let signal = Arc::new(tokio::sync::Notify::new());
         relay.state.lock().await.dependency_wait = Some(signal.clone());
@@ -934,7 +919,7 @@ pub(crate) mod tests {
         }
     }
     #[tokio::test]
-    async fn wallet_scopes_do_not_share_paid_results_but_share_failure_breaker() {
+    async fn wallet_scopes_do_not_share_paid_results_or_failures() {
         let (first, f, task) = fixture(envelope(TARGET), false, false).await;
         let second = second_wallet(&first);
         first.fetch(TARGET, 4096, "max_spec_bytes").await.unwrap();
@@ -952,7 +937,7 @@ pub(crate) mod tests {
             second.fetch(TARGET, 4096, "max_spec_bytes")
         );
         assert!(a.is_err() && b.is_err());
-        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+        assert_eq!(f.signed.load(Ordering::SeqCst), 2);
         task.abort();
     }
     // These tests own a small wallet/source graph; deployment example renames
@@ -976,7 +961,7 @@ pub(crate) mod tests {
         })).unwrap()
     }
     #[tokio::test]
-    async fn built_relays_share_wallet_clients_and_one_global_breaker() {
+    async fn built_relays_share_wallet_clients_and_provider_serialization() {
         let mut config = relay_wallet_fixture();
         config.wallet_bootstrap = None;
         let policy = config.relay_fallback.as_ref().unwrap();
@@ -1379,8 +1364,8 @@ pub(crate) mod tests {
                     .await
                     .is_err()
             );
-            assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-            assert_eq!(f.calls.load(Ordering::SeqCst), 2);
+            assert_eq!(f.signed.load(Ordering::SeqCst), 2);
+            assert_eq!(f.calls.load(Ordering::SeqCst), 4);
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert!(logs.contains(&format!("reason=\"{reason}\"")), "{logs}");
             assert!(logs.contains("possible_submission=true"), "{logs}");
@@ -1391,7 +1376,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn paid_failure_stops_all_queued_targets_and_never_replays() {
+    async fn paid_failure_is_scoped_to_each_queued_target_without_replay() {
         let (relay, f, task) = fixture(envelope(TARGET), true, false).await;
         let results = futures_util::future::join_all((0..16).map(|i| {
             let relay = relay.clone();
@@ -1403,8 +1388,22 @@ pub(crate) mod tests {
         }))
         .await;
         assert!(results.iter().all(Result::is_err));
-        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
-        assert_eq!(f.calls.load(Ordering::SeqCst), 2);
+        assert!(results.iter().all(|result| {
+            result
+                .as_ref()
+                .err()
+                .unwrap()
+                .is::<document::PossiblePayment>()
+        }));
+        assert_eq!(f.signed.load(Ordering::SeqCst), 16);
+        assert_eq!(f.calls.load(Ordering::SeqCst), 32);
+        assert!(
+            relay
+                .fetch("https://example.com/0", 4096, "max_spec_bytes")
+                .await
+                .is_err()
+        );
+        assert_eq!(f.signed.load(Ordering::SeqCst), 16);
         task.abort();
     }
     #[tokio::test]
@@ -1467,13 +1466,8 @@ pub(crate) mod tests {
                     self::fixture(envelope(other_url), false, false).await;
                 Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
                 let result = other.fetch(other_url, 4096, "max_spec_bytes").await;
-                if failure == "wrong_target" {
-                    assert!(result.is_err());
-                    assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 0);
-                } else {
-                    assert!(result.is_ok(), "{expected}/{failure}");
-                    assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 1);
-                }
+                assert!(result.is_ok(), "{expected}/{failure}");
+                assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 1);
                 task.abort();
                 other_task.abort();
             }

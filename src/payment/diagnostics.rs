@@ -339,7 +339,7 @@ fn emit(
             authorization_may_charge,
             "Payment call completed; completion does not establish settlement"
         );
-    } else if relay_call && !authorization_may_charge {
+    } else if relay_call {
         tracing::debug!(
             stage,
             last_http_status,
@@ -352,7 +352,14 @@ fn emit(
             unsigned_attempt,
             max_unsigned_attempts,
             authorization_may_charge,
-            "Relay payment attempt failed before any potentially chargeable authorization"
+            last_payment_required_state = observation.payment_required.state,
+            last_payment_required_error = observation.payment_required.error,
+            last_payment_response_state = observation.payment_response.state,
+            last_payment_response_error = observation.payment_response.error,
+            last_seller_success = observation.payment_response.seller_success,
+            response_body_kind = observation.response_body_kind,
+            omitted_extensions = ?observation.omitted_extensions,
+            "Relay payment attempt failed; the owning acquisition retains any payment liability and decides continuation"
         );
     } else {
         tracing::warn!(
@@ -513,7 +520,7 @@ mod tests {
         .await;
         let logs = std::fs::read_to_string(log.path()).unwrap();
         let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
-        assert_eq!(warnings.len(), 3, "{logs}");
+        assert_eq!(warnings.len(), 2, "{logs}");
         for expected in [
             "http_transport_or_body",
             "transport_reason=\"connection\"",
@@ -537,19 +544,18 @@ mod tests {
             warnings[1].contains("do not automatically repeat"),
             "{logs}"
         );
-        let relay_detail = logs
+        let relay_details: Vec<_> = logs
             .lines()
-            .find(|line| line.contains("Relay payment attempt failed"))
-            .unwrap();
-        assert!(
-            relay_detail.contains("DEBUG")
-                && relay_detail.contains("authorization_may_charge=false"),
-            "{logs}"
-        );
-        assert!(
-            warnings[2].contains("authorization_may_charge=true"),
-            "{logs}"
-        );
+            .filter(|line| line.contains("Relay payment attempt failed"))
+            .collect();
+        assert_eq!(relay_details.len(), 2, "{logs}");
+        for (line, charge) in relay_details.iter().zip([false, true]) {
+            assert!(line.contains("DEBUG"), "{logs}");
+            assert!(
+                line.contains(&format!("authorization_may_charge={charge}")),
+                "{logs}"
+            );
+        }
         for private in ["private-path", "private-token", &address.to_string()] {
             assert!(!logs.contains(private), "{logs}");
         }
@@ -607,16 +613,20 @@ mod tests {
             );
             assert!(!logs.contains("INFO"), "{logs}");
             let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
-            assert_eq!(warnings.len(), 2, "{logs}");
+            assert_eq!(warnings.len(), 1, "{logs}");
             assert!(
-                warnings[0].contains("no further cause information is available"),
+                warnings[0].contains("The payment outcome is unknown; reconciliation is required"),
                 "{logs}"
             );
-            assert!(!warnings[0].contains("unsuccessful HTTP status"), "{logs}");
-            assert!(
-                warnings[1].contains("The payment outcome is unknown; reconciliation is required"),
-                "{logs}"
-            );
+            let relay_failures: Vec<_> = logs
+                .lines()
+                .filter(|line| line.contains("Relay payment attempt failed"))
+                .collect();
+            assert_eq!(relay_failures.len(), if debug { 2 } else { 0 }, "{logs}");
+            if debug {
+                assert!(relay_failures[0].contains("authorization_may_charge=false"));
+                assert!(relay_failures[1].contains("authorization_may_charge=true"));
+            }
             for warning in warnings {
                 assert!(
                     warning.contains("authorization_may_charge=true")
