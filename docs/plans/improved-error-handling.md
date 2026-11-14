@@ -9,7 +9,7 @@ their remaining tools. Frameworks must distinguish completed preparation,
 current MCP availability, catalog coverage and successful paid API execution.
 
 This is an active implementation plan. C1/C2 are implemented and validated;
-G1 is approved; C3 consumer validation and G2 remain pending.
+G1 is approved; C3 is committed and validated; G2 remains pending.
 The user has authorized executing this plan. Live paid calls remain outside scope.
 
 - Working branch: `flaky_provider_resiliance`.
@@ -322,7 +322,7 @@ preserve unsquashed history. Combined gates examine all accumulated changes and
 consumers; per-commit review does not replace them.
 
 Current status: D1 and G1 approved; C1/C2 committed and validated. C3 is
-implemented in a writable consumer worktree; packaged acceptance and G2 remain
+committed in a writable consumer worktree with packaged acceptance; G2 remains
 pending. Independent fresh-context,
 read-only design review examined this plan against native acquisition, diagnostics,
 selection, routing, readiness and pricing, plus consumer preparation, activation,
@@ -430,10 +430,34 @@ onboarding accepts the structured native completion envelope, including degraded
 and all-unavailable results, without new count/cache/price gates or persistent
 coverage markers. Focused consumer tests passed: onboarding 35, endpoint readiness
 12, renderer 4. The packaged fixture adds networkless loopback TLS catalogs and
-checks actual all-twelve activation, empty filtered endpoints, source diagnostics
+passed actual all-twelve activation, empty filtered endpoints, source diagnostics
 and absence of API calls. Its unique image tag preserves existing local images.
 The build uses the consumer Dockerfile's exact native SHA assertion and unchanged
 build recipe, substituting a local Git bundle only for unpublished-source
 transport. Ordinary upstream image fetch requires publishing the native commit;
 this task does not authorize publication. Podman is unavailable, so no native
-Podman coverage is claimed. Final packaged results and G2 remain pending.
+Podman coverage is claimed. G2 remains pending.
+
+
+C3 commit `30d74b8` pins native `3125dcacca10aee1c988a9ffa088f802025ee77e`.
+The frozen consumer passed all 172 Python tests after standard disposable worktree
+initialization and socket-capable execution, effective-model validation,
+`compileall`, local file links and whitespace checks. The reviewed-source image
+built successfully with the unchanged production recipe and exact native SHA
+assertion; the frozen onboarding source was included by a final cached rebuild.
+`target/hermes-c3-endpoints-final.log` records all five networkless container
+scenarios passing: cancelled pending probe cleanup, delayed startup, genuine
+endpoint failure with healthy peer, corrected restart, and degraded catalogs with
+all twelve authenticated endpoints (one healthy tool, eleven empty inventories).
+Only the three authored catalog paths were requested: no API/payment probe occurred.
+The new fixture first exposed two fixture authoring errors (using operationId
+instead of native path-based names, and presenting a CA as a server certificate).
+It now uses correct names and a separately signed serverAuth/SAN leaf, preserving
+TLS verification. Those corrections require final exact-commit review.
+
+The stopped-Tor smoke assertion was updated to degraded zero/JSON and preserved
+forced-acquisition/cache assertions, but that full Tor stack scenario was not run.
+No live Tor, paid provider, financial settlement, or native Podman qualification
+is claimed; these are explicit coverage limits, not passed checks. Final G2 will
+review both exact branches, all native fixups, permanent contract ownership and
+consumer pin before completed-plan cleanup.
