@@ -17,7 +17,7 @@ impl Schedule {
     pub(super) fn failed(&self) -> bool {
         self.failures > 0
     }
-    pub(super) fn complete(&mut self, success: bool, successful_interval: Duration) {
+    pub(super) fn complete(&mut self, success: bool) {
         self.failures = if success {
             0
         } else {
@@ -29,7 +29,7 @@ impl Schedule {
         self.due = Some(
             Instant::now()
                 + if success {
-                    successful_interval
+                    Duration::from_secs(60)
                 } else {
                     Duration::from_secs(seconds)
                 },
@@ -37,14 +37,6 @@ impl Schedule {
     }
 }
 
-/// Use the interval ending at the next block, from the scan already completed.
-pub(super) fn scan_interval(network: TreasuryNetwork, scanned_height: u64) -> Duration {
-    use zcash_protocol::consensus::{BlockHeight, pow_target_spacing};
-    let next = u32::try_from(scanned_height)
-        .unwrap_or(u32::MAX)
-        .saturating_add(1);
-    pow_target_spacing(&network.chain(), BlockHeight::from_u32(next))
-}
 impl Treasury {
     pub(crate) fn configure_funding_discovery(&mut self, groups: Vec<String>) {
         self.funding_groups = groups;
@@ -69,25 +61,14 @@ mod tests {
     use super::*;
 
     #[tokio::test(start_paused = true)]
-    async fn successful_scan_schedule_follows_next_block_across_nu7() {
-        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
-        let network = TreasuryNetwork::Mainnet;
-        let activation = u64::from(u32::from(
-            network
-                .chain()
-                .activation_height(NetworkUpgrade::Nu7)
-                .unwrap(),
-        ));
+    async fn successful_scan_waits_one_minute_after_completion() {
         let mut schedule = Schedule::default();
-        for (height, seconds) in [(activation - 2, 75), (activation - 1, 25), (activation, 25)] {
-            let interval = scan_interval(network, height);
-            assert_eq!(interval, Duration::from_secs(seconds));
-            schedule.complete(true, interval);
-            assert_eq!(schedule.due() - Instant::now(), interval);
-            assert!(!schedule.ready());
-            tokio::time::advance(interval).await;
-            assert!(schedule.ready());
-        }
+        assert!(schedule.ready());
+        schedule.complete(true);
+        tokio::time::advance(Duration::from_secs(59)).await;
+        assert!(!schedule.ready());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(schedule.ready());
     }
     #[tokio::test]
     async fn frequent_source_observers_reuse_scan_without_tip_io_or_renewing_due() {
@@ -117,12 +98,12 @@ mod tests {
             .unwrap();
         owner.reusable_sync_revision = Some(owner.revision);
         tokio::time::pause();
-        owner.observation.complete(true, Duration::from_secs(25));
+        owner.observation.complete(true);
         let due = owner.observation.due();
         let revision = owner.revision;
         let stop = CancellationToken::new();
         // No configured endpoint: either a new scan or a tip probe would fail.
-        for _ in 0..5 {
+        for _ in 0..12 {
             owner.sync_for_observation(&stop).await.unwrap();
             assert_eq!(owner.observation.due(), due);
             assert_eq!(owner.revision, revision);
@@ -175,7 +156,7 @@ mod tests {
                 1
             );
             // Existing successful-completion state resets the same schedule.
-            owner.observation.complete(true, Duration::from_secs(75));
+            owner.observation.complete(true);
             assert!(owner.sync_once(&stop).await.is_err());
             assert_eq!(
                 std::fs::read_to_string(logs.path())
@@ -184,7 +165,7 @@ mod tests {
                     .count(),
                 2
             );
-            owner.observation.complete(true, Duration::from_secs(75));
+            owner.observation.complete(true);
             stop.cancel();
             assert!(owner.sync_once(&stop).await.is_err());
         }
@@ -207,10 +188,10 @@ mod tests {
         owner.close().await.unwrap();
     }
     #[tokio::test(start_paused = true)]
-    async fn completion_uses_consensus_interval_and_independent_failure_backoff() {
+    async fn completion_uses_one_minute_interval_and_independent_failure_backoff() {
         let mut schedule = Schedule::default();
         assert!(schedule.due() <= Instant::now());
-        schedule.complete(false, Duration::ZERO);
+        schedule.complete(false);
         for seconds in [90, 180, 300, 300, 300] {
             assert_eq!(
                 schedule.due() - Instant::now(),
@@ -222,9 +203,9 @@ mod tests {
             assert_eq!(schedule.due(), due);
             tokio::time::advance(Duration::from_secs(seconds - 5)).await;
             assert_eq!(schedule.due(), Instant::now());
-            schedule.complete(false, Duration::ZERO);
+            schedule.complete(false);
         }
-        schedule.complete(true, Duration::from_secs(25));
-        assert_eq!(schedule.due() - Instant::now(), Duration::from_secs(25));
+        schedule.complete(true);
+        assert_eq!(schedule.due() - Instant::now(), Duration::from_secs(60));
     }
 }

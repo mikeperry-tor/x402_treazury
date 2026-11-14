@@ -546,17 +546,16 @@ impl Treasury {
         self.drain_calculation().await;
         let previously_failed = self.observation.failed();
         let result = self.scan_once(stop).await;
-        self.observation
-            .complete(result.is_ok(), result.as_ref().copied().unwrap_or_default());
+        self.observation.complete(result.is_ok());
         if !previously_failed
             && !stop.is_cancelled()
             && let Err(error) = &result
         {
             diagnostics::report_sync_unavailable(error);
         }
-        result.map(|_| ())
+        result
     }
-    async fn scan_once(&mut self, stop: &CancellationToken) -> Result<Duration> {
+    async fn scan_once(&mut self, stop: &CancellationToken) -> Result<()> {
         self.reusable_sync_revision = None;
         ensure!(
             self.healthy,
@@ -664,10 +663,8 @@ impl Treasury {
             tracing::debug!("treasury sync: wallet checkpoint saved after interruption or failure");
         }
         outcome?;
-        Ok(observation::scan_interval(
-            self.network,
-            height.context("successful scan has no scanned height")?,
-        ))
+        height.context("successful scan has no scanned height")?;
+        Ok(())
     }
     pub async fn close(self) -> Result<()> {
         // A response waiter cannot abandon accepted local publication.

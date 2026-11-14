@@ -443,15 +443,8 @@ async fn production_worker_bootstraps_groups_and_retries_refunded_ready_wallet_r
     // Same-epoch handoffs reached submission without advancing a poll clock.
     assert_eq!(handoff_started.elapsed(), Duration::ZERO);
     // Successful source polls use poll=1 plus at most one second of jitter.
-    // They reuse the SDK scan until the synthetic network's NU7 block interval.
+    // They reuse the SDK scan during the one-minute observation interval.
     let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
-    assert_eq!(
-        observation::scan_interval(
-            TreasuryNetwork::Synthetic,
-            before.sync.as_ref().unwrap().height.unwrap()
-        ),
-        Duration::from_secs(25)
-    );
     let observed = lookups.load(Ordering::SeqCst);
     tokio::time::advance(Duration::from_secs(2)).await;
     tick(&worker, clock).await;

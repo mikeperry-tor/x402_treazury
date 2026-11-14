@@ -2591,8 +2591,8 @@ obtains a fresh challenge and enforces its spend cap before signing.
 Remove these keys even if their old values were zero. Balances are advisory; SDK
 input selection and protocol deadlines govern spending. Treasury discovery is
 requested at available-capability startup, explicit sync, enabled funding demand
-and validated pending source/shielding work. Successful treasury scans use the
-SDK consensus block interval at the next established scanned height; failures
+and validated pending source/shielding work. Successful treasury scans schedule the
+next recurring scan 60 seconds after completion; failures
 retain 90/180/300-second backoff. Successful source/provider observations use
 configured polling plus jitter, with independent failure backoff; Base acquisitions
 retain their 60-second completion floor. Idle treasury performs no balance polling.

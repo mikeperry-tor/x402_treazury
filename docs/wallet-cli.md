@@ -530,9 +530,8 @@ supported funds. Unconfirmed change is excluded.
 
 Available treasury serving requests one background ZEC scan after listeners bind.
 Further scans need enabled unfilled funding claims or validated pending source or
-shielding transactions. After success, the next scan uses the SDK consensus block
-interval at the next established scanned height (75 seconds before NU7, 25 after),
-without another tip query. Failures retain independent 90/180/300-second backoff.
+shielding transactions. After success, the next recurring scan starts after
+60 seconds, without another tip query. Failures retain independent 90/180/300-second backoff.
 New reserve demand wakes discovery; idle serving does not watch for deposits.
 The [wallet observation policy](wallet-rotation.md#wallet-observation-policy)
 describes the Store-only exception when the SDK/source capability is unavailable.

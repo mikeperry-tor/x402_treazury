@@ -396,7 +396,6 @@ impl TreasuryCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     fn assert_shielded_refund(encoded: &str) {
         let zcash_keys::address::Address::Unified(receivers) =
@@ -709,7 +708,7 @@ mod tests {
         // Make the shared observation unambiguously overdue before starting the
         // real owner, without waiting through the production scan interval.
         tokio::time::pause();
-        owner.observation.complete(true, Duration::from_secs(75));
+        owner.observation.complete(true);
         tokio::time::advance(std::time::Duration::from_secs(91)).await;
         tokio::time::resume();
 
@@ -767,7 +766,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000, Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
             owner.startup_discovery = false;
-            owner.observation.complete(true, Duration::from_secs(75));
+            owner.observation.complete(true);
             owner.configure_sync(
                 super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
             );
@@ -1108,7 +1107,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000, Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
         owner.startup_discovery = false;
-        owner.observation.complete(true, Duration::from_secs(75));
+        owner.observation.complete(true);
         owner.configure_sync(
             super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
         );
