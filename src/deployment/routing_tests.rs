@@ -85,7 +85,7 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
             "b2b_webmd_healthcare_provider_directory",
             Some("health"),
         ),
-        ("companyrecords", "b2b_ada_find_a_dentist", None),
+        ("companyrecords", "b2b_ada_find_a_dentist", Some("health")),
         ("banking_compliance", "check", None),
         ("banking_compliance", "lookup", Some("finance")),
         ("banking_compliance", "generate", None),
