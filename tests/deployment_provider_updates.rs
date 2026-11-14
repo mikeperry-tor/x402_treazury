@@ -65,12 +65,13 @@ async fn otto_removed_generative_routes_preserve_remaining_research_destinations
         .collect();
     assert_eq!(
         names,
-        BTreeSet::from(["business", "finance", "security", "social", "world"])
+        BTreeSet::from(["business", "finance", "security", "social", "web", "world"])
     );
     for (server, tool) in [
         ("world", "otto_weather"),
         ("finance", "otto_funding_rates"),
         ("security", "otto_dns_lookup"),
+        ("web", "otto_web_extract"),
     ] {
         assert!(
             inventory

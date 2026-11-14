@@ -196,19 +196,45 @@ send_tools = [
   { to = "web" },
 ]
 
+# Atlas timelines, regional interest and related searches/topics remain alongside
+# Duoleads. Related-query relevance needs inspection; all-time and sub-day
+# coverage remains unqualified.
 [sources.google_trends]
 extends = "../../providers/google-trends.toml"
 send_tools = [
-  # trend_over_time covers every supported window and reports granularity.
-  # Inline guidance replaces vendor help with unselected bridge follow-ups.
-  { to = "exclude", tools = ["trend", "help"] },
-  { to = "web" },
+  { to = "web", tools = ["trend_over_time", "related_queries", "related_topics", "interest_by_region"] },
+  { to = "exclude" },
 ]
 
-# Disabled after failed paid settlement/lookup probes on 2026-10-28.
-# 402radar's latest listed Base payment was 3 days old at review:
-# https://402radar.io/api.socialfetch.dev
-# Activity is an external observation, not proof of settlement or universal outage.
+[sources.duoleads]
+extends = "../../providers/duoleads.toml"
+send_tools = [
+  # OpenVerbs returns matching comparison values for $0.03, but Duoleads ($0.045)
+  # also identifies granularity, as-of time and partial periods. Weekly labels
+  # differ by six days; do not silently combine buckets across providers.
+  { to = "web", tools = ["trend", "trends", "related_queries", "interest_by_region"] },
+  { to = "exclude" },
+]
+
+[sources.openverbs]
+extends = "../../providers/openverbs.toml"
+send_tools = [
+  # Geographic radius lookup delivered data; richer operational fields and
+  # exhaustive regional coverage are not implied.
+  { to = "travel", tools = ["airport_v1_nearest"] },
+  { to = "exclude" },
+]
+
+[sources.onchaincheck]
+extends = "../../providers/onchaincheck.toml"
+send_tools = [
+  # $0.003 priced holdings complement BMM; no NFT, transfer or risk equivalence.
+  { to = "finance", tools = ["wallet_balances"] },
+  { to = "exclude" },
+]
+
+# The current catalog exceeds the supported specification size; delivery remains
+# unqualified. External payment activity alone does not establish API delivery.
 # [sources.socialfetch]
 # extends = "../../providers/socialfetch.toml"
 # send_tools = [{ to = "exclude" }]
@@ -297,14 +323,42 @@ send_tools = [
 [sources.kronos]
 extends = "../../providers/kronos.toml"
 send_tools = [
+  # overview returned 503; APEX funding boards and Otto token details provide
+  # narrower working market reads. Remove this exclusion to restore the combined
+  # overview; they do not replace its model or forecast fields.
+  { to = "exclude", tools = ["overview"] },
   { to = "exclude", tools = ["alerts_btc"] }, # Superseded by alerts_asset with asset="btc": matching alerts/state at the same $0.02.
   { to = "finance" },
 ]
 
-[sources.regimeshift]
-extends = "../../providers/regimeshift.toml"
+# Unreachable source; uncomment to restore its specialized models and RFQ tools.
+# Qualified observations below are partial coverage, not substitutes for its
+# Agent-SOFR premiums, model max-LTV, signed quotes or loan lifecycle.
+# [sources.regimeshift]
+# extends = "../../providers/regimeshift.toml"
+# send_tools = [{ to = "finance" }]
+
+[sources.horizonpulse_rates]
+extends = "../../providers/horizonpulse.toml"
 send_tools = [
-  { to = "finance" },
+  { to = "finance", tools = ["money_market_rates"] },
+  { to = "exclude" },
+]
+
+[sources.degenscan]
+extends = "../../providers/degenscan.toml"
+send_tools = [
+  # Supply yields and Deribit IV/DVOL observations; no forward risk/max-LTV model.
+  { to = "finance", tools = ["defi_yields_best", "options_volatility"] },
+  { to = "exclude" },
+]
+
+[sources.marketintelligence]
+extends = "../../providers/marketintelligence.toml"
+send_tools = [
+  # On-chain supply/borrow APYs and utilization complement DefiLlama supply yields.
+  { to = "finance", tools = ["markets_yields"] },
+  { to = "exclude" },
 ]
 
 # Retain complementary financial, corporate, property and regional research;
@@ -427,10 +481,9 @@ send_tools = [
   # the selected page readers, and StableEnrich Firecrawl Markdown plus the
   # caller's own structuring replaces a second paid LLM extraction pass.
   { to = "exclude", tools = ["web_answer", "web_links", "web_json_extract"] },
-  # Otto returned incomplete JavaScript-rendered content and treated a bot
-  # challenge as success in testing; StableEnrich Firecrawl and APEX
-  # page_markdown cover rendered reads.
-  { to = "exclude", tools = ["web_extract"] },
+  # Static extraction complements rendered reads; inspect content because
+  # JavaScript pages and bot challenges can return incomplete text as success.
+  { to = "web", tools = ["web_extract"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "13d_activist_watch",
@@ -468,6 +521,10 @@ send_tools = [
 [sources.agentfund]
 extends = "../../providers/agentfund.toml"
 send_tools = [
+  # Use 2s econ_fred seriesId=RSFSXMV (advance ex-autos, including food services),
+  # limit>=13 for MoM/YoY. Values are monthly SA millions and can be revised.
+  # AgentFund's additional monthly summary needs body={}; its ex-autos label
+  # is unreliable. Prefer the FRED series for verified ex-autos observations.
   # Superseded by x402stock filing_search: sampled matches preserve forms, filing URLs and reporting periods.
   { to = "exclude", tools = ["edgar_full_text_search"] },
   # Route business research families before the primary fallback.
@@ -591,8 +648,8 @@ send_tools = [
 # Marketplace search, product details and offers across Amazon, Google Shopping,
 # Walmart, eBay, Home Depot, Wayfair and Costco, plus Google Lens image tools.
 # The provider excludes duplicate alias trees so generated names follow the
-# shorter family. Books, price history (returned no data), Amazon reviews (caller
-# cookie required) and unqualified seller/influencer routes remain excluded.
+# shorter family. Price history supplies no history data; Amazon reviews require
+# a caller cookie. Seller/influencer routes remain unqualified.
 [sources.openwebninja]
 extends = "../../providers/openwebninja.toml"
 send_tools = [
@@ -657,8 +714,9 @@ send_tools = [
     "driving_directions_get_directions",
     "waze_*",
   ] },
-  # Google Images text search and reverse-image source pages.
+  # Book metadata and Google Images/reverse-image source pages.
   { to = "web", tools = [
+    "realtime_books_data_search",
     "realtime_image_search_search",
     "reverse_image_search_reverse_image_search",
   ] },
@@ -1000,6 +1058,8 @@ send_tools = [
 [sources.twos]
 extends = "../../providers/2s.toml"
 send_tools = [
+  # Nearby lookup supports country/service filters; OpenVerbs remains a backup.
+  { to = "travel", tools = ["airport_near"] },
   { to = "exclude", tools = [
     "security_password_exposure", # Prefer local HIBP prefix checking over uploading passwords or full hashes.
     "security_http_headers",      # NetIntel already supplies structured header checks.
@@ -1063,9 +1123,9 @@ send_tools = [
     "pep_check", "adverse_media_check", "country_tax_rates", "employment_cost_estimate",
     # EUIPO search is absent; US trademark ID lookups do not replace it.
     "work_permit_requirements", "eori_validate", "charity_lookup_uk",
+    # Preserve ESMA register dates and availability; no match is not clearance.
+    "vasp_verify", "vasp_non_compliant_check",
   ] },
-  # MiCA vasp_verify and vasp_non_compliant_check reported unavailable registers,
-  # despite HTTP success; neither qualifies a compliance verdict.
   # AgOSINT supplies routine CZ/NO/GB/FR/FI/US/DE company lookups; Brazilayer supplies CNPJ.
   # Strale and CompanyRecords complement Maxwell registries; contracts and freshness differ.
   # Selected web/science tools cover web/papers, finance covers markets, and NetIntel/AgOSINT cover DNS/domains.
@@ -1168,6 +1228,11 @@ send_tools = [
 [sources.stabletravel]
 extends = "../../providers/stabletravel/provider.toml"
 send_tools = [
+  # FlightAware nearby reads retain operational fields; OpenVerbs and 2s remain
+  # geographic alternatives with different filters and radius contracts.
+  # Canonical lookup returned 401; 2s airport_lookup resolves IATA/ICAO codes
+  # using OurAirports. Remove this exclusion to restore FlightAware aliases.
+  { to = "exclude", tools = ["flightaware_airports_id_canonical"] },
   # Intent is a write; world already supplies aviation weather.
   { to = "exclude", tools = ["flightaware_flights_ident_intents", "flightaware_airports_id_weather_*"] },
   { to = "travel", tools = ["google_flights_search", "seats_aero_*", "flightaware_*"] },
@@ -1251,13 +1316,13 @@ send_tools = [
     "gov_data_gov_uk", "gov_data_gov",
     "b2b_slovakia_rpo_companies", # Known ICO only; no company-name search.
   ] },
-  # WebMD returned family-medicine listings; dentistry failed upstream HTTP 503.
-  # ADA searches in New Orleans and Austin returned 404; leave ADA unselected.
+  # WebMD supplies medical/dental listings; ADA ZIP lookup adds dentist records.
   # Healthline adds a different upstream provider directory, not independent
   # redundancy: both it and WebMD come from the same SiteCheck operator. HealthData.gov
   # is a catalogue only, useful for discovering public-health datasets by keyword.
   { to = "health", tools = [
     "b2b_webmd_healthcare_provider_directory",
+    "b2b_ada_find_a_dentist",
     "b2b_healthline_medical_providers_directory",
     "gov_healthcare_gov",
     "gov_healthdata",
@@ -1276,6 +1341,7 @@ send_tools = [
     "travel_airbnb", "travel_airbnb_reviews", "travel_google_hotels_price", "travel_google_travel",
     "travel_flightradar24_live_flights", "travel_flightaware_public_tracker",
     "travel_skyscanner", "travel_kayak", "travel_momondo",
+    "travel_google_flights", "travel_wikivoyage_articles",
     "travel_amtrak_train_tracker", "travel_hk_mtr_realtime", "travel_seat61_routes",
     "travel_mbta_realtime", "travel_septa_train_view", "travel_michelin_restaurant_guide",
   ] },
@@ -1287,7 +1353,6 @@ send_tools = [
     "health_loinc_laboratory_codes",
     "health_ema_shortages_safety",
   ] },
-  # Wikivoyage failed upstream HTTP 503; Google Flights returned no fare data.
   # Aviation weather stays on world; cars, corporate data and other non-travel namespace reads stay omitted.
   { to = "exclude" },
 ]
@@ -1315,7 +1380,7 @@ listen = "127.0.0.1:3011"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "general"
-instructions_text = "Web search, pages, news, archives, trends and images. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Choose coverage, freshness and answer quality before price. Read rendered pages with stableenrich_firecrawl_scrape; apexfaucet_page_markdown is the cheap JS-only fallback; exa_contents adds cheap indexed text and freshness/history controls. Use agproxy_fetch for raw fetches from residential IPs; it does not render JavaScript or solve challenges. Use glim_twitter_trends for X trends and google_trends_trend_over_time for interest timelines. Use strale_c2pa_inspect to view C2PA media authentication credentials."
+instructions_text = "Web search, pages, news, archives, trends and images. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Choose coverage, freshness and answer quality before price. Read rendered pages with stableenrich_firecrawl_scrape; apexfaucet_page_markdown is the cheap JS-only fallback; exa_contents adds cheap indexed text and freshness/history controls. Use agproxy_fetch for raw fetches from residential IPs; it does not render JavaScript or solve challenges. Use glim_twitter_trends for X trends and duoleads_trend or duoleads_trends for Google interest timelines and comparisons; duoleads_interest_by_region and duoleads_related_queries add regional interest and related searches; google_trends_trend_over_time provides an alternative timeline; google_trends_related_topics adds subjects/entities, google_trends_interest_by_region provides regional interest, and google_trends_related_queries adds search phrases whose relevance needs inspection. openweb_realtime_books_data_search supplies book metadata and preview links. otto_web_extract reads static pages; inspect content for incomplete JavaScript or bot challenges. Use strale_c2pa_inspect to view C2PA media authentication credentials."
 
 [servers.science]
 listen = "127.0.0.1:3012"
@@ -1368,8 +1433,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "personal"
 discover_on_demand = true
-instructions_text = "Trip planning across flights, stays, ground transport, places and destination references. See the discovery tool's keyword list for full capabilities. Availability, prices and schedules are sampled or cached, not guarantees; preserve dates, currencies and cache timestamps. Verify any community-maintained visa requirement references with the destination country/authority."
-discovery_search_tool_instructions_text = "Travel endpoint keywords: nearby places, Google Maps, local business, Yelp business search, local reviews, hotel reviews, rental reviews, local events, concerts, festivals, event tickets, driving directions, traffic, Waze, alerts, jams, venues, OpenStreetMap POI, POI near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips."
+instructions_text = "Trip planning across flights, stays, ground transport, places and destination references. Use twos_airport_lookup for IATA/ICAO codes and twos_airport_near for nearby airports; FlightAware adds operational fields and OpenVerbs supplies a geographic alternative with a kilometre radius. See the discovery tool's keyword list for full capabilities. Availability, prices and schedules are sampled or cached, not guarantees; preserve dates, currencies and cache timestamps. Verify any community-maintained visa requirement references with the destination country/authority."
+discovery_search_tool_instructions_text = "Travel endpoint keywords: nearby places, Google Maps, local business, Yelp business search, local reviews, hotel reviews, rental reviews, local events, concerts, festivals, event tickets, driving directions, traffic, Waze, alerts, jams, venues, OpenStreetMap POI, POI near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, nearby airports, nearest airports, airport radius in kilometres, airport coordinates, departures, arrivals, IATA, ICAO, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, Wikivoyage, travel guides, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips."
 
 [servers.health]
 listen = "127.0.0.1:3018"
@@ -1377,8 +1442,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "health"
 discover_on_demand = true
-instructions_text = "Health research and care access. See the discovery tool's keyword list for full capabilities. Preserve source dates, identifiers and evidence grades; offices, fees and availability need confirmation, and price benchmarks are not interchangeable. Directories may be incomplete; dentistry delivery is unqualified; HCPCS/LOINC do not establish coverage, and LOINC omits units and reference ranges."
-discovery_search_tool_instructions_text = "Health endpoint keywords: find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, WebMD, Healthline, Healthline FindCare, HealthCare.gov, HealthData.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, HCPCS, HCPCS Level II, LOINC, lab test code, PubMed, PMID, medRxiv, preprint, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central."
+instructions_text = "Health research and care access. See the discovery tool's keyword list for full capabilities. Preserve source dates, identifiers and evidence grades; offices, fees and availability need confirmation, and price benchmarks are not interchangeable. Directories may be incomplete; HCPCS/LOINC do not establish coverage, and LOINC omits units and reference ranges."
+discovery_search_tool_instructions_text = "Health endpoint keywords: find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, family membership plans, adult and child membership tiers, monthly fee distributions, statewide DPC statistics, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, WebMD, dentistry, ADA, dentist ZIP lookup, Healthline, Healthline FindCare, HealthCare.gov, HealthData.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, HCPCS, HCPCS Level II, LOINC, lab test code, PubMed, PMID, medRxiv, preprint, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central."
 
 [servers.business]
 listen = "127.0.0.1:3019"
@@ -1387,7 +1452,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financial"
 discover_on_demand = true
 instructions_text = "Business, public-record, patent, funding, jobs, grants and filing research. See the discovery tool's keyword list for full capabilities. Resolve entity identity before enrichment; compare facts by their start/end periods, where interim flows may be fiscal year-to-date while balances are point-in-time, and missing records do not prove absence."
-discovery_search_tool_instructions_text = "Business endpoint keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, Google Play app charts, app installs, app ratings, mobile app reviews, app adoption, app store ranking, GLEIF, LEI, accounting-consolidation parent companies, company profiles, firmographics, employee count, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, USPTO, patents, registry, CNPJ, VAT, sanctions, funding, investors, financial statements, earnings calendar, analyst ratings, insider trades, institutional holdings, jobs, job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, crypto ecosystem, crypto project investors, congressional stock trades, activist filings, material events, occupations, education, licensing, international company registries, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+discovery_search_tool_instructions_text = "Business endpoint keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, Google Play app charts, app installs, app ratings, mobile app reviews, app adoption, app store ranking, GLEIF, LEI, accounting-consolidation parent companies, company profiles, firmographics, employee count, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, USPTO, patents, registry, CNPJ, VAT, sanctions, funding, investors, financial statements, earnings calendar, analyst ratings, insider trades, institutional holdings, jobs, job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, MiCA, CASP, ESMA authorized providers, non-compliant register, crypto ecosystem, crypto project investors, congressional stock trades, activist filings, material events, occupations, education, licensing, international company registries, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3020"
@@ -1396,7 +1461,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financial"
 discover_on_demand = true
 instructions_text = "Financial and macro research. See the discovery tool's keyword list for full capabilities. Banking copy checks and rule summaries are advisory; wallet research may be partial; compare facts by their start/end periods, where interim flows may be fiscal year-to-date while balances are point-in-time."
-discovery_search_tool_instructions_text = "Finance endpoint keywords: funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, crypto news, crypto headlines, market recap, airdrops, DeFi trends, KOL, whale, forecast, Polymarket, Solana, stablecoin, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, FTD, fails to deliver, settlement fails, technical indicators, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+discovery_search_tool_instructions_text = "Finance endpoint keywords: SOFR, EFFR, NY Fed money-market reference rates, protocol supply and borrow APY, lending utilization, Deribit DVOL, implied volatility, monthly retail and food-services sales, headline retail sales including autos, advance retail sales excluding autos, FRED series, RSFSXMV, seasonally adjusted monthly sales, multichain native and ERC-20 balances, priced wallet holdings, excluded dust and unpriced tokens, funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, crypto news, crypto headlines, market recap, airdrops, DeFi trends, KOL, whale, forecast, Polymarket, Solana, stablecoin, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, FTD, fails to deliver, settlement fails, technical indicators, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 [servers.security]
 listen = "127.0.0.1:3021"

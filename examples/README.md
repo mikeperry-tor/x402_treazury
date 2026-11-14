@@ -72,6 +72,7 @@ of $0.003, $0.01 and $0.0156–$0.0372. These are advisory; actual offers govern
 payment. Curl supplies a public text-fetch alternative and skips requests with
 required headers or nonempty bodies. Ordinary API relay remains disabled.
 
+
 | Endpoint | Port | Group | Scope |
 | --- | --- | --- | --- |
 | toolbox | 3010 | general | Provider management, raw calls and agent-added APIs |
@@ -124,8 +125,18 @@ Exa is the primary general/news search and cited-answer source. StableEnrich
 Firecrawl supplies rendered page and PDF reads; APEX page_markdown is the cheaper
 JavaScript-only fallback; AGProxy adds raw residential fetches for
 non-JavaScript pages. Exa Contents supplies indexed text and explicit
-freshness/history controls. GLIM supplies X trends, Google Trends supplies interest
-timelines, and Strale inspects C2PA media credentials.
+freshness/history controls. GLIM supplies X trends; Duoleads supplies Google Trends
+series, comparisons, regional interest and related queries. Atlas retains timelines,
+regional interest, related queries and subjects/entities as alternatives. Related
+queries need relevance inspection; all-time and sub-day windows remain unqualified.
+Otto adds
+static page extraction, with incomplete JavaScript and bot-challenge content
+requiring inspection. OpenWeb Ninja adds book metadata and preview links rather
+than full-text retrieval. Duoleads comparison costs $0.045 versus
+OpenVerbs $0.03 and supplies explicit granularity, as-of time and partial periods.
+The weekly labels differ by six days for matching values; do not merge them
+without resolving bucket conventions. OpenVerbs remains a bundled alternative.
+Strale inspects C2PA media credentials.
 
 Exa mode choice is advisory. Lite is $0.004 for indexed search with restricted
 inputs and no live fetching; auto is $0.007 and remains the general-search
@@ -192,8 +203,17 @@ dates and coverage. Locus feedback and coverage-participation writes are exclude
 
 StableTravel supplies Google Flights cash fares, FlightAware operations and cached
 Seats.aero awards; 2s supplies flight status, airport boards and route schedules
-over shared FlightAware data; HALOWERK supplies route matrices. HealthTravel adds
-hotel prices and Amtrak; ShopSocial adds hiking and FlixBus/FlixTrain; Maxwell
+over shared FlightAware data; HALOWERK supplies route matrices. 2s airport lookup
+resolves IATA/ICAO codes from OurAirports and replaces the unavailable FlightAware
+canonical lookup. FlightAware nearby lookup supplies operational links and
+geographic fields; 2s nearby adds country/scheduled-service filters. OpenVerbs
+remains a geographic nearest-airport alternative with an
+explicit kilometre radius. It lacks 2s country/scheduled-service filters and the
+FlightAware approach, heading, pagination and operational-link fields, and has a
+smaller result allowance than 2s. It does not establish exhaustive coverage or
+equivalence to FlightAware's unspecified radius unit. HealthTravel adds
+hotel prices, Google Flights fare observations, Wikivoyage article discovery and
+Amtrak; ShopSocial adds hiking and FlixBus/FlixTrain; Maxwell
 adds resort lodging, lift access, menus, rentals and local tips; APEX adds cached
 Aviasales deals. OpenWeb Ninja adds Yelp business search, details and reviews plus
 local and virtual event search with venue and ticket links. EV chargers are
@@ -212,14 +232,19 @@ financial assistance and uninsured-care guides. WebMD adds provider search;
 HealthCare.gov adds ACA plan data; EMA adds shortage records; HealthTravel adds
 PubMed citation metadata; 2s adds NPI/NPPES lookups. Hospital facility prices, Medicare benchmarks, drug acquisition
 costs and pre-subsidy premiums are distinct bases. Directories can be incomplete;
-dentistry delivery is unqualified. HCPCS and LOINC are reference codes: existence
+WebMD supplies dentistry listings and ADA adds ZIP-based dentist lookup. For
+statewide DPC monthly plan distributions,
+FindMyDirectDoctor family plans with `view=stats` can separate adult/child tiers
+and billing periods. Their plan-field samples differ from practice-level price
+statistics and do not supply every statistic, so both contracts remain selected. HCPCS and LOINC are reference codes: existence
 does not establish coverage, and LOINC results omit units and reference ranges.
 
 ### Business
 
 Strale supplies UK charity records, Canadian and Swiss company profiles, Polish
-and Slovak ID lookups and EU regulation search; MiCA checks are excluded because
-the registers are unavailable. 2s supplies NY/CO/CT state company records and FCC
+and Slovak ID lookups and EU regulation search. Its MiCA checks read ESMA
+authorized-provider and non-compliant registers; preserve register dates and
+availability, and do not interpret a missing list match as clearance. 2s supplies NY/CO/CT state company records and FCC
 proceedings.
 CompanyRecords supplies NY registry records, weekly Swedish snapshots, known-ID
 Polish KRS extracts and CourtListener opinions. OpenWeb Ninja supplies
@@ -240,10 +265,31 @@ absence.
 
 ### Finance
 
+RegimeShift is disabled while unreachable. Horizon Pulse supplies free official
+SOFR/EFFR reference observations; Degenscan adds supply-yield pools and Deribit
+IV/DVOL; Market Intelligence adds on-chain protocol supply/borrow APYs,
+utilization and sizes. These observations do not replace Agent-SOFR premiums,
+forward-risk/max-LTV models, RFQ matching or signed loan quotes. The disabled
+source remains in TOML comments for deliberate re-enabling.
+
+2s FRED supplies verified ex-autos observations through series `RSFSXMV`:
+advance monthly retail and food-service sales excluding motor vehicles/parts,
+seasonally adjusted, in millions of dollars. Retrieve sufficient observations,
+match prior-month/year dates and compute percentage changes; current-vintage
+observations can be revised. AgentFund's additional monthly summary needs
+`body={}`; its advertised ex-autos label is unreliable, so prefer FRED for that
+series. See the [AgentFund boundary](../providers/CAVEATS.md#agentfundtoml--agentfund-us-economic-sec--on-chain-data-x402agentfundnet).
+APEX funding boards and Otto token details
+supply narrower working market reads beside the excluded Kronos overview; they
+do not replace its model/forecast fields.
+
 Otto supplies crypto news, market briefs, market and token data and funding/OI
 reads; APEX adds venue-normalized funding boards, stablecoin pegs, prediction
 odds, tokenized-stock quotes and X1 reads. Blockchain Money Map supplies wallet,
-transaction and saved-report research; Arkham adds labels and transfers. SmartPerps
+transaction and saved-report research; Arkham adds labels and transfers.
+Onchaincheck adds native and priced ERC-20 holdings with explicit dust/unpriced
+exclusions. It complements BMM rather than replacing NFT, activity or risk data.
+SmartPerps
 supplies Hyperliquid cohort positioning. 2s supplies FIGI/security resolution.
 Concordance supplies multi-source series lookups; Banking Compliance supplies rule
 lookup only, while business retains authoritative eCFR retrieval. Checks and
