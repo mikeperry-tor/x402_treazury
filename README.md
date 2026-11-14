@@ -280,6 +280,7 @@ details.
 | Guide | What it covers |
 | --- | --- |
 | [Documentation index](docs/README.md) | Architecture, demos, plans and further references |
+| [Framework integration](docs/framework-integration.md) | Catalog preparation, degraded coverage and endpoint readiness contract |
 | [Provider caveats](providers/CAVEATS.md) | Current provider support boundaries and uncertainty |
 | [Wallet rotation](docs/wallet-rotation.md) | Admission, reserve claims, retained capacity and durable accounting |
 | [Network isolation](docs/network-egress.md) | Tor identities, connection pools and egress boundaries |
