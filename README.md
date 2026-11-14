@@ -15,7 +15,7 @@ network address to these API providers and to Coinbase infrastructure.
 The `x402_treazury` cli tool loads x402 provider API catalogs, converts them into
 MCP tools, handles x402 payments, and replenishes Base USDC wallets, without giving the agent spending keys. One Rust process can serve multiple authenticated MCP endpoints with different tools and wallet groups, all filled from the same Zcash treasury wallet.
 
-You can also optionally grant your agent a set of tools to discover and add x402 providers themselves, and as a separate additonal option, to send and receive cryptocurrency on any blockchain supported by Near Intents, using shielded ZEC swaps.
+You can also optionally grant your agent a set of tools to discover and add x402 providers themselves, and, as a separate additional option, to send and receive cryptocurrency on any blockchain supported by Near Intents, using shielded ZEC swaps.
 
 You can set custom financial limits on all of these transactions.
 
@@ -168,13 +168,109 @@ stopping `serve`.
 See [wallet administration](docs/wallet-cli.md) and the [example choices](examples/README.md)
 for more details.
 
+## API discovery and provider management
+
+The `examples/deployments/managed.toml` configuration's `research` endpoint lets
+the agent extend its own toolset at runtime. It enables local and remote
+provider management and documented raw URL calls, so the agent can find bundled
+providers, search public directories, register new APIs and call documented
+endpoints directly. These tools are off by default on other endpoints and must
+be enabled deliberately. In the
+[advanced configuration example configs](./README_ADVANCED.md), these tools are
+provided on the `toolbox` endpoint.
+
+New registrations belong to the endpoint that added them and are invisible to
+other endpoints. They last until the process exits unless you set
+`source_registry_file`. Normal payment caps and endpoint tool filters still
+apply.
+
+| Tool | Enabled by | What the agent uses it for |
+| --- | --- | --- |
+| `x402_treazury_providers_list_local` | `provider_management_local = true` | Finds reviewed bundled provider definitions offline, with optional `q`, `page` and `per_page`. |
+| `x402_treazury_providers_add_local` | `provider_management_local = true` | Registers a bundled provider by exact `provider_id`, with optional `name`. |
+| `x402_treazury_providers_search_remote` | `provider_management_remote = true` plus `remote_provider_directories` | Searches every configured directory, with optional `q`, `limit` and `max_price_usd`. |
+| `x402_treazury_providers_add_remote` | `provider_management_remote = true` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url`, with optional `name`. |
+| `x402_treazury_provider_details_remote` | `provider_management_remote = true` | Locates specifications or help from `base_url`, reads usage text from `documentation_url`, or looks up an `x402_list_id` when `x402-list` is selected. |
+| `x402_treazury_raw_call` | `raw_url_calls = true` | Calls an exact documented public HTTPS URL with required `method` and `url`, plus optional `query`, `headers` and JSON `body`. |
+
+Set `discover_on_demand = true` on an endpoint with a large catalog to keep full API
+definitions out of the advertised tool list. The endpoint then adds two wrapper
+tools, and the agent retrieves schemas only when it needs them:
+
+| Tool | What the agent uses it for |
+| --- | --- |
+| `x402_treazury_tools_search` | Finds callable tools and their complete input schemas on this endpoint; optional `query`, `source_name`, `cursor` and `limit`. Makes no provider requests. |
+| `x402_treazury_tool_call` | Invokes a discovered `tool_id` with matching `arguments`; ordinary payment checks apply. |
+
+These two tools are also advertised whenever either provider-management capability
+is enabled, because the agent needs them to find and call newly registered APIs.
+On-demand discovery only changes tool advertising: catalogs still load and direct
+tool calls still work, but most agent frameworks will require using these indirect
+calls to non-advertized tools. See [agent source management](docs/agent-sources.md) for
+directory behavior, registration names and persistence.
+
+## Enabling Direct Cryptocurrency Transactions
+
+Optionally let agents receive payments into your Zcash treasury and send ZEC or
+foreign assets from it. These tools are disabled by default. Native ZEC transfers
+use shielded Ironwood transactions; foreign assets use NEAR swaps.
+
+Use an initialized `[treasury]` and an authenticated MCP endpoint (`auth = true`).
+Add this to your deployment file, replacing `research` with the endpoint name
+(`research` in the quickstart, `toolbox` in the research desk):
+
+```toml
+[servers.research.swap_control]
+receive = true
+send = true
+max_send_zec = "0.05" # Optional per-send ZEC limit, including the network fee.
+```
+
+Enable `receive` and `send` independently. `max_send_zec` limits only sends and
+outgoing swaps through these tools; it does not limit managed wallet funding or other ZEC
+usage, nor does it limit incoming swaps. Omit it or set it to `"none"` for no total-debit limit. Native ZEC needs no
+NEAR setup; foreign assets require the [NEAR swap settings](docs/configuration.md#direct-swap-control)
+under `[funding]`. Start or restart `serve` to expose the enabled tools.
+
+| Tool | Enabled by | What it does |
+| --- | --- | --- |
+| `x402_treazury_swap_assets` | Either flag | Search native ZEC and supported foreign assets by symbol, chain or keywords. |
+| `x402_treazury_payment_request_create` | `receive` | Create a fresh shielded ZEC receive address or a single-use foreign swap deposit request. |
+| `x402_treazury_swap_preview` | `send` | Preview an outgoing payment and whether its estimated total fits the send limit and spendable ZEC balance. |
+| `x402_treazury_swap_send` | `send` | Send native ZEC or swap treasury ZEC for a specified foreign amount. |
+| `x402_treazury_swap_status` | Either flag; retained for saved requests | Check sent payments or receive requests, including current UTC time and available expiry countdowns. |
+
+The tool descriptions give the agent the usage rules for these tools in the tool
+descriptions, to ensure correct usage within their limitations. In particular,
+foreign payers must be told to send the **exact requested amount**, with network
+fees and any required memo added, and agents must never to reuse a swap receive
+address: another payment needs a new `x402_treazury_payment_request_create` call
+and a fresh quote/address. The tool descriptions also explain that native ZEC
+addresses may be reused and that partial receipts accumulate toward the
+requested amount, and that saved requests remain accessible through status after
+new sends or receives are disabled.
+
+Even so, you may want to reinforce these requirements in your prompts for any
+agent doing heavy cryptocurrency activity, to reduce the chance of tool
+description compliance issues. LLMs are trained to place tool
+instruction descriptions at lower trust and lower priority than prompts and
+direct requests. See the [direct payment and swap
+reference](docs/configuration.md#direct-swap-control) for parameters and timing
+details.
+
+> **NOTE**: It should go without saying that even with these tool descriptions,
+> spend limits, and careful prompting, these tools are still
+> [incredibly risky](https://github.com/mikeperry-tor/HostileShop/) to enable,
+> due to prompt injection risk and cryptocurrency scams that even
+> humans regularly fall for. Do NOT give your agent large quantities of ZEC,
+> and have it regularly transfer any ZEC that it earns out of its wallet to
+> an offline wallet or a wallet that you have exclusive control over.
+
 ## Going further
 
 - [Advanced deployments](README_ADVANCED.md): configuration walkthroughs, Tor, bootstrap, relay details, adding new providers.
 - [Large reserves and expensive APIs](docs/configuration.md#reserve-sizing-and-fragmentation): sizing, fragmentation and the separate large-wallet rationale.
 - [Wallet sharing and automatic assignment](docs/configuration.md#multiple-mcp-ports-from-one-configuration): templates, scopes and examples.
-- [Agent Zcash payments and swaps](docs/configuration.md#direct-swap-control): optional receive/send tools and limits.
-- [Agent-added API providers](docs/agent-sources.md#agent-tools): discovery, registration and direct calls.
 - [Wallet CLI](docs/wallet-cli.md): treasury operations, funding limits and recovery.
 
 ## Developer Documentation (Warning: Heavy LLM-isms)
