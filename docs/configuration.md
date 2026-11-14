@@ -1,9 +1,11 @@
 # Configuration reference
 
-Start with the [managed-wallet quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools);
+For an operator-oriented introduction, start with the
+[configuration guide](usage/configuration.md) and the
+[managed-wallet quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools);
 [advanced deployments](../README_ADVANCED.md) cover the multi-listener Zcash-and-Tor
-walkthroughs. This reference covers TOML composition, tool selection, transport and
-pricing.
+walkthroughs. This reference covers exact TOML composition, tool selection,
+transport and pricing.
 Commands run from the repository root. The executable requires an explicit
 subcommand; running it without arguments displays help and never starts serving.
 
@@ -141,7 +143,13 @@ Selection limits new allocations and command completeness. Sync, status, preview
 offline initialization remain non-activating; qualification retains its named
 allocation and payment authority.
 
-## Multiple MCP ports from one configuration
+## Deployment composition and multiple listeners
+
+A deployment file composes reusable providers into named sources and exposes them
+on one or more authenticated MCP listeners. This section covers catalog loading,
+listener startup, source and wallet composition, and managed reserve settings.
+
+### Catalog loading and listener startup
 
 Deployment catalog acquisition shares capacity for active Tor isolation scopes.
 The default is 2 scopes; set a value from 1 to 64 in the deployment TOML:
@@ -174,7 +182,9 @@ deferred serving. Strict inspection requires complete selected results; warming
 reports unavailable sources and compatible partial catalogs in its completed summary. Dynamic imports outside deployment catalog acquisition retain their
 existing scheduling. Accepted ownership retains publication. Synchronous relay
 fallback traverses its configured list once;
-only deferred serving waits for discovery readiness. Ordinary deployment serving loads
+only deferred serving waits for discovery readiness.
+
+Ordinary deployment serving loads
 local catalogs and binds every listener socket before funding and background remote
 catalog discovery start. Each endpoint defaults to `wait_for_catalogs = true`:
 it accepts MCP HTTP requests only after its effectively bound sources have loaded and
@@ -204,6 +214,8 @@ while this announcement waits for their catalog outcomes. Optional catalog failu
 retain their normal allowed behavior; required catalog or selection failures
 suppress the announcement.
 
+#### Startup announcement
+
 This is an advisory startup observation, identified by the log's `funding_basis`,
 not a payment guarantee or a new serving gate. It performs no extra network reads,
 funding actions or periodic polling. Estimates may subsequently change; payment
@@ -215,6 +227,8 @@ There is no overall catalog-startup deadline: progress, server-directed retry
 waits, Tor availability or relay payer readiness can keep a dependent endpoint
 waiting. Funding and discovery workers run during this wait under their existing
 authority. Shutdown still cancels unsigned discovery and drains accepted paid work.
+
+#### Catalog failures and strict inspection
 
 A required remote catalog failure leaves its waiting endpoints unavailable,
 closes their sockets and emits an ERROR identifying each failed endpoint and the
@@ -273,6 +287,8 @@ Each alias retains its own tools, filters, base URL and wallet binding. Local fi
 are read independently. Compatible remote responses can also use the disk cache described below.
 
 
+### Example deployments and serving
+
 [examples/deployments/managed.toml](../examples/deployments/managed.toml) exposes
 Exa web search, page contents and provider-management tools through an authenticated
 research listener and one managed pool. Exa's catalog loads from its public
@@ -286,6 +302,8 @@ the initialized treasury and binds the listener before
 background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
 adds multiple research listeners, Tor, relay and persistent source registrations.
 
+### Listener transport
+
 Each listener serves stateless Streamable HTTP at `/mcp`. Deployment listeners bind
 their configured address, and standalone HTTP listeners accept any host that
 resolves to bind addresses; use a literal such as `0.0.0.0` when serving from a
@@ -293,6 +311,8 @@ container. There is no hot reload; restart to apply changes.
 Static wallet profiles remain supported and use `mode = "static"` with
 `private_key_env`; they do not require treasury configuration. Static serving
 loads only the keys used by selected tools.
+
+### Deployment file structure
 
 The version-1 TOML schema separates named sources, wallets and servers, with
 optional wallet templates and an automatic assignment policy:
@@ -312,6 +332,8 @@ optional wallet templates and an automatic assignment policy:
   `wallet` and optional
   `include_tools`, `exclude_tools`, `tags`, and `exclude_tags`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
+
+### Source selection and tool filters
 
 Provider/source `description` is optional searchable capability metadata. It inherits
 and replaces as an ordinary whole field and appears in `config show` with its
@@ -413,6 +435,8 @@ Composition follows the ordinary replacement rule: omitted lists inherit,
 present lists replace, and `[]` clears. To select tools outside an inherited
 `include_operations` allowlist, explicitly clear or replace that allowlist too.
 
+### Listener settings, host validation and authentication
+
 Host validation defaults to `localhost`, `127.0.0.1` and `::1`, independently of
 the listener's bind address. Replace that allowlist per listener when using a
 custom hostname or reverse proxy:
@@ -484,6 +508,8 @@ credentials. Each category logs at most once per listener per 30 seconds; warnin
 state this limit and the next warning reports the suppressed count. Every rejected
 request receives the error response even when its warning is suppressed.
 
+### Wallet bindings
+
 Payment identity sharing is controlled by named wallet references. For every
 server/source binding, precedence is **source `wallet` → server default `wallet`
 → automatic assignment**. A server may omit its default if every listed source
@@ -549,6 +575,8 @@ before restarting. Both names need not appear in the file used by rename. A save
 destination, even empty or disabled, blocks rename. See
 [managed group rename](wallet-cli.md#rename-a-managed-wallet-group) for identity,
 collision and historical-linkability contracts.
+
+### Wallet templates and automatic assignment
 
 To avoid repeating managed wallet definitions, define one template and an
 automatic assignment policy. To adapt the managed starter, replace its
@@ -618,6 +646,8 @@ caps retain their default; missing managed caps remain errors.
 A cap above every nominal bound is valid, and nominal bounds above the cap are
 valid; neither arrangement authorizes extra funding.
 
+### Managed reserves and funding
+
 `reserves.small` defaults to a randomized $2-3 nominal range when omitted or empty.
 `reserves.large` is optional; an absent large table stays disabled, while an
 explicit empty `reserves.large` enables the randomized $10-25 default. Defaults are
@@ -660,6 +690,8 @@ minimum supported size. USD valuations and commission metadata are advisory. No 
 or mutable balance tracking is introduced. Accepted older `EXACT_OUTPUT` work
 retains its original terms; configuration changes govern new quotes.
 
+#### Retired-wallet tolerance
+
 `max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
 `"0.001"` (1,000 atomic units) independently per managed group. Explicit `"0"`
 requires exact zero. It authorizes eligible retained-wallet retirement on the
@@ -680,6 +712,8 @@ funds and keys at their address, stops routine polling/selection, transfers noth
 and never releases financial obligations. Positive tolerance trades purchasing
 power for less observation work; it does not bound cumulative stranded capital.
 
+#### Base finality and schema
+
 Canonical Base balances, authorization resolution and payment receipts require
 the RPC's `finalized` chain. Financial observations use the finalized anchor;
 there is no additional application confirmation-depth setting. A lagging finalized
@@ -691,7 +725,9 @@ policy. Historical records retain their original minimum-depth metadata.
 Current database schema 23 is required
 for owner opens and read-only inspection; older and future versions fail without
 source-state mutation. Retained histories protect original financial ownership; see
-the [database rollback boundary](wallet-cli.md#treasury-and-managed-pools).
+the [database rollback boundary](wallet-cli.md#database-schema-and-upgrade-compatibility).
+
+#### Funding capital and automatic funding
 
 Funding capital comes from actual spendable treasury funds after confirmations,
 reservations, liabilities and fees; that spendable ZEC balance is the operator's
@@ -709,17 +745,7 @@ explicit funding controls and separately authorized qualification allocation cou
 Qualification has no separate ZEC spending budget. Its `total_test_budget_usdc`
 limits API authorizations using a running durable total, independently of funding.
 
-`funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
-local funding inventory/owner scheduling and successful recurring source and
-provider-status observations after completion, plus existing per-job jitter.
-Failed observations retain independent error backoff with a 60-second floor,
-bounded by 300 seconds before jitter. Base credit acquisitions retain their
-independent 60-second completion floor and backoff. Successful local preparation
-and submission handoffs remain immediate. `funding.swap_timeout_seconds` defaults to 1,800 seconds
-from the first durable broadcast intent and reports degraded health without
-abandoning accepted work or granting replay authority. See the
-[wallet observation policy](wallet-rotation.md#wallet-observation-policy) for
-startup, explicit sync and requested-refresh scopes.
+### Reserve settings and state changes
 
 Managed reserve amounts belong in `reserves.small` and optional `reserves.large`;
 `max_api_payment_usdc` sets independent per-payment authority. Configuration uses
@@ -761,6 +787,20 @@ confirmed Ironwood receipt at its saved receiver. Bound REFUNDED, source closure
 and that receipt permit replacement under current enabled funding and an unused
 initial claim; every replacement obtains a fresh quote and receiver. Provider
 FAILED alone never authorizes replacement. See [refund recovery](wallet-rotation.md#refunds-state-and-recovery).
+
+### Funding timing and observation cadence
+
+`funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
+local funding inventory/owner scheduling and successful recurring source and
+provider-status observations after completion, plus existing per-job jitter.
+Failed observations retain independent error backoff with a 60-second floor,
+bounded by 300 seconds before jitter. Base credit acquisitions retain their
+independent 60-second completion floor and backoff. Successful local preparation
+and submission handoffs remain immediate. `funding.swap_timeout_seconds` defaults to 1,800 seconds
+from the first durable broadcast intent and reports degraded health without
+abandoning accepted work or granting replay authority. See the
+[wallet observation policy](wallet-rotation.md#wallet-observation-policy) for
+startup, explicit sync and requested-refresh scopes.
 
 `funding.quote_deadline_seconds` defaults to 1,800 seconds and preserves explicit
 operator overrides. It requests a quote window; the returned deadline governs
@@ -877,6 +917,8 @@ Small PNG/JPEG/WebP results are returned as MCP image attachments; provider TOML
 can also extract explicitly mapped base64/data-URI images from JSON while keeping
 metadata. See [inline image configuration](../providers/README.md#inline-image-results)
 for byte/count limits and supported formats. Asset URLs are not automatically fetched.
+
+### TOML composition and filtering
 
 Composition is one level: a source may extend a provider file, but that provider
 must not contain `extends`. Local fields replace inherited fields in full;
@@ -1268,7 +1310,7 @@ The entire `response_mappings` table replaces the inherited table when overridde
 an empty table clears inherited mappings. Agent source registration cannot supply
 mapping configuration.
 
-## Implemented behavior
+## Supported behavior and CLI defaults
 
 - Composed TOML provider settings and local/remote JSON OpenAPI specs or digests;
   local `$ref` resolution, path/tag selection, deterministic names, flattened

@@ -118,7 +118,7 @@ explicit uncertainty, without dated probe or sample journals.
   fields cannot select owners. Registration never allocates or funds a wallet.
 - Ordinary serving binds listener sockets before funding. MCP availability follows
   each endpoint's `wait_for_catalogs` setting (default true); see
-  [catalog startup](docs/configuration.md#multiple-mcp-ports-from-one-configuration)
+  [catalog startup](docs/configuration.md#catalog-loading-and-listener-startup)
   and the [framework integration contract](docs/framework-integration.md).
   Ready endpoints remain usable while managed funding is pending or degraded;
   catalog failures disable only dependent waiting endpoints and emit ERROR.
@@ -325,6 +325,21 @@ make fmt-check
 
 ## Local files, logs and documentation
 
+- `README.md`, `README_ADVANCED.md` and `docs/usage/*` are human-facing operator
+  documents and **must** stay readable without implementation context. Keep them
+  task-oriented and free of misplaced text, long paragraphs, unexplained jargon or
+  shorthand, deep technical descriptions, internal identifiers, agent-directed
+  instructions and developer test or probe narratives. Use short paragraphs, clear
+  headings and tables; move exact contracts, edge cases and implementation detail
+  to their owning reference guide and link to it.
+- Every human-facing section **must** serve one purpose. Do not place unrelated
+  reference material under a heading because it was nearby, and do not duplicate a
+  full reference contract in a usage guide. Human documents explain what an operator
+  chooses, why it matters and what to do next; reference documents preserve exact
+  behavior.
+- Keep tool requirements, usage rules and recovery directives in tool descriptions
+  and agent-facing reference sections. Human guides describe those rules; they do
+  not instruct the operator to satisfy them manually or write prompts to compensate.
 - Keep `.env`, `state/`, `secrets/`, local example overrides and reference checkouts
   untracked.
 - Preserve unrelated user files and local changes, whether tracked, untracked or

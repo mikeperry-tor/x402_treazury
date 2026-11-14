@@ -1,8 +1,10 @@
 # Wallet CLI and managed configuration
 
-Start with the [README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools).
-This reference covers treasury commands, funding controls and operator recovery.
-For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
+Start with the [command-line guide](usage/cli.md) and the
+[README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools).
+This reference covers exact treasury command behavior, funding controls and
+operator recovery. For lifecycle invariants, see
+[wallet rotation](wallet-rotation.md).
 Commands run from the repository root; `x402_treazury` means the built executable on PATH.
 
 ## Preview configuration against saved groups
@@ -119,6 +121,8 @@ x402_treazury wallet backup --config examples/deployments/managed.local.toml --d
 x402_treazury wallet sync --config examples/deployments/managed.local.toml
 ```
 
+### Initialization and status
+
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
 it. Generated and mnemonic-imported wallets expose shielded-only receive addresses
 and persist disabled transparent address discovery. Runtime reopening and SDK
@@ -182,6 +186,8 @@ Pending Base proof work includes unavailable finalized evidence and automatic
 reconciliation after a canonical-history change. Rerunning sync or resuming
 serving continues the original work without replaying a payment or deposit.
 
+### Syncing the treasury
+
 Stop `serve` before running `wallet sync`: it acquires the same exclusive treasury
 ownership. Explicit sync performs one ZEC scan and one pass over existing eligible
 configured managed-USDC wallets plus outstanding accepted initial-funding
@@ -222,6 +228,8 @@ the slot; the pool then reports `funding_degraded=true`. Human status explains
 that automatic funding replaces this inventory after original source ownership
 resolves. This is distinct from insufficient spendable ZEC, and previously
 credited low-balance wallets are never topped up.
+
+### Endpoints, keys and standalone options
 
 Only `treasury.state_dir` is required in the treasury table.
 Actual spendable funds after reservations, confirmations and fees govern enabled funding;
@@ -373,7 +381,7 @@ stays owned and continues reconciling during serving.
 
 Ordinary managed `serve` binds listener sockets before starting initial or replacement
 funding. MCP HTTP availability follows each endpoint's `wait_for_catalogs` setting
-(default true); see [catalog startup](configuration.md#multiple-mcp-ports-from-one-configuration).
+(default true); see [catalog startup](configuration.md#catalog-loading-and-listener-startup).
 Remote catalog discovery and pending paid
 relay discovery continue under the retained owner; relay discovery
 waits for its assigned payer without allocating wallets itself. Serving does not
@@ -400,6 +408,8 @@ allocations and API authority; bootstrap policy cannot substitute a bootstrap
 payer for a qualification case or increase its permitted allocation count.
 
 ## Treasury and managed pools
+
+### Build and standalone commands
 
 Build or test the embedded wallet with the shell wrapper, which supplies a
 Cargo-managed protoc compiler. First builds may download public proving
@@ -458,6 +468,8 @@ is not automatically retried over those files. Wallet data stays in memory until
 written as an authenticated encrypted snapshot. The wallet's internal path uses a
 private temporary directory, separate from the durable database. Upstream plaintext
 save tasks are never started. These commands never broadcast or fund anything.
+
+### Indexer endpoints
 
 Standalone new-wallet initialization queries `ZCASH_INDEXER_URL` when set, otherwise
 `https://zec.rocks:443`, and records the mainnet tip minus 100 blocks as its
@@ -528,6 +540,8 @@ comes from the pinned Zcash SDK's trusted confirmation policy (currently 3).
 An explicit override replaces this default; the same threshold applies to all
 supported funds. Unconfirmed change is excluded.
 
+### Sync cadence and status
+
 Available treasury serving requests one background ZEC scan after listeners bind.
 Further scans need enabled unfilled funding claims or validated pending source or
 shielding transactions. After success, the next recurring scan starts after
@@ -558,6 +572,8 @@ The removed `max_sync_age_seconds` and `base_max_block_age_seconds` settings fai
 configuration validation explicitly.
 
 
+### Backup and restore
+
 Stop serving before running an offline backup:
 
 ```sh
@@ -577,6 +593,8 @@ entire backup as spending material. To restore, stop the original process and us
 `state_dir`, its `key` as `key_file`, and the same treasury ID. Do not run the
 original and restored copies simultaneously. A Zcash mnemonic alone cannot restore
 random EVM keys, pending payment authorizations or the rotation journal.
+
+### Database schema and upgrade compatibility
 
 The application maintains encrypted save/reopen and address continuity coverage
 for the embedded Zingolib v8 SDK's current wallet format 45, including current
@@ -601,6 +619,8 @@ serving and take a complete backup before a software upgrade. Older v6 applicati
 binaries cannot reopen a format-45 SDK snapshot. A pre-upgrade backup is not a safe rollback after new financial work:
 restoring it would discard the newer accepted operations and liabilities. Preserve
 the current state and use a compatible application for recovery.
+
+### Recovery
 
 To assess existing funding problems and perform one recovery pass, stop serving and run:
 
@@ -665,6 +685,8 @@ pending in the automatic provider/credit lanes. Refunds alone grant no replaceme
 deposit authority. The low-level recovery commands remain
 available for advanced use, but are omitted from ordinary help.
 
+### Funding workers and scheduling
+
 Managed serving performs finite startup Base discovery and requested scalar
 balance refreshes under the [wallet observation policy](wallet-rotation.md#wallet-observation-policy).
 Idle wallets are not swept, and ordinary scalar reads do not reconcile historical
@@ -691,6 +713,8 @@ static wallets. Bounded qualification examples explicitly opt out. `near_api_key
 Tokens stay in environment variables and are sent only to the fixed NEAR origin.
 Session issuance/refresh and authenticated access still require qualification.
 
+### Refund addresses and quote recovery
+
 The coordinator persists a unique Ironwood-capable unified refund address with
 only its Orchard-format receiver, along with the SDK snapshot, before obtaining a quote.
 Existing transparent refund addresses remain unchanged. Shielded receipts need
@@ -702,6 +726,8 @@ prove no accepted calculation or outgoing record exists; it archives its old bin
 a durable refresh marker and allocates a fresh operation/refund identity.
 Historical unclassified recovery records retain their original obligations. Signed operations never refresh. Insufficient shielded
 spendable funds leave the job unprepared; another attempt still needs current authority.
+
+### Credit polling and observation
 
 Fresh allocations and unsigned funding quotes do not start Base credit polling.
 Actual preparation reads its exact destination once after the SDK provides a valid
@@ -746,6 +772,8 @@ allocate automatic shielding work, and `wallet shield-refunds` fails explicitly.
 Raw SDK recognition of an unsupported output does not make it supported capital.
 Already accepted transaction bytes retain their canonical reconciliation owner;
 this never authorizes a new shielding transaction or a replacement deposit.
+
+### Funding completion and expiry recovery
 
 Expired funding deposits use automatic
 recovery or `wallet recover --config servers.toml`. For an individual shielding
@@ -838,6 +866,8 @@ metadata, retained without collector/rate/shape restrictions; requests do not ad
 application fees. Exact transfer and actual alternate-recipient bindings remain enforced. Public quote fixtures and
 confidential-auth rejection fixtures live in `tests/fixtures/near/`. Redirects are
 disabled; optional credentials remain confined to the NEAR client.
+
+### Submission and reconciliation
 
 `rotation/transaction.rs` makes submission consume a `BroadcastTransaction` handle
 created only after `BROADCAST_REQUESTED` is durable. Each retry requires another
@@ -955,6 +985,8 @@ profile while serving managed pools disables it without deleting its history.
 A name with durable managed state cannot become static; retain the treasury
 reference so this identity conflict can be detected. Re-adding a managed name
 resumes its existing UUID, keys and allocation floors.
+
+### Base RPC verification
 
 Base verification defaults to **PublicNode → dRPC → Base**. The primary can be
 overridden through `funding.base_rpc_url_env` (default `BASE_RPC_URL`); when that
@@ -1106,6 +1138,8 @@ prints balances indexed by pool, without printing addresses, and exits unsuccess
 if any view fails. Use the same trusted
 RPC policy as the deployment; choosing another provider discloses those addresses
 to that provider.
+
+### Managed reserves and payment rules
 
 Managed `mode = "zcash_rotation"` requires `max_api_payment_usdc`. `reserves.small` defaults to a
 randomized $2-3 nominal range; an absent `reserves.large` stays disabled, while an

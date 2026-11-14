@@ -269,22 +269,21 @@ details.
 ## Going further
 
 - [Advanced deployments](README_ADVANCED.md): configuration walkthroughs, Tor, bootstrap, relay details, adding new providers.
-- [Large reserves and expensive APIs](docs/configuration.md#reserve-sizing-and-fragmentation): sizing, fragmentation and the separate large-wallet rationale.
-- [Wallet sharing and automatic assignment](docs/configuration.md#multiple-mcp-ports-from-one-configuration): templates, scopes and examples.
-- [Wallet CLI](docs/wallet-cli.md): treasury operations, funding limits and recovery.
+- [Command-line guide](docs/usage/cli.md): setup, wallet management, wallet inspection, and recovery workflows.
+- [Configuration guide](docs/usage/configuration.md): operator choices for listeners, sources, wallets, Tor and relay fallback.
+- [Large reserves and expensive APIs](docs/usage/configuration.md#small-and-large-reserves): sizing, fragmentation and when to opt into a large reserve.
+- [Wallet sharing and automatic assignment](docs/usage/configuration.md#reusing-one-policy-across-many-groups): templates, scopes and examples.
+- [Sharing a payer during first use](docs/usage/configuration.md#sharing-a-payer-during-first-use): bootstrap groups and deferred funding.
 
 ## Developer Documentation (Warning: Heavy LLM-isms)
 
 | Guide | What it covers |
 | --- | --- |
-| [Examples](examples/README.md) | Deployment choices, wallet groups, ports and source selections |
-| [Configuration](docs/configuration.md) | Sources, listeners, filters, pricing and transport options |
-| [Wallet CLI](docs/wallet-cli.md) | Treasury operations, funding limits and recovery |
+| [Documentation index](docs/README.md) | Architecture, demos, plans and further references |
+| [Provider caveats](providers/CAVEATS.md) | Current provider support boundaries and uncertainty |
 | [Wallet rotation](docs/wallet-rotation.md) | Admission, reserve claims, retained capacity and durable accounting |
 | [Network isolation](docs/network-egress.md) | Tor identities, connection pools and egress boundaries |
-| [Provider caveats](providers/CAVEATS.md) | Current provider support boundaries and uncertainty |
-| [Development](docs/development.md) | Tests, coverage and complexity tools |
-| [Documentation index](docs/README.md) | Architecture, demos, plans and further references |
+| [Developer orientation](docs/development.md) | Platform support info, tests, diagnostic logs, code coverage, and complexity tools |
 
 Common development commands run from the repository root:
 
