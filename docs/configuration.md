@@ -170,8 +170,8 @@ its last active holder finishes, before retry delays or wallet handoffs. Cache
 hits, local files, relay serialization/readiness waits and direct egress consume
 no slots; this includes `catalog warm --direct`. Idle Tor circuits and pooled
 sockets do not count. The same scheduling applies to inspection, warming and
-deferred serving; inspection and warming still require their complete selected
-results. Dynamic imports outside deployment catalog acquisition retain their
+deferred serving. Strict inspection requires complete selected results; warming
+reports unavailable sources and compatible partial catalogs in its completed summary. Dynamic imports outside deployment catalog acquisition retain their
 existing scheduling. Accepted ownership retains publication. Synchronous relay
 fallback traverses its configured list once;
 only deferred serving waits for discovery readiness. Ordinary deployment serving loads
@@ -219,34 +219,38 @@ authority. Shutdown still cancels unsigned discovery and drains accepted paid wo
 A required remote catalog failure leaves its waiting endpoints unavailable,
 closes their sockets and emits an ERROR identifying each failed endpoint and the
 source. Other endpoints keep running, even if every waiting endpoint fails.
-Restart to retry. `sources.NAME.optional_startup = true` lets waiting endpoints
+Restart to retry. `sources.NAME.allow_catalog_failure = true` lets waiting endpoints
 start after that source's failure, with its tools omitted as a complete unit.
 This includes failures discovered during remote parsing, tool generation or filter
 selection. For `wait_for_catalogs = false`, any failed remote source is omitted,
-regardless of `optional_startup`. Stderr and MCP instructions identify pending or
-unavailable sources. Errors preparing source configuration or loading local catalogs remain fatal.
-Listener selector and empty-inventory errors disable only that
-endpoint's static selection, including for local catalogs; valid assignments to
-other endpoints remain available. `optional_startup` does not waive invalid
-endpoint selection. Waiting endpoints close after publishing the failure; eager
-endpoints retain their capabilities and show the failure in MCP instructions.
+regardless of `allow_catalog_failure`. Stderr and MCP instructions identify pending or
+unavailable sources. Errors preparing source configuration or reading/parsing local
+catalogs remain fatal; supported projection omissions are coverage results in
+ordinary serving/warming regardless of document location.
+Ordinary serving permits empty source and listener selections, including local
+catalogs, missing names/tags, contradictory filters and empty opted-in advice.
+These outcomes emit coverage diagnostics and MCP instructions while endpoints
+remain available; they never widen the authored selection. Accepted empty selection
+alone does not require `allow_catalog_failure`. Invalid selector syntax, invalid
+configuration references and actual acquisition/admission failures retain their
+existing failure boundaries. Strict inspection and qualification reject invalid or
+empty inventory selections.
 Reserved static tool namespaces invalidate source admission: a late invalid source
 is omitted as a unit while healthy aliases, published tools and captured calls
 remain usable. Strict catalog inspection rejects reserved namespaces without
 opening wallets or listeners.
-An unresolved exact listener selector is deferred only if its name falls
-exclusively under pending or unavailable sources' resolved prefixes (including inherited
-prefixes). Unknown namespaces and names also attributable to a ready source
-remain errors; an unavailable source cannot hide a ready-source typo.
-Listener wildcard DEBUG diagnostics wait until all of that listener's source loads have
-finished, including failures. They are reported once at that point, independently
-of `wait_for_catalogs`; unrelated catalog completions do not repeat them. Exact
-selectors owned exclusively by pending or unavailable sources remain deferred
-without a warning for each selector; source status reports explain availability.
+Ordinary serving does not infer ownership of missing names from source prefixes.
+Shared/nested namespaces and pending completion order cannot turn an absent
+selection into an endpoint failure. Listener coverage diagnostics wait for that
+listener's own loads to settle and run after successful refresh publication;
+unrelated catalog completions do not repeat them. Unmatched positive selectors
+and empty inventories emit ERROR for reduced coverage; unmatched exclusions emit
+INFO and have no current effect. See [framework integration](framework-integration.md).
 Inspection, frozen inventories and qualification wait for complete catalogs and
 remain strict. The synchronous unsigned-serving loader can omit remote failures
-only with `sources.NAME.optional_startup = true`; required failures cancel its
-unfinished loads. Ordinary deployment serving publishes remote catalogs as they
+only with `sources.NAME.allow_catalog_failure = true`; required failures cancel its
+unfinished loads. It uses the same permissive selection policy as deferred serving; qualification
+continues to use strict inspection semantics. Ordinary deployment serving publishes remote catalogs as they
 finish. Failed sources are not retried during the run;
 restart to retry them. A Tor source that keeps downloading retains its shared
 isolation slot until its last active response finishes. Tool ordering and wallet
@@ -354,10 +358,13 @@ Names are assigned after path, operation and tag selection, before tool-name
 filtering, so removing a tool by name does not rename its remaining siblings.
 Tool-name filters intersect the earlier filters; exclusions win. Help tools also
 participate: include their name or a matching pattern to keep them in an allowlist.
-Unknown exact inclusion names fail catalog loading; unmatched inclusion wildcards
-emit a warning. Unmatched exclusion selectors, exact or wildcard, report INFO and
-have no current effect. An empty final toolset still fails. Server filters further narrow each
-listener's inventory and cannot restore excluded source tools.
+Strict inspection rejects unknown exact inclusion names and empty toolsets;
+unmatched inclusion wildcards emit a warning. Ordinary deployment serving and
+warming retain missing inclusion patterns for local and remote catalogs, report
+reduced coverage and preserve selected siblings. Unmatched exclusions report INFO
+and have no current effect. Empty selections do not fail ordinary serving or
+warming, including contradictory inclusion/exclusion filters. Listener filters
+further narrow the inventory and cannot restore excluded source tools.
 
 Provider/source `recommended_tools` is advisory metadata using the same generated-name
 selector syntax. The full compatible catalog remains visible unless the source
@@ -374,10 +381,12 @@ Recommendation, inclusion and exclusion selectors all validate against the same
 compatible inventory after names and help are generated. Opt-in intersects advice
 with the ordinary source filters; exclusions win, and listener filters narrow the
 result further. Selection never renames siblings or changes source/wallet identity.
-Include help deliberately. An opted-in missing, empty or entirely unmatched list
-fails; unmatched exact recommendations fail when opted in, while unmatched wildcards
-warn. Unused stale advice warns without hiding compatible tools. Malformed selector
-syntax or field types remain configuration errors even when advice is unused.
+Include help deliberately. Empty opted-in advice selects no tools in ordinary
+serving/warming and reports reduced coverage. Strict inspection rejects empty
+opted-in advice, missing exact recommendations and entirely unmatched advice.
+Ordinary deployment serving/warming retain missing recommendation patterns without
+widening selection. Unused stale advice warns without hiding compatible tools.
+Malformed selector syntax or field types remain errors even when advice is unused.
 
 Lists replace on inheritance, and `recommended_tools = []` clears advice. Names are
 not rewritten when a source changes its prefix: replace inherited advice with the
@@ -394,8 +403,11 @@ filters explicitly in a separate inspection configuration to inspect a broader
 compatible inventory; set `prefer_post = false` to inspect both method twins.
 This inspection never initiates extra pricing probes or changes serving selection.
 Offline `config show` reports effective advice, opt-in and field origins without
-catalogs or secrets; inventory-dependent errors (including empty opt-in) are
-reported when loading a catalog.
+catalogs or secrets, including selections that cannot currently yield tools.
+Selector syntax is checked before acquisition and wallet initialization. Strict
+inspection validates actual inventory selections after applying `--all-tools`.
+Ordinary serving/warming report empty or unmatched selections as degraded coverage
+without speculative pattern satisfiability checks.
 
 Composition follows the ordinary replacement rule: omitted lists inherit,
 present lists replace, and `[]` clears. To select tools outside an inherited
@@ -884,8 +896,10 @@ filters its assigned generated tools by tags and tool names. Source `send_tools`
 when present, assign tools before this final listener narrowing. Tag inclusion matches any
 listed tag, exclusions win, and matching is case-sensitive; untagged tools
 (including help) do not match a positive tag filter. Tool-name patterns support
-`*` and `?`. Unmatched exact inclusions are errors; unmatched inclusion wildcards
-produce DEBUG diagnostics. Unmatched exclusions, exact or wildcard, report INFO
+`*` and `?`. Ordinary deployment serving accepts unmatched exact and wildcard
+inclusions without widening exposure. Empty listener selections, including missing
+tags, remain available with coverage instructions and ERROR diagnostics.
+Strict inspection retains exact-name and empty-inventory validation. Unmatched exclusions, exact or wildcard, report INFO
 without failing catalog loading or endpoint readiness. Listener diagnostics identify
 `include_tools` or `exclude_tools` after that listener's source loads settle. When a generated name proves that a source
 tool-name filter removed a matching tool, the diagnostic names the resolved `sources.NAME` setting and a matching tool as
@@ -899,7 +913,9 @@ as publication. Listener filters cannot restore tools removed by source filters;
 an exclusion for an already removed tool can simply be redundant. Other unmatched
 patterns report source availability and suggest checking source/listener filters,
 without inferring a conflict from tool prefixes alone.
-Duplicate tool names and empty server inventories are errors. Calls enforce
+Strict inspection rejects duplicate tool names and unexplained empty server
+inventories. Ordinary serving omits ambiguous names and permits empty inventories
+without inferring whether provider drift or an authored selection caused them. Calls enforce
 the same selection as listing. Sources referenced by multiple listeners are
 loaded once and retain one catalog; selected instructions are combined without
 hidden truncation.
@@ -939,20 +955,26 @@ first. The first matching rule consumes each surviving tool: assignment sends it
 to every named endpoint, while exclusion publishes it nowhere. Later rules cannot
 restore or redistribute it. Explicit destination arrays express sharing. Exact
 selectors validate against the full surviving source inventory before consumption;
-a known tool consumed earlier is still known. Missing exact assignment selectors
-fail. Unmatched selectors in `to = "exclude"` rules, exact or wildcard, report INFO
-and have no current effect. Unmatched assignment wildcards and fully shadowed rules
-emit DEBUG because future families and explicit fallback rules can legitimately
-have no current matches. These rules apply to serving, bootstrap, strict catalog
-inspection and warming alike; malformed selectors remain errors.
+a known tool consumed earlier is still known. Strict inspection rejects missing exact assignment selectors.
+Ordinary deployment serving/warming retain missing local or remote assignment selectors and report reduced coverage, preserving
+the authored rule order. Unmatched selectors in `to = "exclude"` rules, exact or wildcard, report INFO
+and have no current effect. Unmatched assignment wildcards report missing-selection
+notices and ERROR coverage diagnostics during ordinary serving/warming; strict
+inspection emits DEBUG for those wildcards. Fully shadowed rules emit DEBUG because
+earlier rules can legitimately consume all their matches. Syntax, rule order and exclusions apply equally across
+operations; malformed selectors remain errors. Missing inventory selections are
+best effort only for ordinary deployment serving/warming, as described in
+[framework integration](framework-integration.md).
 Inventory-dependent diagnostics
 wait while their source is pending or unavailable. Listener filters can only
 narrow assignments. Existing duplicate-name handling still applies across sources.
-During ordinary serving, invalid listener selectors or an empty static-only
-destination disable that endpoint's static selection, without discarding the source
-catalog or its valid assignments elsewhere. Waiting endpoints fail startup; eager
-endpoints show the failure in their instructions. Strict inspection rejects these
-errors. Shared-payer cover-policy conflicts retain their cross-listener validation.
+During ordinary serving, missing listener selections and empty static-only
+destinations report reduced coverage while endpoints remain available, including
+waiting endpoints once their catalogs settle. Authored routing and listener filters
+remain in force; no additional tools are exposed. Strict inspection rejects missing
+exact selections and empty static-only inventories. Invalid selector syntax and
+configuration references remain errors. Shared-payer cover-policy conflicts retain
+their cross-listener validation.
 
 Every non-exclude target mentioned in any rule establishes a potential binding,
 including a shadowed or currently unmatched target. These catalog-free bindings
@@ -1440,15 +1462,15 @@ tool compatibility validation. To intentionally remove an unsupported operation 
 use operation/path/method/tag selection such as `exclude_operations`. Tool-name
 filters run after compatibility and POST preference; they match compatible names,
 never hypothetical names for omitted operations, and do not erase source notices.
-A serving source with no supported selected API operations retains its issue metadata
-and is unavailable to dependent `wait_for_catalogs = true` endpoints; other endpoints
-follow their own readiness and serving settings. A help document does not convert
-that source into a successful API catalog. Intentionally empty selections remain
-configuration errors, and explicit help-only selection remains valid when supported
-API operations existed before name filtering. Dynamic registration may reject an
-all-unsupported candidate without changing existing registrations. Strict tool inspection
-and qualification still reject any omission.
-An explicit unmatched active selector remains an error rather than widening access.
+Ordinary deployment serving publishes accepted catalogs even when their selected
+API inventory is empty or every selected operation is omitted as unsupported.
+Omissions and empty selections remain visible in instructions and ERROR coverage
+diagnostics; they do not close waiting endpoints. A help document does not turn an
+unsupported API contract into a usable operation. Actual acquisition or source
+admission failures retain the configured `allow_catalog_failure` readiness policy.
+Dynamic registration may reject an all-unsupported candidate without changing
+existing registrations. Strict inspection and qualification still reject omissions
+and invalid inventory selections. Authored filters never widen access.
 
 ## OpenAPI header parameters and idempotency
 
@@ -2049,8 +2071,8 @@ a new local lifetime. Without validators, the catalog is downloaded again.
 Failed refreshes retain the previous complete disk snapshot but return the refresh
 error; they never serve an expired document as a successful refresh. Ordinary
 startup, explicit warm and runtime refresh stage downloaded or revalidated bytes
-until source generation and source tool routing validate (including strict
-completeness for inspection and warm). A rejected response cannot create an
+until source generation and source tool routing validate. Strict inspection requires
+completeness; warming can accept compatible partial catalogs with visible omissions. A rejected response cannot create an
 indefinite snapshot or renew a previous one. Optional pricing documents are
 persisted only after their configured format is validated. Generic library JSON
 loaders accept parsed JSON; callers of `load_json_discovery_bounded` must explicitly
@@ -2125,9 +2147,9 @@ metadata authority and does not allocate wallets or start funding.
 If replacement tools select a static wallet that was unused and therefore not
 initialized at startup, publication fails and existing tools remain available.
 Restart to initialize that newly selected wallet under the current configuration.
-If every selected API operation becomes unsupported, the source is unavailable
-just as at startup; exact selectors owned by it do not withdraw healthy sibling
-sources. If no API tools remain, that source cannot produce another refresh
+If every selected API operation becomes unsupported, the accepted source publishes
+an empty API inventory with omission instructions, just as at startup; endpoints
+and healthy sibling sources remain available. If no API tools remain, that source cannot produce another refresh
 signal; restart after repairing its catalog to restore it.
 Refresh publishes the complete replacement catalog without waiting for optional
 pricing. Its generation owns asynchronous pricing enrichment, just as at startup.
@@ -2166,8 +2188,8 @@ x402_treazury catalog warm --config deployment.toml --source provider_id --direc
 
 `--source` selects authored source IDs from the deployment, not provider file paths;
 repeat it or use a comma-separated list. Omitting it selects every declared source.
-Every selected catalog and its configured pricing hint document is downloaded
-unconditionally, including with a fresh cache entry or saved validators. It adds no
+Selected remote catalogs and external pricing documents for their usable API tools
+are downloaded unconditionally, including with a fresh cache entry or saved validators. It adds no
 conditional GET or API replay. The command requires an existing treasury state directory and rejects
 `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on a selected source. Without `--direct`, it uses the
 deployment's network policy, replaced by `--network-config` when supplied. It starts
@@ -2198,15 +2220,25 @@ to refresh directly. Paid requests, real payment challenges, lazy help, agent
 imports and treasury traffic always retain their configured policy. Qualification
 continues to bypass all disk caches and cannot invoke this warm path.
 
-The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
-`fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`. Catalogs use the configured local TTL,
-including when upstream requests no storage or immediate revalidation. Variant,
-size and provenance restrictions still apply; `--direct` does not override them
-or extend lifetimes. Warm validates each source's generation, completeness and
-`send_tools` routing before its write; it does not validate combined listener
-selection. A removed exact listener selector can therefore make its endpoint
-unavailable after restart even when warm succeeds. A failed multi-source warm can
-leave completed disposable entries.
+The command prints one JSON summary with `direct`, `outcome` (`ok` or `degraded`)
+and one result per selected source. Valid remote attempts finish independently:
+a failed source does not cancel healthy sibling acquisition. Both outcomes return
+zero, including when every remote source is unavailable. Invalid local
+configuration/state, local catalog errors, cancellation and internal failures remain
+nonzero. Accepted paid work drains before its owner closes.
+
+`catalog_cache` distinguishes `fresh`, `fresh_via_relay`, `requires_revalidation`,
+`not_stored` and `local_file`, separately from source availability. Catalogs use the
+configured local TTL, including when upstream requests no storage or immediate
+revalidation. Variant, size and provenance restrictions still apply; `--direct`
+does not override them or extend lifetimes. Warming validates source generation and
+`send_tools` routing before cache acceptance. Compatible partial catalogs may be
+accepted with omissions; wholly unsupported or invalid replacements retain previous
+accepted bytes, prices and provenance. Missing remote selections are reported without
+broadening authored filters. Combined listener selection is not validated by warming.
+
+See [framework integration](framework-integration.md) for the exact JSON fields,
+failure vocabulary, exit contract and framework preparation/readiness behavior.
 
 ## Relay fallback
 
@@ -2402,8 +2434,9 @@ allows a larger body; changing the bound does not authorize a second fee. Reusin
 a successful cached response still checks the requesting alias's bound. Uncertain
 paid outcomes stay with that acquisition while later providers and unrelated
 targets remain eligible. There is no separate attempt counter or independent
-backoff. Strict inspection/warming still require complete selected
-results; ordinary serving can expose a failed catalog as unavailable. Successful cached results remain usable.
+backoff. Strict inspection requires complete selected results; warming reports
+failed sources and compatible partial results, while ordinary serving can expose a
+failed catalog as unavailable. Successful cached results remain usable.
 
 Outer provider and decoded target bounds are separate allocations. JSON escaping
 or base64 can enlarge the envelope; raising only the target limit cannot enlarge

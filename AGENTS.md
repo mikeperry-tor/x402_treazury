@@ -118,7 +118,8 @@ explicit uncertainty, without dated probe or sample journals.
   fields cannot select owners. Registration never allocates or funds a wallet.
 - Ordinary serving binds listener sockets before funding. MCP availability follows
   each endpoint's `wait_for_catalogs` setting (default true); see
-  [catalog startup](docs/configuration.md#multiple-mcp-ports-from-one-configuration).
+  [catalog startup](docs/configuration.md#multiple-mcp-ports-from-one-configuration)
+  and the [framework integration contract](docs/framework-integration.md).
   Ready endpoints remain usable while managed funding is pending or degraded;
   catalog failures disable only dependent waiting endpoints and emit ERROR.
   Strict inspection and separately

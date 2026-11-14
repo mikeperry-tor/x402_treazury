@@ -5,12 +5,82 @@ use super::*;
 #[derive(Serialize)]
 pub struct CacheWarmSummary {
     pub direct: bool,
+    pub outcome: &'static str,
     pub sources: Vec<CacheWarmSource>,
 }
 #[derive(Serialize)]
 pub struct CacheWarmSource {
     pub source: String,
-    pub catalog_cache: &'static str,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_cache: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub omissions: Vec<crate::catalog::OperationIssue>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selection_notices: Vec<crate::catalog::SelectionNotice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<CacheWarmFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<CacheWarmPricing>,
+}
+impl CacheWarmSource {
+    pub(super) fn degraded(&self) -> bool {
+        self.status != "ready"
+            || !self.selection_notices.is_empty()
+            || matches!(
+                self.catalog_cache,
+                Some("not_stored" | "requires_revalidation")
+            )
+            || self.pricing.as_ref().is_some_and(|p| {
+                p.status == "unavailable"
+                    || matches!(
+                        p.catalog_cache,
+                        Some("not_stored" | "requires_revalidation")
+                    )
+            })
+    }
+}
+#[derive(Serialize)]
+pub struct CacheWarmPricing {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_cache: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<CacheWarmFailure>,
+}
+#[derive(Serialize)]
+pub struct CacheWarmFailure {
+    pub stage: &'static str,
+    pub reason: &'static str,
+    pub message: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+}
+impl From<crate::catalog::diagnostics::Failure> for CacheWarmFailure {
+    fn from(failure: crate::catalog::diagnostics::Failure) -> Self {
+        let reason = failure.code();
+        let message = if reason == failure.reason {
+            match reason {
+                "pricing_document_invalid" => {
+                    "Advertised pricing metadata has an invalid format; API tools remain usable with challenge-based prices"
+                }
+                "pricing_inventory_unavailable" => {
+                    "Advertised prices could not be matched to API operations; API tools remain usable with challenge-based prices"
+                }
+                _ => {
+                    "The catalog document could not be accepted; inspect provider configuration and strict catalog inspection"
+                }
+            }
+        } else {
+            failure.reason
+        };
+        Self {
+            stage: failure.stage,
+            reason,
+            message,
+            http_status: failure.http_status,
+        }
+    }
 }
 
 /// Warm only explicitly selected authored sources (all if selection is empty).
@@ -68,8 +138,11 @@ pub async fn warm_cache_with_network(
             .get(id)
             .with_context(|| format!("unknown cache-warming source {id}"))?;
         let cfg = crate::config::resolve(source.provider.clone(), path)
-            .await?
+            .await
+            .with_context(|| format!("source {id}"))?
             .settings;
+        crate::catalog::validate_tool_selection(&cfg)
+            .with_context(|| format!("source {id}: invalid tool selections"))?;
         ensure!(
             !cfg.catalog_cache_ttl_seconds.disabled(),
             "source {id}: cache warming is disabled by catalog_cache_ttl_seconds=0"
@@ -151,7 +224,52 @@ pub async fn warm_cache_with_network(
     } else {
         Default::default()
     };
-    let sources = startup::warm(&config, path, &selected, direct, relay).await?;
-    drop(owner);
-    Ok(CacheWarmSummary { direct, sources })
+    let stop = CancellationToken::new();
+    let _cancel_on_drop = stop.clone().drop_guard();
+    let path = path.to_owned();
+    let stopped = stop.clone();
+    // Retain accepted relay ownership if the CLI waiter disappears.
+    let task = tokio::spawn(async move {
+        let (result, cancelled) = {
+            tokio::select! {
+                result = startup::warm(&config, &path, &selected, direct, relay.clone()) => (result, false),
+                _ = stopped.cancelled() => {
+                    tracing::info!("Catalog warming stopped; waiting for accepted relay work to finish");
+                    (Err(anyhow::anyhow!("catalog warming cancelled")), true)
+                },
+            }
+        };
+        // Dropping unsigned acquisition futures above cannot orphan accepted paid I/O.
+        futures_util::future::join_all(relay.values().map(|relay| relay.drain())).await;
+        drop(relay);
+        let cleanup = if let Some(owner) = owner {
+            owner.shutdown().await
+        } else {
+            Ok(())
+        };
+        if cancelled && cleanup.is_ok() {
+            tracing::info!("Catalog warming stopped; accepted relay work has finished");
+        }
+        let sources = match result {
+            Err(error) => return Err(error),
+            Ok(sources) => {
+                cleanup?;
+                sources
+            }
+        };
+        let outcome = if sources.iter().any(CacheWarmSource::degraded) {
+            "degraded"
+        } else {
+            "ok"
+        };
+        Ok(CacheWarmSummary {
+            direct,
+            outcome,
+            sources,
+        })
+    });
+    crate::wallet_cli::finish_on_shutdown("catalog warming", &stop, async {
+        task.await.context("catalog warming supervisor failed")?
+    })
+    .await
 }

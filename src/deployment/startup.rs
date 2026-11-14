@@ -99,7 +99,9 @@ impl PendingSource {
         let mut acquired = (*document).clone();
         let mut source = Source::from_document(id, self.config.clone(), document)?
             .with_send_tools(id, self.send_tools.clone())?;
-        acquired.commit().await;
+        if !source.tools.is_empty() {
+            acquired.commit().await;
+        }
         if let Some(hints) = &acquired.hints {
             hints.slot.record_configuration(&source.config).await;
         }
@@ -153,6 +155,7 @@ pub(super) enum CatalogPurpose {
     #[default]
     Inspection,
     Serving,
+    Warming,
     Qualification,
 }
 impl CatalogPurpose {
@@ -191,10 +194,16 @@ impl Downloads {
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        cfg.allow_empty_selection = matches!(
+            self.purpose.for_current_operation(),
+            CatalogPurpose::Serving | CatalogPurpose::Warming
+        );
         cfg.cache_revision = Some(crate::http_cache::configuration_revision(&cfg));
         if self.all_tools {
             cfg.use_recommended_tools = false;
         }
+        catalog::validate_tool_selection(&cfg)
+            .with_context(|| format!("source {id}: invalid tool selections"))?;
         cfg.discovery_source = Some(id.to_owned());
         cfg.relay_fallback = self.relay.get(id).cloned();
         cfg.http_cache_directory = self.cache_directory.clone();
@@ -406,7 +415,7 @@ pub(super) async fn load(
                             continue;
                         }
                         Err(error) if purpose == CatalogPurpose::Serving
-                            && config.sources[source_id].optional_startup && error.is::<RemoteCatalogUnavailable>() => {
+                            && config.sources[source_id].allow_catalog_failure && error.is::<RemoteCatalogUnavailable>() => {
                             failures += 1;
                             unavailable.insert(source_id.clone(), error.downcast_ref::<RemoteCatalogUnavailable>().expect("typed remote failure").prefix.clone());
                             tracing::warn!(source = source_id, state = "unavailable", "Optional source unavailable; required inventory remains complete");
@@ -420,13 +429,9 @@ pub(super) async fn load(
                         }
                         Err(error) => return Err(error),
                     };
-                    if source.compatibility_unavailable() {
-                        unavailable.insert(source_id.clone(), source.config.prefix.clone().expect("resolved prefix"));
-                        tracing::debug!(source = source_id, omitted = source.issues.len(), "Catalog has no supported API operations; dependent waiting endpoints remain unavailable");
-                    } else {
-                        tracing::info!(target: "x402_treazury::startup", source = source_id, completed = sources.len() + 1, total,
-                            elapsed_ms = started.elapsed().as_millis() as u64, "Catalog ready");
-                    }
+                    if purpose == CatalogPurpose::Serving { source.report_degradation(source_id); }
+                    tracing::info!(target: "x402_treazury::startup", source = source_id, completed = sources.len() + 1, total,
+                        elapsed_ms = started.elapsed().as_millis() as u64, "Catalog ready");
                     sources.insert(source_id.clone(), source);
                 }
                 None => break,
@@ -441,7 +446,7 @@ pub(super) async fn load(
             completed = sources.len(), "Catalog inspection finished with failures; no partial inventory published");
         return Err(error.context(format!("catalog inspection failed for {failures} of {total} sources; independent catalog results retained")));
     }
-    tracing::info!(target: "x402_treazury::startup", total, ready = sources.values().filter(|source| !source.compatibility_unavailable()).count(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64,
+    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64,
     "{}", if deferred.is_empty() {
         "Initial catalog loading finished"
     } else {
@@ -471,12 +476,14 @@ async fn load_one(
     if let Err(error) = &result {
         let failure = catalog_failure(error, progress.phase);
         catalog_evidence::record(id, State::Failed, failure.stage, failure.http_status);
-        tracing::warn!(target: "x402_treazury::startup", source = id, phase = progress.phase,
+        if downloads.purpose != CatalogPurpose::Warming {
+            tracing::warn!(target: "x402_treazury::startup", source = id, phase = progress.phase,
             failure_stage = failure.stage, reason = failure.reason,
             http_status = failure.http_status,
             elapsed_ms = progress.started.elapsed().as_millis() as u64,
             collecting_independent_results = catalog_evidence::collecting(),
             "Catalog load failed; complete inventory unavailable");
+        }
     } else if matches!(result, Ok(SourceLoad::Ready(_))) {
         catalog_evidence::record(id, State::Completed, "generation", None);
     }
@@ -526,10 +533,18 @@ impl Source {
         let mut acquired = (*document).clone();
         let mut source = Self::from_document(id, cfg, document)?
             .with_send_tools(id, source.send_tools.clone())?;
-        if downloads.purpose != CatalogPurpose::Serving && !source.issues.is_empty() {
+        let purpose = downloads.purpose.for_current_operation();
+        let allow_partial = matches!(purpose, CatalogPurpose::Serving | CatalogPurpose::Warming);
+        if !allow_partial && !source.issues.is_empty() {
             return Err(catalog::IncompleteCatalog(source.issues.clone()).into());
         }
-        acquired.commit().await;
+        if !matches!(
+            downloads.purpose,
+            CatalogPurpose::Serving | CatalogPurpose::Warming
+        ) || !source.tools.is_empty()
+        {
+            acquired.commit().await;
+        }
         if let Some(hints) = &acquired.hints {
             hints.slot.record_configuration(&source.config).await;
         }
@@ -540,6 +555,21 @@ impl Source {
             source.enrich_pricing(downloads.gate.clone());
         }
         Ok(SourceLoad::Ready(source))
+    }
+    pub(super) fn report_degradation(&self, id: &str) {
+        if !self.issues.is_empty()
+            || !self.config.selection_notices.is_empty()
+            || self.tools.is_empty()
+        {
+            let reasons: std::collections::BTreeSet<_> = self
+                .issues
+                .iter()
+                .map(|issue| issue.reason.explanation())
+                .collect();
+            tracing::error!(source=id, omitted_operations=self.issues.len(),
+                missing_selections=self.config.selection_notices.len(), reasons=?reasons,
+                "Some selected provider capabilities are unavailable; remaining selected tools can be used; inspect catalog omissions and source selections");
+        }
     }
     fn enrich_pricing(&mut self, gate: Option<Arc<crate::network::DiscoveryCapacity>>) {
         if CatalogPurpose::Serving.for_current_operation() != CatalogPurpose::Serving {
@@ -594,7 +624,12 @@ impl Source {
             .context(catalog::LoadStage::Configuration)?;
         cfg.resolve_cover(&base_url, crate::network::global().policy.cover_enabled())
             .context(catalog::LoadStage::Configuration)?;
-        let built = catalog::build_catalog(&cfg, &document, cfg.prefix.as_deref().unwrap())
+        let build = if cfg.allow_empty_selection {
+            catalog::build_catalog_unreported
+        } else {
+            catalog::build_catalog
+        };
+        let built = build(&cfg, &document, cfg.prefix.as_deref().unwrap())
             .map_err(|e| {
                 if (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
                     && !e.is::<catalog::ToolConfigurationError>()
@@ -610,6 +645,7 @@ impl Source {
             .with_context(|| format!("source {id}: catalog generation"))?;
         let mut tools = built.tools;
         let issues = built.issues;
+        cfg.selection_notices = built.selection_notices;
         for tool in &mut tools {
             tool.catalog_hints = document.hints.clone();
             if let Some(expires) = document.advertised_expires {
@@ -662,7 +698,7 @@ pub(super) async fn warm(
     relay: crate::discovery_relay::Relays,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
-        purpose: CatalogPurpose::Inspection,
+        purpose: CatalogPurpose::Warming,
         defer: false,
         all_tools: false,
         relay,
@@ -677,41 +713,155 @@ pub(super) async fn warm(
         direct_warm_target: direct.then(|| config.network.clone()),
         force_refresh: true,
     };
-    let mut loads = Vec::with_capacity(selected.len());
+    // Finish all locally detectable configuration checks before starting acquisition.
+    let mut configured = Vec::with_capacity(selected.len());
     for id in selected {
-        let cfg = downloads
-            .configure(id, &config.sources[id], path, false)
-            .await;
+        let source = config
+            .sources
+            .get(id)
+            .with_context(|| format!("unknown cache-warming source {id}"))?;
+        let cfg = downloads.configure(id, source, path, false).await?;
+        configured.push((id, cfg));
+    }
+    let mut loads = Vec::with_capacity(configured.len());
+    for (id, cfg) in configured {
         let downloads = &downloads;
         loads.push(async move {
-            let SourceLoad::Ready(source) =
-                load_one(id, &config.sources[id], cfg, downloads).await?
-            else {
-                anyhow::bail!("cache warming cannot defer catalog discovery");
-            };
-            let mut source = source;
-            crate::pricing::discovery::refresh_static(
-                &source.config,
-                &source.document,
-                &source.base_url,
-                &mut source.tools,
-                downloads.gate.clone(),
-            )
-            .await;
-            let catalog_cache = catalog_cache_status(&source.config).await;
-            Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
-                source: id.clone(),
-                catalog_cache,
-            })
+            let remote = cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://");
+            let result = warm_source(id, &config.sources[id], cfg, downloads).await;
+            (id, remote, result)
         });
     }
     let mut pending = stream::iter(loads).buffer_unordered(selected.len().max(1));
     let mut results = Vec::new();
-    while let Some(result) = pending.next().await {
-        results.push(result?);
+    let mut local_error = None;
+    while let Some((id, remote, result)) = pending.next().await {
+        match result {
+            Ok(result) => results.push(result),
+            Err(error) if remote && warm_remote_failure(&error) => {
+                let failure = catalog_failure(&error, "acquisition");
+                tracing::error!(
+                    source = id,
+                    failure_stage = failure.stage,
+                    reason = failure.code(),
+                    http_status = failure.http_status,
+                    "Catalog warming could not acquire this source; its API tools are unavailable"
+                );
+                results.push(super::cache_warm::CacheWarmSource {
+                    source: id.clone(),
+                    status: "unavailable",
+                    catalog_cache: None,
+                    omissions: Vec::new(),
+                    selection_notices: Vec::new(),
+                    failure: Some(failure.into()),
+                    pricing: None,
+                });
+            }
+            Err(error) => {
+                if local_error.is_none() {
+                    local_error = Some(error);
+                }
+            }
+        }
+    }
+    if let Some(error) = local_error {
+        return Err(error);
     }
     results.sort_by(|a, b| a.source.cmp(&b.source));
     Ok(results)
+}
+
+fn warm_remote_failure(mut error: &anyhow::Error) -> bool {
+    while let Some(shared) = error.downcast_ref::<SharedFailure>() {
+        error = shared.0.as_ref();
+    }
+    let local_configuration = error
+        .downcast_ref::<catalog::LoadStage>()
+        .is_some_and(|stage| stage.label() == "configuration")
+        && !error.is::<RemoteCatalogUnavailable>();
+    !local_configuration
+        && !error.is::<catalog::LocalCatalogFailure>()
+        && !error.is::<catalog::ToolConfigurationError>()
+        && !error.is::<tokio::task::JoinError>()
+        && !error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_builder)
+}
+
+async fn warm_source(
+    id: &str,
+    source_config: &SourceConfig,
+    cfg: catalog::Config,
+    downloads: &Downloads,
+) -> Result<super::cache_warm::CacheWarmSource> {
+    use super::cache_warm::{CacheWarmPricing, CacheWarmSource};
+    let SourceLoad::Ready(mut source) = load_one(id, source_config, Ok(cfg), downloads).await?
+    else {
+        anyhow::bail!("cache warming cannot defer catalog discovery");
+    };
+    let pricing_config = source.config.effective_pricing()?;
+    let mut pricing = CacheWarmPricing {
+        status: match pricing_config {
+            None => "not_configured",
+            Some(_) if !source.tools.iter().any(|tool| tool.help_url.is_none()) => "not_attempted",
+            Some(ref cfg) if cfg.source == "catalog" => "catalog",
+            Some(_) => "ready",
+        },
+        failure: None,
+        catalog_cache: None,
+    };
+    if let Err(error) = crate::pricing::discovery::refresh_static(
+        &source.config,
+        &source.document,
+        &source.base_url,
+        &mut source.tools,
+        downloads.gate.clone(),
+    )
+    .await
+    {
+        if !warm_remote_failure(&error) {
+            return Err(error);
+        }
+        let failure = catalog_failure(&error, "pricing");
+        pricing.status = "unavailable";
+        pricing.failure = Some(failure.into());
+    }
+    if pricing.status == "ready"
+        && let Some(pricing_config) = pricing_config
+    {
+        let mut cfg = source.config.clone();
+        cfg.spec = pricing_config.source;
+        pricing.catalog_cache = Some(catalog_cache_status(&cfg).await);
+    }
+    let catalog_cache = catalog_cache_status(&source.config).await;
+    let status = if source.tools.is_empty() {
+        "unavailable"
+    } else if !source.issues.is_empty() || !source.config.selection_notices.is_empty() {
+        "partial"
+    } else {
+        "ready"
+    };
+    let result = CacheWarmSource {
+        source: id.to_owned(),
+        status,
+        catalog_cache: Some(catalog_cache),
+        omissions: source.issues,
+        selection_notices: source.config.selection_notices,
+        failure: None,
+        pricing: Some(pricing),
+    };
+    if result.degraded() {
+        tracing::error!(
+            source = id,
+            status,
+            catalog_cache,
+            omitted_operations = result.omissions.len(),
+            missing_selections = result.selection_notices.len(),
+            pricing_status = result.pricing.as_ref().map(|p| p.status),
+            "Catalog warming finished with reduced coverage, unavailable prices or incomplete cache storage; inspect the source result"
+        );
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -837,7 +987,7 @@ mod deferred_tests {
             logs.contains("fresh HTTP disk cache; tool generation and validation still required")
         );
         assert!(!logs.contains("private upstream prose") && !logs.contains("token=secret"));
-        assert!(source.compatibility_unavailable());
+        assert!(!source.issues.is_empty());
         assert!(source.tools.is_empty());
         assert_eq!(
             source.issues,

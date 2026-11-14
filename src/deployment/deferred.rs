@@ -353,6 +353,13 @@ impl Runtime {
             let _ = pricing.send(());
         }
         self.report_selection_failures(&previous_errors, true);
+        selection_diagnostics::report_completed(
+            &self.deployment.listeners,
+            &self.deployment.sources,
+            &self.deployment.pending_sources,
+            Some(&id),
+        );
+        self.deployment.sources[&id].report_degradation(&id);
         self.signal_readiness();
         self.attach_observed_hints(&id, document).await;
         tracing::info!(
@@ -363,6 +370,9 @@ impl Runtime {
     // The complete definitions are already published. Cache/hint failure cannot
     // undo that success or reopen execution through the expired generation.
     async fn attach_observed_hints(&mut self, id: &str, mut document: catalog::LoadedCatalog) {
+        if self.deployment.sources[id].tools.is_empty() {
+            return;
+        }
         document.commit().await;
         let Some(hints) = document.hints else {
             return;
@@ -462,7 +472,12 @@ impl Runtime {
                 _ = &mut failure => panic!("injected deferred worker failure"),
             };
             let Some(event) = event else { continue };
+            let completed_source = match &event {
+                Event::Catalog(id, _) => Some(id.clone()),
+                _ => None,
+            };
             let previous_selection_errors = self.deployment.selection_errors.clone();
+            let mut selection = Ok(());
             match event {
                 Event::Refresh(id, binding, result) => {
                     self.complete_refresh(id, binding, result).await;
@@ -486,18 +501,14 @@ impl Runtime {
                     });
                     match result {
                         Ok(()) => {
-                            if self.deployment.sources[&id].compatibility_unavailable() {
-                                tracing::debug!(
-                                    source = id,
-                                    "Catalog has no supported API operations; dependent waiting endpoints remain unavailable"
-                                );
-                            } else {
-                                tracing::info!(source = id, "Catalog ready");
-                            }
+                            tracing::info!(source = id, "Catalog ready");
                         }
                         Err(error) => {
+                            // The removed pending owner no longer defers exact names.
+                            // Recompute after acquisition failure or admission rollback.
+                            selection = self.deployment.refresh_selection(true);
                             let failure = startup::catalog_failure(&error, "fetch_parse");
-                            tracing::warn!(
+                            tracing::error!(
                                 source = id,
                                 category = "catalog_unavailable",
                                 failure_stage = failure.stage,
@@ -519,7 +530,11 @@ impl Runtime {
             if stop.is_cancelled() {
                 break;
             }
-            if let Err(error) = self.publish().await {
+            let publication = match selection {
+                Ok(()) => self.publish().await,
+                Err(error) => Err(error.context(catalog::LoadStage::Selection)),
+            };
+            if let Err(error) = publication {
                 let failure = startup::catalog_failure(&error, "publication");
                 tracing::warn!(
                     category = "catalog_publication_failed",
@@ -531,6 +546,11 @@ impl Runtime {
                 break;
             }
             self.report_selection_failures(&previous_selection_errors, false);
+            if let Some(id) = completed_source
+                && let Some(source) = self.deployment.sources.get(&id)
+            {
+                source.report_degradation(&id);
+            }
             self.signal_readiness();
         }
         drop(work);
@@ -653,7 +673,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deferred_unsupported_contract_publishes_issues_before_endpoint_failure() {
+    async fn deferred_unsupported_contract_publishes_issues_and_empty_endpoint() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("deployment.toml");
         std::fs::write(
@@ -699,7 +719,7 @@ mod tests {
         );
         let mut readiness = runtime.catalog_readiness();
         runtime.accept_source("late", unsupported).unwrap();
-        assert!(runtime.deployment.unavailable_sources.contains_key("late"));
+        assert!(!runtime.deployment.unavailable_sources.contains_key("late"));
         runtime.publish().await.unwrap();
         // Visibility and tools come from the same published generation before readiness resolves.
         let snapshot = catalog.read();
@@ -719,7 +739,7 @@ mod tests {
                 .contains("Cookie parameters")
         );
         runtime.signal_readiness();
-        assert!(readiness.remove("waiting").unwrap().await.unwrap().is_err());
+        assert!(readiness.remove("waiting").unwrap().await.unwrap().is_ok());
         assert!(readiness.remove("healthy").unwrap().await.unwrap().is_ok());
         assert!(!readiness.contains_key("nonwaiting"));
     }
@@ -1382,7 +1402,7 @@ wait_for_catalogs=false
         let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
             .await
             .unwrap();
-        assert!(!deployment.config.sources["failed"].optional_startup);
+        assert!(!deployment.config.sources["failed"].allow_catalog_failure);
         assert_eq!(deployment.sources.len(), 2);
         assert_eq!(deployment.pending_sources.len(), 1);
         let running = deployment.bind(&env).await.unwrap();
@@ -1507,7 +1527,7 @@ wait_for_catalogs=false
                     .sources
                     .get_mut(source)
                     .unwrap()
-                    .optional_startup = optional;
+                    .allow_catalog_failure = optional;
             }
             let mut required_readiness = None;
             if mode == "mixed" {
@@ -1517,7 +1537,7 @@ wait_for_catalogs=false
                     .sources
                     .get_mut("b")
                     .unwrap()
-                    .optional_startup = true;
+                    .allow_catalog_failure = true;
                 let mut listener = runtime.deployment.listeners["one"].clone();
                 listener.sources = vec!["a".into()];
                 runtime.deployment.listeners.insert("two".into(), listener);

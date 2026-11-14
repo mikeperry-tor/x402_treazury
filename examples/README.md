@@ -67,6 +67,14 @@ health changes to its own $0.50 cap; financial uses $1. Initial general setup is
 $2-3 nominal, while the eventual four-group initial range is $8-12, before fees,
 headroom and later replacements.
 
+Remote research-desk sources use `allow_catalog_failure = true`; endpoints wait for
+their catalog attempts and then serve available tools even when a provider fails.
+Removed remote selections retain their filters and do not expose extra tools.
+Existing private deployment copies require explicit opt-in to this setting;
+updating the binary does not rewrite operator configuration. See
+[framework integration](../docs/framework-integration.md) for degraded warming and
+activation semantics.
+
 Its paid relay order is readFetch, Curl, then AGProxy, using published price hints
 of $0.003, $0.01 and $0.0156–$0.0372. These are advisory; actual offers govern each
 payment. Curl supplies a public text-fetch alternative and skips requests with

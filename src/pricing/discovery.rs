@@ -116,7 +116,7 @@ fn start(
     tools: &mut [ToolSpec],
     load: impl std::future::Future<Output = Result<crate::catalog::LoadedCatalog>> + Send + 'static,
     ready: Option<tokio::sync::oneshot::Receiver<()>>,
-) -> Option<tokio::task::JoinHandle<()>> {
+) -> Option<tokio::task::JoinHandle<Result<()>>> {
     let Ok(Some(config)) = cfg.effective_pricing() else {
         return None;
     };
@@ -152,7 +152,7 @@ fn start(
     let base = base.to_owned();
     let task = runtime.spawn(async move {
         if let Some(ready) = ready && ready.await.is_err() {
-            return;
+            return Ok(());
         }
         let prepared = tokio::task::spawn_blocking(move || {
             let operations = inventory(&settings, &root, &base)?;
@@ -166,7 +166,11 @@ fn start(
         let Ok(Ok((operations, index, mut targets))) = prepared else {
             tracing::info!(source, reason = "pricing_inventory_unavailable",
                 "Advertised prices are unavailable because API operation identities could not be resolved");
-            return;
+            return match prepared {
+                Err(error) => Err(error.into()),
+                Ok(Err(error)) => Err(error.context(crate::catalog::diagnostics::Problem("pricing_inventory_unavailable"))),
+                Ok(Ok(_)) => unreachable!(),
+            };
         };
         match load.await {
             Ok(mut document) => {
@@ -190,15 +194,21 @@ fn start(
                             }
                         }
                     }
-                    _ => tracing::info!(source, reason="pricing_document_invalid", "Advertised prices are unavailable because the metadata format is invalid; API tools remain usable"),
+                    Err(error) => return Err(error.into()),
+                    Ok(Err(error)) => {
+                        tracing::info!(source, reason="pricing_document_invalid", "Advertised prices are unavailable because the metadata format is invalid; API tools remain usable");
+                        return Err(error.context(crate::catalog::diagnostics::Problem("pricing_document_invalid")));
+                    }
                 }
             }
             Err(error) => {
                 let failure=crate::discovery_relay::document::SharedFailure::capture(&error,"pricing_metadata_unavailable");
                 tracing::info!(source,reason="pricing_metadata_unavailable",http_status=failure.status(),authorization_may_charge=failure.possible_payment(),
                     "{}", if failure.possible_payment() { "Advertised prices could not be loaded; API tools remain usable; a relay payment authorization may still charge" } else { "Advertised prices could not be loaded; API tools remain usable with challenge-based prices" });
+                return Err(error);
             }
         }
+        Ok(())
     });
     let owner = Arc::new(Acquisition::new(task.abort_handle()));
     for tool in tools.iter_mut().filter(|tool| tool.help_url.is_none()) {
@@ -214,7 +224,7 @@ fn static_task(
     tools: &mut [ToolSpec],
     gate: Option<Arc<network::DiscoveryCapacity>>,
     ready: Option<tokio::sync::oneshot::Receiver<()>>,
-) -> Option<tokio::task::JoinHandle<()>> {
+) -> Option<tokio::task::JoinHandle<Result<()>>> {
     let Ok(Some(pricing)) = cfg.effective_pricing() else {
         return None;
     };
@@ -254,7 +264,7 @@ fn dynamic_task(
     tools: &mut [ToolSpec],
     client: crate::payment::PaidClient,
     ready: Option<tokio::sync::oneshot::Receiver<()>>,
-) -> Option<tokio::task::JoinHandle<()>> {
+) -> Option<tokio::task::JoinHandle<Result<()>>> {
     let Ok(Some(pricing)) = cfg.effective_pricing() else {
         return None;
     };
@@ -313,10 +323,11 @@ pub(crate) async fn refresh_static(
     base: &str,
     tools: &mut [ToolSpec],
     gate: Option<Arc<network::DiscoveryCapacity>>,
-) {
+) -> Result<()> {
     if let Some(task) = static_task(cfg, root, base, tools, gate, None) {
-        let _ = task.await;
+        task.await??;
     }
+    Ok(())
 }
 async fn load_dynamic(
     settings: Config,

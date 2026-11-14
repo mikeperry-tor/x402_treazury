@@ -8,7 +8,8 @@ report unavailable capabilities accurately, and let authenticated endpoints serv
 their remaining tools. Frameworks must distinguish completed preparation,
 current MCP availability, catalog coverage and successful paid API execution.
 
-This is an active implementation plan; the proposed behavior is not implemented.
+This is an active implementation plan. C1/C2 are implemented and validated;
+exact-commit G1 review and consumer integration remain pending.
 The user has authorized executing this plan. Live paid calls remain outside scope.
 
 - Working branch: `flaky_provider_resiliance`.
@@ -56,7 +57,7 @@ configuration, x402_treazury guide and planning workflow, including relevant pla
 - Ordinary deployment serving defers remote catalogs until after binding sockets.
   Default `wait_for_catalogs = true` endpoints close on required source failure;
   peers and the process remain alive, even if every waiting endpoint fails.
-  `optional_startup = true` permits failed-source omission; eager endpoints already
+  `allow_catalog_failure = true` permits failed-source omission; eager endpoints already
   omit failed remote sources.
 - Removed exact provider inclusions/recommendations or `send_tools` names can reject
   an entire source. Removed exact endpoint inclusions can clear its entire static
@@ -156,8 +157,8 @@ inventory simply to build this summary.
 
 ### Serving and remote inventory drift
 
-Keep global `wait_for_catalogs` and `optional_startup` meanings. Set
-`optional_startup = true` on remote research-desk sources, retaining waiting startup
+Keep global `wait_for_catalogs` and `allow_catalog_failure` meanings. Set
+`allow_catalog_failure = true` on remote research-desk sources, retaining waiting startup
 so endpoints publish the settled available inventory after their source attempts.
 Required-source configurations elsewhere retain their explicit strict readiness
 choice. Frameworks seeking this availability policy must select it explicitly.
@@ -242,8 +243,7 @@ pending without an overall deadline.
 | ID | Coherent implementation boundary | Acceptance and documentation |
 | --- | --- | --- |
 | D1 | Independently review this design against both exact baselines and the packaged treasury pin. Finalize failure classification, safe JSON fields, pricing/cache reporting and remote-selector attribution before code. | Resolve material findings; commit plan decisions. No new enforcement without a demonstrated contract. |
-| C1 | Drain warming results; implement zero/degraded JSON and partial-compatible generation with safe diagnostics, preserving preflight, cache and accepted-work boundaries. | Focused multi-source, JSON/exit, cache and cancellation tests; publish warming/framework contract in `docs/framework-integration.md`, link configuration/index/AGENTS guidance. |
-| C2 | Implement narrowly scoped remote-selection tolerance and valid empty degraded endpoints; opt research-desk remote sources into existing optional startup. | Source/distribution/listener tests plus authenticated readiness, omission instructions, ownership and strict-mode regressions; update architecture, configuration, agent-source, example and startup-test guidance. |
+| C1/C2 | Deliver one coherent native contract: drain warming with zero/degraded JSON and partial-compatible generation; implement narrow remote-selection tolerance, valid empty degraded endpoints and optional research-desk sources. Preserve preflight, cache and accepted-work boundaries. | Multi-source, JSON/exit, cache/cancellation and source/distribution/listener regressions plus authenticated readiness and strict-mode checks. Publish `docs/framework-integration.md` and update configuration, architecture, agent-source, example, startup-test, index and AGENTS guidance. |
 | G1 | Independent combined native architecture review of C1/C2 and all fixups, exact SHAs and full acquisition-to-publication/serving call chains. | Compiler/Clippy/compatibility evidence and CogC/CycC review complete; no material findings before consumer integration. |
 | C3 | Update private-hermes-agent's image pin, warming display/preparation handling, terminal diagnostic consumer, readiness/smoke expectations and owning docs. | Consumer tests prove degraded preparation activates all twelve endpoints without paid API probes; update stopped-Tor smoke assertions to degraded JSON, preserving forced acquisition. |
 | G2 | Independent final combined review of native and consumer exact SHAs, accumulated fixups, complete affected chains and contract documentation. | Focused native and consumer evidence matches the packaged pin; resolve material findings and compelling simplifications. |
@@ -321,7 +321,8 @@ exact committed SHA and each `git commit --fixup=<introducing-SHA>` correction;
 preserve unsquashed history. Combined gates examine all accumulated changes and
 consumers; per-commit review does not replace them.
 
-Current status: D1 reviewed; C1/C2 implementation starting. Independent fresh-context,
+Current status: D1 reviewed; C1/C2 implemented in the working tree, validation and
+exact-commit review pending. Independent fresh-context,
 read-only design review examined this plan against native acquisition, diagnostics,
 selection, routing, readiness and pricing, plus consumer preparation, activation,
 smoke expectations and the packaged pin. No material findings were reported.
@@ -332,7 +333,7 @@ Resolved decisions:
 - Introduce an explicit Warming purpose; accept compatible partial generation
   without starting Serving's detached pricing and then fetching pricing twice.
 - Keep acquisition statuses `ready`, `partial`, `unavailable`; keep pricing separate
-  as `not_configured`, `catalog`, `ready`, `unavailable`. Pricing ready means valid
+  as `not_configured`, `catalog`, `ready`, `unavailable`, `not_attempted`. Pricing ready means valid
   metadata was processed, not that every tool has a known price. Cache refusal or
   unknown external pricing degrades the summary without disabling API tools.
 - Preserve typed local acquisition failure at the catalog handoff; request-builder
@@ -354,8 +355,59 @@ Resolved decisions:
   This is necessary accepted-work ownership, not new retry or spending authority.
 
 Local file-link and whitespace checks passed for the plan.
-No runtime, compiler, complexity or live evidence is claimed. Record exact-SHA
-review and subsequent implementation evidence here. At each
+The C1/C2 commit boundary is combined: the shared generation policy, source
+selection notices, empty-source admission and warming JSON depend on one another.
+Publishing one native contract avoids an intermediate commit whose documented
+warming behavior still rejects remote distribution drift. G1 still precedes C3;
+scope and acceptance are unchanged.
+
+The user requested a clearer name during implementation. The source setting is
+now `allow_catalog_failure`, retaining its false default and readiness semantics;
+the old `optional_startup` key is rejected, with no compatibility alias. This is
+a configuration rename, not a wallet/state/environment migration. Apply the new
+name to consumer guidance and preserved operator configuration explicitly.
+
+Initial independent implementation reviews found empty-selection local errors,
+lost selection notices, misleading mixed-cause instructions, unavailable cache
+replacement, and local pricing/cache reporting defects. Corrections retain
+compiled patterns and accepted cache state, report separate pricing/storage
+results, and preserve unavailable-source evidence. The reviewer retracted a
+duplicate deferred logging concern after tracing the actual pending/resume path.
+Complexity review identified duplicated empty-source cause classification;
+endpoint instructions now reuse the existing omission/selection evidence with
+one generic empty-source status. The source-matched report is
+`target/complexity-runs/20261114T175803Z-072aed27` (512 files, zero exclusions).
+Review dispositions retain the distinct publication/selection states in
+`build_servers` (CogC 22→31), conservative attribution in
+`listener_tool_inventory` (CogC 21→35, CycC 34→43), and pricing generation
+ownership in `start` (CogC 24→25). The retained warming supervisor adds
+cancellation/draining branches (inclusive CycC 31→42); G1 reviews this ownership
+with the full call chain rather than extracting branches merely to move scores.
+
+Validation uses `CARGO_TARGET_DIR=target/improved-errors-build` after a sampled
+compiler stack showed no progress reading the existing `target/debug/deps`
+directory. Only this task's stalled compiler was terminated; existing artifacts
+were preserved. Production compilation and all-target Clippy passed in the isolated directory.
+`make fmt-check` passed. Selected passing evidence: 8 remote-selection, 3 catalog
+recommendation, 11 warming, 16 deferred-readiness, 21 routing, 7 refresh and 18
+pricing unit tests; CLI contracts 27, configuration 17 and startup 19 (one
+subprocess helper ignored); fixed `make check-compat` 33 tests. Logs are under
+`target/improved-errors-*.log`. The macOS test linker reported an oversized
+exception-unwind section; test execution passed. No production/Clippy diagnostics
+were suppressed.
+
+Validation exposed two stale baseline research-desk routing assertions. Isolated
+fixups `ed89bcf76a4e5dfd16883603f045257752a5b0c6` and
+`bdcb946b963a90632c10e7ca2f2275d7414c86b8` correct their expected curation
+without changing routing; both exact SHAs were independently approved. Semantic
+selection preflight belongs at warm/build boundaries after `--all-tools`, not
+general offline configuration inspection. Config show and all-tools behavior are
+preserved. Remote name tolerance is scoped to warming and deferred ordinary
+serving: synchronous unsigned loading/qualification retains strict authored name
+selection. The selected startup/CLI checks cover these boundaries. Earlier failed compiler
+attempts exposed a private method and an iterator-future lifetime error, corrected
+before continuation. No live qualification is claimed. Record exact-SHA
+review and subsequent validation evidence here. At each
 handoff report branch, both relevant revisions, outstanding work and missing
 validation. Keep the plan until implementation, required reviews and user review
 rounds finish; then transfer enduring rules to the named guides and execute C4.

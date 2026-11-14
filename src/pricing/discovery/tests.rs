@@ -458,7 +458,9 @@ async fn acquired_catalog_pricing_uses_parent_refresh_and_expiry() {
     cfg.http_cache_directory = Some(directory.path().join("cache"));
     let mut parent = loaded(schema());
     let mut first = tools(&cfg, &parent);
-    refresh_static(&cfg, &parent.document, &base, &mut first, None).await;
+    refresh_static(&cfg, &parent.document, &base, &mut first, None)
+        .await
+        .unwrap();
     assert_eq!(first[0].advertised_pricing.amount(), Some(U256::from(1000)));
     assert_eq!(state.calls.load(Ordering::SeqCst), 1);
 
@@ -470,7 +472,9 @@ async fn acquired_catalog_pricing_uses_parent_refresh_and_expiry() {
     parent.configure_pricing(&mut cfg);
     *state.price.lock().unwrap() = 3000;
     let mut expired = tools(&cfg, &parent);
-    refresh_static(&cfg, &parent.document, &base, &mut expired, None).await;
+    refresh_static(&cfg, &parent.document, &base, &mut expired, None)
+        .await
+        .unwrap();
     assert_eq!(state.calls.load(Ordering::SeqCst), 2);
     assert!(expired[0].advertised_pricing.amount().is_none());
     assert!(
@@ -483,7 +487,9 @@ async fn acquired_catalog_pricing_uses_parent_refresh_and_expiry() {
     parent.advertised_expires = Some(crate::http_cache::now() + 120);
     parent.configure_pricing(&mut cfg);
     let mut current = tools(&cfg, &parent);
-    refresh_static(&cfg, &parent.document, &base, &mut current, None).await;
+    refresh_static(&cfg, &parent.document, &base, &mut current, None)
+        .await
+        .unwrap();
     assert_eq!(
         current[0].advertised_pricing.amount(),
         Some(U256::from(3000))
@@ -531,13 +537,19 @@ async fn invalid_external_pricing_never_replaces_accepted_cache() {
     )
     .unwrap();
     let mut rejected = tools(&cfg, &root);
-    refresh_static(&cfg, &root, &base, &mut rejected, None).await;
+    assert!(
+        refresh_static(&cfg, &root, &base, &mut rejected, None)
+            .await
+            .is_err()
+    );
     assert!(rejected[0].advertised_pricing.amount().is_none());
     assert!(slot.read().await.is_none());
 
     *response.lock().unwrap() = document(&format!("{base}/read"), 1000);
     let mut accepted = tools(&cfg, &root);
-    refresh_static(&cfg, &root, &base, &mut accepted, None).await;
+    refresh_static(&cfg, &root, &base, &mut accepted, None)
+        .await
+        .unwrap();
     assert_eq!(
         accepted[0].advertised_pricing.amount(),
         Some(U256::from(1000))
@@ -550,7 +562,11 @@ async fn invalid_external_pricing_never_replaces_accepted_cache() {
     cfg.catalog_cache_force_refresh = true;
     *response.lock().unwrap() = json!({"error":"maintenance"});
     let mut replacement = tools(&cfg, &root);
-    refresh_static(&cfg, &root, &base, &mut replacement, None).await;
+    assert!(
+        refresh_static(&cfg, &root, &base, &mut replacement, None)
+            .await
+            .is_err()
+    );
     assert!(replacement[0].advertised_pricing.amount().is_none());
     let retained = slot.read().await.unwrap();
     assert_eq!(retained.data, previous.data);
@@ -913,18 +929,22 @@ async fn retired_optional_pricing_cannot_replace_current_cache() {
     binding.own_prices(&old);
     *state.price.lock().unwrap() = 3000;
     let mut current = tools(&cfg, &root);
-    refresh_static(&cfg, &root, &base, &mut current, None).await;
+    refresh_static(&cfg, &root, &base, &mut current, None)
+        .await
+        .unwrap();
     assert_eq!(
         current[0].advertised_pricing.amount(),
         Some(U256::from(3000))
     );
     binding.retire();
     release.notify_one();
-    old_task.await.unwrap();
+    old_task.await.unwrap().unwrap();
     assert!(old[0].advertised_pricing.amount().is_none());
     cfg.catalog_cache_force_refresh = false;
     let mut restarted = tools(&cfg, &root);
-    refresh_static(&cfg, &root, &base, &mut restarted, None).await;
+    refresh_static(&cfg, &root, &base, &mut restarted, None)
+        .await
+        .unwrap();
     assert_eq!(state.calls.load(Ordering::SeqCst), 2);
     assert_eq!(
         restarted[0].advertised_pricing.amount(),
@@ -963,7 +983,7 @@ async fn prepared_pricing_waits_for_publication_and_discarded_work_never_polls_l
         } else {
             drop(send);
         }
-        task.await.unwrap();
+        task.await.unwrap().unwrap();
         assert_eq!(polled.load(Ordering::SeqCst), usize::from(published));
         assert_eq!(
             captured[0].advertised_pricing.amount(),

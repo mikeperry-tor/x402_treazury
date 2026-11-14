@@ -227,6 +227,13 @@ remains strict. Read each current input schema: optional/complex JSON bodies use
 one body argument, with ordinary path/query/header arguments outside it. See
 [input contracts](configuration.md#openapi-inputs-and-request-bodies).
 
+Ordinary deployment endpoints can retain healthy selected tools or expose an
+empty tool inventory when catalogs or selected names/tags disappear or configured filters select nothing.
+Initialization instructions identify unavailable sources and missing selections;
+custom instructions do not suppress those notices. Discovery searches only the
+current published selection. MCP availability does not imply complete provider
+coverage; see the [framework integration contract](framework-integration.md).
+
 ## Tool documentation
 
 Agent-facing tool descriptions should briefly explain what the tool does, when

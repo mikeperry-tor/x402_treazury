@@ -696,7 +696,7 @@ async fn offline_show_explanation_and_authored_snapshot_agree_with_publication()
 }
 
 #[tokio::test]
-async fn serving_selection_distinguishes_endpoint_and_source_failure_reasons() {
+async fn serving_selection_distinguishes_empty_coverage_and_source_admission_failure() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("spec.json"),
@@ -722,12 +722,9 @@ async fn serving_selection_distinguishes_endpoint_and_source_failure_reasons() {
     for (case, expected) in [
         (
             "selector",
-            "A listener tool selector matches no assigned tools",
+            "A configured tool selection matches no available tools",
         ),
-        (
-            "empty",
-            "The endpoint has no selected tools or discovery capabilities",
-        ),
+        ("empty", "No static API tools are selected"),
         (
             "reserved",
             "Static tools use a reserved management namespace",
@@ -768,7 +765,7 @@ async fn serving_selection_distinguishes_endpoint_and_source_failure_reasons() {
             continue;
         }
         deployment.refresh_selection(true).unwrap();
-        assert!(deployment.selection_errors["one"].starts_with(expected));
+        assert!(deployment.selection_errors.is_empty());
         assert!(!deployment.selection_errors.contains_key("two"));
         let servers = deployment.build_servers(&wallets);
         let instructions = servers["one"].instructions.as_deref().unwrap();
@@ -1046,7 +1043,7 @@ instructions_text=''
 }
 
 #[tokio::test]
-async fn all_unsupported_initial_source_only_fails_dependent_waiting_endpoints() {
+async fn all_unsupported_initial_source_publishes_empty_waiting_endpoints() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("deployment.toml");
     std::fs::write(
@@ -1079,11 +1076,12 @@ async fn all_unsupported_initial_source_only_fails_dependent_waiting_endpoints()
             .is::<catalog::IncompleteCatalog>()
     );
     let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
-    assert!(deployment.sources["bad"].compatibility_unavailable());
-    assert!(deployment.unavailable_sources.contains_key("bad"));
+    assert!(deployment.sources["bad"].tools.is_empty());
+    assert!(!deployment.sources["bad"].issues.is_empty());
+    assert!(!deployment.unavailable_sources.contains_key("bad"));
     assert!(!deployment.unavailable_sources.contains_key("good"));
     let mut readiness = deployment.resolved_catalog_readiness();
-    assert!(readiness.remove("waiting").unwrap().await.unwrap().is_err());
+    assert!(readiness.remove("waiting").unwrap().await.unwrap().is_ok());
     assert!(readiness.remove("healthy").unwrap().await.unwrap().is_ok());
     assert!(!readiness.contains_key("nonwaiting"));
     let servers =

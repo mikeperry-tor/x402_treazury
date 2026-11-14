@@ -119,7 +119,11 @@ async fn selector_warnings_wait_for_own_catalogs_and_do_not_repeat_on_unrelated_
         1,
         "{logs}"
     );
-    assert!(!logs.contains("selector=\"optional_read\""), "{logs}");
+    assert_eq!(
+        logs.matches("selector=\"optional_read\"").count(),
+        1,
+        "{logs}"
+    );
     assert!(!logs.contains("Tool pattern matches nothing"), "{logs}");
     fixtures.origin.abort();
 }
@@ -192,7 +196,7 @@ impl Fixture {
                 ("optional", "failure", true),
             ] {
                 config.push_str(&format!(
-                    "[sources.{id}]\nspec='{base}/{path}'\nbase_url='{base}'\noptional_startup={optional}\n"
+                    "[sources.{id}]\nspec='{base}/{path}'\nbase_url='{base}'\nallow_catalog_failure={optional}\n"
                 ));
                 if let Some(send_tools) = distribution.get(id) {
                     config.push_str(&format!("send_tools={send_tools}\n"));
@@ -202,7 +206,10 @@ impl Fixture {
         config.push_str(listeners);
         let path = dir.path().join("deployment.toml");
         std::fs::write(&path, config).unwrap();
-        let env = BTreeMap::from([("KEY".into(), format!("{:064x}", 2))]);
+        let env = BTreeMap::from([
+            ("KEY".into(), format!("{:064x}", 2)),
+            ("TOKEN".into(), "readiness-fixture-token".into()),
+        ]);
         let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
             .await
             .unwrap();
@@ -225,7 +232,7 @@ fn listener(name: &str, sources: &str, settings: &str) -> String {
 }
 
 #[tokio::test]
-async fn refresh_selection_failure_resolves_readiness_while_another_catalog_is_pending() {
+async fn refresh_selection_loss_keeps_readiness_pending_until_required_catalog_finishes() {
     let mut fixtures = Fixture::new(
         &(listener(
             "waiting",
@@ -250,7 +257,7 @@ async fn refresh_selection_failure_resolves_readiness_while_another_catalog_is_p
     let stop = CancellationToken::new();
     let worker = tokio::spawn(fixtures.running.deferred.run(stop.clone()));
     // Both remote acquisitions are held in their origin handlers. Neither can
-    // publish an unrelated completion that would rescue a missing refresh signal.
+    // publish an unrelated completion while the refresh settles.
     tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
         .await
         .unwrap()
@@ -261,28 +268,36 @@ async fn refresh_selection_failure_resolves_readiness_while_another_catalog_is_p
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
     ));
     assert!(old.refresh.as_ref().unwrap().trigger());
-    let result = tokio::time::timeout(Duration::from_secs(5), readiness).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while catalog.read().views["eager"][0].tool.path != "/new" {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        readiness.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(catalog.read().views["waiting"].is_empty());
+    fixtures.slow.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), readiness)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     stop.cancel();
     let runtime = worker.await.unwrap();
     fixtures.origin.abort();
     let _ = fixtures.origin.await;
-
-    let error = result
-        .expect("refresh must resolve terminal readiness without another catalog event")
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(
-        error.downcast_ref::<catalog::LoadStage>(),
-        Some(&catalog::LoadStage::Selection)
-    );
-    assert!(runtime.deployment.pending_sources.contains_key("slow"));
+    assert!(runtime.deployment.selection_errors.is_empty());
     let snapshot = catalog.read();
-    assert!(snapshot.views["waiting"].is_empty());
+    assert_eq!(snapshot.views["waiting"][0].tool.name, "slow_read");
     assert!(
         snapshot.instructions["waiting"]
             .as_deref()
             .unwrap()
-            .contains("UNAVAILABLE endpoint tool selection")
+            .contains("A configured tool selection matches no available tools.")
     );
     assert_eq!(snapshot.views["eager"][0].tool.path, "/new");
     assert!(old.refresh.as_ref().unwrap().check().is_err());
@@ -303,6 +318,7 @@ async fn rpc_params(address: SocketAddr, method: &str, params: Value) -> Value {
         .http(&crate::network::IsolationId::bootstrap(), &url, None)
         .unwrap()
         .post(url)
+        .bearer_auth("readiness-fixture-token")
         .header("accept", "application/json, text/event-stream")
         .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
         .send()
@@ -310,6 +326,63 @@ async fn rpc_params(address: SocketAddr, method: &str, params: Value) -> Value {
         .unwrap();
     assert!(response.status().is_success(), "{}", response.status());
     response.mcp_json().await.unwrap()
+}
+
+#[tokio::test]
+async fn twelve_authenticated_endpoints_start_with_outage_and_removed_tool() {
+    let listeners: String = (0..12)
+        .map(|index| {
+            listener(
+                &format!("endpoint{index}"),
+                "['local','slow','optional']",
+                if index == 0 {
+                    "include_tools=['local_read','slow_removed']"
+                } else {
+                    "include_tools=['slow_removed']"
+                },
+            )
+            .replace("auth=false", "bearer_token_env='TOKEN'")
+        })
+        .collect();
+    let fixtures = Fixture::new(&listeners, true).await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    fixtures.slow.add_permits(1);
+    fixtures.failure.add_permits(1);
+    for index in 0..12 {
+        let address = addresses[&format!("endpoint{index}")];
+        let initialized = tokio::time::timeout(Duration::from_secs(5), rpc(address, "initialize"))
+            .await
+            .unwrap();
+        assert!(
+            initialized["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("A configured tool selection matches no available tools."),
+            "{initialized}"
+        );
+        let listed = tokio::time::timeout(Duration::from_secs(5), rpc(address, "tools/list"))
+            .await
+            .unwrap();
+        let names: Vec<_> = listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            if index == 0 {
+                vec!["local_read"]
+            } else {
+                vec![]
+            }
+        );
+    }
+    assert!(!serving.is_finished());
+    finish(stop, serving).await;
+    fixtures.origin.abort();
 }
 
 #[tokio::test]
@@ -382,9 +455,9 @@ async fn routed_shadowed_destination_waits_without_blocking_unrelated_listener()
 }
 
 #[tokio::test]
-async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
+async fn empty_routed_destinations_keep_siblings_and_remote_availability() {
     if crate::test_log_capture::run_in_child(
-        "deployment::deferred::readiness_tests::empty_routed_destinations_do_not_discard_a_siblings_catalog",
+        "deployment::deferred::readiness_tests::empty_routed_destinations_keep_siblings_and_remote_availability",
     ) {
         return;
     }
@@ -438,7 +511,7 @@ async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
                 if initialized["result"]["instructions"]
                     .as_str()
                     .unwrap_or_default()
-                    .contains("The endpoint has no selected tools or discovery capabilities")
+                    .contains("No static API tools are selected for this endpoint.")
                 {
                     break;
                 }
@@ -449,18 +522,16 @@ async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
         .unwrap();
         assert!(catalog.read().views["eager"].is_empty());
         assert_eq!(catalog.read().views["healthy"].len(), 1);
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Ok(socket) = TcpListener::bind(addresses["broken"]).await {
-                    drop(socket);
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
+        let initialized = tokio::time::timeout(
+            Duration::from_secs(5),
+            rpc(addresses["broken"], "initialize"),
+        )
         .await
         .unwrap();
-        // A different pending source's failure must not repeat the eager failure.
+        assert!(initialized.get("result").is_some(), "{initialized}");
+        let listed = rpc(addresses["broken"], "tools/list").await;
+        assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
+        // An unrelated acquisition failure must leave the empty endpoint usable.
         if remote {
             let generation = catalog.read().generation;
             fixtures.failure.add_permits(1);
@@ -472,6 +543,8 @@ async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
             .await
             .unwrap();
         }
+        let listed = rpc(addresses["eager"], "tools/list").await;
+        assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
         finish(stop, serving).await;
         let logs = std::fs::read_to_string(log.path()).unwrap();
         assert_eq!(
@@ -479,7 +552,7 @@ async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
                 .filter(|line| line.contains("MCP endpoint tools are unavailable")
                     && line.contains("server=\"eager\""))
                 .count(),
-            1,
+            0,
             "{logs}"
         );
         assert!(
@@ -491,7 +564,7 @@ async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
 }
 
 #[tokio::test]
-async fn legacy_listener_typo_does_not_reject_a_shared_catalog() {
+async fn unknown_exact_listener_selection_serves_empty_without_rejecting_shared_catalog() {
     let fixtures = Fixture::with_failure_document(
         &(listener("broken", "['failure']", "include_tools=['failure_missing']")
             + &listener("healthy", "['failure']", "")),
@@ -513,14 +586,23 @@ async fn legacy_listener_typo_does_not_reject_a_shared_catalog() {
     assert_eq!(listed["result"]["tools"][0]["name"], "failure_read");
     assert_eq!(catalog.read().views["healthy"].len(), 1);
     assert!(catalog.read().views["broken"].is_empty());
+    let initialized = rpc(addresses["broken"], "initialize").await;
+    assert!(
+        initialized["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("A configured tool selection matches no available tools.")
+    );
+    let listed = rpc(addresses["broken"], "tools/list").await;
+    assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
     finish(stop, serving).await;
     fixtures.origin.abort();
 }
 
 #[tokio::test]
-async fn deferred_send_typo_reports_selection_failure_without_upstream_prose() {
+async fn missing_remote_distribution_starts_empty_endpoint_without_upstream_prose() {
     if crate::test_log_capture::run_in_child(
-        "deployment::deferred::readiness_tests::deferred_send_typo_reports_selection_failure_without_upstream_prose",
+        "deployment::deferred::readiness_tests::missing_remote_distribution_starts_empty_endpoint_without_upstream_prose",
     ) {
         return;
     }
@@ -545,34 +627,35 @@ async fn deferred_send_typo_reports_selection_failure_without_upstream_prose() {
     let stop = CancellationToken::new();
     let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
     fixtures.failure.add_permits(1);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let logs = std::fs::read_to_string(log.path()).unwrap();
-            if logs
-                .lines()
-                .any(|line| line.contains("ERROR") && line.contains("server=\"broken\""))
-            {
-                assert!(logs.contains("failure_stage=\"selection\""), "{logs}");
-                assert!(
-                    logs.contains("Source distribution tool selectors are invalid"),
-                    "{logs}"
-                );
-                assert!(
-                    !logs.contains("Could not obtain the catalog document"),
-                    "{logs}"
-                );
-                assert!(
-                    !logs.contains("private upstream credential text")
-                        && !logs.contains("private_typo"),
-                    "{logs}"
-                );
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
+    let initialized = tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["broken"], "initialize"),
+    )
     .await
     .unwrap();
+    assert!(
+        initialized["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("some configured selections match no current tools")
+    );
+    let listed = rpc(addresses["broken"], "tools/list").await;
+    assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logs.lines()
+            .any(|line| line.contains("ERROR") && line.contains("missing_selections=1")),
+        "{logs}"
+    );
+    assert!(
+        !logs.contains("MCP endpoint tools are unavailable"),
+        "{logs}"
+    );
+    assert!(!logs.contains("MCP endpoint unavailable"), "{logs}");
+    assert!(
+        !logs.contains("private upstream credential text") && !logs.contains("private_typo"),
+        "{logs}"
+    );
     assert_eq!(
         rpc(addresses["healthy"], "tools/list").await["result"]["tools"]
             .as_array()
@@ -805,29 +888,19 @@ async fn required_failure_logs_error_and_closes_only_dependent_endpoint() {
 }
 
 #[tokio::test]
-async fn generation_and_listener_failures_explain_why_a_readable_catalog_is_unavailable() {
+async fn generation_failure_explains_why_a_readable_catalog_is_unavailable() {
     if crate::test_log_capture::run_in_child(
-        "deployment::deferred::readiness_tests::generation_and_listener_failures_explain_why_a_readable_catalog_is_unavailable",
+        "deployment::deferred::readiness_tests::generation_failure_explains_why_a_readable_catalog_is_unavailable",
     ) {
         return;
     }
-    for (document, settings, stage, reason) in [
-        (
-            json!({"paths":{"/read":{"get":{
-                "description":"private upstream credential text",
-                "parameters":[{"name":"Cookie","in":"header"}]
-            }}}}),
-            "",
-            "generation",
-            "API header is reserved",
-        ),
-        (
-            json!({"operations":[{"path":"/read","method":"GET"}]}),
-            "include_tools=['failure_missing']",
-            "selection",
-            "A listener tool selector matches no assigned tools",
-        ),
-    ] {
+    for (document, settings, stage, reason) in [(
+        json!({"operations":[{"path":"/read", "method":17,
+            "description":"private upstream credential text"}]}),
+        "",
+        "generation",
+        "Could not create tools from the catalog",
+    )] {
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .with_ansi(false)
@@ -1081,5 +1154,264 @@ async fn aggregate_catalog_signal_waits_for_eager_sources_and_respects_failures(
             .unwrap()
             .unwrap();
         fixture.origin.abort();
+    }
+}
+
+#[tokio::test]
+async fn provider_filter_empty_endpoint_explains_remote_selection_loss() {
+    for unsupported in [false, true] {
+        let mut document = json!({"paths":{"/read":{"get":{}}}});
+        if unsupported {
+            document["paths"]["/bad"] = json!({"get":{"parameters":[{"name":"cookie","in":"cookie","schema":{"type":"string"}}]}});
+        }
+        let fixtures = Fixture::with_distribution(
+            &listener("only", "[]", ""),
+            true,
+            Some(document),
+            &BTreeMap::from([(
+                "failure",
+                "[{to='only'}]\ninclude_tools=['failure_removed']",
+            )]),
+        )
+        .await;
+        let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+        fixtures.failure.add_permits(1);
+        let initialized =
+            tokio::time::timeout(Duration::from_secs(5), rpc(addresses["only"], "initialize"))
+                .await
+                .unwrap();
+        let instructions = initialized["result"]["instructions"].as_str().unwrap();
+        assert!(
+            instructions.contains("No static API tools are selected for this endpoint."),
+            "{instructions}"
+        );
+        assert!(
+            !instructions.contains("all selected API operations"),
+            "{instructions}"
+        );
+        if !unsupported {
+            assert!(
+                !instructions.contains("unsupported input contracts"),
+                "{instructions}"
+            );
+        }
+        let listed = rpc(addresses["only"], "tools/list").await;
+        assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
+        finish(stop, serving).await;
+        fixtures.origin.abort();
+    }
+}
+
+#[tokio::test]
+async fn wildcard_removals_keep_shared_provider_endpoints_available_with_settled_inventory() {
+    let fixtures = Fixture::with_distribution(
+        &(listener("pattern", "['failure']", "include_tools=['failure_read*']")
+            + &listener("survivor", "['failure']", "include_tools=['failure_other']")
+            + &listener("routed", "[]", "")),
+        true,
+        Some(json!({"paths":{"/other":{"get":{}}}})),
+        &BTreeMap::from([("optional", "[{to='routed',tools=['read*']},{to='exclude'}]")]),
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    fixtures.failure.add_permits(1);
+    for endpoint in ["pattern", "routed", "survivor"] {
+        let initialized = tokio::time::timeout(
+            Duration::from_secs(5),
+            rpc(addresses[endpoint], "initialize"),
+        )
+        .await
+        .unwrap();
+        assert!(initialized.get("result").is_some(), "{initialized}");
+        let listed = rpc(addresses[endpoint], "tools/list").await;
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        if endpoint == "survivor" {
+            assert_eq!(tools.len(), 1);
+            assert_eq!(tools[0]["name"], "failure_other");
+        } else {
+            assert!(tools.is_empty());
+            assert!(
+                initialized["result"]["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("selections")
+                    || initialized["result"]["instructions"]
+                        .as_str()
+                        .unwrap()
+                        .contains("selected tool")
+            );
+        }
+    }
+    finish(stop, serving).await;
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn shared_prefix_sources_wait_for_all_required_catalogs_in_either_order() {
+    for read_first in [false, true] {
+        let mut fixtures = Fixture::with_distribution(
+            &(listener("wait", "[]", "include_tools=['api_read']")
+                + &listener("progress", "[]", "include_tools=['api_other']")),
+            true,
+            Some(json!({"paths":{"/other":{"get":{}}}})),
+            &BTreeMap::from([
+                ("slow", "[{to='wait'}]\nprefix='api'"),
+                ("failure", "[{to=['wait','progress']}]\nprefix='api'"),
+            ]),
+        )
+        .await;
+        let mut ready = fixtures.running.catalog_readiness.remove("wait").unwrap();
+        let catalog = fixtures.running.deferred.catalog.clone();
+        let stop = CancellationToken::new();
+        let worker = tokio::spawn(fixtures.running.deferred.run(stop.clone()));
+        tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        if read_first {
+            fixtures.slow.add_permits(1);
+        } else {
+            fixtures.failure.add_permits(1);
+        }
+        let published = if read_first { "wait" } else { "progress" };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while catalog.read().views[published].is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            matches!(
+                ready.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "a required source is still pending"
+        );
+        if read_first {
+            fixtures.failure.add_permits(1);
+        } else {
+            fixtures.slow.add_permits(1);
+        }
+        let outcome = tokio::time::timeout(Duration::from_secs(5), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        stop.cancel();
+        let runtime = worker.await.unwrap();
+        outcome.unwrap();
+        assert!(runtime.deployment.selection_errors.is_empty());
+        assert_eq!(catalog.read().views["wait"][0].tool.name, "api_read");
+        assert_eq!(catalog.read().views["progress"][0].tool.name, "api_other");
+        fixtures.origin.abort();
+    }
+}
+
+#[tokio::test]
+async fn optional_shared_prefix_failure_keeps_empty_exact_selection_ready() {
+    let mut fixtures = Fixture::with_distribution(
+        &(listener("wait", "[]", "include_tools=['api_missing']")
+            + &listener("progress", "[]", "include_tools=['api_read']")),
+        true,
+        None,
+        &BTreeMap::from([
+            ("slow", "[{to=['wait','progress']}]\nprefix='api'"),
+            ("optional", "[{to='wait'}]\nprefix='api'"),
+        ]),
+    )
+    .await;
+    let mut ready = fixtures.running.catalog_readiness.remove("wait").unwrap();
+    let catalog = fixtures.running.deferred.catalog.clone();
+    let stop = CancellationToken::new();
+    let worker = tokio::spawn(fixtures.running.deferred.run(stop.clone()));
+    tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    fixtures.slow.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while catalog.read().views["progress"].is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        ready.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    fixtures.failure.add_permits(1);
+    let outcome = tokio::time::timeout(Duration::from_secs(5), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    stop.cancel();
+    let runtime = worker.await.unwrap();
+    outcome.unwrap();
+    assert!(runtime.deployment.selection_errors.is_empty());
+    assert!(catalog.read().views["wait"].is_empty());
+    assert!(
+        catalog.read().instructions["wait"]
+            .as_deref()
+            .unwrap()
+            .contains("No static API tools are selected for this endpoint.")
+    );
+    assert_eq!(catalog.read().views["progress"][0].tool.name, "api_read");
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn shared_remote_tag_depletion_and_retagging_keep_empty_endpoint_and_sibling_available() {
+    for tags in [json!([]), json!(["replacement"])] {
+        let fixtures = Fixture::with_failure_document(
+            &(listener(
+                "selected",
+                "['failure']",
+                "tags=['original']\ninstructions_text='Operator guidance'",
+            ) + &listener("sibling", "['failure']", "")),
+            true,
+            Some(json!({"paths":{"/read":{"get":{"tags":tags}}}})),
+        )
+        .await;
+        let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+        // One acquisition for failure/optional aliases and one unrelated slow
+        // acquisition. Sharing the source between listeners adds no request.
+        tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        fixtures.failure.add_permits(1);
+        let initialized = tokio::time::timeout(
+            Duration::from_secs(5),
+            rpc(addresses["selected"], "initialize"),
+        )
+        .await
+        .unwrap();
+        let instructions = initialized["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("Operator guidance"), "{instructions}");
+        assert!(
+            instructions.contains("No static API tools are selected for this endpoint."),
+            "{instructions}"
+        );
+        let listed = rpc(addresses["selected"], "tools/list").await;
+        assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
+        let initialized = rpc(addresses["sibling"], "initialize").await;
+        assert!(initialized.get("result").is_some(), "{initialized}");
+        let listed = rpc(addresses["sibling"], "tools/list").await;
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "failure_read");
+        assert_eq!(fixtures.arrived.available_permits(), 0);
+        finish(stop, serving).await;
+        fixtures.origin.abort();
     }
 }

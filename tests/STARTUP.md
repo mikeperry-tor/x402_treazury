@@ -123,12 +123,13 @@ required failure and allowed optional failure without changing serving readiness
 The waiting-endpoint regression also checks that the INFO startup summary
 identifies catalogs still loading instead of announcing discovery completion.
 Publication preserves authored prices, tool order and existing callable snapshots.
-Advisory listener/distribution selectors emit DEBUG diagnostics; missing exact
-selectors retain terminal failure diagnostics. Listener selector diagnostics are
+Ordinary missing listener selections and empty inventories emit coverage
+diagnostics without terminal readiness failure; strict inspection retains exact
+selector validation. Listener selector diagnostics are
 covered by `deployment::selection_diagnostics` and the deferred readiness fixtures:
 pending catalogs do not produce missing-tool diagnostics, terminal source outcomes trigger one report per affected listener, and
 unrelated completions do not repeat it. Synthetic catalogs verify source name-filter
-causes, opt-in recommendations, listener tags and unchanged exact-selector errors.
+causes, opt-in recommendations, listener tags and strict inspection errors.
 Deferred collision
 regressions cover both legacy attachments and authored distribution rules in
 opposite completion orders: three owners, exact selectors, unique tools, exclusion,
@@ -140,9 +141,9 @@ Routing regressions must preserve pending/optional/required source isolation and
 `wait_for_catalogs` behavior for every declared target, including targets with no
 current tools or shadowed rules. Static-only empty routed destinations and invalid
 legacy listener selectors must not discard a shared catalog's valid tools on peers.
-Immediate local and deferred remote catalogs use the same selection path; eager
-endpoints publish safe failure instructions and unchanged failures do not repeatedly
-log on unrelated completion. Shared-payer cover ownership still validates across
+Immediate local and deferred remote catalogs use the same selection path; empty
+endpoints publish safe coverage instructions and unrelated completions do not repeat
+listener diagnostics. Shared-payer cover ownership still validates across
 listeners: conflicting profiles reject admission, while matching profiles preserve
 both endpoints. Late namespace rejection omits only the invalid source, retaining
 healthy aliases and captured calls; both completion orders verify a safe selection
@@ -250,3 +251,19 @@ mature circuit-build learning. Record changes in that learning and connection
 quality. Keep Tor warm; use controlled NEWNYM between comparable runs when needed
 rather than restarting it or resetting unrelated state. Local replay cannot
 establish live Tor latency, memory costs or anonymity.
+
+## Best-effort framework startup
+
+The `deployment::remote_selection_tests` contracts cover ordinary local/remote
+empty selections, unknown names, empty recommendation opt-in, contradictory filters,
+namespace independence, retained routing and required endpoint readiness. Strict
+inspection remains inventory-dependent. Shared-source readiness fixtures cover
+removed/reassigned tags, empty inventories with custom instructions, actual required
+outage isolation and publication failure. Runtime refresh diagnostics follow
+successful publication and recover with the same retained filters. The native
+`catalog_warm_all_remote_sources_unavailable_returns_degraded_json` CLI fixture
+checks a zero exit and one degraded JSON result without opening wallets or listeners.
+Warming regressions retain sibling completion, partial acceptance, invalid/unusable
+replacement retention and accepted relay draining on caller cancellation. These use
+unfunded local fixtures, not live provider, Tor or settlement qualification. The
+public contract lives in [framework integration](../docs/framework-integration.md).

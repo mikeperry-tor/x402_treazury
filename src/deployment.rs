@@ -8,6 +8,8 @@ use crate::{
 };
 use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
+#[cfg(test)]
+mod remote_selection_tests;
 pub mod routing;
 #[cfg(test)]
 mod routing_tests;
@@ -62,8 +64,9 @@ pub struct MetaConfig {
 pub struct SourceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_tools: Option<Vec<SendToolsRule>>,
+    /// Permit startup with remaining tools if this remote catalog fails.
     #[serde(default)]
-    pub optional_startup: bool,
+    pub allow_catalog_failure: bool,
     pub wallet: Option<String>,
     #[serde(flatten)]
     pub provider: toml::Table,
@@ -508,7 +511,8 @@ impl Deployment {
                     .insert("prefix".into(), "source identifier".into());
             }
             let mut resolved_source = serde_json::to_value(provider)?;
-            resolved_source["optional_startup"] = serde_json::json!(source.optional_startup);
+            resolved_source["allow_catalog_failure"] =
+                serde_json::json!(source.allow_catalog_failure);
             resolved_source["send_tools"] = serde_json::to_value(&source.send_tools)?;
             resolved_source["wallet"] = serde_json::to_value(&source.wallet)?;
             resolved.insert(id, resolved_source);
@@ -1433,21 +1437,10 @@ impl Deployment {
     // Catalogs belong to sources; selection failures belong to endpoints. Keep
     // successful acquisition even when one destination has invalid narrowing.
     fn refresh_selection(&mut self, serving: bool) -> Result<()> {
-        // Loaded sources own their compatibility status. Retain absent-source
-        // entries for pending downloads and acquisition failures.
-        for (id, source) in &self.sources {
-            if source.compatibility_unavailable() {
-                self.unavailable_sources.insert(
-                    id.clone(),
-                    source
-                        .config
-                        .prefix
-                        .clone()
-                        .expect("resolved source prefix"),
-                );
-            } else {
-                self.unavailable_sources.remove(id);
-            }
+        // A loaded source is published even when its selected API inventory is
+        // empty. Only absent acquisition/admission owners remain unavailable.
+        for id in self.sources.keys() {
+            self.unavailable_sources.remove(id);
         }
         let mut selected = BTreeMap::new();
         let mut conflicts = BTreeMap::new();
@@ -1561,7 +1554,24 @@ impl Deployment {
             if let Some(reason) = self.selection_errors.get(name) {
                 instructions.push_str(&format!("\n\nUNAVAILABLE endpoint tool selection: {reason}. Correct the endpoint/source selections and restart."));
             }
+            for selector in &cfg.include_tools {
+                if !selected
+                    .iter()
+                    .any(|(_, tool)| pattern(selector).is_ok_and(|p| p.is_match(&tool.name)))
+                {
+                    instructions.push_str("\n\nA configured tool selection matches no available tools. Remaining selected tools are available; inspect source availability and tool selections.");
+                    break;
+                }
+            }
+            if selected.is_empty() {
+                instructions.push_str("\n\nNo static API tools are selected for this endpoint. Check source availability, routing, tags and tool filters; management capabilities remain available when configured.");
+            }
             for id in &cfg.sources {
+                if let Some(source) = self.sources.get(id)
+                    && !source.config.selection_notices.is_empty()
+                {
+                    instructions.push_str(&format!("\n\nSource {id}: some configured selections match no current tools. Remaining selected tools are available; missing selections do not expose additional tools."));
+                }
                 if self.unavailable_sources.contains_key(id) {
                     if self
                         .pending_sources
@@ -1571,12 +1581,6 @@ impl Deployment {
                         instructions.push_str(&format!("\n\nSource {id}: OPERATOR_REQUIRED (new relay payer creation is unavailable). Observation continues; its tools will appear if discovery becomes possible."));
                     } else if self.pending_sources.contains_key(id) {
                         instructions.push_str(&format!("\n\nSource {id}: PENDING (catalog discovery is waiting). Its tools will appear when discovery succeeds."));
-                    } else if self
-                        .sources
-                        .get(id)
-                        .is_some_and(Source::compatibility_unavailable)
-                    {
-                        instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (all selected API operations have unsupported input contracts). Inspect omitted operations and correct the source configuration."));
                     } else {
                         instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (catalog discovery failed). Its tools are unavailable, not intentionally empty. Restart to retry."));
                     }
@@ -1937,9 +1941,6 @@ struct ListenerInventory {
 }
 
 impl Source {
-    fn compatibility_unavailable(&self) -> bool {
-        self.tools.is_empty() && !self.issues.is_empty()
-    }
     // One transient assignment/tag view feeds publication and selector diagnostics.
     fn listener_tools(&self, name: &str, listener: &ListenerConfig) -> Result<Vec<&ToolSpec>> {
         let operations = if listener.tags.is_empty() && listener.exclude_tags.is_empty() {
@@ -2009,9 +2010,9 @@ fn listener_tool_inventory(
             .iter()
             .map(|text| {
                 let re = pattern(text)?;
-                if require_match && !available.keys().any(|n| re.is_match(n))
+                if require_match && !omit_conflicts && !incomplete
+                    && !available.keys().any(|n| re.is_match(n))
                     && !text.contains(['*', '?'])
-                    && !selector_has_unavailable_owner(text, server, sources, unavailable)
                 {
                     let removals =
                         selection_diagnostics::selection_removals(name, server, sources)?;
@@ -2038,15 +2039,17 @@ fn listener_tool_inventory(
         .filter(|(_, binding)| binding.is_none())
         .map(|(name, _)| name.clone())
         .collect();
+    let selected_name = |n: &str| {
+        (include.is_empty() || include.iter().any(|p| p.is_match(n)))
+            && !exclude.iter().any(|p| p.is_match(n))
+    };
     let tools: Vec<_> = available
         .into_iter()
-        .filter(|(n, _)| {
-            (include.is_empty() || include.iter().any(|p| p.is_match(n)))
-                && !exclude.iter().any(|p| p.is_match(n))
-        })
+        .filter(|(n, _)| selected_name(n))
         .filter_map(|(_, t)| t)
         .collect();
-    if tools.is_empty()
+    if !omit_conflicts
+        && tools.is_empty()
         && !crate::discovery::policy::EndpointPolicy::from(server).any()
         && !server.discover_on_demand
         && server.swap_control.is_none()
@@ -2057,33 +2060,6 @@ fn listener_tool_inventory(
             .context(catalog::diagnostics::Problem("The endpoint has no selected tools or discovery capabilities; review source assignments and listener filters")));
     }
     Ok(ListenerInventory { tools, conflicts })
-}
-
-fn selector_has_unavailable_owner(
-    selector: &str,
-    server: &ListenerConfig,
-    sources: &BTreeMap<String, Source>,
-    unavailable: &BTreeMap<String, String>,
-) -> bool {
-    // Prefixes come from the resolved provider (including inherited/custom
-    // prefixes), not the source ID. Overlapping namespaces cannot establish
-    // ownership: do not hide a required source's typo behind an optional outage.
-    let owners: Vec<_> = server
-        .sources
-        .iter()
-        .filter(|id| {
-            let prefix = unavailable
-                .get(*id)
-                .map(String::as_str)
-                .or_else(|| sources.get(*id).and_then(|s| s.config.prefix.as_deref()));
-            prefix.is_some_and(|prefix| {
-                selector
-                    .strip_prefix(prefix)
-                    .is_some_and(|rest| rest.starts_with('_'))
-            })
-        })
-        .collect();
-    !owners.is_empty() && owners.iter().all(|id| unavailable.contains_key(*id))
 }
 
 fn required_secret(env: &BTreeMap<String, String>, key: &str) -> Result<String> {

@@ -4,9 +4,10 @@ mod contracts;
 mod credit_pricing;
 mod input;
 pub(crate) mod media;
+#[cfg(test)]
 pub(crate) use contracts::omission_instructions;
 pub use contracts::{
-    CatalogBuild, IncompleteCatalog, OperationIssue, Unsupported, append_omissions,
+    CatalogBuild, IncompleteCatalog, OperationIssue, SelectionNotice, Unsupported, append_omissions,
 };
 pub use input::BodyArgument;
 pub(crate) mod diagnostics;
@@ -76,6 +77,16 @@ impl std::error::Error for ToolConfigurationError {
         Some(self.error.as_ref())
     }
 }
+
+/// A local acquisition setup fault, distinct from rejected remote content.
+#[derive(Debug)]
+pub(crate) struct LocalCatalogFailure;
+impl std::fmt::Display for LocalCatalogFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("catalog transport configuration failed")
+    }
+}
+impl std::error::Error for LocalCatalogFailure {}
 
 const DEFAULT_PRICE: &str = "Cost: unknown.";
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
@@ -169,6 +180,13 @@ impl CacheLifetime {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Runtime-only policy for ordinary deployment serving and warming.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub allow_empty_selection: bool,
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub selection_notices: Vec<SelectionNotice>,
     /// Deployment source identity for discovery diagnostics, independent of tool prefixes.
     #[serde(skip)]
     pub discovery_source: Option<String>,
@@ -297,6 +315,8 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            allow_empty_selection: false,
+            selection_notices: Vec::new(),
             discovery_source: None,
             cache_revision: None,
             relay_fallback: None,
@@ -1027,6 +1047,18 @@ pub(crate) async fn prepare_json_discovery_bounded(
         Err(failure) => failure,
     };
     if !failure.fallback {
+        if failure.kind == crate::network::acquisition::FailureKind::Local
+            && !failure.error.is::<crate::limits::DownloadLimit>()
+        {
+            return Err(failure.error.context(LocalCatalogFailure));
+        }
+        if failure
+            .error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_builder)
+        {
+            return Err(failure.error.context(LocalCatalogFailure));
+        }
         return Err(failure.error);
     }
     let error = failure.error;
@@ -1839,7 +1871,20 @@ pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<Catalog
     result
 }
 
+/// The deployment owner reports final source outcomes after admission.
+pub(crate) fn build_catalog_unreported(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+) -> Result<CatalogBuild> {
+    build_catalog_inner(cfg, root, prefix)
+}
+
 fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
+    validate_tool_selection(cfg).map_err(|error| ToolConfigurationError {
+        error,
+        reason: "Provider tool-name selector syntax is invalid; review inclusions, exclusions and recommendations",
+    })?;
     cfg.effective_pricing()?;
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
@@ -1851,11 +1896,12 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
         operations: selected,
         issues,
     } = selected_operations(cfg, root, prefix)?;
+    let mut selection_notices = Vec::new();
     // A help document cannot disguise the absence of every selected API contract.
     // Active inclusion/recommendation selectors require a compatible inventory.
     if selected.is_empty() && !issues.is_empty() {
         if !cfg.include_tools.is_empty() || cfg.use_recommended_tools {
-            filter_tool_names(cfg, &mut Vec::new(), prefix, true).map_err(|error| ToolConfigurationError {
+            filter_tool_names(cfg, &mut Vec::new(), prefix, true, &mut selection_notices).map_err(|error| ToolConfigurationError {
                 error: error.context(IncompleteCatalog(issues.clone())),
                 reason: "Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections",
             })?;
@@ -1863,6 +1909,17 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
         return Ok(CatalogBuild {
             tools: Vec::new(),
             issues,
+            selection_notices,
+        });
+    }
+    if selected.is_empty() && cfg.allow_empty_selection {
+        return Ok(CatalogBuild {
+            tools: Vec::new(),
+            issues,
+            selection_notices: vec![SelectionNotice {
+                setting: "operation_filters",
+                selector: "*".into(),
+            }],
         });
     }
     let mut credit_diagnostics = credit_pricing::Diagnostics::default();
@@ -1889,14 +1946,18 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
-    filter_tool_names(cfg, &mut tools, prefix, !issues.is_empty()).map_err(|error| ToolConfigurationError {
+    filter_tool_names(cfg, &mut tools, prefix, !issues.is_empty(), &mut selection_notices).map_err(|error| ToolConfigurationError {
         error: if issues.is_empty() {error} else {error.context(IncompleteCatalog(issues.clone()))},
         reason: if issues.is_empty() {"Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings"} else {"Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections"},
     })?;
     if let Some(credits) = &cfg.credit_pricing {
         credit_diagnostics.report(prefix, credits, &tools);
     }
-    Ok(CatalogBuild { tools, issues })
+    Ok(CatalogBuild {
+        tools,
+        issues,
+        selection_notices,
+    })
 }
 
 fn filter_tool_names(
@@ -1904,11 +1965,13 @@ fn filter_tool_names(
     tools: &mut Vec<ToolSpec>,
     prefix: &str,
     partial: bool,
+    notices: &mut Vec<SelectionNotice>,
 ) -> Result<()> {
     // Every selector sees the same compatible named inventory, including help.
-    let compile = |selectors: &[String],
-                   advisory: bool,
-                   exclusion: bool|
+    let mut compile = |selectors: &[String],
+                       advisory: bool,
+                       exclusion: bool,
+                       setting: &'static str|
      -> Result<Vec<regex::Regex>> {
         selectors.iter().map(|selector| {
             let pattern = crate::deployment::pattern(selector)?;
@@ -1916,6 +1979,8 @@ fn filter_tool_names(
                 if exclusion {
                     tracing::info!(source=cfg.discovery_source.as_deref(), prefix, selector, setting="exclude_tools",
                         "Provider exclusion selector matches no compatible tools; exclusion has no current effect");
+                } else if cfg.allow_empty_selection && !advisory {
+                    notices.push(SelectionNotice {setting, selector: selector.clone()});
                 } else if advisory || selector.contains(['*', '?']) {
                     tracing::warn!(source=cfg.discovery_source.as_deref(), prefix, selector, advisory, "Provider tool selector matches nothing");
                 } else {
@@ -1926,10 +1991,15 @@ fn filter_tool_names(
             Ok(pattern)
         }).collect()
     };
-    let include = compile(&cfg.include_tools, false, false)?;
-    let exclude = compile(&cfg.exclude_tools, false, true)?;
-    let recommended = compile(&cfg.recommended_tools, !cfg.use_recommended_tools, false)?;
-    if cfg.use_recommended_tools {
+    let include = compile(&cfg.include_tools, false, false, "include_tools")?;
+    let exclude = compile(&cfg.exclude_tools, false, true, "exclude_tools")?;
+    let recommended = compile(
+        &cfg.recommended_tools,
+        !cfg.use_recommended_tools,
+        false,
+        "recommended_tools",
+    )?;
+    if cfg.use_recommended_tools && !cfg.allow_empty_selection {
         ensure!(
             tools
                 .iter()
@@ -1938,14 +2008,47 @@ fn filter_tool_names(
         );
     }
     tools.retain(|tool| {
-        (include.is_empty() || include.iter().any(|p| p.is_match(&tool.name)))
-            && !exclude.iter().any(|p| p.is_match(&tool.name))
-            && (!cfg.use_recommended_tools || recommended.iter().any(|p| p.is_match(&tool.name)))
+        selected_tool_name(
+            &tool.name,
+            &include,
+            &exclude,
+            cfg.use_recommended_tools.then_some(recommended.as_slice()),
+        )
     });
     ensure!(
-        !tools.is_empty(),
+        !tools.is_empty() || cfg.allow_empty_selection,
         "no tools matched provider tool-name filters"
     );
+    if tools.is_empty() && notices.is_empty() {
+        notices.push(SelectionNotice {
+            setting: "tool_filters",
+            selector: "*".into(),
+        });
+    }
+    Ok(())
+}
+
+fn selected_tool_name(
+    name: &str,
+    include: &[Regex],
+    exclude: &[Regex],
+    recommended: Option<&[Regex]>,
+) -> bool {
+    (include.is_empty() || include.iter().any(|p| p.is_match(name)))
+        && !exclude.iter().any(|p| p.is_match(name))
+        && recommended.is_none_or(|patterns| patterns.iter().any(|p| p.is_match(name)))
+}
+
+/// Validate selector syntax without predicting a provider's current inventory.
+pub(crate) fn validate_tool_selection(cfg: &Config) -> Result<()> {
+    for name in cfg
+        .include_tools
+        .iter()
+        .chain(&cfg.exclude_tools)
+        .chain(&cfg.recommended_tools)
+    {
+        crate::deployment::pattern(name)?;
+    }
     Ok(())
 }
 
@@ -2006,7 +2109,7 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Opera
             selected.push((op, base));
         }
     }
-    if selected.is_empty() {
+    if selected.is_empty() && !cfg.allow_empty_selection {
         let error = anyhow::anyhow!("no operations matched");
         return Err(if had_operations {
             ToolConfigurationError {

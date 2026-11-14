@@ -40,15 +40,64 @@ pub(crate) struct Failure {
     pub stage: &'static str,
     pub reason: &'static str,
     pub http_status: Option<u16>,
+    retained_code: Option<&'static str>,
 }
 impl Failure {
+    /// Stable codes for machine consumers; authored prose remains display-only.
+    pub fn code(&self) -> &'static str {
+        if let Some(code) = self.retained_code {
+            return code;
+        }
+        if self
+            .reason
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b == b'_')
+        {
+            return self.reason;
+        }
+        if self.http_status.is_some() {
+            return "http_status";
+        }
+        match self.reason {
+            "The catalog exceeds the configured download size limit; no partial catalog was accepted" => {
+                "download_limit"
+            }
+            "Selected API operations have unsupported input contracts; complete inspection requires resolving or explicitly excluding the reported operations" => {
+                "unsupported_operations"
+            }
+            "The server returned only part of the catalog; a complete document is required" => {
+                "incomplete_document"
+            }
+            "The connection to the catalog server timed out" => "connection_timeout",
+            "The catalog server stopped sending data before the response was complete" => {
+                "response_inactivity"
+            }
+            "Could not connect to the catalog server or configured proxy" => "connection_failed",
+            "The catalog HTTP request failed before a complete response was received" => {
+                "request_failed"
+            }
+            _ => match self.stage {
+                "local_read" => "local_read_failed",
+                "parse" => "invalid_json",
+                "configuration" => "configuration_failed",
+                "generation" => "generation_failed",
+                "selection" => "selection_failed",
+                "publication" => "publication_failed",
+                "body" => "body_failed",
+                _ => "acquisition_failed",
+            },
+        }
+    }
     pub fn from_error(error: &anyhow::Error, fallback_stage: &'static str) -> Self {
         let stage = error
             .downcast_ref::<LoadStage>()
             .map(|stage| stage.label())
             .unwrap_or(fallback_stage);
         let http = error.downcast_ref::<reqwest::Error>();
-        let http_status = http.and_then(reqwest::Error::status).map(|s| s.as_u16());
+        let relay = crate::discovery_relay::RelayFailure::retained(error);
+        let http_status =
+            crate::discovery_relay::document::SharedFailure::capture(error, "catalog_unavailable")
+                .status();
         let reason = if let Some(problem) = error.downcast_ref::<Problem>() {
             problem.0
         } else if let Some(configuration) = error.downcast_ref::<super::ToolConfigurationError>() {
@@ -59,6 +108,8 @@ impl Failure {
             "Selected API operations have unsupported input contracts; complete inspection requires resolving or explicitly excluding the reported operations"
         } else if error.is::<super::IncompleteRelayCatalog>() {
             "The server returned only part of the catalog; a complete document is required"
+        } else if let Some(relay) = relay {
+            relay.explanation()
         } else if http_status.is_some() {
             "The catalog server returned an unsuccessful HTTP status"
         } else if let Some(http) = http {
@@ -97,6 +148,7 @@ impl Failure {
             stage,
             reason,
             http_status,
+            retained_code: relay.map(|relay| relay.kind()),
         }
     }
 }
@@ -210,6 +262,19 @@ mod tests {
             text.contains("document_complexity_limit")
                 && !text.contains("catalog_construction_failed"),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn relay_failures_preserve_safe_code_and_status_without_generation_mislabeling() {
+        let error = anyhow::Error::new(crate::discovery_relay::RelayFailure::http_status(502));
+        let failure = Failure::from_error(&error, "acquisition");
+        assert_eq!(failure.stage, "acquisition");
+        assert_eq!(failure.code(), "http_status");
+        assert_eq!(failure.http_status, Some(502));
+        assert_eq!(
+            failure.reason,
+            "The server returned an unsuccessful HTTP status"
         );
     }
 

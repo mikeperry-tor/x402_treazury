@@ -713,7 +713,7 @@ async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
     );
     let text = std::fs::read_to_string(&path)
         .unwrap()
-        .replace("[sources.s01]", "[sources.s01]\noptional_startup=true");
+        .replace("[sources.s01]", "[sources.s01]\nallow_catalog_failure=true");
     std::fs::write(&path, text).unwrap();
     assert!(
         Deployment::load(&path).await.is_err(),
@@ -748,13 +748,13 @@ async fn optional_remote_failure_is_visible_and_inspection_remains_strict() {
     task.await.unwrap().unwrap();
     let text = std::fs::read_to_string(&path)
         .unwrap()
-        .replace("optional_startup=true", "optional_startup=false");
+        .replace("allow_catalog_failure=true", "allow_catalog_failure=false");
     std::fs::write(&path, text).unwrap();
     assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
 }
 
 #[tokio::test]
-async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
+async fn optional_remote_source_retains_empty_authored_selections() {
     tls::install_trust();
     let fixture = Fixture::new(1, None).await;
     fixture.gates[0].add_permits(8);
@@ -774,21 +774,21 @@ async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
     ] {
         let text = original.replace(
             "[sources.s00]",
-            &format!("[sources.s00]\noptional_startup=true\n{selection}"),
+            &format!("[sources.s00]\nallow_catalog_failure=true\n{selection}"),
         );
         std::fs::write(&path, text).unwrap();
-        let error = Deployment::load_for_unsigned_serving(&path)
-            .await
-            .err()
-            .expect("authored errors must fail startup");
+        let loaded = Deployment::load_for_unsigned_serving(&path).await.unwrap();
         assert!(
-            format!("{error:#}").contains("invalid provider tool configuration"),
-            "{selection}: {error:#}"
+            loaded
+                .inventory()
+                .iter()
+                .flat_map(|server| &server.tools)
+                .all(|tool| tool.tool.name != "s00_read")
         );
     }
     let advisory = original.replace(
         "[sources.s00]",
-        "[sources.s00]\noptional_startup=true\nexclude_tools=['this_is_a_local_typo']",
+        "[sources.s00]\nallow_catalog_failure=true\nexclude_tools=['this_is_a_local_typo']",
     );
     std::fs::write(&path, advisory).unwrap();
     let inventory = Deployment::load_for_unsigned_serving(&path)
@@ -804,7 +804,7 @@ async fn optional_remote_source_does_not_suppress_authored_selection_errors() {
 }
 
 #[tokio::test]
-async fn optional_outage_defers_only_unambiguous_listener_selectors() {
+async fn optional_outage_and_missing_listener_selections_keep_endpoints_available() {
     async fn endpoint_instructions(deployment: Deployment) -> String {
         let running = deployment
             .bind_unsigned(&BTreeMap::from([(
@@ -864,17 +864,17 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
         .replace("[servers.test]", "[servers.test]\nwait_for_catalogs=false")
         .replace(
             "[sources.s01]",
-            "[sources.s01]\noptional_startup=true\nextends='optional.toml'",
+            "[sources.s01]\nallow_catalog_failure=true\nextends='optional.toml'",
         );
-    for (selection, succeeds) in [
-        ("include_tools=['s00_read','offline_read']", true),
-        ("include_tools=['offline_read']", true),
-        ("exclude_tools=['offline_read']", true),
-        ("include_tools=['s00_typo']", false),
-        ("exclude_tools=['s00_typo']", true),
-        ("exclude_tools=['unknown_read']", true),
-        ("include_tools=['unknown_read']", false),
-        ("include_tools=['s01_read']", false),
+    for selection in [
+        "include_tools=['s00_read','offline_read']",
+        "include_tools=['offline_read']",
+        "exclude_tools=['offline_read']",
+        "include_tools=['s00_typo']",
+        "exclude_tools=['s00_typo']",
+        "exclude_tools=['unknown_read']",
+        "include_tools=['unknown_read']",
+        "include_tools=['s01_read']",
     ] {
         std::fs::write(
             &path,
@@ -883,14 +883,12 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
         .unwrap();
         let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
         let instructions = endpoint_instructions(deployment).await;
-        assert_eq!(
+        assert!(
             !instructions.contains("UNAVAILABLE endpoint tool selection"),
-            succeeds,
             "{selection}: {instructions}"
         );
     }
-    // The optional source must not claim a namespace also owned by a ready one,
-    // including nested prefixes that could be ordinary required tool suffixes.
+    // Shared/nested prefixes do not turn missing names into terminal failures.
     for prefix in ["s00", "s00_nested"] {
         std::fs::write(
             dir.path().join("optional.toml"),
@@ -905,7 +903,7 @@ async fn optional_outage_defers_only_unambiguous_listener_selectors() {
         let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
         let instructions = endpoint_instructions(deployment).await;
         assert!(
-            instructions.contains("UNAVAILABLE endpoint tool selection"),
+            !instructions.contains("UNAVAILABLE endpoint tool selection"),
             "{prefix}: {instructions}"
         );
     }
@@ -935,7 +933,7 @@ async fn optional_remote_base_url_failures_are_isolated_but_authored_urls_are_st
     .unwrap();
     let path = dir.path().join("config.toml");
     let config = format!(
-        "version=1\n[sources.good]\nspec='good.json'\nbase_url='https://127.0.0.1:9'\n[sources.optional]\nspec='https://{address}/spec'\noptional_startup=true\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
+        "version=1\n[sources.good]\nspec='good.json'\nbase_url='https://127.0.0.1:9'\n[sources.optional]\nspec='https://{address}/spec'\nallow_catalog_failure=true\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
     );
     for remote in [None, Some("not a URL"), Some("ftp://example.com")] {
         *document.lock().unwrap() = serde_json::json!({"paths":{"/read":{"get":{}}}, "servers":remote.map(|url| serde_json::json!([{"url":url}]))});
@@ -946,7 +944,7 @@ async fn optional_remote_base_url_failures_are_isolated_but_authored_urls_are_st
         assert!(Deployment::load(&path).await.is_err());
         std::fs::write(
             &path,
-            config.replace("optional_startup=true", "optional_startup=false"),
+            config.replace("allow_catalog_failure=true", "allow_catalog_failure=false"),
         )
         .unwrap();
         assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());

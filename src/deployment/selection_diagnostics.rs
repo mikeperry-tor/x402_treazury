@@ -17,8 +17,8 @@ pub(super) fn report_completed(
         match warnings(name, server, sources) {
             Ok(warnings) => {
                 for warning in warnings {
-                    if warning.setting == "exclude_tools" {
-                        tracing::info!(
+                    if warning.setting != "exclude_tools" {
+                        tracing::error!(
                             server = name,
                             setting = warning.setting,
                             selector = warning.selector,
@@ -26,7 +26,7 @@ pub(super) fn report_completed(
                             warning.explanation
                         );
                     } else {
-                        tracing::debug!(
+                        tracing::info!(
                             server = name,
                             setting = warning.setting,
                             selector = warning.selector,
@@ -75,28 +75,22 @@ fn warnings(
         ("include_tools", &server.include_tools),
         ("exclude_tools", &server.exclude_tools),
     ] {
-        for selector in selectors
-            .iter()
-            .filter(|s| setting == "exclude_tools" || s.contains(['*', '?']))
-        {
+        for selector in selectors {
             let pattern = pattern(selector)?;
             if !available.iter().any(|name| pattern.is_match(name)) {
                 unmatched.push((setting, selector, pattern));
             }
         }
     }
-    if unmatched.is_empty() {
-        return Ok(Vec::new());
-    }
     // Temporary evidence is shared by every selector in this report, never
     // retained in runtime state. One witness per filter explains the cause.
     let removals = selection_removals(name, server, sources)?;
-    Ok(unmatched.into_iter().map(|(setting, selector, pattern)| {
+    let mut warnings: Vec<_> = unmatched.into_iter().map(|(setting, selector, pattern)| {
         let causes = removal_causes(&removals, &pattern);
         let subject = if setting == "exclude_tools" {
             "Listener exclusion selector matches no available tools; exclusion has no current effect"
         } else {
-            "Listener tool pattern matches no available tools"
+            "A configured tool selection matches no available tools; remaining selected endpoint tools are available"
         };
         let explanation = if causes.is_empty() {
             format!("{subject}; check the selector, source availability and source/listener filters. Unavailable sources: {unavailable:?}")
@@ -104,7 +98,30 @@ fn warnings(
             format!("{subject}; matching tools were already removed before listener name filtering: {}. Listener filters cannot restore source tools", causes.join("; "))
         };
         Warning { setting, selector: selector.clone(), explanation }
-    }).collect())
+    }).collect();
+    let include = server
+        .include_tools
+        .iter()
+        .map(|p| pattern(p))
+        .collect::<Result<Vec<_>>>()?;
+    let exclude = server
+        .exclude_tools
+        .iter()
+        .map(|p| pattern(p))
+        .collect::<Result<Vec<_>>>()?;
+    if !server.sources.is_empty()
+        && !available.iter().any(|name| {
+            (include.is_empty() || include.iter().any(|p| p.is_match(name)))
+                && !exclude.iter().any(|p| p.is_match(name))
+        })
+    {
+        warnings.push(Warning {
+            setting: "tool_filters",
+            selector: "*".into(),
+            explanation: "No static API tools are selected for this endpoint; check source availability, routing, tags and tool filters; configured management capabilities remain available".into(),
+        });
+    }
+    Ok(warnings)
 }
 
 pub(super) fn removal_causes(
@@ -264,10 +281,11 @@ mod tests {
             let mut server = listener();
             server.exclude_tools = server.include_tools.clone();
             let actual = warnings("main", &server, &sources).unwrap();
-            assert_eq!(actual.len(), 2);
+            assert_eq!(actual.len(), 3);
+            assert_eq!(actual[2].setting, "tool_filters");
             assert_eq!(actual[0].setting, "include_tools");
             assert_eq!(actual[1].setting, "exclude_tools");
-            for warning in actual {
+            for warning in &actual[..2] {
                 assert!(warning.explanation.contains(expected), "{warning:?}");
                 assert!(warning.explanation.contains("removes vendor_hidden"));
                 assert_eq!(warning.explanation.matches("(removes ").count(), 1);
@@ -284,7 +302,7 @@ mod tests {
         assert!(warnings("main", &server, &sources).unwrap().is_empty());
         server.tags = vec!["visible".into()];
         let actual = warnings("main", &server, &sources).unwrap();
-        assert_eq!(actual.len(), 1);
+        assert_eq!(actual.len(), 2);
         assert!(
             !actual[0]
                 .explanation
@@ -301,13 +319,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["/read"]
         );
-        assert_eq!(warnings("main", &server, &sources).unwrap().len(), 1);
+        assert_eq!(warnings("main", &server, &sources).unwrap().len(), 2);
         let sources = BTreeMap::from([("alias".into(), source("exclude=['/hidden']"))]);
         server.exclude_tags.clear();
         // The sibling remains selected, so narrow the listener to the removed path.
         server.include_tools = vec!["vendor_hidde?".into()];
         let actual = warnings("main", &server, &sources).unwrap();
-        assert_eq!(actual.len(), 1);
+        assert_eq!(actual.len(), 2);
         assert!(
             !actual[0]
                 .explanation
@@ -355,7 +373,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unmatched_distribution_and_listener_patterns_are_debug_diagnostics() {
+    async fn distribution_advice_is_debug_and_missing_listener_selections_report_coverage() {
+        if crate::test_log_capture::run_in_child(
+            "deployment::selection_diagnostics::tests::distribution_advice_is_debug_and_missing_listener_selections_report_coverage",
+        ) {
+            return;
+        }
         let (_, logs) = crate::limits::tests::capture(async {
             let send_tools = serde_json::from_value(json!([
                 {"to":"main","tools":["*"]},
@@ -386,7 +409,6 @@ mod tests {
         for message in [
             "Source distribution pattern matches no available tools",
             "Source distribution rule assigns no current tools",
-            "Listener tool pattern matches no available tools",
         ] {
             assert!(
                 logs.lines()
@@ -395,9 +417,16 @@ mod tests {
             );
         }
         assert!(
-            !logs.contains("WARN") && !logs.contains("ERROR") && !logs.contains("INFO"),
+            logs.lines()
+                .any(|line| line.contains("ERROR") && line.contains("setting=\"include_tools\"")),
             "{logs}"
         );
+        assert!(
+            logs.lines()
+                .any(|line| line.contains("ERROR") && line.contains("No static API tools")),
+            "{logs}"
+        );
+        assert!(!logs.contains("WARN") && !logs.contains("INFO"), "{logs}");
     }
 
     #[tokio::test]
@@ -466,7 +495,8 @@ mod tests {
             let sources = BTreeMap::from([("alias".into(), routed)]);
             let mut server = listener();
             let actual = warnings("main", &server, &sources).unwrap();
-            assert_eq!(actual.len(), 1);
+            assert_eq!(actual.len(), 2);
+            assert_eq!(actual[1].setting, "tool_filters");
             assert!(
                 actual[0]
                     .explanation
@@ -516,55 +546,85 @@ mod tests {
         }
     }
 
-    #[test]
-    fn mixed_source_filters_and_distribution_report_both_removal_causes() {
-        let send_tools = serde_json::from_value(json!([
-            {"to":"sibling","tools":["hidden"]},{"to":"main"}
-        ]))
-        .unwrap();
-        let routed = source("exclude_tools=['vendor_hidden_extra']")
-            .with_send_tools("alias", Some(send_tools))
+    #[tokio::test]
+    async fn mixed_source_filters_and_distribution_report_both_removal_causes() {
+        if crate::test_log_capture::run_in_child(
+            "deployment::selection_diagnostics::tests::mixed_source_filters_and_distribution_report_both_removal_causes",
+        ) {
+            return;
+        }
+        let (_, logs) = crate::limits::tests::capture(async {
+            let send_tools = serde_json::from_value(json!([
+                {"to":"sibling","tools":["hidden"]},{"to":"main"}
+            ]))
             .unwrap();
-        let sources = BTreeMap::from([("alias".into(), routed)]);
-        let actual = warnings("main", &listener(), &sources).unwrap();
-        assert_eq!(actual.len(), 1);
-        assert!(
-            actual[0]
-                .explanation
-                .contains("sources.alias.exclude_tools")
-        );
-        assert!(
-            actual[0]
-                .explanation
-                .contains("sources.alias.send_tools[0]")
-        );
-        assert!(
-            actual[0]
-                .explanation
-                .contains("removes vendor_hidden_extra")
-        );
-        assert!(actual[0].explanation.contains("removes vendor_hidden)"));
+            let routed = source("exclude_tools=['vendor_hidden_extra']")
+                .with_send_tools("alias", Some(send_tools))
+                .unwrap();
+            let sources = BTreeMap::from([("alias".into(), routed)]);
+            let actual = warnings("main", &listener(), &sources).unwrap();
+            assert_eq!(actual.len(), 2);
+            assert_eq!(actual[1].setting, "tool_filters");
+            assert!(
+                actual[0]
+                    .explanation
+                    .contains("sources.alias.exclude_tools")
+            );
+            assert!(
+                actual[0]
+                    .explanation
+                    .contains("sources.alias.send_tools[0]")
+            );
+            assert!(
+                actual[0]
+                    .explanation
+                    .contains("removes vendor_hidden_extra")
+            );
+            assert!(actual[0].explanation.contains("removes vendor_hidden)"));
+            report_completed(
+                &BTreeMap::from([("main".into(), listener())]),
+                &sources,
+                &BTreeMap::new(),
+                Some("alias"),
+            );
+        })
+        .await;
+        let diagnostic = logs
+            .lines()
+            .find(|line| line.contains("ERROR") && line.contains("setting=\"include_tools\""))
+            .expect("missing selection must emit an ERROR diagnostic");
+        for expected in [
+            "selector=\"vendor_hidden*\"",
+            "remaining selected endpoint tools are available",
+            "sources.alias.exclude_tools",
+            "removes vendor_hidden_extra",
+            "sources.alias.send_tools[0] assigns matching tools to sibling",
+            "removes vendor_hidden)",
+        ] {
+            assert!(diagnostic.contains(expected), "{logs}");
+        }
     }
 
     #[test]
-    fn unavailable_exact_selectors_stay_silent_without_hiding_ready_source_typos() {
+    fn missing_selectors_report_coverage_without_namespace_validation() {
         let sources = BTreeMap::from([("alias".into(), source(""))]);
         let unavailable = BTreeMap::from([("offline".into(), "offline".into())]);
         let mut server = listener();
         server.sources.push("offline".into());
-        server.include_tools = vec!["offline_read".into()];
-        listener_tool_inventory("one", &server, &sources, &unavailable, true).unwrap();
-        assert!(warnings("main", &server, &sources).unwrap().is_empty());
-        for selector in ["vendor_typo", "unknown_read"] {
+        for selector in ["offline_read", "vendor_typo", "unknown_read", "offline_*"] {
             server.include_tools = vec![selector.into()];
-            assert!(listener_tool_inventory("one", &server, &sources, &unavailable, true).is_err());
+            let inventory =
+                listener_tool_inventory("one", &server, &sources, &unavailable, true).unwrap();
+            assert!(inventory.tools.is_empty());
+            let actual = warnings("main", &server, &sources).unwrap();
+            assert_eq!(actual.len(), 2);
+            assert_eq!(actual[0].setting, "include_tools");
+            assert!(
+                actual[0]
+                    .explanation
+                    .contains("Unavailable sources: [\"offline\"]")
+            );
+            assert_eq!(actual[1].setting, "tool_filters");
         }
-        server.include_tools = vec!["offline_*".into()];
-        let actual = warnings("main", &server, &sources).unwrap();
-        assert!(
-            actual[0]
-                .explanation
-                .contains("Unavailable sources: [\"offline\"]")
-        );
     }
 }

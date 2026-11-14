@@ -1592,6 +1592,119 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
 }
 
 #[tokio::test]
+async fn catalog_warm_all_remote_sources_unavailable_returns_degraded_json() {
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex, atomic::Ordering},
+    };
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
+        observed.lock().unwrap().push(uri.path().to_owned());
+        async {
+            (
+                axum::http::StatusCode::BAD_GATEWAY,
+                "PRIVATE_UPSTREAM_RESPONSE_SENTINEL",
+            )
+        }
+    });
+    let (address, server) = tls::serve(app).await;
+    let proxy = socks::Socks::start(
+        BTreeMap::from([("spec.example.com".into(), address)]),
+        socks::Fault::None,
+    )
+    .await;
+    // Keeping the configured MCP address occupied makes any listener startup fail.
+    let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    std::fs::write(
+        dir.path().join("deployment.toml"),
+        format!(
+            r#"version=1
+[treasury]
+state_dir='state'
+key_file='UNREAD_KEY_FILE'
+[wallets.shared]
+mode='static'
+private_key_env='UNREAD_KEY'
+[sources.zeta]
+spec='https://spec.example.com/zeta'
+base_url='https://api.example.com'
+[sources.alpha]
+spec='https://spec.example.com/alpha'
+base_url='https://api.example.com'
+[servers.research]
+listen='{}'
+bearer_token_env='UNREAD_TOKEN'
+wallet='shared'
+sources=['zeta','alpha']
+[network]
+mode='tor'
+tor_isolation_retries=0
+socks_endpoint='{}'
+trusted_ca_files=[{:?}]
+"#,
+            occupied.local_addr().unwrap(),
+            proxy.address,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tls/ca.pem"),
+        ),
+    )
+    .unwrap();
+    // Missing wallet/token secrets and treasury files must not prevent unsigned warming.
+    let output = run(
+        dir.path(),
+        &["catalog", "warm", "--config", "deployment.toml"],
+        &[],
+    )
+    .await;
+    server.abort();
+    let stderr = String::from_utf8(output.stderr.clone()).unwrap();
+    let summary = good(output); // Parsing the entire stdout also rejects extra wire output.
+    assert_eq!(summary["outcome"], "degraded");
+    assert_eq!(summary["direct"], false);
+    let sources = summary["sources"].as_array().unwrap();
+    assert_eq!(
+        sources
+            .iter()
+            .map(|s| s["source"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["alpha", "zeta"]
+    );
+    for source in sources {
+        assert_eq!(source["status"], "unavailable");
+        assert_eq!(source["failure"]["stage"], "headers");
+        assert_eq!(source["failure"]["reason"], "http_status");
+        assert_eq!(source["failure"]["http_status"], 502);
+        assert!(source.get("catalog_cache").is_none());
+    }
+    let mut paths = requests.lock().unwrap().clone();
+    paths.sort();
+    assert_eq!(paths, ["/alpha", "/zeta"]);
+    // Independent catalog requests may share the origin's pooled connection.
+    assert!(proxy.accepted.load(Ordering::SeqCst) > 0);
+    assert!(stderr.contains("ERROR"), "{stderr}");
+    assert!(
+        stderr.contains("Catalog warming could not acquire this source"),
+        "{stderr}"
+    );
+    for forbidden in [
+        "PRIVATE_UPSTREAM_RESPONSE_SENTINEL",
+        "stack backtrace",
+        "panicked at",
+    ] {
+        assert!(!stderr.contains(forbidden), "{stderr}");
+        assert!(!summary.to_string().contains(forbidden));
+    }
+    assert!(!dir.path().join("UNREAD_KEY_FILE").exists());
+    // The only permitted treasury-directory output is the unsigned HTTP cache.
+    for entry in std::fs::read_dir(&state).unwrap() {
+        assert_eq!(entry.unwrap().file_name(), "http-cache");
+    }
+}
+
+#[tokio::test]
 async fn bootstrap_warming_opens_only_fixed_bootstrap_authority() {
     for explicit in [true, false] {
         let dir = tempfile::tempdir().unwrap();

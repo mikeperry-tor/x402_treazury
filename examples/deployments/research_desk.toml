@@ -174,6 +174,7 @@ send_tools = [
 ]
 
 [sources.blockchainmoneymap]
+allow_catalog_failure = true
 extends = "../../providers/blockchainmoneymap.toml"
 send_tools = [
   # $0.01 tx status agreed with Arkham; Arkham adds labels, time and transfers.
@@ -189,6 +190,7 @@ send_tools = [
 ]
 
 [sources.exa]
+allow_catalog_failure = true
 extends = "../../providers/exa.toml"
 send_tools = [
   # Inline schemas cover selected calls; vendor help adds HTTP/payment setup.
@@ -200,6 +202,7 @@ send_tools = [
 # Duoleads. Related-query relevance needs inspection; all-time and sub-day
 # coverage remains unqualified.
 [sources.google_trends]
+allow_catalog_failure = true
 extends = "../../providers/google-trends.toml"
 send_tools = [
   { to = "web", tools = ["trend_over_time", "related_queries", "related_topics", "interest_by_region"] },
@@ -207,6 +210,7 @@ send_tools = [
 ]
 
 [sources.duoleads]
+allow_catalog_failure = true
 extends = "../../providers/duoleads.toml"
 send_tools = [
   # OpenVerbs returns matching comparison values for $0.03, but Duoleads ($0.045)
@@ -217,6 +221,7 @@ send_tools = [
 ]
 
 [sources.openverbs]
+allow_catalog_failure = true
 extends = "../../providers/openverbs.toml"
 send_tools = [
   # Geographic radius lookup delivered data; richer operational fields and
@@ -226,6 +231,7 @@ send_tools = [
 ]
 
 [sources.onchaincheck]
+allow_catalog_failure = true
 extends = "../../providers/onchaincheck.toml"
 send_tools = [
   # $0.003 priced holdings complement BMM; no NFT, transfer or risk equivalence.
@@ -240,6 +246,7 @@ send_tools = [
 # send_tools = [{ to = "exclude" }]
 
 [sources.pdl]
+allow_catalog_failure = true
 extends = "../../providers/pdl.toml"
 send_tools = [
   # Route business research families before the primary fallback.
@@ -248,6 +255,7 @@ send_tools = [
 ]
 
 [sources.arkham]
+allow_catalog_failure = true
 extends = "../../providers/arkham.toml"
 send_tools = [
   { to = "finance" },
@@ -255,6 +263,7 @@ send_tools = [
 
 # filing_search and financials_ticker provide distinct filing-search and statement coverage.
 [sources.x402stock]
+allow_catalog_failure = true
 extends = "../../providers/x402stock.toml"
 send_tools = [
   { to = "health", tools = ["clinical_trials", "fda", "fda_shortages"] },
@@ -291,6 +300,7 @@ send_tools = [
 # is otherwise uncovered; latest-half-month fails-to-deliver is $0.004 vs
 # x402stock $0.02; address-only OFAC is $0.002 vs AgOSINT $0.015.
 [sources.vextorium]
+allow_catalog_failure = true
 extends = "../../providers/vextorium.toml"
 send_tools = [
   { to = "business", tools = ["sec_private_offerings", "us_crypto_regulation"] },
@@ -302,6 +312,7 @@ send_tools = [
 # x_dossier, x_watchlist and x_pulse add account analysis, polling state and
 # sentiment beyond the cheaper glim X reads selected below.
 [sources.botsmith]
+allow_catalog_failure = true
 extends = "../../providers/botsmith.toml"
 send_tools = [
   # Keep probabilistic model questions outside this research deployment; inline schemas replace help.
@@ -321,6 +332,7 @@ send_tools = [
 # Asset digests, sentiment, OHLC, signals, stablecoins and trade preflight
 # complement market research. alerts_asset supplies BTC and other asset alerts.
 [sources.kronos]
+allow_catalog_failure = true
 extends = "../../providers/kronos.toml"
 send_tools = [
   # overview returned 503; APEX funding boards and Otto token details provide
@@ -346,6 +358,7 @@ send_tools = [
 ]
 
 [sources.degenscan]
+allow_catalog_failure = true
 extends = "../../providers/degenscan.toml"
 send_tools = [
   # Supply yields and Deribit IV/DVOL observations; no forward risk/max-LTV model.
@@ -354,6 +367,7 @@ send_tools = [
 ]
 
 [sources.marketintelligence]
+allow_catalog_failure = true
 extends = "../../providers/marketintelligence.toml"
 send_tools = [
   # On-chain supply/borrow APYs and utilization complement DefiLlama supply yields.
@@ -364,6 +378,7 @@ send_tools = [
 # Retain complementary financial, corporate, property and regional research;
 # omit superseded tools, duplicate previews and model/document workflows below.
 [sources.lonestar]
+allow_catalog_failure = true
 extends = "../../providers/lonestar.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -453,6 +468,7 @@ send_tools = [
 # APEX page_markdown and StableEnrich Firecrawl. They preserve alternatives to
 # Otto's rendered reads without establishing equivalence to its curated output.
 [sources.otto]
+allow_catalog_failure = true
 extends = "../../providers/otto.toml"
 send_tools = [
   # Direct Exa returned more primary sources in both sampled searches and exposes filters/content controls.
@@ -519,6 +535,7 @@ send_tools = [
 
 # Macro, EDGAR, on-chain and deterministic text utilities provide complementary coverage.
 [sources.agentfund]
+allow_catalog_failure = true
 extends = "../../providers/agentfund.toml"
 send_tools = [
   # Use 2s econ_fred seriesId=RSFSXMV (advance ex-autos, including food services),
@@ -548,6 +565,7 @@ send_tools = [
 
 # Retain full research tools; omit samples, health checks and the free-tool index.
 [sources.brazilayer]
+allow_catalog_failure = true
 extends = "../../providers/brazilayer.toml"
 send_tools = [
   { to = "exclude", tools = [  # Demo/free endpoints excluded
@@ -575,6 +593,7 @@ send_tools = [
 # Use canonical POST tools for same-path GET/POST twins. Preflight exceeds
 # the financial per-payment cap.
 [sources.genuinegood]
+allow_catalog_failure = true
 extends = "../../providers/genuinegood.toml"
 send_tools = [
   { to = "exclude", tools = ["preflight"] },
@@ -584,6 +603,7 @@ send_tools = [
 # Search/image tools are routed to web; people, business and property searches
 # are routed below. Keep help available for each selected subset.
 [sources.stableenrich]
+allow_catalog_failure = true
 extends = "../../providers/stableenrich.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -629,6 +649,7 @@ send_tools = [
 # ref reads, and supplies the Reddit and X reads removed above. Amazon and Serper
 # shopping tools are excluded in favor of OpenWeb Ninja's shopping catalog.
 [sources.glim]
+allow_catalog_failure = true
 extends = "../../providers/glim.toml"
 send_tools = [
   # Combined helper duplicates the granular tweet/user reads; aliases add no coverage.
@@ -651,6 +672,7 @@ send_tools = [
 # shorter family. Price history supplies no history data; Amazon reviews require
 # a caller cookie. Seller/influencer routes remain unqualified.
 [sources.openwebninja]
+allow_catalog_failure = true
 extends = "../../providers/openwebninja.toml"
 send_tools = [
   { to = "shopping", tools = [
@@ -727,6 +749,7 @@ send_tools = [
 # bibliography/family/legal records and the US file wrapper rather than another
 # keyword search.
 [sources.google_patents]
+allow_catalog_failure = true
 extends = "../../providers/google-patents.toml"
 send_tools = [
   { to = "business", tools = ["search", "patent"] },
@@ -736,6 +759,7 @@ send_tools = [
 # Market families and project trend feeds are available on the finance endpoint.
 # Entity, funding and ecosystem/category research is available on business.
 [sources.claw402]
+allow_catalog_failure = true
 extends = "../../providers/claw402.toml"
 # Comparison guidance from one live sample; retain complementary coverage.
 # For funding rates, prefer otto_funding_rates for compact per-symbol funding/OI summaries.
@@ -776,6 +800,7 @@ send_tools = [
 # Company research and decision-maker discovery are available on business.
 # Targeted email and mobile-phone lookups are available on social.
 [sources.deepline]
+allow_catalog_failure = true
 extends = "../../providers/deepline.toml"
 # Retain targeted business-contact tools; keep general identity enrichment with Minerva/PDL.
 send_tools = [
@@ -792,6 +817,7 @@ send_tools = [
 
 # Network ownership and routing checks are available on security.
 [sources.agosint]
+allow_catalog_failure = true
 extends = "../../providers/agosint.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -804,6 +830,7 @@ send_tools = [
 ]
 
 [sources.relayshield]
+allow_catalog_failure = true
 extends = "../../providers/relayshield.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -835,6 +862,7 @@ send_tools = [
 ]
 
 [sources.netintel]
+allow_catalog_failure = true
 extends = "../../providers/netintel.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -914,6 +942,7 @@ send_tools = [
 ]
 
 [sources.ipintel]
+allow_catalog_failure = true
 extends = "../../providers/ipintel.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -1139,6 +1168,7 @@ send_tools = [
 # payment_invalid with facilitatorStatus 502 / upstream_unreachable. It may need
 # removal if these problems persist; retain the alternatives alongside it for now.
 [sources.maxwell]
+allow_catalog_failure = true
 extends = "../../providers/maxwell.toml"
 send_tools = [
   { to = "exclude", tools = [
@@ -1172,6 +1202,7 @@ send_tools = [
 
 # Geocoding/routes and customs references add focused structured data.
 [sources.halowerk]
+allow_catalog_failure = true
 extends = "../../providers/halowerk.toml"
 send_tools = [
   { to = "security", tools = ["injection_scan"] },
@@ -1217,6 +1248,7 @@ send_tools = [
 # Company enrichment and four one-record NASA platform reads delivered data.
 # Separate comments/transcripts/personal-profile modes remain unqualified.
 [sources.agdata]
+allow_catalog_failure = true
 extends = "../../providers/agdata.toml"
 send_tools = [
   { to = ["business", "social"], tools = ["linkedin_company"] },
@@ -1243,6 +1275,7 @@ send_tools = [
 
 # Atlas grant details, publication joins and funding aggregates returned NIH records.
 [sources.biomedical_grants]
+allow_catalog_failure = true
 extends = "../../providers/biomedical-grants.toml"
 send_tools = [
   { to = ["science", "business"], tools = ["search", "organization", "project_number"] },
@@ -1259,6 +1292,7 @@ send_tools = [
 # medRxiv date-window listings add a medical-preprint lane absent from 2s
 # papers_search. They list by publication date rather than keyword search.
 [sources.medrxiv]
+allow_catalog_failure = true
 extends = "../../providers/medrxiv-details.toml"
 send_tools = [
   { to = "exclude", tools = ["help"] },
@@ -1268,11 +1302,13 @@ send_tools = [
 # Doctor search, hospital prices, assistance and HRSA reads delivered records.
 # The full read-only catalog is selected; other operations remain unqualified.
 [sources.findmydirectdoctor]
+allow_catalog_failure = true
 extends = "../../providers/findmydirectdoctor.toml"
 send_tools = [{ to = "health" }]
 
 # GLEIF gateway redundancy; accounting parents are not beneficial owners.
 [sources.legal_entities]
+allow_catalog_failure = true
 extends = "../../providers/legal-entities.toml"
 send_tools = [
   { to = "business", tools = ["search", "entity_lei", "parent_companies_lei"] },
@@ -1281,6 +1317,7 @@ send_tools = [
 
 # Read-only cohort snapshots; no execution or wallet custody.
 [sources.smartperps]
+allow_catalog_failure = true
 extends = "../../providers/smartperps.toml"
 send_tools = [
   { to = "finance", tools = ["preview", "lite", "coin", "scan"] },
@@ -1291,6 +1328,7 @@ send_tools = [
 # Social/business selections are sampled; travel also includes contract-reviewed companion reads.
 # Related catalogs do not provide independent redundancy.
 [sources.shopsocial]
+allow_catalog_failure = true
 extends = "../../providers/shopsocial.toml"
 send_tools = [
   { to = "social", tools = [
@@ -1304,6 +1342,7 @@ send_tools = [
 ]
 
 [sources.companyrecords]
+allow_catalog_failure = true
 extends = "../../providers/companyrecords.toml"
 send_tools = [
   { to = ["business", "social"], tools = ["b2b_linkedin_company_profiles"] },
@@ -1331,6 +1370,7 @@ send_tools = [
 ]
 
 [sources.healthtravel]
+allow_catalog_failure = true
 extends = "../../providers/healthtravel.toml"
 send_tools = [
   # Dated hotel prices and Amtrak tracking returned records; companion reads are contract-reviewed.

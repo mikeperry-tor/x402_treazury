@@ -85,13 +85,16 @@ fn recommendations_fail_closed_only_when_selected_and_never_rewrite_prefixes() {
             .to_string()
             .contains("unknown provider tool selector api_absent")
     );
-    for advice in [vec![], vec!["api_*".into()]] {
+    for (advice, reason) in [
+        (vec![], "no tools matched recommended_tools"),
+        (vec!["api_*".into()], "no tools matched recommended_tools"),
+    ] {
         cfg.recommended_tools = advice;
         assert!(
             build_tools(&cfg, &document(), "alias")
                 .unwrap_err()
                 .to_string()
-                .contains("no tools matched recommended_tools")
+                .contains(reason)
         );
     }
     cfg.recommended_tools = vec!["alias_read".into(), "alias_stale*".into()];

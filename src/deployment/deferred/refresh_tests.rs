@@ -8,15 +8,17 @@ use std::sync::{
 };
 
 #[tokio::test]
-async fn unsupported_refresh_preserves_siblings_and_restores_availability_on_rollback() {
+async fn mixed_filtered_refresh_preserves_readiness_siblings_and_rollback() {
     let mut fixture = Fixture::configured(false, true).await;
     assert_eq!(fixture.runtime.catalog.read().views["affected"].len(), 2);
-    let unsupported = json!({"paths":{"/read":{"get":{"parameters":[
-        {"in":"cookie","name":"session","schema":{"type":"string"}}
-    ]}}}});
+    let unsupported = json!({"paths":{
+        "/read":{"get":{}},
+        "/cookie":{"get":{"parameters":[{"in":"cookie","name":"session","schema":{"type":"string"}}]}}
+    }});
     *fixture.document.lock().unwrap() = unsupported;
     let mut cfg = fixture.runtime.deployment.sources["api"].config.clone();
     cfg.catalog_cache_force_refresh = true;
+    cfg.exclude_tools = vec!["api_read".into()];
     let acquire = || {
         refresh_source(
             "api",
@@ -27,7 +29,8 @@ async fn unsupported_refresh_preserves_siblings_and_restores_availability_on_rol
     };
     let rejected = acquire().await.unwrap();
     let accepted = acquire().await.unwrap();
-    assert!(accepted.0.compatibility_unavailable());
+    assert!(accepted.0.tools.is_empty());
+    assert!(!accepted.0.issues.is_empty());
     let old = fixture.runtime.catalog.read();
     let binding = fixture.runtime.refreshes["api"].clone();
 
@@ -49,7 +52,7 @@ async fn unsupported_refresh_preserves_siblings_and_restores_availability_on_rol
             .unavailable_sources
             .contains_key("api")
     );
-    assert!(!fixture.runtime.deployment.sources["api"].compatibility_unavailable());
+    assert!(!fixture.runtime.deployment.sources["api"].tools.is_empty());
     assert_eq!(fixture.runtime.deployment.selected["affected"].len(), 2);
     fixture.runtime.catalog.publish((*old).clone());
 
@@ -60,13 +63,21 @@ async fn unsupported_refresh_preserves_siblings_and_restores_availability_on_rol
         .await;
     assert!(binding.check().is_err());
     assert!(
-        fixture
+        !fixture
             .runtime
             .deployment
             .unavailable_sources
             .contains_key("api")
     );
     assert!(fixture.runtime.deployment.selection_errors.is_empty());
+    assert!(
+        fixture
+            .runtime
+            .deployment
+            .endpoint_readiness("affected")
+            .unwrap()
+            .is_ok()
+    );
     let current = fixture.runtime.catalog.read();
     assert_eq!(current.views["affected"].len(), 1);
     assert_eq!(current.views["affected"][0].tool.name, "other_other");
@@ -81,6 +92,7 @@ async fn unsupported_refresh_preserves_siblings_and_restores_availability_on_rol
     fixture.assert_unrelated_usable().await;
 
     *fixture.document.lock().unwrap() = json!({"paths":{"/read":{"get":{}}}});
+    cfg.exclude_tools.clear();
     let recovered = refresh_source(
         "api",
         cfg,
@@ -103,6 +115,14 @@ async fn unsupported_refresh_preserves_siblings_and_restores_availability_on_rol
             .contains_key("api")
     );
     assert!(fixture.runtime.deployment.selection_errors.is_empty());
+    assert!(
+        fixture
+            .runtime
+            .deployment
+            .endpoint_readiness("affected")
+            .unwrap()
+            .is_ok()
+    );
     assert_eq!(fixture.runtime.catalog.read().views["affected"].len(), 2);
     fixture.origin.abort();
     let _ = fixture.origin.await;
@@ -437,7 +457,7 @@ sources=['alias']
             ));
         }
         std::fs::write(&path, config).unwrap();
-        let deployment = Deployment::load(&path).await.unwrap();
+        let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
         assert_eq!(deployment.listeners["affected"].wait_for_catalogs, !sibling);
         let catalog = Arc::new(crate::catalog_state::CatalogState::new(
             crate::catalog_state::CatalogSnapshot {
@@ -872,9 +892,9 @@ async fn repaired_tools_publish_while_pricing_is_pending_and_keep_generation_sco
 }
 
 #[tokio::test]
-async fn refresh_missing_exact_selector_reports_waiting_endpoint_failure_after_publication() {
+async fn refresh_missing_exact_selector_reports_endpoint_removal_after_publication() {
     if crate::test_log_capture::run_in_child(
-        "deployment::deferred::refresh_tests::refresh_missing_exact_selector_reports_waiting_endpoint_failure_after_publication",
+        "deployment::deferred::refresh_tests::refresh_missing_exact_selector_reports_endpoint_removal_after_publication",
     ) {
         return;
     }
@@ -890,33 +910,60 @@ async fn refresh_missing_exact_selector_reports_waiting_endpoint_failure_after_p
     let previous = slot.read().await.unwrap();
     let acquired = fixture.acquire().await;
     let binding = fixture.runtime.refreshes["api"].clone();
+    let publications = Arc::new(AtomicUsize::new(0));
+    let seen = publications.clone();
+    let log_path = log.path().to_owned();
+    *fixture.runtime.catalog.before_publish.lock().unwrap() = Some(Arc::new(move || {
+        if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+            let logs = std::fs::read_to_string(&log_path).unwrap();
+            assert!(
+                !logs.contains("A configured tool selection matches no available tools"),
+                "{logs}"
+            );
+        }
+    }));
     assert!(binding.trigger());
     fixture
         .runtime
         .complete_refresh("api".into(), binding, Ok(acquired))
         .await;
+    fixture
+        .runtime
+        .catalog
+        .before_publish
+        .lock()
+        .unwrap()
+        .take();
+    assert!(publications.load(Ordering::SeqCst) > 0);
     let snapshot = fixture.runtime.catalog.read();
     assert!(snapshot.views["affected"].is_empty());
+    assert_eq!(
+        fixture.runtime.deployment.listeners["affected"].include_tools,
+        ["api_read"]
+    );
+    assert_eq!(fixture.runtime.deployment.sources["api"].tools.len(), 1);
+    assert_eq!(
+        fixture.runtime.deployment.sources["api"].tools[0].path,
+        "/new"
+    );
+    assert!(fixture.runtime.deployment.selection_errors.is_empty());
+    let instructions = snapshot.instructions["affected"].as_deref().unwrap();
     assert!(
-        fixture
-            .runtime
-            .deployment
-            .selection_errors
-            .contains_key("affected")
+        instructions.contains("A configured tool selection matches no available tools"),
+        "{instructions}"
     );
     assert!(
-        !fixture
-            .runtime
-            .deployment
-            .selection_errors
-            .contains_key("unrelated")
+        !instructions.contains("UNAVAILABLE endpoint tool selection"),
+        "{instructions}"
     );
     fixture.assert_unrelated_usable().await;
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
         logs.lines().any(|line| line.contains("ERROR")
             && line.contains("server=\"affected\"")
-            && line.contains("failure_stage=\"selection\"")),
+            && line.contains("setting=\"include_tools\"")
+            && line.contains("selector=\"api_read\"")
+            && line.contains("A configured tool selection matches no available tools")),
         "{logs}"
     );
     assert!(
@@ -932,5 +979,41 @@ async fn refresh_missing_exact_selector_reports_waiting_endpoint_failure_after_p
         previous.hints.unwrap().generation
     );
     assert_eq!(fixture.downloads.load(Ordering::SeqCst), 2);
+
+    *fixture.document.lock().unwrap() = json!({"paths":{"/read":{"get":{"operationId":"read"}}}});
+    let mut config = fixture.runtime.deployment.sources["api"].config.clone();
+    config.catalog_cache_force_refresh = true;
+    let recovered = refresh_source(
+        "api",
+        config,
+        None,
+        fixture.runtime.deployment.catalog_capacity.clone(),
+    )
+    .await
+    .unwrap();
+    let binding = fixture.runtime.refreshes["api"].clone();
+    assert!(binding.trigger());
+    fixture
+        .runtime
+        .complete_refresh("api".into(), binding, Ok(recovered))
+        .await;
+    let recovered = fixture.runtime.catalog.read();
+    assert_eq!(recovered.views["affected"].len(), 1);
+    assert_eq!(recovered.views["affected"][0].tool.name, "api_read");
+    assert!(
+        !recovered.instructions["affected"].as_deref().is_some_and(
+            |text| text.contains("A configured tool selection matches no available tools")
+        )
+    );
+    assert_eq!(
+        fixture.runtime.deployment.listeners["affected"].include_tools,
+        ["api_read"]
+    );
+    assert_eq!(fixture.downloads.load(Ordering::SeqCst), 3);
+    let recovered_logs = std::fs::read_to_string(log.path()).unwrap();
+    assert_eq!(
+        logs, recovered_logs,
+        "recovery must not report a missing selector"
+    );
     fixture.origin.abort();
 }

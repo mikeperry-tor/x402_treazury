@@ -138,14 +138,15 @@ Public Vec builders and strict tool/qualification inspection refuse partial resu
 Standalone tag inventory is metadata-only; deployment tag inspection retains strict loading.
 Operation/path/method/tag exclusions precede compatibility; later tool-name filters
 see compatible names only and do not erase source-level omissions.
-A serving source with no supported selected API operations retains its issue metadata
-and is unavailable to dependent `wait_for_catalogs = true` endpoints; other endpoints
-follow their own readiness and serving settings. A help document does not convert
-that source into a successful API catalog. Intentionally empty selections remain
-configuration errors, and explicit help-only selection remains valid when supported
-API operations existed before name filtering. Dynamic registration may reject an
-all-unsupported candidate without changing existing registrations. Strict inspection
-and qualification still reject any omission.
+Ordinary deployment serving publishes accepted catalogs even when their selected
+API inventory is empty or every selected operation is omitted as unsupported.
+Omissions and empty selections remain visible in instructions and ERROR coverage
+diagnostics; they do not close waiting endpoints. A help document does not turn an
+unsupported API contract into a usable operation. Actual acquisition or source
+admission failures retain the configured `allow_catalog_failure` readiness policy.
+Dynamic registration may reject an all-unsupported candidate without changing
+existing registrations. Strict inspection and qualification still reject omissions
+and invalid inventory selections. Authored filters never widen access.
 
 The existing JSON encoder carries the selected declared application/json or +json
 Content-Type and parameters through routing; non-UTF8 or non-JSON-only bodies are
@@ -218,8 +219,16 @@ Worker/publication failure fails unresolved readiness signals. Listeners with
 and omit failed sources regardless of optional status. Strict inspection/qualification
 wait for complete catalogs. The
 synchronous unsigned-serving loader cancels unfinished loads on required failure
-and can omit an explicitly `optional_startup` remote failure. Source
-completion order cannot change the final sorted inventory for valid configurations.
+and can omit an explicitly `allow_catalog_failure` remote failure.
+Ordinary synchronous and deferred serving and warming permit empty selections for
+local and remote catalogs. They retain authored filters and routing without using
+namespace ownership, speculative pattern intersections or pending-name gates to
+infer whether an absent selection is a typo. Empty selections and unmatched
+inclusions are reported as reduced coverage; strict inspection and qualification
+retain inventory validation. Actual acquisition/admission failures retain the configured required-source
+readiness boundary; omission metadata does not create an additional readiness gate. See [framework integration](framework-integration.md) for CLI outcomes,
+coverage and activation boundaries.
+
 Ordinary serving retains successfully generated source catalogs when one endpoint's
 selection fails. Initial and deferred selection use the same endpoint-local path:
 the failed endpoint publishes no static tools and explains the selection failure;

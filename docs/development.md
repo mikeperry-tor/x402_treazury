@@ -348,7 +348,7 @@ operation, after its applicable retry and fallback paths:
 
 | Level | Use for | Examples |
 | --- | --- | --- |
-| ERROR | Required service or endpoint functionality is unavailable and has no recovery remaining in the current lifecycle. | Program failure; an MCP endpoint cannot bind or cannot publish its required catalogs. Other endpoints may remain healthy. |
+| ERROR | Required service or endpoint functionality is unavailable and has no recovery remaining in the current lifecycle. | Program failure; an MCP endpoint cannot bind or cannot publish its required catalogs; a configured deployment catalog finishes with unavailable capabilities. Other endpoints may remain healthy. |
 | WARN | A requested operation cannot complete under its existing recovery and authority, or functionality is unexpectedly lost even when the remaining operation succeeds. | Document retrieval fails with no usable fallback; a potentially chargeable payment fails; one-pass sync fails; selected catalog operations become unavailable. |
 | INFO | Meaningful user-visible lifecycle, progress, delay or recovery changes. | Program startup; catalog ready; MCP endpoint ready; funding progress; entering fallback or waiting for a retrying dependency; recovery of that dependency. |
 | DEBUG | Routine outcomes, expected negative results, individual attempts and troubleshooting details. | Ordinary successful calls; optional probes finding no document; no search matches; routine input/authentication rejection; background polling; cache activity. |
@@ -369,7 +369,11 @@ emits the terminal diagnostic; lower layers retain the safe facts needed to
 explain it without announcing each failed attempt as an operation failure.
 Unexpected catalog truncation or unavailable selected tools emits WARN at the
 public catalog construction boundary, including library callers and successful
-partial inventories. Log only safe aggregate omission counts and fixed reasons.
+partial inventories. Ordinary deployment serving/warming owns its terminal source
+outcome and emits ERROR for unavailable source capabilities or degraded warming;
+its internal generation does not duplicate the public builder warning. Frameworks
+must follow [the integration contract](framework-integration.md), rather than
+interpret ERROR severity as process failure. Log only safe aggregate omission counts and fixed reasons.
 Strict conversion of that same build does not repeat the construction warning;
 its terminal command/source/endpoint owner may separately report the broader
 impact. Internal naming reprojections and speculative parsing do not announce
@@ -585,19 +589,25 @@ Source distribution selector failures retain the selection stage and a safe reas
 identifying the source's `send_tools` rules in both immediate and deferred catalog loads.
 A readable catalog with invalid distribution is not a network acquisition failure;
 detailed selectors remain in the inspection error chain, outside serving logs.
-Endpoint selection diagnostics distinguish a missing exact listener selector from
-an empty inventory without discovery capabilities. A reserved static namespace has
-a distinct source-admission reason. Serving logs and endpoint status use fixed
-reasons with repair guidance; detailed selector/routing evidence stays in inspection
-errors.
+Missing exact listener inclusions emit ERROR after successful runtime refresh
+publication as well as completed startup loading. The report is scoped to listeners
+using the completed source and waits for their other source loads to settle.
+The endpoint retains its filters and any remaining selected tools, including an
+empty selection, and its MCP instructions identify the missing capability.
+Failed refresh publication retains the old tools without announcing their removal.
+A reserved static namespace has a distinct source-admission reason. Serving logs
+and endpoint status use fixed reasons with repair guidance; detailed routing
+evidence stays in inspection errors.
 Unmatched exclusion selectors report INFO with the affected source or listener
 and selector, without failing the source, endpoint or strict inspection. This
 covers provider/source `exclude_tools`, `send_tools` exclusion rules and listener
 `exclude_tools`, for both exact names and wildcards. Listener diagnostics wait for
 that listener's source loads to settle and retain unavailable-source context.
-Positive distribution/listener wildcards and shadowed distribution rules remain
-DEBUG; missing exact inclusion/assignment selectors remain selection errors.
-Provider recommendation and positive-filter diagnostics retain their own policy.
+Unmatched endpoint inclusions and empty static inventories emit ERROR for reduced
+coverage in ordinary serving, without disabling the endpoint. Source assignment
+notices are reported by the source owner; shadowed distribution rules remain DEBUG.
+Strict inspection retains exact-name and empty-inventory errors. Provider
+recommendation and positive-filter diagnostics retain their own policy.
 
 A `tools/list` request with more than 500 advertised definitions emits an advisory
 WARN whose message states the endpoint name and current tool count and suggests

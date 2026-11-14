@@ -74,6 +74,13 @@ pub struct OperationIssue {
 pub struct CatalogBuild {
     pub tools: Vec<ToolSpec>,
     pub issues: Vec<OperationIssue>,
+    pub selection_notices: Vec<SelectionNotice>,
+}
+/// An authored selector that matches no tools in the current selected inventory.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct SelectionNotice {
+    pub setting: &'static str,
+    pub selector: String,
 }
 #[derive(Debug)]
 pub struct IncompleteCatalog(pub Vec<OperationIssue>);

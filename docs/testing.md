@@ -164,6 +164,16 @@ omissions, representable scalar/tuple alternatives, ignored protocol declaration
 and managed Idempotency-Key diagnostics. Static checks stay limited to explicit
 type domains; runtime codecs retain their actual-value guards.
 
+## Framework degradation
+
+[The framework integration contract](framework-integration.md) distinguishes
+completed warming from catalog coverage and authenticated MCP availability.
+Focused warming/selection/readiness fixtures are mapped in
+[startup tests](../tests/STARTUP.md#best-effort-framework-startup). Consumer checks
+must use their actual pinned treasury implementation; a host executable alone does
+not validate a packaged image. Synthetic outage and catalog-removal results do not
+qualify current provider availability, live paid APIs or real Tor circuits.
+
 ## Dynamic registry publication
 
 Registry efficiency fixtures observe actual import builds under isolated child

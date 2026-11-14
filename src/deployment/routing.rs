@@ -216,7 +216,13 @@ impl<'a> CompiledRules<'a> {
         }
         unreachable!("validated rules have a final catch-all")
     }
-    pub fn validate_inventory(&self, id: &str, tools: &[ToolSpec]) -> Result<()> {
+    pub fn validate_inventory(
+        &self,
+        id: &str,
+        tools: &[ToolSpec],
+        tolerate_missing: bool,
+    ) -> Result<Vec<catalog::SelectionNotice>> {
+        let mut notices = Vec::new();
         let suffixes: Vec<_> = tools
             .iter()
             .map(|tool| tool.name.strip_prefix(&self.prefix).unwrap_or(&tool.name))
@@ -235,6 +241,11 @@ impl<'a> CompiledRules<'a> {
                             selector,
                             "Source exclusion selector matches no available tools; exclusion has no current effect"
                         );
+                    } else if tolerate_missing {
+                        notices.push(catalog::SelectionNotice {
+                            setting: "send_tools",
+                            selector: selector.clone(),
+                        });
                     } else {
                         ensure!(
                             selector.contains(['*', '?']),
@@ -257,7 +268,7 @@ impl<'a> CompiledRules<'a> {
                 );
             }
         }
-        Ok(())
+        Ok(notices)
     }
 }
 
@@ -268,12 +279,13 @@ impl Source {
         send_tools: Option<Vec<SendToolsRule>>,
     ) -> Result<Self> {
         if let Some(rules) = &send_tools {
-            CompiledRules::new(rules, self.config.prefix.as_deref().unwrap())
-                .and_then(|compiled| compiled.validate_inventory(id, &self.tools))
+            let notices = CompiledRules::new(rules, self.config.prefix.as_deref().unwrap())
+                .and_then(|compiled| compiled.validate_inventory(id, &self.tools, self.config.allow_empty_selection))
                 .context(catalog::diagnostics::Problem(
                     "Source distribution tool selectors are invalid; check the source send_tools rules against its available tools",
                 ))
                 .context(catalog::LoadStage::Selection)?;
+            self.config.selection_notices.extend(notices);
         }
         self.send_tools = send_tools;
         Ok(self)

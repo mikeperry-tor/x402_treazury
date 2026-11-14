@@ -37,22 +37,10 @@ impl Deployment {
         }
         if let Some(id) = sources.iter().find(|id| {
             !self.pending_sources.contains_key(*id)
-                && self
-                    .sources
-                    .get(*id)
-                    .is_none_or(Source::compatibility_unavailable)
-                && !self.config.sources[*id].optional_startup
+                && !self.sources.contains_key(*id)
+                && !self.config.sources[*id].allow_catalog_failure
         }) {
-            let mut error = anyhow::anyhow!("required catalog unavailable: {id}");
-            if let Some(source) = self.sources.get(id) {
-                // Summary contains only fixed explanations, never upstream paths/prose.
-                if let Some(reason) = catalog::omission_instructions(&source.issues) {
-                    error = error
-                        .context(reason)
-                        .context(catalog::LoadStage::Generation);
-                }
-            }
-            return Some(Err(error));
+            return Some(Err(anyhow::anyhow!("required catalog unavailable: {id}")));
         }
         sources
             .iter()

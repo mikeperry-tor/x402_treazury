@@ -9,6 +9,7 @@ examples. Maintained implementation and operational explanations live here:
 | [Advanced deployments](../README_ADVANCED.md) | Research desk and comprehensive walkthroughs, Tor and wallet bootstrap |
 | [Deployment examples](../examples/README.md) | Example choices, wallet groups, ports and source selections |
 | [Provider updates](provider-updates.md) | Public evidence and pricing capture, comparison and reviewed provider maintenance |
+| [Framework integration](framework-integration.md) | Catalog warming exit status/JSON, degraded serving and framework preparation/activation |
 | [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
 | [Development](development.md) | Local checks, coverage and complexity tooling |
