@@ -9,8 +9,7 @@ their remaining tools. Frameworks must distinguish completed preparation,
 current MCP availability, catalog coverage and successful paid API execution.
 
 This is an active implementation plan; the proposed behavior is not implemented.
-The current request authorizes writing and reviewing this plan, not executing its
-implementation stages or making live paid calls.
+The user has authorized executing this plan. Live paid calls remain outside scope.
 
 - Working branch: `flaky_provider_resiliance`.
 - Treasury baseline: `d9c8b8a3d2df281fcfb5b23725fc392e080ca3cc`.
@@ -322,13 +321,39 @@ exact committed SHA and each `git commit --fixup=<introducing-SHA>` correction;
 preserve unsquashed history. Combined gates examine all accumulated changes and
 consumers; per-commit review does not replace them.
 
-Current status: plan only; C1-C4 have not started. Independent fresh-context,
+Current status: D1 reviewed; C1/C2 implementation starting. Independent fresh-context,
 read-only design review examined this plan against native acquisition, diagnostics,
 selection, routing, readiness and pricing, plus consumer preparation, activation,
 smoke expectations and the packaged pin. No material findings were reported.
-The reviewer confirmed that D1 must finalize pricing/cache reporting and local
-transport failure classification before C1; this remains unfinished design work,
-not an implemented guarantee. Local file-link and whitespace checks passed.
+The initial plan review approved exact commit `5a006dbb`. D1 used separate
+fresh-context reviewers for warming/ownership and serving/consumer attribution.
+Resolved decisions:
+
+- Introduce an explicit Warming purpose; accept compatible partial generation
+  without starting Serving's detached pricing and then fetching pricing twice.
+- Keep acquisition statuses `ready`, `partial`, `unavailable`; keep pricing separate
+  as `not_configured`, `catalog`, `ready`, `unavailable`. Pricing ready means valid
+  metadata was processed, not that every tool has a known price. Cache refusal or
+  unknown external pricing degrades the summary without disabling API tools.
+- Preserve typed local acquisition failure at the catalog handoff; request-builder
+  and transport-construction faults stay fatal, while download-limit rejection is
+  a source outcome even though it cannot authorize paid fallback. Drain sibling
+  results before returning a late local failure. Invalid/all-unsupported remote
+  replacement does not renew accepted bytes, prices or expiry.
+- Keep missing inclusion/recommendation patterns compiled. New endpoint-removal
+  tolerance requires exactly one effective resolved-prefix owner, remote and in
+  ordinary Serving/Warming; inspect nested prefixes and local overlaps. Preserve
+  the existing all-unavailable-owner exception separately. Empty endpoints require
+  attributable degradation, never mere presence of a remote source.
+- Existing Hermes configurations remain operator-owned: changing the native example
+  affects newly seeded configurations only. Document explicit optional-source
+  opt-in for preserved configurations. Keep all twelve authenticated probes.
+- D1 found warming lacked bootstrap-style retained shutdown ownership. Resolve this
+  at C1 by reusing the existing cancellation token, retained supervisor and shutdown
+  signal/drain pattern, including relay drain before initialized-wallet shutdown.
+  This is necessary accepted-work ownership, not new retry or spending authority.
+
+Local file-link and whitespace checks passed for the plan.
 No runtime, compiler, complexity or live evidence is claimed. Record exact-SHA
 review and subsequent implementation evidence here. At each
 handoff report branch, both relevant revisions, outstanding work and missing
