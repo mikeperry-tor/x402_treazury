@@ -7,7 +7,8 @@ include = ["/api/v1", ""]
 # Prepaid capital, persistent webhook ownership and MCP transport are separate workflows.
 exclude = ["/api/v1/credits/buy", "/api/v1/alerts/subscriptions", "/mcp"]
 # Free feedback persists a message without an x402 execution gate.
-exclude_operations = ["POST /api/v1/feedback"]
+# Decision GETs require unsupported CSV-array query serialization.
+exclude_operations = ["POST /api/v1/feedback", "GET /api/v1/decision", "GET /api/v1/decision/{symbol}"]
 pricing_key = "x-payment-info"
 help_url = "https://api.marketintelligenceapi.com/llms.txt"
 instructions_text = "Preserve timestamps, source attribution, module availability and measured track records. Several flow metrics share one underlying trade source; do not count them as independent evidence. Missing coverage is not a neutral market signal."

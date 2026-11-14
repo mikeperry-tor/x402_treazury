@@ -1,0 +1,28 @@
+description = "Google Trends, keyword metrics, search results, domain rankings, backlinks, site audits and brand visibility."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
+spec = "https://keywords.duoleads.com/openapi.json"
+name = "Duo Leads Keyword and SEO Data"
+base_url = "https://keywords.duoleads.com"
+prefix = "duoleads"
+include = ["/v1", ""]
+help_url = "https://keywords.duoleads.com/llms.txt"
+instructions_text = "Preserve source dates, partial periods, market fallback warnings and missing-data markers. Empty, missing-data and cached answers are charged. Site audit and page-speed failures, too_large and suppressed outcomes can also be charged answers."
+
+[overrides.duoleads_trend]
+description = "Read a keyword's dated Google Trends interest series for a country or worldwide. Returns granularity, observation time and partial-period flags. Values are relative interest, not search counts."
+
+[overrides.duoleads_trends]
+description = "Compare Google Trends interest for up to five terms on one relative scale. Choose location, time window and web, news or YouTube search. Preserve partial periods and observation time."
+
+[overrides.duoleads_related_queries]
+description = "Find top and rising Google searches related to a keyword. Returns relative popularity and percentage growth, with country, window and observation time. These are queries, not related-topic entities."
+
+[overrides.duoleads_interest_by_region]
+description = "Compare a keyword's relative Google search interest across subregions, or countries worldwide. Returns region codes, missing-data count and observation time; scores are not search counts."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

@@ -1,4 +1,6 @@
 description = "Company registries, government and court records, LinkedIn company facts, business reviews, healthcare-provider directories and ACA insurance plans from SiteCheck."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
 spec = "https://api.companyrecords-api.workers.dev/openapi.json"
 name = "SiteCheck Company Records"
 base_url = "https://api.companyrecords-api.workers.dev"
@@ -9,6 +11,9 @@ instructions_text = "Preserve registry identifiers, source URLs, dates, match qu
 
 [overrides.companyrecords_help]
 description = "Read SiteCheck's company, public-record and B2B endpoint guide, prices and coverage. Use exposed schemas for exact inputs."
+
+[overrides.companyrecords_b2b_ada_find_a_dentist.params]
+address = "Use a US ZIP code or street address. A failed search does not establish absence of local dentists."
 
 [pricing]
 source = "catalog"

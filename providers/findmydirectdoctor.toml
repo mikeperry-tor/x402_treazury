@@ -14,6 +14,9 @@ pricing_description = "Cost: ~$0.02/call [spec]."
 [overrides.findmydirectdoctor_help]
 description = "Read the directory's endpoint guide, examples and coverage notes. Use exposed schemas for exact inputs."
 
+[overrides.findmydirectdoctor_clinics_family_plans]
+description = "Find published membership tiers or aggregate them with view=stats. Filter by state, model, plan_kind and billing period for comparable fees. Statistics describe available plan fields; their sample differs from price-statistics practice aggregates. Confirm fees with the practice."
+
 [pricing]
 source = "catalog"
 format = "payment-info"

@@ -168,6 +168,13 @@ opt-outs. These resource checks do not establish paid settlement or
 physical-connection affinity. API functionality and configured Tor routing remain
 available without cover.
 
+Arkham, CompanyRecords, Duo Leads, Genuine Good, Kronos, Maxwell, Onchaincheck and
+Global Legal Entities disable optional cover because both their automatic help
+and catalog candidates return HTTP/2 200
+instead of honoring unsigned ranges. These definitions have no qualified alternate
+resource; this does not establish that every resource on their origins is
+incompatible. AGProxy also retains its explicit opt-out.
+
 Banking Compliance also disables optional cover: its local catalog and absent
 help URL supply no eligible same-origin HTTP resource. Claw402 and APEX Faucet
 opt out after unsigned HTTP/2 checks showed Claw's help/catalog and APEX's help
@@ -401,10 +408,11 @@ Authored tool descriptions retain actual country/window defaults, relative-inter
 semantics and result-source limitations, using callable follow-up tool names rather
 than vendor paths or unconfigured bridge APIs. `trend` and `trend_over_time` both
 accept all windows; the latter defaults to twelve months and reports granularity.
-The research-desk deployment selects it alone; the reusable provider retains both.
 When `data_source` indicates fallback, inspect returned geography, time window and
 `notice` before making country- or window-specific claims. This result-validity
 requirement remains visible even when endpoint instructions replace provider prose.
+Related-query top and rising lists can include unrelated or spam-like terms;
+successful delivery and a primary-source marker do not establish query relevance.
 
 ## arkham.toml — Arkham Intel x402 rail (api.arkm.com/x402)
 
@@ -528,12 +536,26 @@ balances, Chainlink oracle prices, gas), plus deterministic
 `structured_json_repair` and `tabular_to_json` for messy LLM/tool output.
 Every request body is inline (no `$ref`), the spec carries an absolute
 `servers` URL, and every op publishes a correct-shape `x-payment-info` price
-($0.001–$0.03/call, USDC on Base; failed upstream calls are never charged) —
+($0.001–$0.03/call, USDC on Base) —
 so the conf points at the **live vendor spec** and needs no base_url pin, no
-local catalog and no overrides. No vendor `llms.txt`;
+local catalog. Parameter notes explain how to send an empty JSON body. No vendor `llms.txt`;
 the spec's top-level `x-guidance` is condensed into `instructions_text`
 instead. (The vendor also serves these tools natively over MCP at `/mcp`;
 this conf exists so the wallet/spend-cap story stays in this server.)
+
+When no filters are needed, pass `body = {}` to send a JSON request body.
+An omitted retail-sales body can return HTTP 415 after a potentially chargeable
+authorization; an explicit empty body supports the retail summary. This does not
+establish the behavior of every optional-body route, and a failed signed request
+does not authorize replay. Failed-upstream billing assurances are vendor claims,
+not proof that a submitted authorization cannot charge.
+
+The retail summary's advertised ex-autos label is unreliable: returned totals
+and changes can match the auto-inclusive retail/food-services headline.
+Verify period and aggregation against the
+[Census release tables on FRED](https://fred.stlouisfed.org/release/tables?rid=9).
+Use `RSFSXMV` for the separately identified ex-autos series; the provider override
+does not rewrite returned values or infer missing series identifiers.
 
 ## otto.toml — Otto AI x402 swarm (x402.ottoai.services)
 
@@ -563,6 +585,13 @@ does not implement; the help description makes those boundaries explicit. Caveat
 - Some services also quote Solana; the live challenge `accepts[]` is
   authoritative for available payment rails. Permit2/`upto` accepts
   need the one-time USDC allowance documented in the repo README.
+- `stock_buy_tx` returns a quote and unsigned Base approval/swap transactions;
+  nothing in that response is executed by Treazury. Preserve quote expiry, fees
+  and wallet-balance sufficiency. The API payment does not authorize executing
+  the returned transactions.
+- Page extraction can return useful static text, incomplete JavaScript content
+  or a bot challenge as a successful result. Inspect the actual content;
+  `publishedTime` is provider metadata, not a verified original publication date.
 
 ## brazilayer.toml — Brazilayer registry & market data (api.brazilayer.com)
 
@@ -1997,6 +2026,13 @@ done or failed rather than interpreting acceptance as completion. Credential
 issuance, prepaid key purchases/balance and MCP transport are excluded; public
 plans and diagnostics remain available.
 
+Market Intelligence's two GET decision contracts (`/api/v1/decision` and
+`/api/v1/decision/{symbol}`) are excluded because their optional `include` array
+requires comma-separated query serialization (`style=form`, `explode=false`).
+The current converter supports repeated array values, so it cannot faithfully
+expose that complete input contract. No POST twin is declared for these paths;
+other decision and yield reads remain available.
+
 Market Intelligence's GET/POST opportunity scans share results and billing;
 POST uses arrays and nested `constraints` and is the default method. Public
 credit/alert documentation, gift configuration/status and diagnostics remain
@@ -2151,7 +2187,7 @@ separates submitting flight intent from alert creation and callback endpoints.
 StableTravel exposes no callback/subscription management contract, so neither
 notification delivery nor an owned alert lifecycle is inferred. The preserved
 body ident collides with the repaired path ident: supply the same flight in
-`ident` and `ident_body`. The wrapper's intent semantics remain unqualified.
+`ident` and `body.ident`. The wrapper's intent semantics remain unqualified.
 
 Google Flights search, UAL123 lookup and KJFK/KLAX routes return x402 Base USDC
 offers of $0.02, $0.01 and $0.04 alongside Solana offers. Paid reads support dated
@@ -2257,8 +2293,8 @@ after payment verification. Each repaired operation uses POST with a required
 The repair preserves other operation metadata, responses, security and pricing.
 JSON-stringifying objects in query parameters cannot fix the method mismatch.
 
-The gateway and PDF executor were inspected at upstream commit
-`e79fbf2574def4583b80053a29515a265db8a0ac`. HTML-to-PDF returns synchronous JSON
+The gateway source and catalog authorities are recorded with content hashes in
+the asset provenance. HTML-to-PDF returns synchronous JSON
 with `base64_pdf`, without the async-only `files` field. Schema validation applies
 a nested schema and HTTP-to-cURL preserves nested headers/body; the other seven
 operations have source/schema evidence rather than paid delivery qualification.
@@ -2267,7 +2303,10 @@ No automatic retry or nonpayment assurance follows from the failed GET request.
 Refresh through shared maintenance capture/review, reconciling the upstream
 OpenAPI, complete catalog input schemas and gateway source. Preserve complete
 body schemas rather than reconstructing them from the lossy GET parameter view;
-retire a repair when upstream publishes the correct POST contract. Bundled ID or
+retire a repair when upstream publishes the correct POST contract. Nordic
+statistics supplies a native POST body and needs no repair. EU trademark search,
+GDPR fine lookup and the AI Act assessment solution are absent from the current
+schema and catalog. Bundled ID or
 API-base selection uses the repaired asset; importing the upstream OpenAPI URL
 directly retains upstream contracts. Accepted dynamic registrations retain their
 accepted bytes until explicitly refreshed.
@@ -2282,7 +2321,10 @@ v2 offers include both `amount` and a legacy `maxAmountRequired`. These are
 ordinary Base USDC exact offers, not an unsupported transfer type. The legacy
 field is preserved as opaque metadata while signing and capping only `amount`.
 Static link extraction and UK charity registration with dated financial facts are
-supported. MiCA checks can report unavailable registers despite HTTP success.
+supported. MiCA checks expose ESMA authorized-provider and non-compliant
+registers with availability and freshness metadata. They can report unavailable
+registers despite HTTP success; preserve that state and the source dates.
+No match on the non-compliant list is not a full compliance determination.
 Unexercised operations still need separate delivery qualification.
 
 Canadian and Swiss company lookups are supported; Canadian lookup advertises
@@ -2418,11 +2460,11 @@ and research tools without hiding other compatible operations from the provider.
 `apexfaucet-openapi.json` is an authored repair of the complete public
 `https://apexfaucet.xyz/openapi.json`, with its source hash, documentation URL and
 refresh instructions in `x-treazury-provenance`. The vendor supplies the POST
-bodies for chat-completions, token-verdict and base-token-verdict, so their former
-method/body repairs are removed. Current token-verdict requires tokenAddress and
-makes chain optional. The remaining authored asset supplies the documented prompt
-and steps query parameters omitted from image-generate. Missing query inputs named
-in vendor descriptions are restored for trades/candles/volume windows, launch and
+bodies for chat-completions, token-verdict and base-token-verdict, and the prompt
+and steps query parameters for image-generate. Current token-verdict requires
+tokenAddress and makes chain optional. Missing query inputs named
+in vendor descriptions are restored for both path and query-mint forms of
+trades/candles/volume windows, launch and
 archive pagination, contract-read arguments and block, token/recipient/payment
 filters, wallet tokens, impact sizes, marketplace search and agent-trust's
 alternative URL/agent identifiers. The current vendor-supplied address parameter
@@ -2437,8 +2479,9 @@ Arc/X1 passport creation transfers a persistent identity asset to the payment
 signer and requires an owner beyond a rotating payer. Market featured slots and
 room meal/upgrade purchases create persistent paid placement or owned property.
 These operations remain excluded pending ownership support. The pay-safe-credits
-product is also excluded: it sells prepaid checks and returns a bearer token for
-later consumption, rather than an immediate independent result. Read-only financial
+product and api-pass/api-pass-pro are also excluded: they sell prepaid checks or
+API credit and return a bearer token for later consumption, rather than an
+immediate independent result. Read-only financial
 measurements and quotes remain available. Bloodstream prediction
 submission has no stake or payout and remains supported: its description makes
 the persistent record under the paying wallet explicit. Ask-flux also publishes
@@ -2482,6 +2525,11 @@ documented output field can support a faithful image mapping. A provider's claim
 that failures are refused before payment does not grant replay authority after
 an authorization has been submitted.
 
+Page-watch returns snapshot tokens for later comparisons of the same URL and
+retains snapshots for 30 days. Preserve each token and the compared URL. The
+published contract rejects foreign tokens but does not explain whether that
+means a different URL or payer; use across rotating payers is unqualified.
+
 ## freeq.toml — FreeQ x402 gateway
 
 The primary [OpenAPI document](https://x402.freeq.one/openapi.json) describes
@@ -2521,8 +2569,10 @@ ID/URL and cannot discover stores. Dining reads are not delivery-qualified.
 City-page hotel data does not establish dated room availability; preserve price
 dates, currencies and source limits. The PlugShare-named read supplies OSM/NREL
 charger locations rather than live occupancy. No hotel-loyalty API was found.
-Google Flights can return no fares and Wikivoyage can fail; both remain excluded,
-and aviation weather remains on world. These catalogs share an operator/payment
+Google Flights returns dated fare observations, which can be empty and do not
+hold inventory. Wikivoyage search returns article metadata and snippets rather
+than proof that the full guide was retrieved. Aviation weather remains on world.
+These catalogs share an operator/payment
 recipient; source diversity does not establish independent gateway redundancy.
 
 ## ForgeMesh and Vextorium
@@ -2736,8 +2786,8 @@ selects these as partial alternatives while retaining Maxwell's broader contract
 WebMD family-medicine search can include other-specialty listings and missing
 office phones or offices. NPPES through 2s can agree on NPI, name and taxonomy while
 returning a different office address. Dentistry requests can fail HTTP 503; ADA
-ZIP searches can fail HTTP 404, which does not prove no local dentists, and ADA
-remains unselected. HealthCare.gov returns a subset of reported plans for the
+ZIP searches return dentist listings but can fail HTTP 404, which does not prove
+no local dentists. HealthCare.gov returns a subset of reported plans for the
 nearest published age. Preserve federal-exchange state coverage, plan year,
 nearest published age and pre-subsidy pricing. Failed calls retain possible payment
 liability despite vendor no-charge/retry claims.
@@ -2752,11 +2802,11 @@ HealthTravel supports Numbeo city observations, Rome2Rio options and EMA shortag
 records. Numbeo's normalized currency can be null while `priceText` retains the
 original currency; preserve the original text. Rome2Rio is a public-page preview,
 not a full route inventory or booking quote. EMA matches include resolved shortages
-and discontinued medicines, not solely active shortages. Google Flights can return
-no fare rows, which does not qualify flight coverage or establish no flights.
+and discontinued medicines, not solely active shortages. Google Flights fare
+observations can be empty; this does not establish that no flights exist.
 Wikivoyage can fail upstream HTTP 503 after authorization; no automatic replay
 occurs. Its claim that nothing was charged does not prove settlement or authorize
-retry. These two travel operations remain unselected.
+retry.
 
 WebIntel supports news aggregation and GDELT Context article/sentence matches.
 Aggregation can report a Google News timeout while Bing and GDELT return results.
@@ -2809,8 +2859,8 @@ including help, to health for healthcare access and costs.
 
 ## openwebninja.toml — OpenWeb Ninja
 
-The published `https://x402.openwebninja.com/openapi.json` (310 operations,
-~1.9 MB) and `/llms.txt` describe the catalog. All selected commerce routes are
+The published `https://x402.openwebninja.com/openapi.json` and `/llms.txt`
+describe the catalog. All selected commerce routes are
 GET reads with `x-payment-info` fixed USD hints (~$0.003; $0.005 for EV charge
 lookup).
 
@@ -2825,8 +2875,9 @@ Redfin copies under `/realtime-real-estate-data`, `/ai-answers` and
 `realtime-zillow-data`, `local-business-data`, `waze`, `jsearch`, and so on).
 Amazon `product-reviews` requires a caller-supplied Amazon cookie and is not
 suitable as a managed tool. Google Shopping `product-price-history` can return
-only the echoed product identifier with no history data; its book search can return
-empty arrays, so it is not a usable library source. EV charge search can return
+only the echoed product identifier with no history data. Book search returns
+bibliographic metadata and Google Books preview links; it can return empty arrays
+and does not establish full-text availability or library holdings. EV charge search can return
 stations but empty `connectors`.
 
 Marketplace search, product details, product offers, Google Shopping, Google Lens
@@ -2854,3 +2905,58 @@ Offer lists can repeat the same offer, and price, availability, delivery and
 sponsorship fields are marketplace state rather than guarantees. Response
 bodies are large (50–180 KB) and field names differ per marketplace; preserve
 marketplace identifiers and currency rather than normalizing by field name.
+
+## Duoleads
+
+The [public OpenAPI](https://keywords.duoleads.com/openapi.json) and
+[guide](https://keywords.duoleads.com/llms.txt) describe synchronous keyword,
+Google Trends, search, domain/ranking, backlink, site-audit and brand-visibility
+reads. The reusable definition retains the complete compatible catalog. `/v1`
+anchors names with a root fallback. GET descriptions also advertise POST
+alternatives, but the schema declares only the published methods; no inferred
+method twins or exceptions are introduced. Fixed USD `x-payment-info` prices use
+the shared per-call adapter; live Base USDC offers remain authoritative.
+
+Google Trends values are relative interest, not search counts. Single-keyword
+series identify weekly/daily granularity and partial periods; comparisons use a
+shared scale for up to five terms. Regional results and related queries preserve
+the requested market/window and missing-data markers. Related-keyword SEO data
+is not a Trends related-topic API. There is no related-topic endpoint or all-time
+or sub-day Trends window. Other gateways can label matching weekly values at a
+different point in the week; establish bucket conventions before joining series.
+
+The guide describes twelve-hour Trends caching and family-specific cache windows
+for other data. Repeated cached answers, empty results and missing-keyword
+lookups are charged. Preserve `dataAsOf`, `partial`, `missing`, `market.fallback`
+and market warnings; unsupported POST markets may fall back to the US or another
+language. On-page/page-speed `failed`, `too_large` and `suppressed` outcomes can
+be charged semantic answers. Upstream/settlement assurances are vendor claims,
+not permission to replay an unresolved authorization. Public help/catalog ignore
+unsigned byte ranges, so optional cover is disabled.
+
+## Onchaincheck
+
+The [public OpenAPI](https://onchaincheck.dev/openapi.json) and
+[guide](https://onchaincheck.dev/llms.txt) cover multichain wallet/token research,
+public risk evidence, company/web data and AI utilities. Preserve declared
+methods: the guide's broad GET wording does not replace its JSON POST contracts.
+The reusable definition exposes compatible operations with catalog-derived fixed
+USD per-call hints. All ordinary client/network/payment policies still apply.
+
+`POST /watch` is excluded because it creates or renews a seven-day webhook
+subscription and returns an HMAC secret. Cancelling requires the secret on an
+authenticated DELETE route absent from the schema; persistent ownership and
+secret recovery are unsupported. The separate stateless `GET /watchlist` remains
+available. This does not exclude future unrelated reads in the namespace.
+
+Wallet balances return native and priced ERC-20 holdings, totals, top holdings,
+observation time and exclusion counts. Dust and unpriced tokens are omitted;
+neither absence nor a priced total establishes a complete wallet inventory.
+NFTs, DeFi positions, transfers and wallet-risk assessment are separate contracts.
+Preserve Alchemy/DefiLlama attribution and chain-specific coverage. Delivery on
+one chain does not qualify every chain or operation.
+
+Chat supports completed JSON with `stream` omitted/false; streaming chunks are
+not exposed as a conversational stream. Image/TTS media remain encoded JSON.
+TTS documentation disagrees about MIME/model, so no fixed MP3 or model promise
+is made. Public help/catalog ignore unsigned ranges; optional cover is disabled.

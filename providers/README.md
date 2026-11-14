@@ -86,6 +86,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |
 | Deepline | `deepline.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Degenscan Intel | `degenscan.toml` | Event intelligence, keyless Carry reads and public forecast submit/poll |
+| Duo Leads | `duoleads.toml` | Full synchronous keyword, Google Trends, SEO and search-data catalog |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
 | FindMyDirectDoctor | `findmydirectdoctor.toml` | Full read-only doctor/clinic, hospital cash-price and healthcare-access catalog |
 | ForgeMesh Utility Grid | `forgemesh.toml` | Full fixed-price POST catalog; free route menu; duplicate aliases retained |
@@ -113,6 +114,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Nansen | `nansen.toml` | Keyless paid analytics; API-key account/trading and SSE agents excluded |
 | News Gurus | `newsgurus/provider.toml` | Vendor x402 catalog projection, including agent-status; lazy help |
 | OneShot | `oneshot.toml` | Synchronous search and public discovery; authenticated jobs excluded |
+| Onchaincheck | `onchaincheck.toml` | Public wallet, token, company/web and AI catalog; secret-owned webhook subscription excluded |
 | OpenVerbs | `openverbs.toml` | Combined apex catalog: 418 POST operations across 93 verb families; per-service `/health` omitted |
 | Otto | `otto.toml` | Vendor OpenAPI |
 | People Data Labs | `pdl.toml` | Vendor OpenAPI; no additional compatibility restriction identified |

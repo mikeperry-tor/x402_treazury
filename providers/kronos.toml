@@ -1,4 +1,6 @@
 description = "Crypto spot and derivatives market data, forecasts and public model track records."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
 
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://kronossignals.com/api/openapi.json"

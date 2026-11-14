@@ -1,4 +1,6 @@
 description = "Wallet intelligence, balances, portfolios, transfers, token markets and Polymarket activity."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
 
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://api.arkm.com/x402/openapi.json"

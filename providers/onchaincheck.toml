@@ -1,0 +1,24 @@
+description = "Multichain wallet holdings, token and transaction research, public risk evidence, company and web data, and AI utilities."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
+spec = "https://onchaincheck.dev/openapi.json"
+name = "Onchaincheck"
+base_url = "https://onchaincheck.dev"
+prefix = "onchaincheck"
+include = [""]
+help_url = "https://onchaincheck.dev/llms.txt"
+# Webhook subscriptions return a cancellation secret and own remote state.
+exclude_operations = ["POST /watch"]
+instructions_text = "Preserve checkedAt, source coverage, excluded-token counts and missing-price markers. Holdings omit dust and unpriced tokens; absence does not establish zero balance. For chat, omit stream or set it false for a completed JSON response. Media encoded inside JSON remains JSON."
+
+[overrides.onchaincheck_wallet_balances]
+description = "Read native and priced ERC-20 holdings across supported EVM chains for a public address. Returns USD totals, top holdings, observation time and counts of excluded dust/unpriced tokens. No NFTs, DeFi positions, transfers or wallet-risk assessment."
+
+[overrides.onchaincheck_v1_chat_completions.params]
+stream = "Omit or set false for a completed JSON response."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

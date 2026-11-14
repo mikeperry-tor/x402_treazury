@@ -1,4 +1,6 @@
 description = "GLEIF global company name search, Legal Entity Identifiers (LEIs), entity registration and accounting-consolidation parent relationships through x402 Atlas."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
 spec = "https://legal-entities.use.x402atlas.com/openapi.json"
 name = "Global Legal Entities (x402 Atlas)"
 base_url = "https://legal-entities.use.x402atlas.com"

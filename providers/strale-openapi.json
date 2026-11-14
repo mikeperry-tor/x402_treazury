@@ -13101,36 +13101,8 @@
                 "schema": {
                   "type": "object",
                   "example": {
-                    "url": "https://strale.dev/robots.txt",
+                    "url": "https://strale.io/robots.txt",
                     "rules": [
-                      {
-                        "allow": [
-                          "/"
-                        ],
-                        "disallow": [],
-                        "user_agent": "Googlebot"
-                      },
-                      {
-                        "allow": [
-                          "/"
-                        ],
-                        "disallow": [],
-                        "user_agent": "Bingbot"
-                      },
-                      {
-                        "allow": [
-                          "/"
-                        ],
-                        "disallow": [],
-                        "user_agent": "Twitterbot"
-                      },
-                      {
-                        "allow": [
-                          "/"
-                        ],
-                        "disallow": [],
-                        "user_agent": "facebookexternalhit"
-                      },
                       {
                         "allow": [
                           "/"
@@ -13141,18 +13113,14 @@
                     ],
                     "exists": true,
                     "sitemaps": [
-                      "https://strale.dev/sitemap.xml"
+                      "https://strale.io/sitemap.xml"
                     ],
-                    "raw_length": 201,
-                    "total_rules": 5,
+                    "raw_length": 63,
+                    "total_rules": 1,
                     "user_agents": [
-                      "Googlebot",
-                      "Bingbot",
-                      "Twitterbot",
-                      "facebookexternalhit",
                       "*"
                     ],
-                    "total_allow_rules": 5,
+                    "total_allow_rules": 1,
                     "blocks_all_crawlers": false,
                     "total_disallow_rules": 0
                   },
@@ -13929,7 +13897,7 @@
           "x402"
         ],
         "summary": "Backlink Check (x402)",
-        "description": "Find possible backlinks to a domain from search results and web archives. Returns linking pages and available link details.",
+        "description": "Find possible backlinks to a domain from Google search results. Returns linking pages and available link details.",
         "x-payment-info": {
           "protocols": [
             {
@@ -13954,13 +13922,18 @@
                     "domain": "google.com",
                     "backlinks": [
                       {
-                        "first_seen": "20240223074906",
-                        "source_url": "http://www.google.com.",
-                        "anchor_text": null,
-                        "source_domain": "google.com."
+                        "first_seen": null,
+                        "source_url": "https://en.wikipedia.org/wiki/Google",
+                        "anchor_text": "Google - Wikipedia",
+                        "source_domain": "en.wikipedia.org"
                       }
                     ],
-                    "top_anchors": [],
+                    "top_anchors": [
+                      {
+                        "text": "google - wikipedia",
+                        "count": 1
+                      }
+                    ],
                     "total_backlinks": 1,
                     "dofollow_estimate": null,
                     "nofollow_estimate": null,
@@ -14484,7 +14457,8 @@
                         "open": true,
                         "port": 443,
                         "service": "HTTPS",
-                        "latency_ms": 1
+                        "latency_ms": 1,
+                        "state": "open"
                       }
                     ],
                     "closed_count": 0,
@@ -14506,7 +14480,8 @@
                       "type": "integer"
                     },
                     "closed_ports": {
-                      "type": "array"
+                      "type": "array",
+                      "description": "Ports that are not open. Each entry's `state` is `closed` (the host refused the connection) or `filtered` (no answer within the timeout, or an ICMP unreachable while another port on the host answered)."
                     }
                   }
                 }
@@ -15017,6 +14992,13 @@
                     },
                     "prioritized_fixes": {
                       "type": "array"
+                    },
+                    "unavailable_sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when robots.txt could not be read; the robots and sitemap checks are then null and left out of the score."
                     }
                   }
                 }
@@ -15137,140 +15119,55 @@
                 "schema": {
                   "type": "object",
                   "example": {
-                    "url": "https://strale.dev/sitemap.xml",
+                    "url": "https://strale.io/sitemap.xml",
                     "type": "urlset",
-                    "total_urls": 239,
-                    "has_lastmod": true,
+                    "total_urls": 487,
+                    "has_lastmod": false,
                     "sample_urls": [
                       {
-                        "loc": "https://strale.dev/",
-                        "lastmod": "2026-03-12",
-                        "priority": "1.0",
-                        "changefreq": "weekly"
+                        "loc": "https://strale.io/"
                       },
                       {
-                        "loc": "https://strale.dev/capabilities",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.9",
-                        "changefreq": "daily"
+                        "loc": "https://strale.io/tools"
                       },
                       {
-                        "loc": "https://strale.dev/pricing",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.8",
-                        "changefreq": "monthly"
+                        "loc": "https://strale.io/company-data"
                       },
                       {
-                        "loc": "https://strale.dev/docs",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.8",
-                        "changefreq": "weekly"
+                        "loc": "https://strale.io/use-cases"
                       },
                       {
-                        "loc": "https://strale.dev/signup",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.7",
-                        "changefreq": "monthly"
-                      },
-                      {
-                        "loc": "https://strale.dev/security",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.7",
-                        "changefreq": "monthly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/belgian-company-data",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/vat-validate",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/ssl-certificate-chain",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/vat-rate-lookup",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/web-extract",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/invoice-extract",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/swedish-company-data",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/pdf-extract",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/eori-validate",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/iban-validate",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/brand-mention-search",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/norwegian-company-data",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/austrian-company-data",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
-                      },
-                      {
-                        "loc": "https://strale.dev/capabilities/danish-company-data",
-                        "lastmod": "2026-03-12",
-                        "priority": "0.6",
-                        "changefreq": "weekly"
+                        "loc": "https://strale.io/pricing"
                       }
                     ],
-                    "has_priority": true,
-                    "has_changefreq": true,
-                    "newest_lastmod": "2026-03-12",
-                    "oldest_lastmod": "2026-03-12",
+                    "has_priority": false,
+                    "has_changefreq": false,
+                    "newest_lastmod": null,
+                    "oldest_lastmod": null,
                     "top_path_segments": [
                       {
-                        "count": 234,
-                        "segment": "capabilities"
+                        "count": 298,
+                        "segment": "tools"
+                      },
+                      {
+                        "count": 95,
+                        "segment": "solutions"
+                      },
+                      {
+                        "count": 49,
+                        "segment": "guides"
+                      },
+                      {
+                        "count": 26,
+                        "segment": "company-data"
+                      },
+                      {
+                        "count": 7,
+                        "segment": "use-cases"
+                      },
+                      {
+                        "count": 5,
+                        "segment": "docs"
                       },
                       {
                         "count": 1,
@@ -15282,15 +15179,11 @@
                       },
                       {
                         "count": 1,
-                        "segment": "docs"
-                      },
-                      {
-                        "count": 1,
-                        "segment": "signup"
-                      },
-                      {
-                        "count": 1,
                         "segment": "security"
+                      },
+                      {
+                        "count": 1,
+                        "segment": "about"
                       }
                     ]
                   },
@@ -15871,24 +15764,35 @@
                 "schema": {
                   "type": "object",
                   "example": {
-                    "grade": "D",
+                    "grade": "A",
                     "checks": {
-                      "has_mx": false,
-                      "has_spf": false,
-                      "mx_count": 0,
-                      "resolves": false,
-                      "has_dmarc": false,
-                      "https_works": false
+                      "has_mx": true,
+                      "has_spf": true,
+                      "mx_count": 1,
+                      "resolves": true,
+                      "has_dmarc": true,
+                      "https_works": true,
+                      "has_csp": false,
+                      "has_xfo": true,
+                      "has_hsts": false,
+                      "has_xcto": false,
+                      "https_status": 200,
+                      "ip_addresses": [
+                        "172.253.63.139",
+                        "172.253.63.102",
+                        "172.253.63.100",
+                        "172.253.63.113",
+                        "172.253.63.138",
+                        "172.253.63.101"
+                      ]
                     },
-                    "domain": "this-domain-does-not-exist-abc123xyz.com",
+                    "domain": "google.com",
                     "issues": [
-                      "Domain does not resolve to any IP address",
-                      "HTTPS connection failed",
-                      "Unusually long domain name",
-                      "Domain contains many hyphens"
+                      "No HSTS header",
+                      "No X-Content-Type-Options header"
                     ],
-                    "issue_count": 4,
-                    "reputation_score": 40
+                    "issue_count": 2,
+                    "reputation_score": 92
                   },
                   "properties": {
                     "grade": {
@@ -17473,7 +17377,7 @@
                     "country_code": "SE",
                     "country_name": "Sweden",
                     "financial_year_end": "12-31",
-                    "tax_filing_deadline": "May 1 (calendar year companies); 6 months after FY end for broken fiscal years",
+                    "tax_filing_deadline": "August 1 of the following year for fiscal years ending September-December (calendar year companies); December 1 for years ending January-April; January 15 for May-June; April 1 for July-August",
                     "financial_year_start": "01-01",
                     "vat_filing_frequency": "Monthly (turnover >40M SEK), quarterly (1-40M SEK), or annually (<1M SEK)",
                     "annual_report_deadline": "7 months after financial year end",
@@ -18112,7 +18016,7 @@
                       "//icann.org/epp"
                     ],
                     "raw_whois": "   Domain Name: GOOGLE.COM\r\n   Registry Domain ID: 2138514_DOMAIN_COM-VRSN\r\n   Registrar WHOIS Server: whois.markmonitor.com\r\n   Registrar URL: http://www.markmonitor.com\r\n   Updated Date: 2019-09-09T15:39:04Z\r\n   Creation Date: 1997-09-15T04:00:00Z\r\n   Registry Expiry Date: 2028-09-14T04:00:00Z\r\n   Registrar: MarkMonitor Inc.\r\n   Registrar IANA ID: 292\r\n   Registrar Abuse Contact Email: abusecomplaints@markmonitor.com\r\n   Registrar Abuse Contact Phone: +1.2086851750\r\n   Domain Status: clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited\r\n   Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited\r\n   Domain Status: clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited\r\n   Domain Status: serverDeleteProhibited https://icann.org/epp#serverDeleteProhibited\r\n   Domain Status: serverTransferProhibited https://icann.org/epp#serverTransferProhibited\r\n   Domain Status: serverUpdateProhibited https://icann.org/epp#serverUpdateProhibited\r\n   Name Server: NS1.GOOGLE.COM\r\n   Name Server: NS2.GOOGLE.COM\r\n   Name Server: NS3.GOOGLE.COM\r\n   Name Server: NS4.GOOGLE.COM\r\n   DNSSEC: unsigned\r\n   URL of the ICANN Whois Inaccuracy Complaint Form: https://www.icann.org/wicf/\r\n>>> Last update of whois database: 2026-03-06T20:03:16Z <<<\r\n\r\nFor more information on Whois status codes, please visit https://icann.org/epp\r\n\r\nNOTICE: The expiration date displayed in this record is the date the\r\nregistrar's sponsorship of the domain name registration in the registry is\r\ncurrently set to expire. This date does not necessarily reflect the expiration\r\ndate of the domain name registrant's agreement with the sponsoring\r\nregistrar.  Users may consult the sponsoring registrar's Whois database to\r\nview the registrar's reported date of expiration for this registration.\r\n\r\nTERMS OF USE: You are not authorized to access or query our Whois\r\ndatabase through the use of electronic processes that are high-volume and\r\nautomated except as reasonably necessary to register domain names or\r\nmodify existing registrations; the Data in VeriSign Global Registry\r\nServices' (\"VeriSign\") Whois database is provided by VeriSign for\r\ninformation purposes only, and to assist persons in obtaining information\r\nabout or related to a domain name registration record. VeriSign does not\r\nguarantee its accuracy. By submitting a Whois query, you agree to abide\r\nby the following terms of use: You agree that you may use this Data only\r\nfor lawful purposes and that under no circumstances will you use this Data\r\nto: (1) allow, enable, or otherwise support the transmission of mass\r\nunsolicited, commercial advertising or solicitations via e-mail, telephone,\r\nor facsimile; or (2) enable high volume, automated, electronic processes\r\nthat apply to VeriSign (or its computer systems). The compilation,\r\nrepackaging, dissemination or other use of this Data is expressly\r\nprohibited without the prior written consent of VeriSign. You agree not to\r\nuse electronic processes",
-                    "registrar": "whois.markmonitor.com",
+                    "registrar": "MarkMonitor Inc.",
                     "name_servers": [
                       "ns1.google.com",
                       "ns2.google.com",
@@ -18664,10 +18568,10 @@
                   "example": {
                     "notes": "Municipal tax ~32% + state tax 20% above SEK 598k",
                     "currency": "SEK",
-                    "tax_year": "2024/2025",
+                    "tax_year": "2026",
                     "country_code": "SE",
                     "country_name": "Sweden",
-                    "last_updated": "2025-01",
+                    "last_updated": "2026-11-06",
                     "social_security": {
                       "employee": 7,
                       "employer": 31.42
@@ -19070,10 +18974,6 @@
                     "url": {
                       "type": "string"
                     },
-                    "error": {
-                      "type": "string",
-                      "description": "Present only on network/timeout failures."
-                    },
                     "title": {
                       "type": [
                         "string",
@@ -19081,11 +18981,8 @@
                       ]
                     },
                     "exists": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ],
-                      "description": "Three-state. true = page appears to exist; false = page appears gone (hard or soft 404); null = indeterminate (blocked by bot detection, server error, or network failure) — treat as \"unknown\", not as either answer."
+                      "type": "boolean",
+                      "description": "true = page appears to exist; false = page appears gone (hard or soft 404), or the URL's own host name does not resolve (reason dns_nxdomain). When the site blocks the check, errors or does not answer, the call fails and is not billed, so there is no \"unknown\" answer."
                     },
                     "reason": {
                       "enum": [
@@ -19097,13 +18994,7 @@
                         "soft_404_body_and_redirect",
                         "redirected_to_generic",
                         "thin_content",
-                        "access_blocked",
-                        "server_error",
-                        "unexpected_status",
-                        "timeout",
-                        "redirect_loop",
-                        "dns_error",
-                        "network_error"
+                        "dns_nxdomain"
                       ],
                       "type": "string"
                     },
@@ -19133,14 +19024,10 @@
                       "enum": [
                         "high",
                         "medium",
-                        "low",
-                        null
+                        "low"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "null whenever exists is null. Do not act on \"low\" alone."
+                      "type": "string",
+                      "description": "Do not act on \"low\" alone."
                     },
                     "redirected": {
                       "type": "boolean",
@@ -19904,6 +19791,7 @@
                       {
                         "rate": 6,
                         "categories": [
+                          "food",
                           "books",
                           "cultural_events",
                           "transport"
@@ -19912,7 +19800,6 @@
                       {
                         "rate": 12,
                         "categories": [
-                          "food",
                           "restaurant_food",
                           "accommodation"
                         ]
@@ -21102,6 +20989,15 @@
                     },
                     "inverse_rate": {
                       "type": "number"
+                    },
+                    "stale": {
+                      "type": "boolean"
+                    },
+                    "rate_date": {
+                      "type": "string"
+                    },
+                    "rate_source": {
+                      "type": "string"
                     }
                   }
                 }
@@ -23469,7 +23365,7 @@
           "x402"
         ],
         "summary": "Country Trade Data (x402)",
-        "description": "Get a country's top exports and imports, trade balance and main trading partners, from the World Bank.",
+        "description": "Get a country's trade figures: World Bank totals where available, else 2023 estimates, plus 2023 product and partner estimates.",
         "x-payment-info": {
           "protocols": [
             {
@@ -23492,7 +23388,7 @@
                   "type": "object",
                   "example": {
                     "note": "Product breakdown and partner data are estimates based on 2023 published trade statistics.",
-                    "year": 2025,
+                    "year": 2023,
                     "data_source": "embedded-trade-data",
                     "top_exports": [
                       {
@@ -23579,7 +23475,8 @@
                     ],
                     "total_exports_usd": 195000000000,
                     "total_imports_usd": 195000000000,
-                    "trade_balance_usd": 0
+                    "trade_balance_usd": 0,
+                    "totals_year": 2023
                   },
                   "properties": {
                     "top_exports": {
@@ -23589,12 +23486,24 @@
                       "type": "array"
                     },
                     "total_exports_usd": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "total_imports_usd": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "trade_balance_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "totals_year": {
                       "type": "number"
                     }
                   }
@@ -23795,10 +23704,27 @@
                       "type": "string"
                     },
                     "top_contributors": {
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     },
                     "maintenance_health_score": {
                       "type": "integer"
+                    },
+                    "bus_factor_estimate": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "The model's estimate of how many key contributors the project depends on (1-10); null when GitHub declined to list the contributors."
+                    },
+                    "unavailable_sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when GitHub declined to list the contributors; top_contributors and bus_factor_estimate are then null."
                     }
                   }
                 }
@@ -24734,10 +24660,42 @@
                       "type": "number"
                     },
                     "tracking_scripts": {
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     },
                     "consent_banner_detected": {
-                      "type": "boolean"
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "Null when the page analysis could not be read or did not say whether a banner is present (unknown, not \"no banner\")."
+                    },
+                    "potential_issues": {
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "consent_banner_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "third_party_domains": {
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "unavailable_sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when the page analysis could not be read; the analysis fields are then null, not empty."
                     }
                   }
                 }
@@ -24983,7 +24941,10 @@
                   },
                   "properties": {
                     "dic": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "input_dic": {
                       "type": "string"
@@ -24994,7 +24955,10 @@
                         "type": "object",
                         "properties": {
                           "bank_code": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "is_standard": {
                             "type": "boolean"
@@ -25009,16 +24973,25 @@
                       }
                     },
                     "is_unreliable_payer": {
-                      "type": "boolean"
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
                     },
                     "joint_liability_risk": {
                       "type": "string"
                     },
                     "financial_office_code": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "response_generated_at": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "is_registered_vat_payer": {
                       "type": "boolean"
@@ -25709,6 +25682,15 @@
                     },
                     "converted_amount": {
                       "type": "number"
+                    },
+                    "stale": {
+                      "type": "boolean"
+                    },
+                    "rate_date": {
+                      "type": "string"
+                    },
+                    "rate_source": {
+                      "type": "string"
                     }
                   }
                 }
@@ -26947,15 +26929,15 @@
                   "example": {
                     "slug": "parent#uniswap",
                     "protocol": "Uniswap",
-                    "fees_7d_usd": 7424515,
-                    "fees_24h_usd": 1100432,
-                    "fees_30d_usd": 39302873,
-                    "revenue_7d_usd": null,
-                    "revenue_24h_usd": null,
-                    "revenue_30d_usd": null,
-                    "fees_all_time_usd": 5497395571,
-                    "fees_48h_to_24h_usd": 1417183,
-                    "revenue_all_time_usd": null
+                    "fees_7d_usd": 13435356,
+                    "fees_24h_usd": 1564082,
+                    "fees_30d_usd": 76015351,
+                    "revenue_7d_usd": 1544123,
+                    "revenue_24h_usd": 183026,
+                    "revenue_30d_usd": 8140819,
+                    "fees_all_time_usd": 6152364825,
+                    "fees_48h_to_24h_usd": 2022931,
+                    "revenue_all_time_usd": 64445266
                   },
                   "properties": {
                     "protocol": {
@@ -27369,20 +27351,20 @@
                 "schema": {
                   "type": "object",
                   "example": {
-                    "url": "https://strale.dev",
+                    "url": "https://strale.io",
                     "rating": "A",
                     "methodology": "Website Carbon / Sustainable Web Design model",
-                    "page_size_kb": 3,
-                    "annual_co2_kg": 0.1,
+                    "page_size_kb": 59,
+                    "annual_co2_kg": 1.82,
                     "green_hosting": "unknown",
-                    "page_size_bytes": 3239,
+                    "page_size_bytes": 60397,
                     "recommendations": [
                       "This page is already lightweight. Maintain current optimization practices."
                     ],
                     "transfer_encoding": "gzip",
-                    "co2_grams_per_view": 0.0008,
+                    "co2_grams_per_view": 0.0152,
                     "annual_co2_kg_custom": null,
-                    "cleaner_than_percent": 100
+                    "cleaner_than_percent": 99
                   },
                   "properties": {
                     "rating": {
@@ -27455,7 +27437,7 @@
                       "Employer contributions (arbetsgivaravgifter) 31.42% cover pension, health, parental insurance, etc.",
                       "Municipal tax varies 29-35%; 32% used as average.",
                       "State income tax 20% applies above SEK 614,000 (2024).",
-                      "Reduced employer contributions for young employees (<23) and seniors (>65)."
+                      "Reduced employer contributions for employees aged 19-23 (20.81% on pay up to SEK 25,000 a month, 1 April 2026 to 30 September 2027) and for older employees."
                     ],
                     "effective_tax_rate": 0,
                     "net_salary_estimate": 1,
@@ -27704,12 +27686,14 @@
                       "version": null,
                       "collection": "dilisense/consolidated-pep",
                       "major_lists": [
-                        "EU C/2023/724 — Member-State PEP function definitions",
-                        "DE Bundestag, Bundesrat, Bundespräsident, Bundesbank, state-owned enterprises",
-                        "(plus 228+ national parliament/government/central-bank/judiciary sources)"
+                        "EU C/2023/724 — public functions defining PEPs in each Member State",
+                        "Politicians",
+                        "Relatives and close associates (RCAs)",
+                        "Example given by the publisher for Germany: Federal President, Bundestag, Bundesrat, Bundesbank, and state-owned enterprises (Deutsche Bahn, Bundesdruckerei, BwConsulting)",
+                        "(plus the other categories in the publisher's catalogue)"
                       ],
                       "source_count": 230,
-                      "freshness_note": "Dilisense PEP coverage spans 230+ geopolitical territories and aligns with EU C/2023/724 PEP function definitions. The publisher refreshes the index multiple times daily; per-list timestamps are not exposed via the screening API.",
+                      "freshness_note": "Dilisense states PEP coverage of 230+ geopolitical territories in 12 categories, updated once a day by default and more often for highly important PEPs, and describes EU PEPs by the C/2023/724 public-function lists. Per-list timestamps are not exposed by the screening API.",
                       "last_updated_at": null,
                       "source_catalog_url": "https://dilisense.com/en/sources/politically-exposed-persons-list"
                     },
@@ -29625,6 +29609,9 @@
                     },
                     "change_percent": {
                       "type": "number"
+                    },
+                    "rate_source": {
+                      "type": "string"
                     }
                   }
                 }
@@ -32120,11 +32107,11 @@
                 "schema": {
                   "type": "object",
                   "example": {
-                    "timeline": "No mandatory compliance deadline, but voluntary codes of conduct may apply.",
+                    "timeline": "No compliance deadline specific to this risk level, but voluntary codes of conduct may apply.",
                     "prohibited": false,
                     "risk_level": "minimal",
                     "obligations": [
-                      "No mandatory obligations under the EU AI Act.",
+                      "No obligations specific to this risk level under the EU AI Act.",
                       "Voluntary codes of conduct encouraged (Article 95)."
                     ],
                     "recommendations": [
@@ -32208,17 +32195,23 @@
                 "schema": {
                   "type": "object",
                   "example": {
-                    "notes": "The provided page content does not contain information for HS code 847130. The page displays TARIC measure information for Chapter 1 (Live Animals) codes only, specifically codes in the 0101-0102 range. HS code 847130 falls under Chapter 84 (Machinery) and is not present in the displayed content.",
+                    "notes": "The low-value consignment duty applies from 1 July 2026 to items in consignments worth up to EUR 150.",
                     "hs_code": "847130",
                     "vat_rate": null,
-                    "duty_rate": null,
-                    "duty_type": null,
-                    "description": null,
-                    "destination": null,
+                    "duty_rate": "0%",
+                    "duty_type": "ad_valorem",
+                    "description": "Portable automatic data-processing machines, weighing not more than 10 kg",
+                    "destination": "SE",
                     "anti_dumping": false,
-                    "origin_country": "not specified",
-                    "additional_duties": [],
-                    "preferential_rates": []
+                    "origin_country": "CN",
+                    "additional_duties": [
+                      {
+                        "rate": "3.00 EUR per item",
+                        "measure": "Low-value consignment customs duty"
+                      }
+                    ],
+                    "preferential_rates": [],
+                    "resolved_hs_code": "847130"
                   },
                   "properties": {
                     "duty_rate": {
@@ -32231,6 +32224,36 @@
                       "type": "boolean"
                     },
                     "preferential_rates": {
+                      "type": "array"
+                    },
+                    "notes": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "hs_code": {
+                      "type": "string"
+                    },
+                    "vat_rate": {
+                      "type": "null"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "destination": {
+                      "type": "string"
+                    },
+                    "origin_country": {
+                      "type": "string"
+                    },
+                    "resolved_hs_code": {
+                      "type": "string"
+                    },
+                    "additional_duties": {
                       "type": "array"
                     }
                   }
@@ -32248,24 +32271,30 @@
             "in": "query",
             "required": true,
             "schema": {
-              "type": "string"
-            }
+              "type": "string",
+              "description": "HS code of 6, 8 or 10 digits at the level the EU tariff lists it, e.g. '8471.30' or '6109100010'. If the code is split further, the error lists the codes to use."
+            },
+            "description": "HS code of 6, 8 or 10 digits at the level the EU tariff lists it, e.g. '8471.30' or '6109100010'. If the code is split further, the error lists the codes to use."
           },
           {
             "name": "origin_country",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "string"
-            }
+              "type": "string",
+              "description": "ISO 3166-1 alpha-2 code of the non-EU country the goods come from, e.g. 'CN'."
+            },
+            "description": "ISO 3166-1 alpha-2 code of the non-EU country the goods come from, e.g. 'CN'."
           },
           {
             "name": "destination_country",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
-            }
+              "type": "string",
+              "description": "EU member state the goods are imported into (ISO alpha-2, e.g. 'SE'), or 'EU' (default). The customs duty is the same in every member state."
+            },
+            "description": "EU member state the goods are imported into (ISO alpha-2, e.g. 'SE'), or 'EU' (default). The customs duty is the same in every member state."
           }
         ]
       }
@@ -34975,7 +35004,8 @@
                       ]
                     },
                     "ssl_valid": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True only when a TLS connection to the URL that answered completed with a certificate the runtime trusts. False for plain http, a redirect to http, a rejected certificate, or no connection at all."
                     },
                     "status_code": {
                       "type": "integer"
@@ -35184,11 +35214,6 @@
                         "details": "Redirects to https://developers.google.com/program"
                       },
                       {
-                        "name": "@google",
-                        "type": "twitter/x",
-                        "details": "taken"
-                      },
-                      {
                         "name": "google",
                         "type": "github",
                         "details": "taken"
@@ -35208,7 +35233,8 @@
                       {
                         "handle": "@google",
                         "platform": "Twitter/X",
-                        "available": false
+                        "available": null,
+                        "note": "Not checked — X's Terms of Service prohibit automated access. Verify the handle manually at x.com."
                       },
                       {
                         "handle": "google",
@@ -35260,7 +35286,7 @@
                     ],
                     "keyword": "google",
                     "available": [],
-                    "taken_count": 9,
+                    "taken_count": 8,
                     "available_count": 0,
                     "best_available_domain": null
                   },
@@ -35272,10 +35298,41 @@
                       "type": "array"
                     },
                     "domains": {
-                      "type": "array"
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "domain": {
+                            "type": "string"
+                          },
+                          "available": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ],
+                            "description": "True only on NXDOMAIN; null when the resolver did not answer for this domain."
+                          },
+                          "extension": {
+                            "type": "string"
+                          },
+                          "current_owner": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
                     },
                     "available": {
                       "type": "array"
+                    },
+                    "unavailable_sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when a domain's DNS lookup, GitHub, npm or PyPI did not answer; that domain's or handle's available is null, and it is listed neither as available nor as taken."
                     }
                   }
                 }
@@ -36412,87 +36469,6 @@
         ]
       }
     },
-    "/x402/v2/gdpr-fine-lookup": {
-      "get": {
-        "tags": [
-          "x402"
-        ],
-        "summary": "GDPR Fine Lookup (x402)",
-        "description": "Look up GDPR fines by company or country: amounts, authorities and the articles breached.",
-        "x-payment-info": {
-          "protocols": [
-            {
-              "x402": {}
-            }
-          ],
-          "price": {
-            "mode": "fixed",
-            "currency": "USD",
-            "amount": "0.216000"
-          }
-        },
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "example": {
-                    "fines": [
-                      {
-                        "date": null,
-                        "company": "Meta Platforms Ireland Limited",
-                        "country": "IE",
-                        "authority": "Irish Data Protection Commission (DPC)",
-                        "amount_eur": 1200000000,
-                        "description": "Unlawfully transferring personal data to the United States",
-                        "article_violated": null
-                      }
-                    ],
-                    "total_fines": 1,
-                    "total_amount_eur": 1200000000
-                  },
-                  "properties": {
-                    "fines": {
-                      "type": "array"
-                    },
-                    "total_fines": {
-                      "type": "number"
-                    },
-                    "total_amount_eur": {
-                      "type": "number"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required (x402 — pay with USDC on Base)"
-          }
-        },
-        "parameters": [
-          {
-            "name": "company",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "country_code",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
     "/x402/v2/cve-lookup": {
       "get": {
         "tags": [
@@ -37127,13 +37103,13 @@
                         "OFAC — Specially Designated Nationals (SDN)",
                         "European Commission — Consolidated List of Financial Sanctions",
                         "UN Security Council — Consolidated List",
-                        "HMT OFSI — Financial Sanctions",
+                        "UK Government — Sanctions List",
                         "SECO — Switzerland Sanctions",
                         "BIS — Entity List",
-                        "(plus ~128 more)"
+                        "(plus ~114 more)"
                       ],
-                      "source_count": 134,
-                      "freshness_note": "Dilisense aggregates 130+ sanctions, debarment, and restrictive-measure lists into a consolidated index. The publisher refreshes the consolidated index multiple times daily; per-list timestamps are not exposed via the screening API.",
+                      "source_count": 120,
+                      "freshness_note": "Dilisense consolidates 120 sanctions and restrictive-measure lists into one index, and states that it is updated every 60 minutes. Per-list timestamps are not exposed by the screening API.",
                       "last_updated_at": null,
                       "source_catalog_url": "https://dilisense.com/en/sources/sanction-sources"
                     },
@@ -40525,7 +40501,8 @@
                     "annual_discount": null,
                     "free_tier_available": false,
                     "free_trial_available": false,
-                    "money_back_guarantee": false
+                    "money_back_guarantee": false,
+                    "page_status": "no_pricing"
                   },
                   "properties": {
                     "plans": {
@@ -40539,6 +40516,14 @@
                     },
                     "free_trial_available": {
                       "type": "boolean"
+                    },
+                    "page_status": {
+                      "enum": [
+                        "pricing",
+                        "no_pricing"
+                      ],
+                      "type": "string",
+                      "description": "pricing = the page shows prices or plans; no_pricing = a real page for the product that publishes no prices (plans is then empty)."
                     }
                   }
                 }
@@ -43380,6 +43365,17 @@
                     },
                     "vulnerabilities": {
                       "type": "object"
+                    },
+                    "risk_score_complete": {
+                      "type": "boolean",
+                      "description": "False when a source that feeds risk_score (deps.dev, the previous-version deps.dev read, or the OpenSSF Scorecard) could not be read. Its penalty was skipped, so risk_score may read higher than a complete check would; the failed source is named in unavailable_sources."
+                    },
+                    "unavailable_sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when a secondary source (deps.dev, the previous-version deps.dev read, or the OpenSSF Scorecard) failed; the fields it feeds are null, not clean."
                     }
                   }
                 }
@@ -43751,75 +43747,6 @@
         ]
       }
     },
-    "/x402/v2/eu-trademark-search": {
-      "get": {
-        "tags": [
-          "x402"
-        ],
-        "summary": "EU Trade Mark Search (x402)",
-        "description": "Search EUIPO for registered and pending EU trade marks: names, numbers, status and owners.",
-        "x-payment-info": {
-          "protocols": [
-            {
-              "x402": {}
-            }
-          ],
-          "price": {
-            "mode": "fixed",
-            "currency": "USD",
-            "amount": "0.540000"
-          }
-        },
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "example": {
-                    "query": "SELECT * FROM users WHERE active = true LIMIT 10",
-                    "source_url": "https://euipo.europa.eu/eSearch/#basic/SELECT%20*%20FROM%20users%20WHERE%20active%20%3D%20true%20LIMIT%2010",
-                    "trademarks": [],
-                    "total_results": 0
-                  },
-                  "properties": {
-                    "trademarks": {
-                      "type": "array"
-                    },
-                    "total_results": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Payment required (x402 — pay with USDC on Base)"
-          }
-        },
-        "parameters": [
-          {
-            "name": "query",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "nice_class",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
     "/x402/v2/link-extract": {
       "get": {
         "tags": [
@@ -44045,6 +43972,13 @@
                     },
                     "outdated_count": {
                       "type": "integer"
+                    },
+                    "unavailable_sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Present only when a registry lookup failed; the affected dependencies carry unavailable true. Those that declare a version were still checked against OSV.dev at that version as written; one that declares none (an unpinned PyPI requirement, an empty npm range) was not checked at all, and its vulnerability_count of 0 means unchecked, not clean."
                     }
                   }
                 }
@@ -48163,63 +48097,6 @@
         }
       }
     },
-    "/x402/v2/solutions/ai-act-assess": {
-      "post": {
-        "tags": [
-          "x402"
-        ],
-        "summary": "EU AI Act Risk Assessment (x402 solution)",
-        "description": "Classify your AI system's risk level under the EU AI Act. Risk classification, obligations, and supervisory authority.",
-        "x-payment-info": {
-          "protocols": [
-            {
-              "x402": {}
-            }
-          ],
-          "price": {
-            "mode": "fixed",
-            "currency": "USD",
-            "amount": "0.864000"
-          }
-        },
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "402": {
-            "description": "Payment required (x402 — pay with USDC on Base)"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "description",
-                  "deployment_country"
-                ],
-                "properties": {
-                  "company": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Describe what your AI system does"
-                  },
-                  "deployment_country": {
-                    "type": "string",
-                    "description": "ISO 3166-1 alpha-2 country code"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/x402/v2/solutions/defi-protocol-risk": {
       "post": {
         "tags": [
@@ -50698,15 +50575,263 @@
           }
         }
       }
+    },
+    "/x402/v2/nordic-statistics": {
+      "post": {
+        "tags": [
+          "x402"
+        ],
+        "summary": "Nordic Statistics (x402)",
+        "description": "Read curated national statistics tables from Statistics Sweden, Statistics Norway and Statistics Finland.",
+        "x-payment-info": {
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.032400"
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "example": {
+                    "as_of": "2026-11-06T15:17:27.873Z",
+                    "label": "07459: Population, by region, contents and year",
+                    "table": "07459",
+                    "office": "SSB",
+                    "source": "Statistics Norway",
+                    "updated": "2026-02-25T07:00:00.000Z",
+                    "dimensions": [
+                      {
+                        "id": "Region",
+                        "label": "region",
+                        "categories": [
+                          {
+                            "code": "0",
+                            "label": "The whole country"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "ContentsCode",
+                        "label": "contents",
+                        "categories": [
+                          {
+                            "code": "Personer1",
+                            "label": "Persons"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "Tid",
+                        "label": "year",
+                        "categories": [
+                          {
+                            "code": "2024",
+                            "label": "2024"
+                          }
+                        ]
+                      }
+                    ],
+                    "source_url": "https://data.ssb.no/api/v0/en/table/07459",
+                    "accessed_at": "2026-11-06",
+                    "licence_note": "Statistics Norway API data is licensed under CC BY 4.0. Attribute Statistics Norway, link the licence, and identify Strale’s reshaping.",
+                    "observations": [
+                      {
+                        "Tid": "2024",
+                        "value": 5550203,
+                        "Region": "0",
+                        "period": "2024",
+                        "ContentsCode": "Personer1"
+                      }
+                    ],
+                    "observation_count": 1
+                  },
+                  "required": [
+                    "office",
+                    "table",
+                    "label",
+                    "updated",
+                    "dimensions",
+                    "observations",
+                    "observation_count",
+                    "source",
+                    "licence_note",
+                    "source_url",
+                    "accessed_at",
+                    "as_of"
+                  ],
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "as_of": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "table": {
+                      "type": "string"
+                    },
+                    "office": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "updated": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "dimensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "categories": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "source_url": {
+                      "type": "string"
+                    },
+                    "accessed_at": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "licence_note": {
+                      "type": "string"
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "period",
+                          "value"
+                        ],
+                        "properties": {
+                          "value": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "period": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": true
+                      }
+                    },
+                    "observation_count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required (x402 — pay with USDC on Base)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "office",
+                  "table",
+                  "filters"
+                ],
+                "properties": {
+                  "table": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A table id from the curated allowlist for the selected office."
+                  },
+                  "office": {
+                    "enum": [
+                      "SCB",
+                      "SSB",
+                      "STATFIN"
+                    ],
+                    "type": "string"
+                  },
+                  "filters": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[A-Za-z0-9_.-]{1,80}$"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "maxItems": 50,
+                          "minItems": 1
+                        }
+                      ]
+                    }
+                  },
+                  "since_period": {
+                    "type": "string",
+                    "pattern": "^\\d{4}(-Q[1-4]|-(0[1-9]|1[0-2]))?$"
+                  },
+                  "until_period": {
+                    "type": "string",
+                    "pattern": "^\\d{4}(-Q[1-4]|-(0[1-9]|1[0-2]))?$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   },
   "x-treazury-provenance": {
     "kind": "authored-openapi",
     "schema": "https://api.strale.io/openapi.json",
-    "schema_sha256": "7b847ce979c9f19f4f25964b1ee1c5a4886e63a46f9f6a35bfd9ba3383e4c498",
+    "schema_sha256": "a847b1ef253fe30d1e7f09ff34ada4c71fb0a25f248843ec5418df540510b9a8",
     "catalog": "https://api.strale.io/x402/catalog",
-    "catalog_tool_capture_sha256": "d8c0f65431d4bf59699367be4f11c1fb1e54601ea3c4de840ca4b81dda4a16be",
-    "gateway_source": "https://github.com/strale-io/strale/blob/e79fbf2574def4583b80053a29515a265db8a0ac/apps/api/src/routes/x402-gateway-v2.ts",
+    "catalog_tool_capture_sha256": "e385210c50cf7cf2b24540b486791166014adf3427ae90232bc0d8507d8ee689",
+    "gateway_source": "https://raw.githubusercontent.com/strale-io/strale/main/apps/api/src/routes/x402-gateway-v2.ts",
     "transforms": [
       "Replace only the nine complex-input GET operations listed in post_operations with POST and required application/json bodies using complete catalog input_schema values; retain all other operation metadata and responses."
     ],
@@ -50721,6 +50846,7 @@
       "POST /x402/v2/risk-narrative-generate",
       "POST /x402/v2/tool-call-validate"
     ],
-    "guidance": "providers/CAVEATS.md#strale-straletoml"
+    "guidance": "providers/CAVEATS.md#strale-straletoml",
+    "gateway_source_sha256": "f561569ade6241d8726d730109ae15d5309cb6b4705210cffb842e0247298d13"
   }
 }

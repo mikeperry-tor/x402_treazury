@@ -9,10 +9,44 @@ name = "AgentFund US Economic, SEC & On-Chain Data"
 prefix = "agentfund"
 include = ["/x402", ""]
 additional_properties = false
-instructions_text = "US economic indicators, SEC filings, on-chain data and text utilities. Preserve source publication lags and revision policies. Vendor does not bill failed upstream requests."
+instructions_text = "US economic indicators, SEC filings, on-chain data and text utilities. Preserve source publication lags and revision policies. Vendor claims failed upstream requests are not billed; a failed call does not prove nonpayment."
 
 [pricing]
 source = "catalog"
 format = "payment-info"
 unit = "call"
 usd_as_usdc = true
+
+[overrides.agentfund_bls_cpi.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_energy.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_gdp.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_housing.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_jobs.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_pce.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_retail_sales]
+description = "Retrieve a U.S. monthly retail/food-services sales summary with salesMillions, month-over-month/year-over-year changes and source. Vendor labels it ex-autos, but figures can match the auto-inclusive headline; verify aggregation before use."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.agentfund_macro_retail_sales.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_macro_release_calendar.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_onchain_gas.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."
+
+[overrides.agentfund_treasury_yield_curve.params]
+body = "Pass an empty object when no filters are needed to send a JSON request body."

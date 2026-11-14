@@ -19,6 +19,80 @@ fn tools(cfg: &catalog::Config, spec: &Value) -> Vec<catalog::ToolSpec> {
 }
 
 #[tokio::test]
+async fn marketintelligence_csv_query_exclusions_preserve_other_research_contracts() {
+    let cfg = provider("providers/marketintelligence.toml").await;
+    let csv = json!({"parameters":[{"name":"include","in":"query","required":false,
+        "style":"form","explode":false,"schema":{"type":"array","items":{"type":"string"}}}]});
+    let mut spec = json!({"openapi":"3.1.0","paths":{
+        "/api/v1/decision":{"get":csv.clone()},
+        "/api/v1/decision/{symbol}":{"get":csv},
+        "/api/v1/decision/lite":{"get":{}},
+        "/api/v1/decision/sample":{"get":{}},
+        "/api/v1/markets/yields":{"get":{}}
+    }});
+    let selected = tools(&cfg, &spec);
+    for path in ["/api/v1/decision", "/api/v1/decision/{symbol}"] {
+        assert!(!selected.iter().any(|t| t.path == path && t.method == "GET"));
+    }
+    for path in [
+        "/api/v1/decision/lite",
+        "/api/v1/decision/sample",
+        "/api/v1/markets/yields",
+    ] {
+        assert!(selected.iter().any(|t| t.path == path && t.method == "GET"));
+    }
+    spec["paths"]["/api/v1/decision"]["post"] = json!({});
+    let future = tools(&cfg, &spec);
+    assert!(
+        future
+            .iter()
+            .any(|t| t.path == "/api/v1/decision" && t.method == "POST")
+    );
+}
+
+#[tokio::test]
+async fn onchaincheck_excludes_owned_webhooks_without_hiding_stateless_reads() {
+    let cfg = provider("providers/onchaincheck.toml").await;
+    let spec = json!({"openapi":"3.1.0","paths":{
+        "/watch":{"post":{"requestBody":{"content":{"application/json":{
+            "schema":{"type":"object","properties":{"webhook":{"type":"string"}}}
+        }}}},"get":{}},
+        "/watchlist":{"get":{}},
+        "/wallet/balances":{"get":{}},
+        "/v1/chat/completions":{"post":{"requestBody":{"required":true,"content":{"application/json":{
+            "schema":{"type":"object","properties":{"stream":{"type":"boolean"}}}
+        }}}}}
+    }});
+    let selected = tools(&cfg, &spec);
+    assert!(
+        !selected
+            .iter()
+            .any(|t| t.path == "/watch" && t.method == "POST")
+    );
+    for path in ["/watch", "/watchlist", "/wallet/balances"] {
+        assert!(selected.iter().any(|t| t.path == path && t.method == "GET"));
+    }
+    let chat = selected
+        .iter()
+        .find(|t| t.path == "/v1/chat/completions")
+        .unwrap();
+    let body = chat
+        .route(
+            "https://onchaincheck.dev",
+            json!({"stream":false}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(body.method, "POST");
+    assert_eq!(body.body, Some(json!({"stream":false})));
+    assert!(
+        chat.input_schema["properties"]["stream"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("false")
+    );
+}
+
+#[tokio::test]
 async fn strale_exact_owned_operations_preserve_public_transaction_and_job_reads() {
     let cfg = provider("providers/strale.toml").await;
     let spec = json!({"openapi":"3.1.0","paths":{

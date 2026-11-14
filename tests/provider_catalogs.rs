@@ -3186,6 +3186,8 @@ async fn apexfaucet_repairs_documented_inputs_without_exposing_owned_purchases()
         "/api/x402/room-meal",
         "/api/x402/room-upgrade",
         "/api/x402/pay-safe-credits",
+        "/api/x402/api-pass",
+        "/api/x402/api-pass-pro",
     ] {
         assert!(doc["paths"].get(path).is_some());
         assert!(

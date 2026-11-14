@@ -1059,7 +1059,8 @@ send_tools = [
     "beneficial_ownership_lookup", "uk_companies_house_officers", "uk_disqualified_director_check",
     "french_insolvency_check", "fr_bodacc_lookup", "no_bankruptcy_check", "insolvency_check",
     "pep_check", "adverse_media_check", "country_tax_rates", "employment_cost_estimate",
-    "work_permit_requirements", "eu_trademark_search", "eori_validate", "charity_lookup_uk",
+    # EUIPO search is absent; US trademark ID lookups do not replace it.
+    "work_permit_requirements", "eori_validate", "charity_lookup_uk",
   ] },
   # MiCA vasp_verify and vasp_non_compliant_check reported unavailable registers,
   # despite HTTP success; neither qualifies a compliance verdict.

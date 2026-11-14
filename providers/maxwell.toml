@@ -1,4 +1,6 @@
 description = "International registries and legislation, USPTO patent search, public datasets, financial records and ski-travel data."
+# Help and catalog ignore unsigned byte ranges; disable optional cover.
+cover_traffic_enabled = false
 spec = "https://api.maxwellinternational.ai/openapi.json"
 name = "Maxwell International"
 base_url = "https://api.maxwellinternational.ai"
