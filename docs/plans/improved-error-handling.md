@@ -9,7 +9,7 @@ their remaining tools. Frameworks must distinguish completed preparation,
 current MCP availability, catalog coverage and successful paid API execution.
 
 This is an active implementation plan. C1/C2 are implemented and validated;
-exact-commit G1 review and consumer integration remain pending.
+G1 is approved; C3 consumer validation and G2 remain pending.
 The user has authorized executing this plan. Live paid calls remain outside scope.
 
 - Working branch: `flaky_provider_resiliance`.
@@ -321,8 +321,9 @@ exact committed SHA and each `git commit --fixup=<introducing-SHA>` correction;
 preserve unsquashed history. Combined gates examine all accumulated changes and
 consumers; per-commit review does not replace them.
 
-Current status: D1 reviewed; C1/C2 implemented in the working tree, validation and
-exact-commit review pending. Independent fresh-context,
+Current status: D1 and G1 approved; C1/C2 committed and validated. C3 is
+implemented in a writable consumer worktree; packaged acceptance and G2 remain
+pending. Independent fresh-context,
 read-only design review examined this plan against native acquisition, diagnostics,
 selection, routing, readiness and pricing, plus consumer preparation, activation,
 smoke expectations and the packaged pin. No material findings were reported.
@@ -411,3 +412,28 @@ review and subsequent validation evidence here. At each
 handoff report branch, both relevant revisions, outstanding work and missing
 validation. Keep the plan until implementation, required reviews and user review
 rounds finish; then transfer enduring rules to the named guides and execute C4.
+
+
+G1 independently approved exact native
+`3125dcacca10aee1c988a9ffa088f802025ee77e` and combined baseline-to-SHA including
+all accumulated plan commits and both routing fixups, with no material findings.
+The reviewer verified final source hashes and retained the warming supervisor's
+CycC 42 (own 31): cancellation, accepted-relay drain and wallet shutdown have
+distinct result ownership; extracting them would only move that choreography.
+All other complexity dispositions above were accepted. No additional financial,
+network or resource authority was found.
+
+C3 uses writable existing-repository worktree
+`/private/tmp/private-hermes-improved-error-handling`, branch
+`codex/improved-error-handling`, preserving the reference checkout. Consumer
+onboarding accepts the structured native completion envelope, including degraded
+and all-unavailable results, without new count/cache/price gates or persistent
+coverage markers. Focused consumer tests passed: onboarding 35, endpoint readiness
+12, renderer 4. The packaged fixture adds networkless loopback TLS catalogs and
+checks actual all-twelve activation, empty filtered endpoints, source diagnostics
+and absence of API calls. Its unique image tag preserves existing local images.
+The build uses the consumer Dockerfile's exact native SHA assertion and unchanged
+build recipe, substituting a local Git bundle only for unpublished-source
+transport. Ordinary upstream image fetch requires publishing the native commit;
+this task does not authorize publication. Podman is unavailable, so no native
+Podman coverage is claimed. Final packaged results and G2 remain pending.
