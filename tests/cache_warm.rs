@@ -157,10 +157,15 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     );
     let report: serde_json::Value = serde_json::from_slice(&warmed.stdout).unwrap();
     assert_eq!(report["direct"], true);
+    assert_eq!(report["outcome"], "ok");
     assert_eq!(report["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(report["sources"][0]["status"], "ready");
     assert_eq!(report["sources"][0]["catalog_cache"], "fresh");
     assert!(report["sources"][0].get("fresh_pricing_entries").is_none());
-    assert!(report["sources"][0].get("pricing").is_none());
+    assert_eq!(
+        report["sources"][0]["pricing"],
+        serde_json::json!({"status":"not_configured"})
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(tor_calls.load(Ordering::SeqCst), 0);
     assert!(String::from_utf8_lossy(&warmed.stderr).contains("Explicit direct cache warming"));
@@ -377,6 +382,7 @@ sources=['z_remote','m_local','a_remote']
         serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
     };
     let warmed = run().await;
+    assert_eq!(warmed["outcome"], "ok");
     let rows = warmed["sources"].as_array().unwrap();
     assert_eq!(
         rows.iter()
@@ -387,10 +393,9 @@ sources=['z_remote','m_local','a_remote']
     assert_eq!(rows[0]["catalog_cache"], "fresh");
     assert_eq!(rows[1]["catalog_cache"], "local_file");
     assert_eq!(rows[2]["catalog_cache"], "fresh");
-    assert!(
-        rows.iter()
-            .all(|r| r.get("pricing").is_none() && r.get("fresh_pricing_entries").is_none())
-    );
+    assert!(rows.iter().all(|r| r["status"] == "ready"
+        && r["pricing"] == serde_json::json!({"status":"not_configured"})
+        && r.get("fresh_pricing_entries").is_none()));
     assert_eq!(
         catalog_calls.load(Ordering::SeqCst),
         1,
@@ -427,12 +432,15 @@ sources=['z_remote','m_local','a_remote']
     )
     .unwrap();
     let refreshed = run().await;
+    assert_eq!(refreshed["outcome"], "ok");
     assert!(
         refreshed["sources"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|r| r.get("fresh_pricing_entries").is_none() && r.get("pricing").is_none())
+            .all(|r| r["status"] == "ready"
+                && r["pricing"] == serde_json::json!({"status":"not_configured"})
+                && r.get("fresh_pricing_entries").is_none())
     );
     assert_eq!(catalog_calls.load(Ordering::SeqCst), 4);
     assert_eq!(price_calls.load(Ordering::SeqCst), 0);

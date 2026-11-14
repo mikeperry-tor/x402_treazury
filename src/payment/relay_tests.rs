@@ -915,12 +915,12 @@ async fn fixture(mode: &str) {
         assert_eq!(events.len(), 2);
         assert!(events.iter().all(|event| event.provider.is_none()));
         assert!(events[0].signer.is_none() && events[1].signer.is_some());
-        for kind in [
-            "relayed402",
-            "relayed404",
-            "uncertain",
-            "malformed-envelope",
-            "private-final",
+        for (kind, advance) in [
+            ("relayed402", false),
+            ("relayed404", false),
+            ("uncertain", true),
+            ("malformed-envelope", true),
+            ("private-final", false),
         ] {
             let progress = SubmissionProgress::default();
             let error = client
@@ -934,18 +934,36 @@ async fn fixture(mode: &str) {
             assert!(format!("{error:#}").contains("do not automatically repeat"));
             assert!(!format!("{error:#}").contains("PRIVATE_RELAY_ERROR"));
             let events = fixture.events(&format!("{method}-{kind}"));
+            // Curl cannot represent this POST's body; HEAD has its own list.
+            let providers: &[usize] = match method {
+                "GET" => &[0, 1],
+                "HEAD" => &[2],
+                _ => &[1],
+            };
+            let providers = if advance { providers } else { &providers[..1] };
             assert_eq!(
                 events.len(),
-                attempts + 2,
-                "terminal or uncertain target/relay response stops the list"
+                attempts + 2 * providers.len(),
+                "{mode} {method} {kind}: only eligible relay-service failures advance"
             );
             assert!(
-                events
+                events[..attempts]
                     .iter()
-                    .filter(|event| event.provider.is_none())
-                    .all(|event| event.signer.is_none()),
+                    .all(|event| event.provider.is_none() && event.signer.is_none()),
                 "relayed target 402 cannot sign/retry the target"
             );
+            for ([unsigned, signed], provider) in
+                events[attempts..].as_chunks::<2>().0.iter().zip(providers)
+            {
+                assert_eq!(unsigned.provider, Some(*provider));
+                assert_eq!(signed.provider, Some(*provider));
+                assert!(unsigned.signer.is_none());
+                assert_eq!(
+                    signed.signer.as_deref(),
+                    Some(payer(181).address.to_ascii_lowercase().as_str()),
+                    "each provider receives one signed exchange; uncertainty grants no replay"
+                );
+            }
         }
     }
 
