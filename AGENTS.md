@@ -1,402 +1,557 @@
-# AGENTS.md
+# Agent instructions for x402_treazury
 
-Guidance for code agents working on **x402_treazury**, a Rust executable and library.
-The server exposes x402-paid HTTP APIs as ordinary MCP tools, owns payment
-credentials and handles challenge/sign/retry. TOML providers compose into sources
-and authenticated listeners. An embedded Zcash treasury can fund rotating Base
-USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
+`x402_treazury` is a Rust executable and library that exposes x402-paid HTTP
+APIs as MCP tools, owns payment credentials, and handles payment challenges,
+signing, and retries. TOML providers compose into sources and authenticated
+listeners. An embedded Zcash treasury funds rotating Base USDC wallets through
+NEAR Intents, and optional Tor routes traffic through the same network layer.
 
-## Engineering preferences
+Treat [financial, network, and state-compatibility boundaries](#financial-and-network-boundaries)
+and [authority limits](#authority-limits) as hard non-negotiables; simplicity,
+provider, logging, review, workflow, and writing-style rules serve those
+invariants.
 
-- Avoid platform-specific code where possible. When OS-specific behavior is
-  necessary, isolate it behind a small shared abstraction and implement it for
-  Linux and macOS. Preserve equivalent correctness and security contracts;
-  do not substitute silent no-ops. Follow the [portability guidance](docs/development.md#portability).
-- Obtain explicit informed user approval before introducing a new maintained
-  dependency checkout or fork. General upgrade or audit-cleanup authority is not
-  approval to vendor. Present actual exposure, existing mitigations, alternatives
-  and maintenance costs, then wait before implementation. Follow the
-  [dependency policy](docs/development.md#dependency-vendoring).
-- Favor simplicity and best-effort execution. Remove responsibilities before
-  adding counters, certificates, recovery ledgers or workflow frameworks.
-- Avoid additional local resource limits and network timeouts. Arbitrary limits
-  are largely reliability hazards. Before adding or tightening a cap, queue,
-  readiness gate, timer or failure switch, identify its concrete resource, external
-  contract or correctness invariant and check existing guards. Generic caution is
-  insufficient. Existing limits are not precedent or proof of necessity.
-- Let valid work finish while it makes progress. Do not stack whole-work deadlines
-  or replace removed timers with enormous durations. Connection establishment,
-  response inactivity, signed expiry and polling cadence have separate meanings.
-  Sibling traffic and keepalives cannot renew another response or financial authority.
-- Avoid preventable agent-call delays. Prepare ahead of demand under existing
-  authority where simple. Focused correctness, race and side-effect tests suffice
-  for straightforward improvements; broader measurements belong to resource tuning,
-  complex scheduling or quantitative performance claims.
-- Scope failures to affected operations. Unsigned outages do not consume transaction
-  recovery attempts. Disconnect, cancellation or cache eviction must not orphan
-  accepted financial work, duplicate active I/O or report abandonment as success.
+## Guides and references
 
-## Provider guidance
+Read the maintained guide for the area you are changing before editing; detailed
+contracts and defaults live there rather than in copies here. The
+[documentation index](docs/README.md) lists all maintained guides.
 
-- Reusable providers expose supported functionality, with concrete reasons for
-  compatibility restrictions.
-- Same-path GET/POST twins default to POST before naming; review actual method
-  contracts and document necessary opt-outs.
-- Recommendations remain advisory until explicit opt-in.
-- Provider-specific regression test and fixture storage needs a named quirk,
-  failure or authored transformation; use small faithful inputs and shared
-  synthetic tests instead of universal inventory/settings snapshots in
-  fixtures and tests.
-- Keep agent-facing tool descriptions and every parameter description concise,
-  consistent and focused on selecting and using the API successfully. Explain
-  purpose, inputs, useful results and constraints that affect the caller's next
-  action; omit internal implementation details and repeated boilerplate. Keep
-  maintainer rationale in owning guides. Follow the
-  [tool documentation policy](docs/agent-sources.md#tool-documentation).
-- Review endpoint summaries and discovery search keywords whenever capabilities or
-  routing change, including new tools; follow
-  [endpoint instruction placement](docs/agent-sources.md#endpoint-instruction-placement).
+| Change area | Read first | Main implementation and tests |
+| --- | --- | --- |
+| Resource limits, cache lifetimes, readiness gates, or polling | [Local resource limits](docs/local-resource-limits.md), [timer inventory](docs/network-egress.md#remaining-timers-and-budgets), [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy) | `src/limits.rs`, owning module |
+| Payments, selection, funding, or recovery | [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy), [wallet ownership](docs/wallet-rotation.md), [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy), [wallet selection and isolation](docs/architecture.md#wallet-selection-and-network-isolation) | `src/payment.rs`, `src/rotation/`, `src/treasury/`; `tests/LIFECYCLE.md` |
+| Direct swap control | [Direct swaps](docs/configuration.md#direct-swap-control), [receive ownership](docs/wallet-rotation.md#direct-receive-ownership), [send ownership](docs/wallet-rotation.md#direct-send-ownership), [Ironwood policy](docs/zingo-integration.md#ironwood-only-policy), [SDK receivers](docs/zingo-integration.md#refund-receivers-and-seed-recovery), [network policy](docs/network-egress.md) | `src/direct_swap/`, `src/rotation/store/direct_swap.rs`, `src/treasury/`, `src/server.rs` |
+| Wallet CLI, initialization, keys, or state conversion | [Wallet administration](docs/wallet-cli.md), [configuration](docs/configuration.md) | `src/wallet_cli/`, `src/cli.rs` |
+| Network clients, HTTP and gRPC timeouts, or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
+| Deployment startup, catalog publication, or shutdown | [Runtime architecture](docs/architecture.md), [configuration](docs/configuration.md), [startup tests](tests/STARTUP.md) | `src/deployment/`, `src/server/`, `src/catalog_state.rs` |
+| Dynamic sources, bundled providers, directory tools, endpoint instructions, or raw calls | [Agent source management](docs/agent-sources.md) (permissions, registration, matching, listing and URL discovery, raw headers, instruction placement), [bundled provider metadata](providers/README.md#bundled-provider-metadata) | `src/discovery/`, `src/providers.rs`, `src/catalog_state.rs` |
+| Deployment source distribution and effective bindings | [Source tool distribution](docs/configuration.md#source-tool-distribution), [catalog and runtime handoff](docs/architecture.md#catalog-configuration-and-execution), [endpoint-local authority](docs/agent-sources.md#configuration-and-authority) | `src/deployment/routing.rs`, `src/deployment/`, `src/rotation/assignment.rs` |
+| Provider TOML, OpenAPI schemas, pricing, caching, or relay | [Provider maintenance](docs/provider-updates.md), [configuration](docs/configuration.md), [header and idempotency contracts](docs/configuration.md#openapi-header-parameters-and-idempotency), [catalog architecture](docs/architecture.md#catalog-configuration-and-execution), [provider policy](providers/README.md#provider-policy), [provider caveats](providers/CAVEATS.md), [provider regressions](docs/testing.md#provider-regressions) | `src/catalog.rs`, `src/config.rs`, `src/pricing/`, `src/http_cache.rs`, `src/discovery_relay.rs` |
+| MCP images, binary output, or truncation | [Output boundaries](docs/architecture.md#mcp-and-output-boundaries), [download and display limits](docs/configuration.md#download-and-display-limits) | `src/output.rs`, `src/server.rs`, `tests/media.rs` |
+| Optional cover traffic | [Cover policy](docs/cover-traffic.md) | `src/cover/` |
+| Live integration, financial evidence, or qualification reports | [Runbook](tests/live/INTEGRATION.md), [technical reference](tests/live/INTEGRATION_REFERENCE.md), [qualification status](docs/testing.md#qualification-status) | `tests/live/runner/driver.rs`, `tests/integration_preparation.rs` |
+| Builds, dependencies, test infrastructure, or release tooling | [Development](docs/development.md), [testing](docs/testing.md), [scripts](scripts/README.md), [vendor provenance](vendor/README.md), [Zingo integration](docs/zingo-integration.md), [reproducible builds](docs/reproducible-builds.md) | `scripts/`, `tools/`, `vendor/` |
 
-Follow the [provider policy](providers/README.md#provider-policy),
-[shared maintenance boundaries](docs/provider-updates.md),
-[selection semantics](docs/configuration.md) and
-[test policy](docs/testing.md#provider-regressions). Provider oddities,
-quirks, workarounds, and compatibility exemptions are documented in
-[provider caveats](providers/CAVEATS.md) as current support boundaries and
-explicit uncertainty, without dated probe or sample journals.
+- When changing policy, update its owning guide and linked references. Resource
+  policy changes must keep both inventories current. Never infer a runtime
+  deadline, external settlement contract, or live qualification from a fixture
+  timeout.
+- For dependency patches, follow
+  [checkout retirement tracking](vendor/README.md#checkout-retirement-tracking).
+  Prioritize complete checkout removal; assess every remaining blocker and
+  preserve behavior, regression coverage, and provenance before counting a
+  retirement.
 
-## Financial and execution boundaries
+## Engineering, financial, and runtime contracts
 
-- **ZEC is Ironwood only.** Reject Sapling/legacy Orchard transfers, historical-pool
-  fallback, transparent wallet receiving/shielding and transparent-address RPC
-  queries. The sole external-output exception is a NEAR-issued transparent deposit
-  address paid from Ironwood under its saved quote. Do not initialize or download
-  legacy proving parameters in application code. Keep only SDK-unavoidable types,
-  decoding/build activity and accepted-work ownership, documented in the
-  [Ironwood-only policy](docs/zingo-integration.md#ironwood-only-policy).
-- Reconcile from established blockchain/SDK facts instead of parallel local
-  monetary tracking. Repair derived state and finish proven work; stale phases,
-  reporting differences and missing optional evidence must not halt otherwise
-  authorized progress. Follow the [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy).
-- Before adding a financial check, identify the actual authority or liability it
-  protects, check existing enforcement, and explain why reconciliation cannot
-  resolve the issue.
-- Needless double-enforcement is forbidden. Treasury funding expresses the
-  operator's capital limit: actual spendable funds govern ordinary enabled
-  auto-funding, and the ZEC wallet balance the operator funds is the ZEC capital
-  limit. Do not reintroduce daily/cumulative allocation, per-transfer ZEC spending
-  budgets, or mirror a USDC reserve target into a ZEC cap. Reserve ranges authorize
-  nominal USDC sizing only. Per-payment authority, SDK transaction validity,
-  accepted-work ownership and separately authorized qualification API budgets
-  protect distinct things. Qualification funding has no separate ZEC spending budget;
-  reviewed job counts, reserve sizing and actual supported treasury funds govern new allocations.
-  Explicit listener `swap_control.max_send_zec` bounds only direct-tool per-call debit;
-  never apply it to managed funding or other ZEC usage.
-- Ordinary USDC payment selection treats balances and price hints as advisory;
-  current payer ownership and amount authority govern signing.
-- After recognized structured insufficient funds, try each existing eligible wallet
-  once with its own challenge while balance reconciliation proceeds independently.
-  Apply the [unsigned x402 GET/POST retry semantics](docs/architecture.md#unsigned-x402-requests-and-post-retries)
-  when assessing method restrictions. Drop the unused error body. Each authorization
-  remains potentially chargeable. Other uncertainty grants no automatic replay;
-  never allocate wallets or wait for funding during this traversal.
-- Journal before disclosure. Preserve exact accepted inputs, signed bytes, original
-  identities and liabilities through cancellation/restart; missing results do not
-  prove nothing happened.
-- SDK/blockchain state owns current supported Ironwood spendability. Managed
-  funding may replace a bound REFUNDED swap after confirmed receiver observation
-  and source closure under a current unused claim; follow the
-  [refund recovery policy](docs/wallet-rotation.md#refunds-state-and-recovery).
-  A refund alone grants no replay authority. Unsupported pool holdings do not grant
-  spending, shielding or fallback authority.
-- Each wallet's initial funding claim is consumed by its first positive USDC
-  observation; low estimates never reopen it or authorize top-ups.
-- All production outbound HTTP/gRPC constructors belong in `src/network.rs`.
-  Preserve identity-bound transports, public-destination enforcement and Tor's remote
-  DNS/no-direct-fallback policy. Do not introduce a vendor-specific bypass.
-- Listener identity is the authenticated source-management principal; agent/session
-  fields cannot select owners. Registration never allocates or funds a wallet.
-- Ordinary serving binds listener sockets before funding. MCP availability follows
-  each endpoint's `wait_for_catalogs` setting (default true); see
-  [catalog startup](docs/configuration.md#catalog-loading-and-listener-startup)
-  and the [framework integration contract](docs/framework-integration.md).
-  Ready endpoints remain usable while managed funding is pending or degraded;
-  catalog failures disable only dependent waiting endpoints that did not opt into
-  `allow_catalog_failure`, and emit ERROR. Strict inspection and separately
-  authorized qualification retain their completeness and authority requirements.
+### Financial and network boundaries
 
 Read the
 [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules),
 [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy),
 and [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy)
-before changing estimation, polling, payment, funding or recovery behavior.
+before changing estimation, polling, payment, funding, or recovery behavior.
 
-## Independent subagent workflows
+- **ZEC is Ironwood only:** Reject Sapling and legacy Orchard transfers,
+  historical-pool fallback, transparent wallet receiving or shielding, and
+  transparent-address RPC queries. The sole external-output exception is a
+  NEAR-issued transparent deposit address paid from Ironwood under its saved
+  quote. Never initialize or download legacy proving parameters in application
+  code. Keep only SDK-unavoidable types, decoding and build activity, and
+  accepted-work ownership; see the
+  [Ironwood-only policy](docs/zingo-integration.md#ironwood-only-policy).
+- **Reconcile from blockchain and SDK facts:** Derive monetary truth from
+  established chain and SDK state instead of parallel local accounting. Repair
+  derived state and finish proven work; stale phases, reporting differences, and
+  missing optional evidence must not halt authorized progress. Before adding a
+  financial check, identify the authority or liability it protects, check
+  existing enforcement, and explain why reconciliation cannot resolve it.
+- **No double enforcement:** Treasury funding expresses the operator's capital
+  limit: spendable funds govern enabled auto-funding, and the funded ZEC wallet
+  balance is the ZEC capital limit. Never reintroduce daily or cumulative
+  allocation caps, per-transfer ZEC spending budgets, or ZEC caps mirrored from
+  USDC reserve targets. Reserve ranges authorize nominal USDC sizing only.
+  Per-payment authority, SDK transaction validity, accepted-work ownership, and
+  separately authorized qualification API budgets protect distinct things;
+  qualification funding has no separate ZEC spending budget (reviewed job
+  counts, reserve sizing, and supported treasury funds govern allocations).
+  Listener `swap_control.max_send_zec` bounds only per-call debit for direct
+  swap tools, never managed funding or other ZEC usage.
+- **Advisory balances and insufficient-funds retries:** USDC payment selection
+  uses cached balances and price hints as estimates, while payer ownership and
+  the payment cap govern signing. After a recognized structured
+  insufficient-funds response, try each eligible wallet once with its own
+  challenge while balance reconciliation runs independently. Apply the
+  [unsigned x402 GET and POST retry semantics](docs/architecture.md#unsigned-x402-requests-and-post-retries)
+  for method restrictions, drop the unused error body, and treat each signed
+  authorization as potentially chargeable. Other uncertainty grants no automatic
+  replay; never create wallets or wait for funding while retrying.
+- **Journal before disclosure:** Persist exact accepted inputs, signed bytes,
+  original identities, and liabilities across cancellation and restart; missing
+  results do not prove nothing happened.
+- **Spendability, claims, and refunds:** Blockchain and SDK state own supported
+  Ironwood spendability; unsupported pool holdings grant no spending, shielding,
+  or fallback authority. Each wallet's initial funding claim is consumed by its
+  first positive USDC observation, and low estimates never reopen it or
+  authorize top-ups. Managed funding may replace a bound `REFUNDED` swap only
+  after confirmed receiver observation and source closure under an unused claim
+  (a refund alone grants no replay authority); see the
+  [refund recovery policy](docs/wallet-rotation.md#refunds-state-and-recovery).
+- **Centralized outbound network policy:** All production outbound HTTP and gRPC
+  constructors belong in `src/network.rs`. Preserve identity-bound transports,
+  public-destination enforcement, and Tor remote DNS with no direct fallback.
+  Never add a vendor-specific bypass.
+- **Listener authority and startup:** Listener identity is the authenticated
+  source-management principal; agent or session fields cannot choose owners, and
+  registration never allocates or funds a wallet. Normal serving binds listener
+  sockets before funding. MCP availability follows each endpoint's
+  `wait_for_catalogs` setting (default `true`; see
+  [catalog startup](docs/configuration.md#catalog-loading-and-listener-startup)
+  and the [framework integration contract](docs/framework-integration.md)).
+  Ready endpoints stay usable while managed funding is pending or degraded;
+  catalog failures disable only waiting endpoints that depend on them and did
+  not set `allow_catalog_failure`, emitting `ERROR`. Strict inspection and
+  separately authorized qualification keep their completeness and authority
+  requirements.
+- **State and contract compatibility:** Preserve stable state formats, generated
+  `auto_v1_` pool names, Tor token domains, and `X402_*` environment contracts
+  when renaming files or product labels.
 
-Use independent subagents for design, audits, and review as a normal part of the
-workflow; do not wait for the user to request delegation each time.
+### Simplicity, portability, and timeouts
 
-### Independence and coordination
+- **Simplicity and best-effort execution:** Remove responsibilities before
+  adding counters, certificates, recovery ledgers, or workflow frameworks. Check
+  component and upstream dependency guarantees before adding wrapper enforcement
+  or patches.
+- **Platform portability:** Avoid platform-specific code where possible. When
+  OS-specific behavior is necessary, isolate it behind a small shared
+  abstraction and implement it for both Linux and macOS with equivalent
+  correctness and security contracts (never silent no-ops). Follow the
+  [portability guidance](docs/development.md#portability).
+- **No arbitrary limits or timeouts:** Arbitrary local resource limits and
+  network timeouts are reliability hazards. Before adding or tightening a cap,
+  queue, readiness gate, timer, or failure switch, identify the concrete
+  resource, external contract, or correctness invariant and check existing
+  guards. Generic caution and existing limits are not precedent or proof of
+  necessity.
+- **Distinct timeout contracts:** Let valid work finish while it makes progress.
+  Do not stack whole-work deadlines or replace removed timers with huge
+  durations. Connection establishment, response inactivity, signed expiry, and
+  polling cadence protect separate boundaries; sibling traffic and keepalives
+  cannot renew another response or financial authority.
+- **Low latency and scoped failures:** Avoid preventable agent-call delays and
+  prepare ahead of demand under existing authority where simple (focused
+  correctness, race, and side-effect tests suffice for straightforward
+  improvements; broader benchmarks belong to resource tuning, complex
+  scheduling, or quantitative performance claims). Scope failures to the failing
+  operation: unsigned outages do not consume transaction recovery attempts, and
+  disconnect, cancellation, or cache eviction must not orphan accepted financial
+  work, duplicate active I/O, or report abandonment as success.
 
-Independent reviewers and auditors must not be authors of the work being
-reviewed and start in fresh conversations without inherited history where
-supported by the agent framework. These requirements apply to all design
-reviews, audits and implementation reviews below, including those required by
-the planning workflow.
+### Provider and tool contracts
 
-Give reviewers self-contained briefs with the user intent, scope, baseline,
-preserved invariants, owning guides, reviewed SHAs or snapshot, and validation
-evidence, plus access to relevant repository state, planning documents and Git
-history. Ask them to verify claims, question unnecessary enforcement, and look
-for simpler approaches, not merely confirm the author's approach.
+Follow the [provider policy](providers/README.md#provider-policy),
+[shared maintenance boundaries](docs/provider-updates.md),
+[selection semantics](docs/configuration.md), and
+[test policy](docs/testing.md#provider-regressions).
 
-- Keep review/audit agents read-only by default. Parallelize independent analysis;
-  coordinate delegated edits with explicit file ownership and avoid competing
-  builds or source changes during validation. Do not impose a fixed reviewer count
-  or duplicate identical checks without a concrete reason.
-- The coordinating agent integrates findings and owns completion. If subagent
-  tooling or fresh conversations are unavailable, the coordinating agent must tell
-  the user which requirement could not be met when reporting review results.
-  Perform the available checks, identify their scope and limitations, and do not
-  claim that the required independent review occurred.
+- Reusable providers expose supported functionality and document concrete
+  reasons for compatibility restrictions. Same-path `GET` and `POST` twins
+  default to `POST` before naming; inspect actual method contracts and document
+  opt-outs. Recommendations remain advisory until opt-in.
+- Store provider-specific regression fixtures only for a named quirk, failure,
+  or authored transformation; use small faithful inputs and shared synthetic
+  tests instead of universal inventory or settings snapshots.
+- Keep agent-facing tool descriptions and parameter descriptions concise,
+  consistent, and focused on choosing and calling the API successfully. State
+  purpose, inputs, useful results, and constraints that affect the caller's next
+  action; omit implementation details and boilerplate, and keep maintainer
+  rationale in owning guides. Follow the
+  [tool documentation policy](docs/agent-sources.md#tool-documentation).
+- Review endpoint summaries and discovery search keywords whenever capabilities
+  or routing change, including new tools; follow
+  [endpoint instruction placement](docs/agent-sources.md#endpoint-instruction-placement).
+- Document provider oddities, workarounds, and compatibility exemptions in
+  [provider caveats](providers/CAVEATS.md) as current support boundaries and
+  open uncertainty, without dated probe or sample journals.
 
-### Required reviews
+### Logging, diagnostics, and output limits
 
-- Before substantive implementation, arrange an independent design review.
-  Resolve material design findings before building on the affected decision.
-- For audits, assign distinct concerns that can be investigated independently.
-- Independently review every exact committed SHA and its relevant consumers. The
-  reviewer must not be the author of the change. Identify uncommitted review
-  snapshots by base SHA and exact contents, including new files, and review the
-  resulting exact SHA when committed.
-- Address findings with `git commit --fixup=<introducing-SHA>` and independently
-  review each fixup. Preserve unsquashed history through final integration review
-  and subsequent user review rounds.
-- Before completion and at meaningful architecture gates, independently review
-  the combined implementation, all accumulated commits and fixups, and complete
-  affected call chains. Per-commit approval does not replace this combined review.
-  Scale review to the change; one review may cover both an exact SHA and the final
-  combined state when it examines both scopes.
-- For substantive Rust refactors and architecture gates, complete the CogC/CycC
-  review required by the
-  [complexity review discipline](tests/COMPLEXITY.md#review-discipline). Use
-  complexity hotspots as focus points for simplification review.
-- Resolve material findings and evaluate compelling simplifications before
-  declaring completion.
+- **Wire separation and redaction:** All logs go to stderr; stdout is reserved
+  for the MCP wire or requested CLI JSON. Never persist or log
+  credential-bearing upstream prose. Follow the
+  [logging contract](docs/development.md#logging-and-diagnostics).
+- **Severity policy:** Choose log severity by the owning capability after
+  recovery (see [severity policy](docs/development.md#log-severity)):
+  - `ERROR`: required service or endpoint functionality unavailable with no
+    recovery remaining in the lifecycle.
+  - `WARN`: terminal agent-operation failures or unexpected loss of
+    functionality, including omitted selected catalog tools.
+  - `INFO`: meaningful user-visible lifecycle, progress, delay, or recovery
+    changes.
+  - `DEBUG` and `TRACE`: routine outcomes, individual attempts, expected
+    negative results, and diagnostic detail.
+  Intermediate failures with retry or fallback remaining must not emit `WARN` or
+  `ERROR`.
+- **Plain-language diagnostics:** `INFO` and higher messages must be readable
+  without source code. `WARN` and `ERROR` messages must include enough safe
+  context to identify what failed, its impact, and the known cause or
+  uncertainty (fields and correlation IDs supplement messages, never replace
+  them); see
+  [message clarity and diagnostic detail](docs/development.md#message-clarity-and-diagnostic-detail).
+  Fix logging-policy violations encountered in touched code (including excess
+  `INFO`, unclear messages, and inadequate failure detail), updating owning docs
+  and diagnostic tests. Existing call sites are not precedent; unrelated
+  repo-wide logging cleanups are not required.
+- **Visible rejection and truncation:** Any limit that rejects or truncates
+  content must be visible to the consumer; never present a partial document as
+  complete. Visibility never justifies adding a limit; see
+  [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
 
-### Review method
+## Independent review and planning
 
-- For design reviews, challenge the scope, approach, necessity of checks, and
-  opportunities to remove responsibilities, or otherwise simplify the deisgn.
-  Verify assumptions against the current implementation and relevant pinned
-  dependencies; check that proposed behavior, implementation detail, tests,
-  validation and permanent documentation agree. Verify the applicability of
-  reference checkouts before relying on them. Look for redundant enforcement or
-  responsibilities already owned by components or dependencies for further
-  opportunities to simplify the design.
-- Inspect surrounding consumers, complete affected call chains, failure paths,
-  test coverage and relevant unchanged high-risk code. Examine financial ownership,
-  concurrency, network policy and documentation handoffs where affected. Each audit
-  agent should assess its assigned scope and method and flag gaps.
-- Choose concrete failure scenarios relevant to the affected contracts, such as
-  concurrent agent calls, competing wallet state resolution, cancellation, crash
-  and restart, blockchain reorgs or offline/online transitions. Trace progress,
-  ownership, recovery and forbidden side effects and assess regression coverage.
-  Do not require scenarios unrelated to the change.
-- For implementation reviews, record an initial assessment before consulting the
-  author's rationale and prior findings, then reconcile it with all prior findings
-  and fixups. Supply required contracts and security context, known limitations
-  and validation failures from the outset.
-- For planned work, use the retained plan to check intended scope, implementation,
-  acceptance evidence and documented deviations. Flag missing implemented portions,
-  unsupported completion claims and unexplained departures. Assess correctness
-  independently; agreement with the plan does not establish correctness.
-- Use fixup and prior finding history to investigate recurring causes, repeated
-  assumptions, hazards and testing gaps elsewhere in the affected call chains.
-  Add regression coverage for gaps exposed by fixes and assess whether
+Use independent subagents for design challenge, audits, and implementation
+review as a normal part of engineering work, without waiting for a separate
+delegation request. Scale review to the change.
+
+### Independent subagent review
+
+- **Applies independently of plans:** Run independent review for non-trivial
+  code, financial, network, provider, behavioral, or substantive documentation
+  changes, including standalone fixes and single-commit work that need no plan
+  file. Only trivial edits (small documentation tweaks, typo fixes, and isolated
+  minor edits) skip independent review.
+- **Pre-implementation design review:** Before substantive implementation or
+  architectural changes, have an independent design reviewer challenge scope,
+  approach, and check necessity, verify assumptions against the current
+  implementation and pinned dependencies, confirm proposed behavior, tests,
+  validation, and documentation agree, identify removable responsibilities, and
+  test whether a simpler design suffices. Resolve material findings before
+  building on that decision.
+- **Fresh, non-author isolation:** Every independent review or audit must run in
+  a newly spawned subagent with a fresh conversation and no prior turns or
+  inherited history where supported by the agent framework. Give the subagent
+  the parent's full tool, Git, MCP, and network capabilities (rather than a
+  stripped-down subagent type that blocks Git history or MCP tools), and
+  instruct it in its brief to perform a read-only review without modifying files
+  or repository state. Never reuse the implementation agent or a prior review
+  conversation, and never have a reviewer review any changes they suggest.
+- **Coordinator responsibilities and delegation:** The coordinating agent
+  integrates findings and owns completion. Supply a self-contained brief with
+  user intent, scope, baseline, preserved invariants, owning guides, reviewed
+  commit SHAs or snapshot (including new files), validation evidence, known
+  gaps, and prior findings, with access to the checkout, plans, and Git history.
+  Parallelize independent analysis, coordinate delegated edits with clear file
+  ownership, and avoid fixed reviewer counts or duplicate checks without a
+  concrete reason.
+- **Exact SHAs, fixups, combined reviews, and complexity gates:** Independently
+  review every committed SHA (for uncommitted snapshots, identify base SHA and
+  exact contents and review the resulting SHA once committed). Address findings
+  with `git commit --fixup=<introducing-SHA>`, independently review each fixup,
+  and keep history unsquashed through final combined review and user review
+  rounds. Before completion and at meaningful architecture gates, independently
+  review the combined implementation, all accumulated commits and fixups, and
+  complete affected call chains; per-commit approval never replaces this
+  combined review (one review may cover both an exact SHA and the combined state
+  for small single-commit work when it examines both scopes). For substantive
+  Rust refactors and architecture gates, complete the CogC and CycC review in
+  [complexity review discipline](tests/COMPLEXITY.md#review-discipline) and use
+  hotspots to drive simplification.
+
+### Review method and findings
+
+- **Independent assessment:** Record an initial assessment before consulting the
+  author's rationale or prior findings, then reconcile it with all prior
+  findings and fixups. Trace surrounding consumers, complete call chains,
+  failure paths, unchanged high-risk code (financial ownership, concurrency,
+  network policy, documentation handoffs), and test coverage. Verify upstream
+  and dependency assumptions against pinned code and reference checkouts
+  (checking exact revisions).
+- **Simplification and complexity challenge:** Look for simpler alternate
+  designs, especially ones that rely on existing components, sub-components, or
+  dependency guarantees rather than new state, checks, or wrappers. Flag
+  over-engineering, double enforcement, collapsible behaviors, parallel state,
+  fragile ownership, speculative machinery, or other awkward, overly complex
+  behaviors that can be simplified or removed. Evaluate concrete simplifications
+  against the contracts they must preserve without expanding into speculative
+  redesign.
+- **Concrete failure scenarios and audits:** Assign distinct audit questions and
+  have each auditor flag scope or method gaps. Exercise failure scenarios tied
+  to the changed contracts (such as concurrent agent calls, competing wallet
+  state resolution, cancellation, crash and restart, blockchain reorgs, or
+  offline and online transitions), tracing progress, ownership, recovery,
+  forbidden side effects, and regression coverage without demanding unrelated
+  scenarios.
+- **Pattern-sweep prior findings across the branch:** When fixups or multiple
+  commits accumulate, each subsequent review pass and the final combined review
+  must trace **all prior findings and fixups** through surrounding code for
+  recurring causes, shared invalid assumptions, overly complex or fragile design
+  patterns that can be simplified or removed, and coverage gaps elsewhere in the
+  branch. Add regression coverage for gaps exposed by fixes, and assess whether
   recurring patterns require a wider audit, simplification, or design change.
-- A compelling simplification removes demonstrated fragility, redundant enforcement
-  or unnecessary state and responsibilities while preserving required contracts.
-  Investigate actual dependency contracts and recurring causes where relevant,
-  rather than expanding into speculative redesign.
-- Report concrete findings and evidence, the examined areas where no issue was
-  found, and review limits. Focused checks do not establish repository-wide assurance.
+- **Documentation review:** Review substantive documentation changes (standalone
+  or paired with code) for [writing style](#writing-style) compliance, factual
+  accuracy against the implementation and pinned dependencies, and preservation
+  of current operational procedures, error conditions, security and financial
+  boundaries, and qualification limits. Check structure, complexity, scope,
+  single ownership, valid local links and anchors, and audience fit
+  (human-facing `README.md`, `README_ADVANCED.md`, and `docs/usage/*` vs.
+  reference guides and tool descriptions).
+- **Verification discipline:** Reviewers verify from the snapshot, source
+  inspection, and recorded evidence; they must not re-run already-run Cargo
+  builds or test suites unless explicitly asked or to confirm a suspected
+  finding with the smallest focused check needed (stating what was not re-run).
+- **Resolving findings and honest reporting:** For planned work, check the plan
+  for intended scope, acceptance evidence, documented deviations, missing
+  portions, unsupported completion claims, and unexplained departures; agreement
+  with the plan does not establish correctness. Treat reviewer suggestions as
+  proposals rather than automatic scope expansion. Fix material defects before
+  dependent work and before declaring completion, evaluate compelling
+  simplifications on merit, explain rejected or deferred items, and re-review
+  when fixes invalidate earlier evidence. Report concrete findings, examined
+  areas with no issues, and review limits (focused checks do not establish
+  repository-wide assurance). If subagent tooling or fresh conversations are
+  unavailable, state which requirement could not be met, perform the available
+  checks with their scope and limits, and never claim independent review
+  occurred.
 
-### Implementation plan structure
+### Planning
 
-Use a plan when requested or when staged work needs explicit decisions, commit
-boundaries and review gates. Small changes can use the independent review
-workflow above without requiring a plan file, a separate review record, or
-architecture gates.
+- Use a committed plan under `docs/plans/` only when the user requests one, when
+  continuing an existing plan, or when staged work genuinely spans multiple
+  dependent phases with distinct design decisions, commit boundaries, and review
+  gates. Small changes use the independent review workflow above without a plan
+  file or extra architecture gates.
+- Before creating, revising, executing, or completing a plan, follow
+  [docs/planning-workflow.md](docs/planning-workflow.md). It owns plan
+  structure, review evidence, handoffs, and removing completed plans from the
+  working tree (Git history preserves them).
 
-Before creating or revising an implementation plan, executing planned work or
-removing a completed plan, read and follow the
-[planning workflow](docs/planning-workflow.md). It owns plan structure, review
-evidence, handoffs and completion. Commit and evolve active plans; remove completed
-plans from the current tree while preserving them in Git history. Small changes
-still use the independent review requirements above without requiring a plan or
-redundant review stages.
+## Validation and authority
 
-## Read the relevant guide before editing
+### Checks and test environment
 
-Load the documents for the area being changed; the detailed contracts and defaults
-belong there rather than in another copy of this file. The [documentation index](docs/README.md)
-links other maintained guides.
+Run Rust builds and checks from the repository root via the
+[Makefile entrypoints](scripts/README.md) so pinned Cargo and Cargo-managed
+`protoc` are used. Zcash is always compiled in; static-wallet deployments simply
+omit treasury configuration. Python is development tooling only, never a runtime
+dependency.
 
-| Change area | Read first | Main implementation / tests |
+| Make command | When to run | Scope and limits |
 | --- | --- | --- |
-| Resource limits, cache lifetimes, readiness gates or polling | [Local resource limits](docs/local-resource-limits.md), [timer inventory](docs/network-egress.md#remaining-timers-and-budgets), [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy) | `src/limits.rs`, owning module |
-| Payments, selection, funding or recovery | [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy), relevant sections of [wallet ownership](docs/wallet-rotation.md), [selection/isolation design](docs/architecture.md#wallet-selection-and-network-isolation) | `src/payment.rs`, `src/rotation/`, `src/treasury/`; `tests/LIFECYCLE.md` |
-| Direct swap control | [Direct swaps](docs/configuration.md#direct-swap-control), [receive ownership](docs/wallet-rotation.md#direct-receive-ownership), [send ownership](docs/wallet-rotation.md#direct-send-ownership), [Ironwood policy](docs/zingo-integration.md#ironwood-only-policy), [SDK receivers](docs/zingo-integration.md#refund-receivers-and-seed-recovery), [network policy](docs/network-egress.md) | `src/direct_swap/`, `src/rotation/store/direct_swap.rs`, `src/treasury/`, `src/server.rs` |
-| Wallet CLI, initialization, keys or state conversion | [Wallet administration](docs/wallet-cli.md), [configuration](docs/configuration.md) | `src/wallet_cli/`, `src/cli.rs` |
-| Network clients, HTTP/gRPC timeouts or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
-| Deployment startup, catalog publication or shutdown | [Runtime architecture](docs/architecture.md), [configuration](docs/configuration.md), [startup tests](tests/STARTUP.md) | `src/deployment/`, `src/server/`, `src/catalog_state.rs` |
-| Dynamic sources, bundled providers, directory tools, endpoint instructions or raw calls | [Agent source management](docs/agent-sources.md), [manual raw headers](docs/agent-sources.md#manual-raw-headers), [bundled provider metadata](providers/README.md#bundled-provider-metadata), [provider-management permissions](docs/agent-sources.md#configuration-and-authority), [registration and published-source contracts](docs/agent-sources.md#registration-and-tool-invocation), [local and remote directory matching](docs/agent-sources.md#external-directory-matching), [tool search matching](docs/agent-sources.md#tool-search-matching-and-results), [remote provider details and URL discovery](docs/agent-sources.md#listing-and-url-discovery), [endpoint instruction placement](docs/agent-sources.md#endpoint-instruction-placement) | `src/discovery/`, `src/providers.rs`, `src/catalog_state.rs` |
-| Deployment source distribution and effective bindings | [Source tool distribution](docs/configuration.md#source-tool-distribution), [catalog and runtime handoff](docs/architecture.md#catalog-configuration-and-execution), [endpoint-local authority](docs/agent-sources.md#configuration-and-authority) | `src/deployment/routing.rs`, `src/deployment/`, `src/rotation/assignment.rs` |
-| Provider TOML, OpenAPI schemas, pricing, caching or relay | [Provider maintenance](docs/provider-updates.md), [Configuration](docs/configuration.md), [header and idempotency contracts](docs/configuration.md#openapi-header-parameters-and-idempotency), [catalog architecture](docs/architecture.md#catalog-configuration-and-execution), [provider policy](providers/README.md#provider-policy), [provider caveats](providers/CAVEATS.md), [provider regressions](docs/testing.md#provider-regressions) | `src/catalog.rs`, `src/config.rs`, `src/pricing/`, `src/http_cache.rs`, `src/discovery_relay.rs`; focused provider regressions |
-| MCP images, binary output or truncation | [Output boundaries](docs/architecture.md#mcp-and-output-boundaries), [download/display limits](docs/configuration.md#download-and-display-limits) | `src/output.rs`, `src/server.rs`, `tests/media.rs` |
-| Optional cover traffic | [Cover policy](docs/cover-traffic.md) | `src/cover/` |
-| Live integration, financial evidence or qualification reports | [Runbook](tests/live/INTEGRATION.md), [technical reference](tests/live/INTEGRATION_REFERENCE.md), [qualification status](docs/testing.md#qualification-status) | `tests/live/runner/driver.rs`, `tests/integration_preparation.rs` |
-| Builds, dependencies, test infrastructure or release tooling | [Development](docs/development.md), [testing](docs/testing.md), [scripts](scripts/README.md), relevant [vendor provenance](vendor/README.md) / [Zingo integration](docs/zingo-integration.md) | `scripts/`, `tools/`, `vendor/`; [reproducible builds](docs/reproducible-builds.md) |
+| `make build` or `make build-dev` | Release build (`CARGO_INCREMENTAL=0`) or incremental dev build | Verifies compilation against pinned toolchain and locked dependencies. |
+| `make test` | Targeted (`CARGO_ARGS=...`, `TEST_ARGS=...`) or full test runs | Runs Cargo tests through `scripts/test-runner.sh`. Check that filtered runs actually execute tests. |
+| `make clippy` | Quick all-target Clippy lint check (`--all-targets -- -D warnings`) | Does not run `zcash-regtest` or cover dependency warnings. |
+| `make check-clippy` | Production compiler and all-target `zcash-regtest` warning gate | Pipes builds through `scripts/check_warnings.py`, catching emitted dependency and cached warnings. |
+| `make fmt-check` | Formatting check | Verifies `cargo fmt --check`. |
+| `make check` | Full application qualification | Runs the ordered `check-*` stages (`check-default-remaining` after `check-compat`), including the synthetic-chain treasury lifecycle. |
+| `make toolchain` | Before plain Homebrew Cargo commands | Verifies the pinned Rust toolchain from `rust-toolchain.toml`. |
 
-When changing policy, update its owning guide and affected references. Resource
-policy changes must keep both inventories current. Do not infer a runtime deadline,
-external settlement contract or live qualification from a fixture timeout.
+- **Documentation-only edits:** Verify local links, heading anchors, and
+  `git diff --check` without running Cargo suites.
+- **Select checks by changed behavior:** Follow
+  [selecting validation by change](docs/testing.md#selecting-validation-by-change);
+  do not apply full compiler, provenance, or reproducibility qualification to
+  every edit. Explicitly requested full checks and named stages keep their fixed
+  selections.
+- **Efficiency, ordering, and continuation:** Follow
+  [testing efficiency](docs/testing.md#testing-efficiency) (reuse valid
+  evidence, avoid matrices, consolidate expensive setup, and prefer functional
+  assertions and deterministic synchronization) and
+  [validation order and continuation](docs/testing.md#validation-order-and-continuation).
+  Complete design and complexity review, compiler and Clippy stages,
+  compatibility stages (`check-compat`), and cheap contract tests before broad
+  runtime suites. After a localized fix, revalidate affected consumers, repeat
+  passed stages whose evidence is invalidated, resume unfinished `check-*`
+  stages, and record the scope and results carried forward.
+- **Compiler diagnostics:** Follow
+  [compiler diagnostics and review](docs/testing.md#compiler-diagnostics-and-review):
+  when selected, run the production compiler and all-target Clippy warning gate
+  (`make check-clippy`) and inspect diagnostics alongside exit status. Remember
+  that selected-target `-D warnings` does not cover dependency warnings, and
+  vendoring can expose previously suppressed upstream diagnostics.
+- **Build coordination and sandbox permissions:** Coordinate editor-triggered
+  Cargo checks and separate builds before validation (`Make` serialization does
+  not cover external processes), and keep source, executable, feature, and
+  profile evidence consistent with `docs/testing.md`. Keep socket-free tests in
+  the normal sandbox; when localhost sockets are blocked, request socket-capable
+  execution up front for socket fixtures and full suites instead of running once
+  to provoke a permission failure (see
+  [test sandbox guidance](docs/testing.md#sandbox-permissions)).
+- **Opt-in features and test rigor:** Only `zcash-testutils` and `zcash-regtest`
+  are opt-in test features; run feature configurations sequentially because CLI
+  tests share an executable path (`target/debug/x402_treazury`), and keep
+  sources and executables frozen during validation. Verify changed financial
+  tests are wired in and actually run (a filtered command can pass with zero
+  tests), assert forbidden side effects stay absent, and cover slow progress vs.
+  true stalls, cancellation and restart, and unrelated concurrent progress when
+  changing failure policy. Never loosen contracts, change toolchain or profile
+  pins, weaken the reproducible-build sandbox, or trim documentation to make
+  tests pass. Patch dependencies only in reviewed `vendor/` sources, never Cargo
+  caches or reference checkouts.
+- **Fixture limits:** Tests use temporary state, unfunded deterministic keys,
+  and localhost fixtures. Consensus tests require Docker and an explicit
+  ignored-test invocation. Offline fixtures never qualify live settlement or
+  Tor.
 
-For dependency patches, follow [checkout retirement tracking](vendor/README.md#checkout-retirement-tracking).
-Prioritize complete checkout removal; assess every remaining blocker and preserve
-required behavior, regression coverage and provenance before counting a retirement.
+### Authority limits
 
-## Commands and test exceptions
+- **Vendoring and forking:** Obtain informed user approval before adding a
+  maintained dependency checkout or fork. General upgrade or audit-cleanup
+  authority is not approval to vendor; present actual exposure, mitigations,
+  alternatives, and maintenance costs, then wait before implementation. Follow
+  the [dependency policy](docs/development.md#dependency-vendoring).
+- **Live funds and secrets:** Never load real wallet secrets in tests or inspect
+  or print secret values unnecessarily. Live-funded qualification requires
+  separate operator authorization.
+- **Git remote and destructive actions:** Local commits do not authorize
+  pushing, merging, publishing, rewriting history, or destructive changes to
+  private state without user instructions. Plan or review recommendations alone
+  grant none of these actions.
 
-Run commands from the repository root. Zcash is unconditional in the application
-build; static wallet deployments simply omit treasury configuration. Use the
-[Makefile entrypoints](scripts/README.md) for pinned Cargo and Cargo-managed protoc. `make build` defaults to release without incremental caches;
-`make build-dev` opts into an incremental development build.
+## Git and workspace care
 
-```sh
-make build
-make test
-make clippy
-make fmt-check
-```
+- **Private and local files:** Keep `.env`, `state/`, `secrets/`, local example
+  overrides, and reference checkouts untracked. Preserve unrelated tracked,
+  untracked, and ignored user files; leave unexpected edits in unrelated files
+  untouched and ask the user if they collide with your task. Do not routinely
+  delete `target/`: it can hold private qualification evidence and pinned
+  executables as well as build caches.
+- **Commits and staging:** Stage only named intended files; never use
+  `git add .` or `git add -A`. Follow
+  [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for
+  subjects and wrap prose in subjects and bodies to 80 columns (long URLs,
+  paths, or hashes do not need artificial line breaks). For changes that fix a
+  substantial bug or limitation, use two body paragraphs: describe the prior
+  problem in past tense, then describe the fix in present tense (see
+  [Writing style](#writing-style)). Follow the `--fixup` and unsquashed-history
+  policy in [Independent subagent review](#independent-subagent-review) for
+  review findings on branch commits.
+- **Handoff:** Report what changed, the validation and reviews performed (with
+  omissions and limits), the committed revision or remaining uncommitted work,
+  and material next steps.
 
-- Select checks by [affected behavior](docs/testing.md#selecting-validation-by-change);
-  do not apply full compiler, provenance or reproducibility qualification to every edit.
-  Explicitly requested full checks and named stages retain their fixed selections.
-- Follow [testing efficiency](docs/testing.md#testing-efficiency): avoid validation
-  matrices, reuse valid evidence, consolidate expensive setup and prefer functional
-  assertions and deterministic synchronization.
-- Follow [validation order and continuation](docs/testing.md#validation-order-and-continuation):
-  complete applicable design/complexity review and selected compiler/Clippy and
-  compatibility stages before broad runtime suites; run affected cheap contract
-  tests first. After a localized fix, revalidate affected consumers and resume
-  unfinished named `check-*` stages. Repeat passed stages only when their evidence
-  is invalidated, and record the scope and results carried forward. `make check`
-  remains the full application check, including the synthetic-chain treasury lifecycle.
-- Follow [compiler diagnostics and review](docs/testing.md#compiler-diagnostics-and-review):
-  when selected, run the production compiler and all-target Clippy warning gate;
-  inspect diagnostics alongside exit status. Selected-target `-D warnings` does not cover dependency
-  warnings, and vendoring can expose previously suppressed upstream diagnostics.
-- Coordinate editor-triggered Cargo checks and separate builds before validation;
-  Make's serialization does not cover other processes. Keep source, executable,
-  feature and profile evidence consistent with the testing guide.
-- Choose sandbox permissions before running tests. Keep socket-free tests in the
-  ordinary sandbox. When localhost sockets are known to be blocked, request
-  socket-capable execution through the runner up front for socket fixtures and
-  full suites; do not deliberately run them once to obtain a permission failure.
-  Follow the [test sandbox guidance](docs/testing.md#sandbox-permissions).
-- Only `zcash-testutils` and `zcash-regtest` are opt-in test features. Run requested
-  feature configurations sequentially: CLI tests share an executable path. Keep
-  sources/executables frozen during their validation.
-- Tests use temporary state, public unfunded deterministic keys and localhost
-  fixtures. Never load real wallet secrets. Live-funded qualification requires
-  separate operator authorization; consensus tests require Docker and an explicit
-  ignored-test invocation. Offline fixtures do not qualify live settlement or Tor.
-- Verify changed financial tests are actually wired into their modules and execute;
-  a filtered command can pass with zero tests. Assert forbidden side effects stay
-  absent. Cover slow progress versus true stalls, cancellation/restart and unrelated
-  concurrent progress when changing failure policy. Do not loosen contracts or trim
-  documentation to make tests pass.
-- Run `make toolchain` before plain Homebrew Cargo commands. Do not
-  change toolchain/profile pins or weaken the reproducible-build sandbox to pass a
-  check. Patch dependencies in reviewed `vendor/` sources, never Cargo caches or
-  reference checkouts. Python is development tooling, never a runtime dependency.
+## Documentation and writing style
 
-## Local files, logs and documentation
+### Maintain current documentation
 
-- `README.md`, `README_ADVANCED.md` and `docs/usage/*` are human-facing operator
-  documents and **must** stay readable without implementation context. Keep them
-  task-oriented and free of misplaced text, long paragraphs, unexplained jargon or
-  shorthand, deep technical descriptions, internal identifiers, agent-directed
-  instructions and developer test or probe narratives. Use short paragraphs, clear
-  headings and tables; move exact contracts, edge cases and implementation detail
-  to their owning reference guide and link to it.
-- Every human-facing section **must** serve one purpose. Do not place unrelated
-  reference material under a heading because it was nearby, and do not duplicate a
-  full reference contract in a usage guide. Human documents explain what an operator
-  chooses, why it matters and what to do next; reference documents preserve exact
-  behavior.
-- Keep tool requirements, usage rules and recovery directives in tool descriptions
-  and agent-facing reference sections. Human guides describe those rules; they do
-  not instruct the operator to satisfy them manually or write prompts to compensate.
-- Keep `.env`, `state/`, `secrets/`, local example overrides and reference checkouts
-  untracked.
-- Preserve unrelated user files and local changes, whether tracked, untracked or
-  ignored.
-- Do not inspect or print secret values unnecessarily.
-- Do not routinely delete `target/`: it may hold private qualification evidence and
-  pinned executables as well as disposable build caches.
-- All logs go to stderr; stdout is the MCP wire or requested CLI JSON. Never persist
-  or log credential-bearing upstream prose. Follow the [logging contract](docs/development.md#logging-and-diagnostics)
-  when changing diagnostics.
-- Choose log severity by the owning capability or operation after applicable
-  recovery: ERROR for required service/endpoint functionality unavailable with no
-  recovery remaining in the current lifecycle; WARN for terminal agent-operation
-  failures or unexpected loss of functionality, including omitted selected catalog
-  tools; INFO for meaningful user-visible lifecycle, progress, delay or recovery
-  changes; DEBUG/TRACE for routine outcomes, individual attempts and diagnostic
-  detail. Intermediate failures with retry or fallback remaining must not emit
-  WARN/ERROR. Expected negative results and routine successes normally belong at
-  DEBUG/TRACE. Follow the [severity policy](docs/development.md#log-severity)
-  for scope and examples.
-- INFO and higher need plain-language message strings a user can understand
-  without reading source code. WARN/ERROR also need enough safe diagnostic context
-  to identify what failed, its impact and the known cause or uncertainty. Follow
-  [message clarity and diagnostic detail](docs/development.md#message-clarity-and-diagnostic-detail);
-  fields and correlation IDs supplement meaningful messages, never replace them.
-- Correct logging-policy violations encountered during development, including
-  excess INFO, unclear messages and inadequate failure detail, and update their
-  owning documentation and affected diagnostic tests.
-  Existing call sites are not precedent; a repository-wide logging cleanup is not
-  required for unrelated work.
-- Limits that reject or truncate content must be visible to the affected consumer;
-  never present a partial document as complete. Visibility requirements do not
-  justify adding a limit; see [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
-- Maintain current rules in place. Keep detailed contracts in their owning guides,
-  not appended migration notes or duplicate checklists.
-- Maintained guides, example/deployment READMEs and provider caveat files state
-  current behavior, current support boundaries and durable limitations. Do not add
-  change logs, dated test journals, probe or sample narratives, "what was true
-  before" history, or "initially/later/retested" discovery sequences. Git history
-  and private `target/` reports carry chronology. Plans may record the evidence
-  and decisions needed for unfinished work; they are not journals or archives of
-  completed history.
-  Runtime sequencing such as "first use activates X; a later replacement" remains
-  valid, as do dates that are part of a fact, including data-as-of dates, legal
-  dates, version or commit pins and captured-evidence identifiers.
-- Provider caveats state each provider's current support boundary and explicit
-  uncertainty, not the sequence of probes that discovered it. Shared contracts may
-  use cross-provider sections. Keep deployment-specific selections, exclusions and
-  curated alternatives in the example guide; a selection note may briefly justify
-  a choice and link to the owning provider caveat, but must not restate the full
-  provider contract in both locations.
-- Follow the [documentation policy](docs/README.md): generated metrics/reports go
-  under ignored `target/` or private external storage, and completed plans yield
-  maintained guidance plus focused unfinished work. Do not add implemented-plan
-  archives or dated handoffs.
-- Documentation/Git cleanup never erases financial evidence or grants replay
-  authority. Move qualification evidence to its owning private report before
-  removing narrative detail from maintained documentation.
-- Preserve stable state formats, generated `auto_v1_` pool names, Tor token domains
-  and `X402_*` environment contracts when renaming files or product labels.
+- **Human-facing vs. reference guides:** `README.md`, `README_ADVANCED.md`, and
+  `docs/usage/*` are human-facing operator documents and must stay readable
+  without implementation context. Keep them task-oriented, short-paragraphed,
+  and free of misplaced reference detail, unexplained jargon, internal
+  identifiers, agent-directed instructions, and test or probe narratives. Every
+  human-facing section serves one purpose: explain what an operator chooses, why
+  it matters, and what to do next, and link to the owning reference guide for
+  exact contracts and edge cases.
+- **Tool rules placement:** Keep tool requirements, usage rules, and recovery
+  directives in tool descriptions and agent-facing reference sections. Human
+  guides describe those rules; they do not instruct the operator to satisfy them
+  manually or write prompts to compensate.
+- **Single ownership and in-place updates:** Maintained guides, example and
+  deployment READMEs, and provider caveat files describe current behavior,
+  support boundaries, and durable limits. Update the owning section in place and
+  remove superseded claims. Place each rule, caveat, and detail once in its
+  owning section, integrated into the surrounding structure, and link from
+  elsewhere (a brief safety reminder linking to the owning section is fine at
+  the point of action). Do not bolt unrelated caveats onto the end of a nearby
+  paragraph, and keep test notes in verification sections rather than operator
+  setup sections.
+- **No journals or archives:** Keep changelogs, dated test journals, probe or
+  sample narratives, "what was true before" histories, "initially", "later", and
+  "retested" sequences, and retired plan phase or gate codes out of permanent
+  docs. Git history and ignored `target/` or private external storage carry
+  chronology and generated metrics or reports; active plans carry unfinished
+  decisions and evidence, and completed plans yield maintained guidance plus
+  focused unfinished work. Do not create implemented-plan archives or dated
+  handoff docs. Runtime sequencing (such as "first use activates X; a later
+  replacement...") and factual dates (data-as-of dates, legal dates, version or
+  commit pins, and captured-evidence identifiers) remain valid where they
+  explain a current fact.
+- **Provider caveats and examples:** `providers/CAVEATS.md` states each
+  provider's current support boundary and open uncertainty, not the probes that
+  discovered it; shared contracts may use cross-provider sections. Keep
+  deployment-specific selections, exclusions, and curated alternatives in the
+  example guide with a brief justification linking to the owning caveat rather
+  than restating the full contract in both places.
+- **Financial evidence during cleanup:** Follow the
+  [documentation policy](docs/README.md). Documentation or Git cleanup never
+  erases financial evidence or grants replay authority: move qualification
+  evidence to its owning private report before removing narrative detail from
+  maintained docs.
+- **Revising documentation:** Preserve current procedures, recovery steps,
+  error conditions, security and financial boundaries, and qualification limits
+  while removing superseded or redundant detail. Verify factual claims against
+  the implementation and pinned dependencies, and cross-check and update all
+  inbound links when renaming, moving, or removing headings.
+
+### Writing style
+
+These rules apply to all prose: documentation, plans, commit messages, PR and
+issue drafts, code comments, and handoff notes.
+
+- Write directly in plain English for human readers, and be concrete at the
+  reader's level of detail. State the behavior, setting, command, or failure
+  mode directly rather than using vague shorthand or invented jargon (for
+  example, "the affected operation", "captured policy eligibility", or
+  "historical completion authority"). Use file paths, function names, and
+  implementation details in commit bodies, code comments, and maintainer docs
+  where they clarify the change, without turning prose into pseudocode.
+- State what a feature does rather than piling up defensive negative disclaimers
+  about what it does not do or does not prove. Only use caveats that prevent a
+  real misunderstanding or safety mistake.
+- Keep internal process terms (qualification runs, replay branches, cleanup
+  passes, or plan phases) out of user-facing docs, commit messages, and
+  upstream PR and issue drafts.
+- Omit filler qualifiers such as "selected", "ordinary", "applicable",
+  "configured", "disposable", "harmless", "affected", "actual", "native",
+  "existing", "matching", "deliberate", "explicit", "saved", "current", or
+  "relevant" unless the adjective distinguishes two real cases in context.
+- Do not stack nouns or modifiers into dense noun-chains (such as "managed
+  wallet funding recovery qualification check" or "deferred catalog startup
+  policy enforcement"); break them into clear subject-verb clauses.
+- Do not pack multiple concepts into slash-joined compounds (such as
+  "balance/quote/swap/claim reconciliation", "policy/credential/storage
+  validation", or "refund/retry", "source/listener", "outage/recovery"). Spell
+  out separate items with commas and conjunctions, or split them into bullets.
+  Reserve slashes for file paths, URLs, `owner/repo` names, and standard
+  protocol or identifier forms such as `HTTP(S)`, `UID/GID`, or `IPv4/IPv6`.
+- Keep paragraphs short (generally 1-4 sentences, one idea per paragraph). Break
+  multi-part details, options, and edge cases into headings, tables, or
+  bulleted lists with clear lead-ins rather than dense walls of text.
+- Always use the Oxford (serial) comma (`a, b, and c`).
+- Use plain ASCII punctuation and symbols instead of Unicode special characters.
+  Avoid curly quotes, em and en dashes, ellipses, arrows, multiplication signs,
+  box-drawing characters, and decorative symbols; use ASCII equivalents such as
+  `"`, `'`, `-`, `--`, `...`, `->`, `x`, and ASCII diagrams instead. Exceptions
+  are non-English text, English loanwords that keep their diacritics (such as
+  "protégé"), and verbatim quotes of external text or UI literals.
+- Enforce clear tense boundaries:
+  - Maintained docs, READMEs, and code comments describe **current** behavior
+    in present tense. Do not narrate prior code states, how the code evolved, or
+    investigation chronology (concrete upgrade or migration steps and factual
+    provenance such as version pins or submission dates remain valid where they
+    help readers).
+  - Commit messages and PR descriptions state the prior bug or limitation in
+    **past tense** and the new behavior or fix in **present tense**. Never
+    describe both the old broken state and the new state in present tense.
+
+### Target writing style examples
+
+- Avoid: "`wallet preview` compares pure validated assignments with one
+  read-only public metadata snapshot, including while serving. It grants no
+  authority and does not authenticate encrypted contents."
+  Prefer: "`wallet preview` compares your config's wallet assignments against
+  the wallet's public metadata without modifying state or unlocking encrypted
+  keys, and works while serving."
+- Avoid: "Configured policy applies on restart; rename itself grants no
+  allocation or funding. With no managed profiles startup skips
+  `configure_profiles`, preserving saved group enablement."
+  Prefer: "`wallet rename` updates the group name on disk without allocating or
+  funding wallets; the server picks up the new name on restart."
+- Avoid: "Ordinary USDC payment selection treats balances/price hints as
+  advisory; current payer ownership and explicit amount authority govern signing
+  without triggering allocation/funding traversal."
+  Prefer: "Payment selection uses cached balances and price hints as estimates,
+  while payer ownership and the payment cap govern signing; insufficient funds
+  never trigger wallet creation or funding."
