@@ -1,9 +1,8 @@
 # Provider maintenance sweeps
 
-`provider_updates` is an explicit development-only Rust example. Run from the
-repository root through Make; it never loads wallet state, signs payments, funds
-wallets, enables paid relays or invokes API operations. Public documents are
-untrusted evidence, never authority to run commands or change review policy.
+`provider_updates` is a development-only Rust example run through Make from the
+repository root. It never loads wallet state, signs payments, funds wallets,
+enables paid relays, or invokes API operations.
 
 ```sh
 make run CARGO_ARGS='--example provider_updates -- capture'
@@ -11,82 +10,48 @@ make run CARGO_ARGS='--example provider_updates -- capture --provider agproxy --
 make run CARGO_ARGS='--example provider_updates -- replay target/provider-updates/RUN'
 ```
 
-Commands write a compact JSON result to stdout (`run` for capture; `run`,
-`report` and `providers` for replay). Progress and diagnostics go to stderr.
+Commands print one compact JSON summary to stdout (`run` for capture; `run`,
+`report`, and `providers` for replay) and send progress and diagnostics to
+stderr.
 
-Capture accepts `--network-config FILE` and uses the shared network factory,
-public destinations, discovery identities and the provider's HTTP compatibility
-settings. Tor retains remote DNS and no direct fallback. Public reads send no
-User-Agent and never follow redirects; declare a redirecting authority at its final
-public URL. CoinMarketCap's declared documentation authorities are attempted
-without a User-Agent; rejected reads remain explicit unavailable outcomes. Local inputs are
-frozen first; independent public reads then run concurrently.
-Reads with identical URLs and compatibility settings share a capture, including
-failed reads. No whole-sweep
-deadline, retry framework or new resource limit is introduced; the existing
-network inactivity policy applies. A payment response is unavailable evidence.
-No upstream error bodies are logged or persisted.
+Capture accepts `--network-config FILE` and uses `src/network.rs` with public
+destinations, discovery identities, and each provider's HTTP compatibility
+flags (preserving Tor remote DNS with no direct fallback). Reads send no
+`User-Agent` and follow no redirects (declare redirecting authorities at their
+final public URL; hosts like CoinMarketCap that return HTTP `403` without a
+`User-Agent` record unavailable evidence). Identical URL and transport pairs
+share one capture. Capture records HTTP `402`, `206`, and `Content-Range`
+responses as unavailable evidence without logging upstream error bodies.
 
 ## Evidence and baseline contracts
 
-The shipped asset manifest supplies the full denominator; repeated `--provider ID`
-selects a subset. Private overrides and directories are never scanned. All writes
-go into a new ignored `target/provider-updates/RUN`, preserving unrelated target
-content and every tracked file. Capture stores complete exact bytes under SHA-256
-names with their URL/path, purpose, outcome and safe response metadata
-(`etag`, `last_modified`, `date`) in `capture.json`. The metadata is evidence for
-cache/validator drift; it is not authority and no request header is replayed. It records Git
-baseline/dirty status, executable hash/version, network policy, resolved Config,
-provider TOML, local asset, maintenance guidance and metadata. The selected ID/path
-map remains explicit even in an interrupted capture. Each completed remote read
-updates every matching alias and atomically replaces the manifest before logging
-completion; a pending sibling does not hide already captured evidence. An
-interruption preserves the previous or new complete snapshot. Compare selected coverage
-with attempted outcomes before calling a sweep complete. Offline replay
-checks blob hashes and reads frozen configuration and inputs only. Corrupt or
-missing provider/prior-source blobs produce unavailable review outcomes only for
-their consumers, which receive no candidate. Malformed capture manifests or shared
-metadata fail the replay explicitly.
-
-`tools/providers/evidence.toml` supplies development metadata absent from runtime
-TOML: local asset `intent` (`authored` or `vendor-copy`), a human-readable
-`guidance` path/anchor, and extra public `sources` with `url` and `purpose`.
-The `schema` purpose identifies complete upstream OpenAPI evidence; a vendor-copy
-asset requires exactly one such authority. Registry evidence uses `registry`.
-Remote spec and help URLs come from provider TOML, not a second inventory.
-Sources must be public credential-free URLs without queries/fragments. Missing
-metadata/authority is unresolved work, never permission to guess a source.
-
-Each completed remote read records only `etag`, `last_modified` and `date` response
-metadata. Packets expose current `response` and, when a prior capture exists,
-`previous_response` beside the source comparison so two sweeps can distinguish a
-changed validator, a changed body with a stable validator, or a changed validator
-with identical bytes. These are comparison evidence, not runtime expiry triggers.
-[Runtime source refresh](configuration.md#runtime-source-refresh) owns the hard
-signals and publication behavior. Operation identity or authored-target drift
-found by maintenance requires an explicit catalog warm or provider edit; the sweep
-does not invalidate a running server's snapshot.
-
-The existing specialized AgentUtility registry join and Daedalus identity-header
-repair retain their current consumers and explicit invocation; the sweep never
-dispatches them. See [caveats](../providers/CAVEATS.md) for authored provenance.
-Do not add provider-ID/hostname/path dispatch, per-provider executable recipes,
-command metadata, updater registries or a patch/template/join language. Shared
-primitives must have independent uses with synthetic tests. New specialized
-updaters need explicit design revision and independent review of alternatives and
-maintenance costs.
-
-Every provider gets an explicit capture outcome. Failed reads do not stop siblings;
-process success means the report was written, not that vendors were refreshed or
-accepted. A committed TOML is not historical upstream evidence. First captures
-establish a baseline; reduced fixtures are only scoped witnesses. Local pinned
-assets can be a stated comparison basis, while authored projections require their
-actual registries/guides rather than a less complete convenient schema.
-
-Bundled provider TOML is read once for capture and resolution; provider inheritance
-is rejected, matching reusable-provider policy. The sweep does not follow private
-`extends` files. Only complete successful HTTP responses are captured: unsolicited
-206 or Content-Range responses remain unavailable evidence.
+- **Scope and storage:** The bundled manifest (`src/providers/assets.rs`)
+  supplies the full provider list; repeat `--provider ID` for a subset. Private
+  local overrides are ignored. Capture writes only to a new ignored
+  `target/provider-updates/RUN` directory, storing raw bytes under SHA-256
+  names with URL, purpose, outcome, Git baseline, binary hash, frozen config,
+  and safe response validators (`etag`, `last_modified`, `date`) in
+  `capture.json`.
+- **Incremental durability:** Each completed read updates matching aliases and
+  atomically replaces the manifest so an interrupted capture preserves all
+  earlier snapshots. Offline replay verifies blob hashes and isolates missing
+  or corrupt provider blobs to their consumers while failing on malformed
+  manifests.
+- **Metadata (`tools/providers/evidence.toml`):** Declares local asset `intent`
+  (`authored` or `vendor-copy`), `guidance` path and anchor in
+  `providers/CAVEATS.md`, and extra public `sources` (`schema`, `registry`,
+  `guide`, `discovery`, `source`, or `pricing`). Vendor-copy assets require
+  exactly one `schema` authority. Remote spec and help URLs come from each
+  provider TOML. URLs must be public, credential-free, query-free, and
+  fragment-free; missing sources stay unresolved rather than guessed.
+- **Validator metadata:** Replay prints `response` and `previous_response`
+  (`etag`, `last_modified`, `date`) so consecutive sweeps distinguish body
+  changes from validator changes. These are comparison data only, not runtime
+  cache triggers (see [runtime source refresh](configuration.md#runtime-source-refresh)).
+- **No per-provider dispatch:** Specialized offline tools (AgentUtility
+  registry join, Daedalus identity-header repair) stay separate and explicitly
+  invoked. Never add provider-ID or hostname dispatch, executable recipes, or a
+  patch or template language to `provider_updates`.
 
 ## Compare frozen evidence
 
@@ -94,399 +59,179 @@ is rejected, matching reusable-provider policy. The sweep does not follow privat
 make run CARGO_ARGS='--example provider_updates -- replay target/provider-updates/NEW --prior target/provider-updates/OLD'
 ```
 
-Replay regenerates `review.json` and numbered per-provider JSON packets inside the
-run. Numbered `candidate-N.json` files are command-owned outputs: replay removes
-the previous candidate at that exact index before validating and staging the new
-proposal, so unavailable or authored-only outcomes leave no stale candidate.
-Capture manifests, input blobs and unrelated files remain intact.
-With no prior capture, remote evidence establishes a baseline. Explicit full-copy
-assets compare against the frozen committed asset when no prior source exists.
-The basis is printed beside each comparison. Authored assets never masquerade as
-historical upstream schemas. Failed prior captures provide no historical baseline.
+Replay writes `review.json` and numbered per-provider packets inside the run
+directory, removing any prior `candidate-N.json` at that index before staging a
+new candidate so stale proposals never linger.
 
-Packets include recursive raw JSON differences (including root metadata, security,
-responses and vendor extensions), atomic ordered-array differences, and exact text
-plus content hashes for non-JSON changes. Only JSON object serialization order is
-ignored. Source bytes remain available even for binary/invalid text. Guide and
-registry evidence are compared independently of schema changes. Removed source
-declarations are explicit authority-review items. Multiple authoritative schemas
-receive separate production projections alongside the authored runtime view;
-the tool never invents their union. Inspect the frozen
-changed evidence, rather than treating structural comparison as semantic proof of
-request compatibility, lifecycle or billing conditions.
-
-The production `operations` and `build_tools` APIs provide operation identities,
-generated names, routing, descriptions, schemas, prices, tags and recommendation
-matches. Operations use original method/path keys; generated name differences are
-ordinary fields. This view includes operations hidden by current filters and
-method-pair changes, while effective tools retain actual selection semantics.
-Compiler failures are explicit diagnostics, never empty successful inventories.
-Both effective and unoverridden tools are included, with existing authored patches,
-missing tool targets and missing parameter-note targets, including help. Parameter-note
-diagnostics share production override target resolution for existing arguments and
-whole-body properties, including legacy body aliases. Review
-old/new unoverridden contracts alongside authored overrides and resulting tools;
-replacement text can mask upstream changes. Raw differences remain necessary
-because compilation omits unsupported constructs. The authored runtime asset and
-upstream projection are labeled separately; a projection does not recreate an
-authored catalog. With a prior capture, `previous_runtime` and `runtime_changes`
-compare the actual frozen runtime inputs and configurations independently of
-`previous_upstream` and `tool_changes`. A comparison with no upstream source,
-pricing, asset or removed upstream-source differences reports `no upstream evidence change`;
-local provider TOML, maintenance-guidance and projection/config differences remain
-visible in `runtime_changes` and `tool_changes` but do not create upstream drift.
-Removed local input paths remain visible in `removed_sources` without implying
-upstream drift. `asset_changes` reports raw local-asset
-changes, including asset addition/removal; absent history is `null`. Authored-only
-or multiple-authority providers still receive runtime comparisons without an
-invented upstream union. No packet is marked accepted automatically.
-Baseline classification follows comparable source, pricing or asset evidence,
-independently of whether a single-schema tool projection exists. Registry-only
-and multiple-schema captures can report changed or unchanged evidence against
-history; adding or recovering an authority still calls for baseline review when
-no other evidence changed. Source removals are historical comparisons too.
-
-A complete vendor-copy download that is semantically identical to the committed
-asset produces `committed asset unchanged; no candidate` and no numbered candidate.
-Whitespace-only or object-order-only differences are not provider updates. A
-different OpenAPI document remains a candidate even when only descriptions or
-examples changed. `committed asset unchanged; no candidate` describes candidate
-staging against the current asset; prior-capture differences remain visible in the
-packet's comparison fields.
-
-Compilation failures preserve the independently parsed operation inventory. Override
-diagnostics may also use an explicitly labeled inventory with tool-name filters
-and recommendation opt-in removed, retaining path/tag/method selection. Unknown
-compiler-dependent targets are `null`, not falsely reported absent. A full-copy
-first update includes effective-tool differences against its committed asset;
-ordinary remote first captures never claim historical tool changes.
+- **Comparison basis:** Without `--prior`, remote sources establish a baseline
+  (full-copy assets compare against their committed file). Failed prior reads
+  never form a baseline.
+- **Raw and compiled diffs:** Packets contain recursive JSON diffs (ignoring
+  only object key order), atomic array diffs, exact text and hash diffs for
+  non-JSON files, and production `operations` and `build_tools` projections
+  (including hidden operations, unoverridden vs. effective tools, and missing
+  tool or parameter-note override targets).
+- **Runtime vs. upstream drift:** `previous_runtime` and `runtime_changes`
+  track local TOML, guidance, and asset changes separately from
+  `previous_upstream` and `tool_changes`. Local edits alone report
+  `no upstream evidence change`. A vendor-copy download identical in JSON
+  semantics to the committed file produces `committed asset unchanged; no candidate`.
 
 ## Pricing evidence and variation review
 
-Pricing hints are advisory advertisements for display and wallet selection; observed
-offers and actual challenges remain authoritative. See
-[pricing metadata and runtime hints](configuration.md#pricing-metadata-and-runtime-hints)
-for normalization, units, credit conversion and selection semantics. A sweep never
-pays to discover a price and never treats a hint as payment authority.
-
-Pricing metadata is less standardized than OpenAPI structure. Known authorities
-include operation or root extensions such as `x-payment-info`, `x-x402`,
-`x-price-usd` and provider-specific keys; separate public x402 v2 discovery
-documents with `resources` or `items` arrays; registry/catalog documents; help or
-guide prose; and public MCP tool metadata. These are discovery leads, not a closed
-inventory. A field that moves, disappears, is renamed or appears in a new place is
-evidence to review, not permission to infer a price. Unknown or absent pricing does
-not mean free.
+Pricing hints are advisory display and selection metadata; live x402 challenges
+always govern payment. See
+[pricing metadata and runtime hints](configuration.md#pricing-metadata-and-runtime-hints).
 
 ### Pricing capture
 
-- The configured `[pricing]` block and any legacy `pricing_key` are frozen with the
-  provider TOML and resolved Config. External `[pricing] source` URLs come from that
-  TOML, not from a second URL inventory.
-- A configured external pricing URL is captured as a separate `pricing` read. It is
-  advisory evidence: it never counts as a schema authority, never blocks schema
-  candidates, and never changes the provider's schema-capture outcome when it is
-  unavailable.
-- Additional public pricing authorities may be declared in
-  `tools/providers/evidence.toml` with `purpose = "pricing"`. They join the
-  configured external source in the advisory pricing collection and never become
-  schema-supporting inputs. Never guess a URL; missing authority is unresolved
-  work. A pricing shape that is not publicly documented stays authored in
-  `pricing_description` or provider caveats.
-- Capture uses the existing public, credential-free, query- and fragment-free URL
-  rule and accepts only complete successful responses. Runtime pricing validation
-  accepts HTTPS provider URLs and runtime acquisition applies the public-destination
-  rule, so a query-bearing URL can work at runtime while capture records it as
-  pricing evidence unavailable. That is not provider failure, and its committed
-  TOML is not rewritten.
-- Payment, partial and unsolicited range responses are unavailable evidence. No
-  paid raw call is made. Captured bytes stay in the ignored
-  `target/provider-updates/RUN`; they are never committed. Offline capture records
-  pricing as not attempted.
+- Freezes `[pricing]` and `pricing_key` from provider TOML and captures
+  configured external `[pricing] source` URLs plus `purpose = "pricing"` entries
+  from `tools/providers/evidence.toml` as separate advisory reads.
+- Pricing capture failures never block schema candidates or alter schema
+  capture outcomes. External pricing URLs with query strings work at runtime
+  while recording unavailable capture evidence (do not rewrite working TOML for
+  that). No paid calls are made, and offline capture marks pricing not
+  attempted.
 
 ### Pricing in packets
 
-- The production projection reports the effective `catalog_key`, the number of
-  operations carrying pricing metadata (`pricing_metadata_operations`) and
-  `total_operations`. Metadata presence does not establish a usable estimate: an
-  operation may expose only authentication flags or a shape the adapter leaves
-  display-only or unknown. Inspect the generated `Cost:` text and normalized
-  packet values separately. Generated `Cost:` text remains
-  visible in the effective and unoverridden tools. This shows coverage without
-  treating catalog-derived text as an upstream price.
-- The packet's `pricing` object reports the configured external source, each
-  pricing source's observed root shape, capture status and prior-capture diff in
-  `pricing.evidence`,
-  relocation flags, and an advisory signal inventory. Configured and resolved
-  Config changes also remain visible in the normal runtime/config differences.
-- `pricing.relocation` flags a configured catalog key with no operations carrying
-  pricing metadata and a changed, added or removed external source. These are
-  review prompts, not errors; many operations legitimately omit pricing. An
-  absent catalog key alone does not imply upstream drift; historical source-body
-  differences and external-source changes determine that comparison.
-- `pricing.signals` lists sorted JSON key pointers whose names look pricing-related
-  (`price`, `pricing`, `payment`, `tariff`, `billing`, `cost`, `credit`, `x402`
-  other than `x402Version`) across remote schema, registry, discovery, guide, help,
-  pricing and source documents. It is bounded per source, records no values or
-  prose, and never infers an amount, adapter or support. Local provider TOML,
-  maintenance guidance and committed assets are excluded.
-- Raw source diffs compare external pricing documents and guide/registry changes.
-  Mapping an external `resources`/`items` document to operations is runtime-only
-  and intentionally ambiguous; an offline sweep does not prove that mapping.
-  Vendor generation timestamps such as `generatedAt` or per-record `lastUpdated`
-  can change on every read. A timestamp-only diff is cache-generation evidence, not
-  a price or schema change; review the structural and amount fields separately.
-- Pricing evidence never stages a schema candidate. Candidate readiness remains
-  governed by the schema authority and its complete supporting reads.
+- Reports effective `catalog_key`, `pricing_metadata_operations`,
+  `total_operations`, generated `Cost:` text, `pricing.evidence` (root shapes,
+  statuses, and diffs), `pricing.relocation` (empty catalog key or changed
+  external source), and `pricing.signals` (bounded sorted JSON pointers whose
+  keys match pricing terms across remote documents, excluding local files and
+  values).
+- Vendor generation timestamps (`generatedAt`, `lastUpdated`) can change on
+  every read; inspect structural and amount fields separately. Pricing evidence
+  never stages a schema candidate.
 
 ### Pricing review steps
 
-For each packet, in addition to the normal steps below:
-
-1. Identify the current authority and adapter: catalog `payment-info`/`x402`, or an
-   external `x402-resources`/`x402-discovery` document. Verify the adapter matches
-   the observed shape rather than assuming the previous format still applies.
-2. Review provider-specific values: configured key or catalog key, `unit`,
-   `usd_as_usdc`, network/asset, fixed versus dynamic/range/metered/credit
-   semantics, and the vendor's per-call billing contract. Do not promote prose
-   options, defaults or example values into constraints.
-3. Look for relocation and variation: a previously used key absent from every
-   operation, a renamed custom field, pricing moved to a root extension, a new
-   well-known/catalog/guide document, or a new resource record shape. Inspect the
-   signal pointers and raw diffs, then confirm the actual document.
-4. Reconcile per-operation mapping where an external document is used. Ambiguous,
-   conflicting or unmatched resources leave the hint unknown; do not invent a
-   mapping or sum alternatives.
-5. Confirm the hint remains advisory: no signing, challenge, spending-cap or
-   reconciliation change follows from pricing metadata. Unknown is not free, and a
-   stale hint must not block an otherwise authorized call.
-6. Update `[pricing]`, `evidence.toml` purposes, authored `pricing_description`
-   fragments and [provider caveats](../providers/CAVEATS.md) as one coherent
-   change. A new format adapter is a shared code and documentation change with
-   independent uses and independent design review, never a per-provider recipe or
-   provider-ID dispatch.
-7. For an all-provider sweep, omit `--provider` to attempt the full manifest and
-   record per-provider pricing outcomes: confirmed unchanged, variation updated,
-   relocation unresolved, no pricing authority captured, or missing maintenance
-   metadata. Report attempted coverage and unresolved authorities separately from
-   accepted changes. Process success is not universal price verification.
+1. Verify the pricing authority and adapter (`payment-info`, `x402`,
+   `x402-resources`, or `x402-discovery`) match the observed document shape.
+2. Check `key`, `unit`, `usd_as_usdc`, asset and network, fixed vs. dynamic or
+   metered semantics, and the vendor's per-call billing contract. Do not turn
+   prose examples into schema constraints.
+3. Inspect `pricing.relocation`, `pricing.signals`, and raw diffs for moved or
+   renamed fields, then verify the raw document directly.
+4. Confirm external document mapping leaves ambiguous or unmatched operations
+   unknown rather than guessing or summing alternatives.
+5. Keep hints advisory: unknown is not free, and stale hints never block
+   authorized calls.
+6. Update `[pricing]`, `evidence.toml`, `pricing_description`, and
+   [provider caveats](../providers/CAVEATS.md) together.
+7. For full-manifest sweeps (omitting `--provider`), report per-provider
+   outcomes (unchanged, updated, relocation unresolved, no authority captured,
+   missing metadata) separately from accepted edits.
 
 ### Pricing coverage triage and adapter gaps
 
-Compare `pricing_metadata_operations` with `total_operations`, then inspect the
-generated `Cost:` text and `pricing.evidence`. A key can be present on every
-operation while the adapter still renders `Cost: unknown.` or raw JSON for an
-unsupported shape. Use the advisory `pricing.signals` pointers to locate candidate
-fields, then read the exact object before proposing a key, unit or code change.
+Compare `pricing_metadata_operations` against `total_operations` and inspect
+generated `Cost:` text: a key may exist on every operation while rendering
+`Cost: unknown.` for an unsupported shape. Use `pricing.signals` to locate
+candidate fields and inspect the raw object.
 
-A new pricing declaration or adapter is a shared code and documentation change
-only when it has independent uses beyond one provider. Record a provider-specific
-or one-off shape in `pricing_description` or the owning caveat instead. Shapes that
-need reviewed custom adapters are tracked in the
-[custom pricing adapters plan](plans/custom-pricing-adapters.md), including the
-affected providers and the distinction between display-only and selection-capable
-metadata. Do not add provider-ID dispatch or a per-provider pricing recipe.
+Add a new format adapter only when it serves multiple independent providers
+(after independent design review); keep one-off shapes in `pricing_description`
+and `providers/CAVEATS.md`. Open adapter gaps are tracked in the
+[custom pricing adapters plan](plans/custom-pricing-adapters.md).
 
 ### Review outcomes and manual review
 
-Read the packet outcome as a workflow state, not a drift verdict:
+| Packet outcome | Meaning |
+| --- | --- |
+| `source unavailable` | At least one required public read failed (for example, CoinMarketCap `403` without `User-Agent`). Retry once for transient errors, then leave unresolved. |
+| `baseline established` or `authored baseline established` | No valid prior comparison exists (or a newly added or recovered read). Review current evidence for consistency. |
+| `no upstream evidence change` or `authored no upstream evidence change` | Comparable upstream source, pricing, and asset evidence is unchanged (local edits still show in `runtime_changes`). |
+| `authored comparison ready; human review pending` | Upstream or asset difference exists for a locally authored `spec`; apply reviewed edits manually. |
+| `candidate ready; human review pending` | Vendor-copy asset with complete reads and valid local references is staged as `candidate-N.json`. |
+| `committed asset unchanged; no candidate` | Current vendor document matches the committed asset semantically. |
 
-- `source unavailable`: at least one required public read failed. For `ax1`, the
-  canonical `www` host returned a 307 redirect to `console.ax1.vc`; capture never
-  follows redirects, so the declared source was updated to the final public URL.
-  For `coinmarketcap`, the documentation origins return 403 to requests without a
-  `User-Agent`. The project intentionally does not advertise one at this stage, so
-  capture attempts all three declared documentation authorities without that header
-  and records failed reads as explicit unavailable outcomes. Those authorities
-  remain unresolved until successfully captured. A wallet
-  receiving payments does not prove documentation acquisition works, and a
-  documentation 403 does not establish payment or API failure. Retry once for
-  transient failures, then treat the authority as unresolved rather than guessing a
-  source.
-- `baseline established` / `authored baseline established`: no prior capture of the
-  authoritative source exists, or newly available source/pricing evidence has no
-  usable prior comparison. This includes a newly added guide or a recovered read,
-  even when the schema is unchanged. Review the current evidence for consistency;
-  this is not evidence of a change. Known differences in comparable evidence still
-  retain a comparison-ready outcome.
-- `no upstream evidence change` / `authored no upstream evidence change`: prior
-  comparable source, pricing and committed-asset evidence is unchanged. Unavailable
-  optional pricing stays advisory and cannot establish a new baseline. Local TOML, override
-  and maintenance-guidance edits may still appear in `runtime_changes` or
-  `tool_changes`.
-- `authored comparison ready; human review pending`: an upstream source, pricing or
-  committed-asset difference exists, but the provider uses a locally authored
-  `spec`. The tool cannot stage an authored replacement; reconcile the evidence and
-  apply ordinary reviewed edits.
-- `candidate ready; human review pending`: a vendor-copy asset with complete
-  supporting reads is staged for review.
-- `committed asset unchanged; no candidate`: the current vendor document matches the
-  committed asset. Prior-capture differences may still appear in the packet.
+For authored providers (reconciling multi-source registries, guides, or local
+projections):
 
-Authored providers are routed to manual review because `provider.asset.is_some()`
-means their catalog is a local authored projection, not because a change was
-detected. Use the projection/tool changes, source diffs, registry/guide evidence and
-pricing relocation fields to decide whether edits are needed. A first authored
-capture or evidence without comparable history remains a baseline review; do not
-infer drift from the label alone.
-
-For an authored baseline or comparison, reconcile the actual captured authorities:
-
-1. Confirm every declared schema, registry, discovery and guide read completed. A
-   missing read is unresolved evidence, not a clean baseline.
-2. Compare operation identities and declared prices in each authority with the local
-   asset. For a multi-authority union, review each source separately; do not merge
-   alternatives by convenience.
-3. When the vendor publishes no schema, identify which authority completes the
-   request contract and follow the manual public MCP procedure if applicable.
-4. Update the local asset, provider TOML and caveats only for a concrete difference.
-   A timestamp, live statistic, guide-page re-render or array reorder alone needs no
-   asset edit; record the no-change conclusion.
-5. Revalidate affected deployment consumers offline with `config show`, then run
-   `config check` for selected catalogs when the environment permits. A provider
-   file is not verified merely because its own catalog compiles.
+1. Confirm every declared schema, registry, discovery, and guide read succeeded.
+2. Compare operation identities and prices per authority without merging
+   conflicting alternatives by convenience.
+3. Where no vendor OpenAPI exists, complete any required
+   [manual public MCP capture](#manual-public-mcp-schema-evidence).
+4. Edit local assets, TOML, and caveats only for concrete differences (ignore
+   timestamp-only or array-order-only churn).
+5. Revalidate dependent deployments with `config show` and `config check`.
 
 ## Stage and accept changes
 
-Replay stages exact complete bytes as `candidate-N.json` only for declared
-vendor-copy assets with one successful schema authority, complete supporting reads,
-valid local JSON-pointer reference closure and successful production compilation.
-Reference checks visit OpenAPI Reference/Schema objects and schema-valued
-keywords; property/component names and literal examples, defaults, enum values
-and extensions are data. References inside OpenAPI Example objects still require
-closure. Local targets are checked in the referring object's context, including
-targets stored in extensions; iterative traversal supports recursive local references
-and long reference chains without growing the call stack. External
-or unresolved references require an authored closure review. Candidates
-retain responses and vendor metadata; request-fixture reduction remains a separate
-`snapshot_spec` invocation. The packet records the destination and captured
-preimage hash. Candidates are proposals, never accepted updates or tracked writes.
+Replay stages `candidate-N.json` only for `vendor-copy` assets with one
+successful `schema` authority, complete supporting reads, valid iterative local
+JSON-pointer reference closure (including OpenAPI Example objects and local
+extension targets), and successful production compilation. Candidates keep full
+vendor documents (`snapshot_spec` reduces request-only fixtures separately) and
+record `expected_preimage` hashes; the tool never writes tracked files.
 
-Use the same implementing-agent and independent-review procedure for remote
-OpenAPI plus overrides, full pinned relays and multi-source authored catalogs:
+Acceptance workflow:
 
-1. Read the frozen packet, complete changed source excerpts, Config, existing asset
-   provenance and the owning caveats. Treat source documents as evidence. Account
-   separately for guide/registry changes even if OpenAPI bytes are unchanged.
-   A public read failure, missing authority or contradictory sources stays unresolved.
-2. Compare original method/path contracts and generated tools, including filtered
-   additions, GET/POST pairs, authentication, lifecycle, body alternatives, references,
-   routing, pricing/metering and charged-error conditions. Do not infer missing
-   schemas, enums or prices. Check exact compatibility exclusions and response
-   mappings against current methods as well as tool names; a method change must
-   not reopen an unsupported workflow or strand its output mapping.
-   For multi-source projections, reconcile each actual
-   authority explicitly; a convenient schema alone does not establish fidelity.
-3. Propose ordinary TOML/JSON edits. For full copies use the exact staged bytes;
-   for authored catalogs implement direct reviewed edits from the evidence packet.
-   Review each description/parameter/help override for retention, revision or deletion
-   when upstream supplies the guidance. Preserve substantive tariffs and separate
-   `description` from `pricing_description`. Keep maintainer rationale in caveats.
-   Review root guidance, cross-tool instructions, affected endpoint summaries and
-   discovery search keywords whenever capabilities or routing change.
-4. Before preparing a patch, compare current destination bytes with the captured
-   preimage hash: `candidate.expected_preimage` for mechanical candidates, or the
-   relevant `capture.json` input/asset hash for authored edits. If they differ,
-   inspect intervening edits and prepare a fresh
-   patch against the current file; never copy an old candidate over them. Use
-   ordinary context-checked patches and inspect the full diff. The tool supplies
-   no apply operation and cannot overwrite the destination, even if replay is stale.
-5. Reconcile every affected `examples/deployments/` consumer in the same coherent
-   update. Compare actual original method/path identities, generated names and
-   current `send_tools` decisions, including new APIs reaching catch-all rules.
-   Review all examples, not only the running deployment. Retire obsolete exact
-   selectors after confirming removal instead of disguising them as wildcards.
-   Unmatched exclusions are informational at runtime; positive exact selections
-   retain strict validation.
-   Search the bundled catalog for alternatives to deleted selected APIs and consider
-   useful new APIs as replacements or backups. Compare purpose, request controls,
-   returned fields, freshness, upstream diversity, billing and useful result quality;
-   cheaper listed prices alone do not establish interchangeability. Treat schema-only
-   proposals as unqualified until their needed delivery evidence exists. Existing
-   public/free trials may help; paid live comparisons require separate operator
-   authorization and must preserve the configured payment and network authority.
-   If a superior or cheaper new API displaces a selection, retain the original
-   selector beside an exclusion/comment naming the replacement, the concrete
-   coverage/quality/price reason and how to re-enable it if the replacement fails.
-   Keep partial alternatives as complements or backups rather than silently claiming
-   full equivalence. Record unresolved replacement gaps explicitly. Update affected
-   endpoint summaries and, for dynamic endpoints, discovery search keyword hints
-   in the same change. Catalog acquisition success does not establish valid routing
-   or a usable waiting endpoint; validate the resulting deployment inventory.
-6. Regenerate effective tools through the production catalog and review the full
-   file diff. Run affected configuration, routing, bundle and named authored-contract
-   tests; fixtures must independently witness a real quirk/transformation. Never
-   regenerate fixtures merely to pass assertions. Unavailable providers need not
-   block independent fully reviewed updates.
-7. Commit coherent accepted changes, have a different read-only agent review each
-   exact SHA and affected call chains, address findings with reviewed fixups and
-   preserve history through combined integration review. Report attempted coverage,
-   unresolved sources and accepted commits separately; process success is no proof
-   of universal refresh or live compatibility. No provider updates are accepted by
-   the capture/replay command itself.
+1. **Read evidence:** Inspect the frozen packet, changed source excerpts,
+   resolved config, asset provenance, and owning caveats. Review guide and
+   registry changes even when OpenAPI bytes did not change.
+2. **Audit contracts:** Compare original `METHOD path` contracts, generated
+   names, filtered additions, `GET` and `POST` pairs, auth, lifecycle, body
+   unions, pricing, exclusions, and `response_mappings` so method changes never
+   reopen unsupported workflows or strand mappings.
+3. **Edit files:** Copy exact staged bytes for full vendor copies or apply
+   reviewed edits for authored catalogs. Review description and parameter
+   overrides, keep `description` separate from `pricing_description`, and
+   update `instructions_text`, endpoint summaries, and discovery search keywords
+   when capabilities or routing change.
+4. **Check preimage hashes:** Verify current file bytes match
+   `candidate.expected_preimage` (or `capture.json` hashes) before patching so
+   intervening edits are never overwritten.
+5. **Reconcile deployment consumers:** Update every dependent deployment under
+   `examples/deployments/`, checking catch-all `send_tools` rules and retiring
+   removed exact selectors instead of masking them with wildcards. Search
+   bundled providers for replacements when APIs disappear, compare coverage and
+   quality before price, and leave adjacent reversible comments when displacing
+   a tool.
+6. **Verify:** Run matching config, routing, bundle, and authored-contract
+   tests (never regenerating fixtures solely to pass assertions).
+7. **Commit and review:** Commit coherent changes, have a fresh independent
+   reviewer check each SHA and complete call chains, and address findings with
+   `--fixup` commits. Report attempted coverage, unresolved sources, and
+   accepted commits separately.
 
-For examples of authority reconciliation, AgentUtility combines schema plus registry;
-CoinMarketCap combines two schemas plus an access guide; NewsGurus uses its Bazaar
-catalog rather than the incomplete OpenAPI. Banking Compliance additionally requires
-manual public MCP `tools/list` evidence, which this GET-only collector does not
-capture; complete that part of each review separately using the procedure below.
-Existing authored transformations remain described in [caveats](../providers/CAVEATS.md).
+Multi-authority examples: AgentUtility joins schema and registry; CoinMarketCap
+combines two schemas and a guide; News Gurus uses its Bazaar catalog; Banking
+Compliance also needs manual public MCP `tools/list` capture below.
 
 ## Manual public MCP schema evidence
 
-When an authored HTTP catalog derives request schemas from a public MCP server,
-capture that authority alongside the ordinary GET evidence. The current collector
-does not send JSON-RPC POST requests; a successful root-page capture does not
-complete this verification.
+When an authored HTTP catalog derives request schemas from a public MCP server
+(such as Banking Compliance), capture `tools/list` alongside normal GET
+evidence:
 
-1. Read the provider's provenance and identify the public MCP endpoint and its
-   mapping to HTTP routes. Use unsigned metadata requests through the chosen
-   network policy, preserving Tor remote DNS and no direct fallback where selected.
-   Send `tools/list`; perform MCP initialization/notification only if required.
-   Negotiate the server's supported protocol and accept JSON or event-stream
-   responses. Authentication or payment requirements leave this public capture
-   unresolved; do not use paid raw calls, payment headers or `tools/call` to obtain
-   schema evidence.
-2. Preserve complete successful response bytes under ignored
-   `target/provider-updates/`, including the full SSE wire body when applicable.
-   Record the public URL, HTTP/JSON-RPC method, noncredential request payload,
-   protocol/transport, observation time, Git baseline, status, content type and
-   SHA-256. Exclude credentials and session headers. Reject partial responses;
-   discard upstream error prose and record the unavailable outcome. Follow every
-   `nextCursor`, retaining each page and checking the JSON-RPC result/error and
-   request identity. Keep parsed JSON separate from the exact wire evidence.
-3. Compare each mapped `inputSchema` recursively with its authored HTTP request
-   body. Review descriptions separately from structural equality; preserve dialect
-   declarations, references, required lists, extra-property rules, types, bounds,
-   defaults and alternatives. Any projection difference needs an explicit rationale.
-   Do not turn prose options/defaults into schema constraints. Reconcile current
-   root/guide route and price evidence separately: a similarly named preview schema
-   does not establish a paid operation's request body or prove HTTP delivery.
-4. Apply the normal acceptance, deployment-consumer, validation and independent
-   review steps above. Record per-source provenance so a new schema observation
-   does not imply that an earlier observation was repeated. Report remaining
-   gaps explicitly; metadata verification does not qualify output quality or payment.
-
-Keep this path manual for now. If more providers need it, consider a shared public
-MCP metadata-capture primitive with independent uses and synthetic protocol tests,
-including pagination and JSON/SSE completeness. Review its transport and authority
-boundaries before implementation; avoid provider dispatch or per-provider recipes.
+1. Use unsigned metadata requests through the configured network policy (no
+   payment headers, raw paid calls, or `tools/call`). Negotiate MCP protocol,
+   initialize if required, and follow every `nextCursor` page. Auth or payment
+   prompts leave the capture unresolved.
+2. Save complete wire bytes (including full SSE bodies) under ignored
+   `target/provider-updates/` with URL, method, payload, transport, timestamp,
+   Git baseline, status, content type, and SHA-256 (excluding credentials and
+   session headers). Keep parsed JSON separate from wire evidence.
+3. Recursively compare each mapped `inputSchema` against the authored HTTP
+   request body (preserving dialect, references, `required`, extra-property
+   rules, bounds, defaults, and alternatives), and reconcile route and price
+   docs separately.
+4. Follow the standard acceptance, deployment-consumer, validation, and
+   independent-review steps above, recording per-source provenance and open
+   gaps.
 
 ## Validation responsibilities
 
-`make test CARGO_ARGS='--example provider_updates'` exercises shared synthetic
-contracts: frozen inputs, safe response metadata, unavailable sibling evidence,
-baseline distinctions, semantically unchanged candidates, masked overrides,
-method/name changes, filtered additions, full-copy closure,
-external and declared pricing evidence isolation, external-document shape and diff
-reporting, pricing relocation/absent-key reporting, advisory key-pointer signals,
-legacy captures without pricing metadata, and missing or corrupt pricing blobs. Provider fixtures require
-a named authored transformation or compatibility quirk; maintenance reports are
-ignored artifacts, never universal vendor inventory goldens.
-Follow [application validation order](testing.md#validation-order-and-continuation),
-including compiler/all-target Clippy and compatibility stages before broad suites.
-At architecture gates compare CogC/CycC against the agreed branch baseline and
-independently review whole capture-to-report-to-accepted-patch chains and prior
-fixups. Confirm no provider dispatch, executable metadata, unnecessary enforcement
-or copied per-provider routines emerged. Offline tests do not qualify vendor health,
-paid settlement or live Tor delivery.
+`make test CARGO_ARGS='--example provider_updates'` exercises frozen inputs,
+response validators, unavailable siblings, baseline states, unchanged
+candidates, masked overrides, method and name drift, local reference closure,
+external pricing isolation, relocation flags, advisory pricing signals, and
+corrupt blob handling. Follow
+[validation order](testing.md#validation-order-and-continuation), verify no
+provider-ID dispatch or executable recipes were introduced, and remember that
+offline tests do not qualify vendor health, paid settlement, or Tor delivery.
