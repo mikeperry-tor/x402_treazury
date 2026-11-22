@@ -1,997 +1,366 @@
-# Agent API discovery and source management
+# Agent source management
 
-For a smaller initial MCP tool list, set `discover_on_demand = true` in a
-`[servers.NAME]` table (default `false`). This is independent of provider management.
-On-demand listeners advertise `x402_treazury_tools_search` and
-`x402_treazury_tool_call`, plus any independently enabled provider-management or raw-call
-tools. API tools, including subsequently registered tools, stay out of `tools/list`.
-
-Agents search the listener's catalog with `x402_treazury_tools_search`, receive
-complete descriptions and input schemas, and invoke a result through
-`x402_treazury_tool_call` using its readable `tool_id` and `arguments`. On-demand
-search defaults to 25 results per page; `query`, positive integer `limit`, and `cursor`
-support targeted discovery and pagination. A broad search can still return large
-schemas. By default, provider instructions remain available in the initialization response.
-
-This setting changes tool advertising, not loading or access: all configured
-catalogs still load, with remote catalogs published after listeners bind during
-ordinary deployment serving. Filters and wallet bindings still apply, and existing direct
-tool calls remain supported. It grants no source registration permissions and
-requires no provider-management wallet or registry for static listeners. Imported OpenAPI catalogs share default same-path POST preference before naming;
-registration exposes no preference argument and raw calls retain their explicit method.
-Tool IDs are exact endpoint-local names, reusable across turns, reconnects and restarts while
-the tool remains available. Calls resolve the current definition and wallet binding,
-including after a source refresh or re-addition with the same tool name. Inspection and
-qualification retain the complete inventory and validate full schemas. Restart the
-server and reconnect clients after changing the setting to refresh cached lists.
-
-
-Static provider/source `recommended_tools` metadata narrows catalogs only with
-explicit `use_recommended_tools = true`; listener filters still apply. Advice
-uses each source's actual generated names without prefix rewriting. Operator
-`catalog tools --all-tools` bypasses advice selection for inspection only and
-retains ordinary filters. Recommendation markers do not change MCP descriptions,
-source owners, payer bindings or invocation identity. Generic specification imports
-do not inherit provider advice. Accepted bundled
-definitions retain recommendation metadata without enabling recommendation selection;
-raw calls retain their separate authority.
-See [catalog selection](configuration.md) for composition and stale-advice behavior.
-
-With bootstrap metadata policy, unsigned documentation discovery can use URL-bound
-discovery isolation without loading a wallet. Otherwise wallet-owned documentation
-discovery retains the selected wallet identity.
-Participating transport scopes distinguish origins; common API credentials, content
-and timing remain service-visible correlation. This does not allocate another
-wallet or grant payment authority.
-
-## Tool search matching and results
-
-Both local search surfaces use the same lexical BM25 ranker: `tools_search.query`
-searches visible tool names, descriptions and top-level input parameter names;
-`providers_list_local.q` searches bundled provider IDs, display names,
-capability descriptions and declared API bases. For example,
-`yelp reviews` finds a description such as "List public reviews for a Yelp business"
-without requiring those words to be adjacent. Query terms have OR semantics:
-candidates matching one term remain eligible, and BM25 ranks their relevance.
-
-Names and descriptions containing the complete trimmed query as a lowercase
-substring rank first, followed by BM25 score and then tool name for deterministic
-ties. Provider search applies the same literal priority to its space-joined metadata
-and breaks score ties by provider ID. Blank searches retain enumeration order.
-Literal priority favors precise identifiers, identifier fragments and phrases;
-it is a relevance rule, not a legacy query mode. Terms are lowercased Unicode
-alphanumeric runs; punctuation, underscores and hyphens separate terms, and repeated
-BM25 query terms count once. There is no stemming, stopword removal, camel-case splitting,
-semantic/fuzzy matching, wildcard expansion or Boolean/quoted-phrase operator syntax.
-A nonblank query without alphanumeric terms can only match a literal substring;
-it never silently becomes a full-catalog enumeration.
-
-Omit `query`, or pass empty/whitespace text, to enumerate every tool in the selected
-scope in catalog order. Omit `source_name` to search configured and registered APIs together. Set it to
-a registration name to restrict the search to that source. Results
-are paginated: pass the returned `next_cursor` with the same query and source filter
-until it is null. All tool search defaults to 25 results per page. `limit` accepts any positive integer.
-
-Each response includes:
-
-| Field | Meaning |
-| --- | --- |
-| `items` | This page's matching tool IDs, descriptions and complete schemas. |
-| `available` | Visible tools after endpoint and optional source filtering, before query matching. |
-| `total` | All query matches before pagination, independent of page size. |
-| `next_cursor` | Opaque continuation, or null on the last page. |
-| `catalog_generation` | Snapshot generation; a publication invalidates old cursors. |
-| `hint` | Present for zero matches from a nonblank query when available tools exist; suggests different keywords or enumeration. |
-
-Both counts refer to the selected scope. `available > 0` with `total = 0` means
-search found no match; `available = 0` means no tools are currently visible there,
-which can reflect pending discovery or filtering. Remove a source filter to inspect
-the endpoint as a whole. Neither case proves a configured provider has no APIs.
-No speculative near-miss list is produced: OR-term retrieval already returns tools
-matching some of the query, and enumeration is the explicit fallback.
-
-Ranking and matching use canonical fallback descriptions. Returned API descriptions
-and fresh direct MCP definitions can show the latest applicable observed offer,
-without changing ranking, counts, catalog generation or continuation cursors.
-Expiry restores fallback pricing; clients retaining an old list may retain an old
-description. Rendering reads the existing trusted source/revision, operation,
-wallet-group and transport-scoped cache; it sends no requests and grants no payment
-authority. See [pricing metadata](configuration.md#pricing-metadata-and-runtime-hints).
-
-Tool ranking uses only the captured endpoint/source-filtered snapshot, so
-inaccessible or unrelated tools cannot influence relevance or counts. Provider
-ranking uses only the shipped metadata collection. The shared ranker builds no
-persistent index, cache or background job and makes no provider requests.
-BM25 uses `k1=1.2`,
-`b=0.75` and positive IDF `ln(1 + (N - df + 0.5)/(df + 0.5))`, as documented by
-[Lucene BM25Similarity](https://lucene.apache.org/core/9_12_3/core/org/apache/lucene/search/similarities/BM25Similarity.html).
-Ranking preserves complete descriptions, schemas and payment bindings.
-
-## External directory matching
-
-`x402_treazury_providers_list_local` enumerates and searches locally bundled,
-reviewed provider definitions, including compatibility filters and repairs for
-supported API operations. Optional capability keywords in `q` use the same BM25
-and literal-match priority as callable tool search across IDs, names, descriptions
-and declared API bases. Omitted or blank `q` enumerates in stable provider-ID order;
-nonblank results rank before pagination, with provider ID breaking ties. `page`
-defaults to 1; `per_page` defaults to 25 and accepts any positive integer.
-The response contains `items`, `total`, `page`, `per_page` and `next_page`; items
-include `provider_id`, name, description, optional API base and schema provenance.
-Listing makes no network requests, selects no payer and never falls back remotely.
-Use the exact ID with `providers_add_local` to register its prepared definition.
-An absent `api_base` means import resolves the API server from the schema, which
-need not share the specification URL's origin. Bundled metadata is independent of
-installed tools and does not establish current availability or live qualification.
-
-`x402_treazury_providers_search_remote` starts one workflow for every directory
-in the endpoint's `remote_provider_directories`, concurrently. It is exposed only
-with remote management enabled and a nonempty directory list. Agents cannot
-select directories. Shared inputs are optional capability keywords `q`, `limit`
-(default 5, range 1–20 requested from each directory), and numeric `max_price_usd`.
-When either Coinbase directory is selected, `q` accepts at most 400 Unicode
-characters; x402-list-only endpoints have no Coinbase query bound. Invalid or
-retired branch, ranking, pagination and directory-selector arguments fail before I/O.
-
-| Directory key | Native search |
-| --- | --- |
-| `coinbase` | Coinbase resource search with `curatedOnly=false`, including curated and non-curated resources. |
-| `coinbase_curated` | The same Coinbase resource search with `curatedOnly=true`. |
-| `x402-list` | x402 List `GET /best`, with `prefer=balanced`, `require_verified=false` and `network=BSE`. |
-
-Coinbase requests retain server-selected Base mainnet USDC/exact constraints.
-Price filters concern advertised prices, not spending authority: Coinbase filters
-resources, while x402 List filters each service's minimum listed price. These
-are different coverage contracts. Advanced x402 List browse/filter operations
-remain available through its ordinary provider definition when configured or registered.
-Neither remote directory uses the local catalog's BM25 ranking.
-
-Each search returns one JSON dictionary keyed by the configured directory names.
-Every successful value is the complete native upstream JSON object, preserving
-array order, duplicate resources across directories, unknown fields, missing
-metadata, counts, verification/provenance and partial-result indicators. Both
-Coinbase selections produce separate responses when enabled together. There is
-no merged list, synthetic pagination or total, acquisition wrapper, provider-match
-enrichment or invented schema. Empty or limited results do not prove absence.
-
-A failed directory returns a locally generated value such as
-`{"local_error":{"kind":"directory_request_failed","payment_may_have_occurred":false}}`.
-`local_error` identifies a local failure, never a fabricated empty upstream result;
-an available safe HTTP status can accompany it. Non-JSON or invalid
-responses fail that directory explicitly. Successful siblings remain complete,
-even if every other directory fails. Required x402 List attribution and relay
-advisories accompany the output separately, without changing successful JSON.
-Cite x402-list.com for its CC BY 4.0 directory data.
-
-One search can authorize more than one directory or relay charge. Each workflow
-retains its own origin, Tor, response-inactivity, relay and payment rules. There
-is no federation replay after a failure, empty result or partial result, and no
-whole-search deadline, combined truncation, discovery cache or background index.
-A failing sibling cannot cancel progressing work; accepted paid child work
-remains owned through waiter cancellation and shutdown. Typed possible-payment
-evidence survives aggregation, parsing and later output errors.
-
-### Coinbase resource search and relay behavior
-
-Coinbase output retains exact URLs, methods, Bazaar metadata, offers, skill links
-and missing request contracts. HTTP examples and Bazaar envelope schemas are not
-request argument schemas. Documented HTTP requests can use `raw_call` when enabled;
-known OpenAPI URLs can use `providers_add_remote` when remote management is enabled.
-MCP/unknown protocols remain metadata only. A published usage-document URL can be
-read with `provider_details_remote(documentation_url=...)` when available.
-
-Public Coinbase reads are unsigned. With bootstrap metadata policy, origin reads
-use URL-bound discovery isolation and need no wallet lookup. Otherwise they use
-an existing endpoint wallet's documentation identity without allocation, funding
-or observation; missing identity fails that workflow. Direct mode uses one origin attempt; Tor adds
-`network.tor_isolation_retries` eligible fresh-isolation retries (default 2), with
-the shared eligibility and `Retry-After` policy, including terminal delay before
-fallback. Only complete valid search JSON may promote an origin scope. HTTP 206,
-Content-Range and complete invalid JSON fail without paid fallback or replay.
-No Coinbase challenge is signed.
-
-With `[relay_fallback]` configured, `source_discovery=true` enables built-in
-Coinbase and x402 List fallback by default. `provider_metadata=true` independently
-enables schemas, imports/refresh, help, usage documents and URL/spec probes. Actual
-API and raw calls require explicit `api_requests=true`; an ordinary call to a
-directory URL remains API work. In mixed `provider_details_remote` workflows,
-the directory lookup is discovery and later documents/probes are metadata.
-Trusted code selects categories; agent arguments, method or hostname cannot.
-With no relay section all requests remain origin-only.
-
-With bootstrap policy, metadata and discovery relay fees use its bootstrap group.
-Otherwise runtime relays use the endpoint's existing wallet regardless of a static
-relay wallet override, with ordinary payment admission, journaling and insufficient-funds
-traversal. Each authorization may charge; uncertain paid failure grants no replay.
-The selected relay sees the query URL and supplies target content/status/headers
-under the configured direct/Tor policy and relay trust boundary. Origin challenges
-retain ordinary handling for paid directory workflows; relay-supplied target
-challenges are terminal. Earlier target signatures suppress generic fallback.
-Local input, origin, identity and download-limit failures authorize no relay spending.
-See [relay configuration](configuration.md#relay-fallback) for settings and trust.
-
-Accepted sources can expose supported operations while omitting incompatible
-siblings. Unexpected omissions WARN with safe aggregate reasons even when the
-remaining catalog succeeds. Source operation/path/tag exclusions declare expected
-non-exposure before compatibility; document known provider limitations in caveats.
-Library catalog builders share this warning contract; other library validators
-leave terminal diagnostics to their caller. Registration details include `omitted_operations` with method, path and
-fixed reason; endpoint instructions retain a concise notice even with configured
-instruction overrides. A compatible preferred POST intentionally suppresses its
-exact GET twin and that twin's omission; disabling preference exposes its actual
-compatibility issue. Omitted POST operations cannot hide usable same-path GETs.
-Source operation/path/method/tag filters can intentionally exclude an unsupported
-operation; later tool-name/listener filters apply only to compatible tool names
-and do not erase source-level notices. Complete operator/qualification inspection
-remains strict. Read each current input schema: optional/complex JSON bodies use
-one body argument, with ordinary path/query/header arguments outside it. See
-[input contracts](configuration.md#openapi-inputs-and-request-bodies).
-
-Ordinary deployment endpoints can retain healthy selected tools or expose an
-empty tool inventory when catalogs or selected names/tags disappear or configured filters select nothing.
-Initialization instructions identify unavailable sources and missing selections;
-custom instructions do not suppress those notices. Discovery searches only the
-current published selection. MCP availability does not imply complete provider
-coverage; see the [framework integration contract](framework-integration.md).
-
-## Tool documentation
-
-Agent-facing tool descriptions should briefly explain what the tool does, when
-to use it and how to use its results. Include request, payment or retry constraints
-when they affect the caller's decision or correct use. Describe only available
-actions and inputs. Keep implementation details, maintainer rationale and repeated
-workflow explanations in the owning guides rather than tool context.
-Refer to available MCP tool names for follow-up actions rather than internal API
-paths or inaccessible vendor services. Describe caller-visible charges and replay
-constraints without explaining transport fallback costs or implementation mechanics.
-Distinguish searching the loaded catalog (no provider requests) from remote
-provider discovery and paid tool invocation.
-
-Registered tools retain normalized provider advertisements separately from observed
-challenge hints. An initial managed call can rank wallets using fresh advertised
-per-call prices before sending its first unsigned request; this read performs no
-balance observation or funding and grants no signing authority. Authored description
-overrides and converted credit estimates remain display-only. Dynamic source imports
-retain accepted provider pricing settings and rebuild runtime metadata rather than
-trusting serialized advertised hints. See
-[pricing configuration](configuration.md#pricing-metadata-and-runtime-hints).
-
-Keep pricing concise. Omit repeated warnings that displayed prices are estimates,
-may vary or do not prove settlement, and generic advice to distrust prices or
-avoid calls. Preserve billing facts that affect requests: metering units, paid
-options, charged errors, non-refundable operations and free quotas becoming paid.
-Keep guide/spec price discrepancies in provider caveats. Authored price text in a
-description override replaces generated pricing; retain its useful tariff unless
-the fallback still supplies that price. Do not parse arbitrary vendor prose to
-remove prices.
-
-API execution errors report concise failure kinds and known provider HTTP statuses.
-Local argument errors retain useful request corrections. A documented relay result
-can identify a separate destination status; arbitrary nested `status` fields do
-not. Potentially chargeable or uncertain write failures say not to retry
-automatically. Internal payment/SDK traces and upstream diagnostic prose stay out
-of agent error content. Directory failures retain sibling results and safe error
-messages in their existing envelopes, with one aggregate retry instruction.
-Grouped errors preserve local payment-limit and wallet-availability reasons
-separately from provider rejections. Successful paid directory results also use
-the aggregate retry instruction while retaining other child advisories.
-These local failure reasons also survive relay fallback and cached document
-failures; a relay's payment limit is not a rejection by the target API.
-
-Document every parameter in the same concise, task-focused style: its meaning,
-expected value or format, and omission/default behavior and interactions where
-they matter. Use schema types, required fields, enums and bounds for structural
-constraints; avoid restating those mechanically in prose. Prefer one useful
-example over a long explanation when a value would otherwise be ambiguous.
-
-Local-provider help should identify locally bundled definitions and their
-compatibility filters and repairs for supported API contracts. This describes
-reviewed compatibility work; it does not establish current upstream availability
-or universal paid-delivery qualification. Keep claims within the evidence and avoid
-repeating generic caveats in each tool and parameter.
-
-Review new and changed help together with its parameter descriptions. Prune
-unnecessary internal details and repetition before delivery; preserve information
-needed for valid requests and correct interpretation of results.
-
-Provider descriptions and pricing prose remain untrusted content; catalog expansion
-guards do not certify their meaning or presentation. The focused output assessment
-belongs to [deferred release work](plans/deferred/release_followups.md). No blanket
-description cap or sanitization policy is selected; transformations need concrete
-caller/output evidence and must preserve useful API meaning.
-
-## Endpoint instruction placement
-
-Each `[servers.NAME]` can customize three instruction surfaces:
-
-| Setting | Placement and semantics |
-| --- | --- |
-| `instructions_text` | Replaces the composed source guidance in `initialize.result.instructions` and current catalog metadata. Omit to retain source composition; `""` suppresses inherited source guidance. Generated pricing, discovery, omitted-operation and availability/conflict notices remain. |
-| `discovery_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_tools_search`, exposed by `discover_on_demand` or either provider-management capability. |
-| `providers_search_remote_tool_instructions_text` | Appends to `x402_treazury_providers_search_remote`, exposed by remote management with a nonempty directory list. |
-
-These are endpoint settings, not provider/source settings. They do not enable tools
-or grant permissions. Absent or empty search text leaves the standard description
-unchanged. Both search fields preserve the standard descriptions and input schemas;
-they do not alter search matching or routing. Inspection inventory and MCP tool
-lookup/listing use the same text. Configured search guidance is available even while
-remote catalogs are pending; it describes intended coverage, not current readiness.
-
-When adding or removing capabilities, or changing source/listener filters and
-routing, review the affected endpoint summaries and discovery search keywords in
-the same change. Cover the capabilities actually selected on that listener with
-concise task and domain terms, including useful aliases for newly available
-workflows. For endpoints without tool search, keep that coverage in
-`instructions_text`. Avoid duplicating the full tool inventory.
-
-Put platform/capability summaries and useful search terms in the tool-search field
-when a client does not forward MCP server instructions to its model. Use the
-remote-search field for guidance about finding new APIs in configured directories;
-`tools_search` searches APIs already available on the listener. To avoid repeating
-source guidance, override initialization with concise endpoint instructions.
-Keep essential operation requirements in the relevant tool descriptions or include
-them in the endpoint search guidance when suppressing inherited instructions.
-Prefer brief endpoint guidance even when clients forward server instructions:
-some clients repeat initialization guidance alongside each tool. The server sends
-`initialize.result.instructions` separately from `tools/list` descriptions. Keep
-request quirks and result-coverage limitations with their affected tools so endpoint
-overrides do not hide them; keep provider inventories and maintainer rationale out
-of initialization text.
-
-```toml
-[servers.research]
-# Existing listen, wallet, sources and authentication settings also apply.
-discover_on_demand = true
-instructions_text = "Research endpoint. Discover schemas before invoking tools."
-discovery_search_tool_instructions_text = "Search this listener for its configured social platforms; use Twitter for X."
-# With remote management and directories enabled, customize remote search:
-providers_search_remote_tool_instructions_text = "Prefer documented research APIs with published OpenAPI specifications."
-```
-
-Dynamic source guidance is recomposed from the immutable static instruction base
-on every publication. Only enabled registrations with visible tools contribute;
-refresh, removal, restore and static republishing replace that contribution without
-duplication or stale guidance. Listener `instructions_text` replacement, including
-empty suppression, applies to dynamic guidance too. Known canonical tool references
-in provider help descriptions and instructions use their public dynamic names;
-URLs, wire fields and input schemas retain their accepted values.
-
-Clients may cache tool descriptions. Restart/reconnect or refresh tools after
-configuration changes; description changes do not promise a live model-context
-update. Detailed source instructions are not automatically copied to search tools.
-
-Tool descriptions contain no registered-source inventory because clients may cache
-it. Use live tool search/enumeration for current endpoint-local availability and
-`source_name` to narrow to a registration.
-
+Multi-server HTTP deployments can let agents discover, register, and call
+public x402 APIs at runtime without restarting `x402_treazury`. All three
+capabilities are off by default and configured independently per authenticated
+listener.
 
 ## Configuration and authority
 
-Provider management and direct URL calls are independent endpoint capabilities,
-disabled by default. Standalone provider serving remains static. The
-[managed starter](../examples/deployments/managed.toml) and
-[comprehensive toolbox](../examples/deployments/comprehensive.toml) enable all three:
+Enable provider management and raw URL calls on any deployment listener that
+declares an explicit `wallet` (automatic wallet assignment cannot supply this
+wallet):
 
 ```toml
-[servers.research]
-wallet = "research" # Existing [wallets.research]; no new pool required.
+[servers.toolbox]
+listen = "127.0.0.1:3010"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "general"
+sources = []
+discover_on_demand = true
 provider_management_local = true
 provider_management_remote = true
 remote_provider_directories = ["coinbase", "x402-list"]
-# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
 raw_url_calls = true
-# source_registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
-# Retain existing listen, bearer_token_env and sources settings.
+source_registry_file = "../../state/toolbox-sources.sqlite"
 ```
 
-| Setting | Default | Permitted new operations |
+| Setting | Default | What it enables |
 | --- | --- | --- |
-| `provider_management_local` | `false` | Offline bundled listing/search and registration by exact bundled ID. |
-| `provider_management_remote` | `false` | Configured directory search, remote details and public HTTPS OpenAPI registration. |
-| `remote_provider_directories` | `[]` | `coinbase`, `coinbase_curated`, `x402-list`, in any subset. |
-| `raw_url_calls` | `false` | Documented public HTTPS calls through `raw_call`. |
+| `provider_management_local` | `false` | Offline bundled provider listing and registration by `provider_id` |
+| `provider_management_remote` | `false` | Remote directory search, URL or slug details lookup, and public HTTPS OpenAPI registration |
+| `remote_provider_directories` | `[]` | Ordered subset of `"coinbase"`, `"coinbase_curated"`, and `"x402-list"` for remote search |
+| `raw_url_calls` | `false` | Direct calls to documented public HTTPS URLs via `x402_treazury_raw_call` |
+| `source_registry_file` | omitted | Owner-only SQLite file for persisting registrations across restarts (ephemeral when omitted) |
+| `discover_on_demand` | `false` | Advertise search and call wrappers instead of individual API tool schemas |
 
-Unknown directory identifiers fail configuration parsing; identical repeats select
-a directory once, while both Coinbase choices remain distinct. The list grants
-no authority when remote management is disabled. An empty list still permits
-remote registration and URL-based details, but omits remote search. Directory
-selection is not a destination allowlist for APIs or permitted raw calls.
-The retired `source_management` and `sources_search_tool_instructions_text`
-settings reject rather than alias the new preferences.
+Authority boundaries:
 
-Requested operations are checked before identity lookup, upstream I/O or
-registration side effects. Tool hiding alone is not authorization. Local-only and
-raw-only endpoints do not require remote permission. Either management capability
-exposes `tools_search` and `tool_call`; `discover_on_demand` can independently expose
-them, while raw permission alone grants no registration authority. Existing accepted
-registrations retain their filters and payer bindings when switching between local
-and remote management. As before, disabling both management capabilities disables
-saved dynamic registrations during restoration; raw permission alone does not
-reactivate them. Preferences do not add per-origin or per-registration invocation
-rules. Inspection and removal remain available regardless of preferences.
-Operator refresh requires either management capability before loading the selected
-existing wallet, regardless of whether the saved definition is generic or bundled.
-
-Omit `source_registry_file` for registrations that last only until exit. Static sources
-are optional: set `sources = []` for a discovery-only listener. A second listener
-can enable provider management with the same shared wallet and its own authenticated
-identity; registrations remain separate even when both listeners use one pool.
-Static profiles also work here when the operator defines the referenced wallet
-with `mode = "static"` and `private_key_env`.
-
-Each enabled endpoint must name an existing wallet with `wallet` and may set its
-own `source_registry_file`. No automatic wallet allocation occurs per source.
-Managed wallet initialization and funding follow the normal operator-authorized
-startup policy. Registration never funds wallets or
-probes endpoint prices; paid invocation checks readiness and ordinary payment limits.
-
-A listener's authenticated endpoint ID is the principal. All agents using its bearer
-token share authority. Agent/session fields cannot choose an owner. Each registration
-is visible only on the endpoint that added it; there are no publication targets,
-receiver roles or process-wide grants. Two endpoints adding the same specification
-get independent registrations, even if they share a payment wallet. Static TOML
-sources cannot be modified by agent tools.
-
-Persistence belongs to the operator. With `source_registry_file`, all additions are saved;
-without it, additions disappear on exit. Agents cannot select lifetime, wallet,
-timeouts, payment limits or visibility. Existing endpoint tag/tool filters still
-constrain imported API tools. Include `dyn_*` when an endpoint has an explicit
-`include_tools` allowlist, or use `dyn_netintel__*` to select a named registration.
-Filters use source names, not registry IDs; existing ID-based filters are not rewritten.
-The `x402_treazury_` and `dyn_` namespaces are reserved in
-participating deployments. Management tools follow their respective capability preferences and are
-not removed by API filters.
-
-Direct financial control has separate listener capabilities under
-[`swap_control`](configuration.md#direct-swap-control). Its first-party asset,
-payment-request, preview, send and status tools share advertising, search and
-dispatch policy. `receive` and `send` independently enable admissions; previews
-require send permission and grant no payment authority. Native shielded ZEC
-receiving and sending use no NEAR call; foreign routes use the host's optional
-NEAR capability. Send requests bind the exact destination terms and caller
-request ID. Foreign sends also require caller ZEC-principal authority; the
-operator's optional total-debit preference includes the actual network fee.
-Status can recover an operation by original kind/request ID after a lost response.
-They require no provider registration and cannot select another listener owner or
-treasury. Disabling admission retains owned status; API filters do not confer
-financial authority.
+- **Authenticated principal:** Each listener's bearer token defines its
+  authority; agent arguments and session fields cannot choose wallets, owners,
+  or persistence.
+- **Endpoint isolation:** Dynamic registrations belong only to the listener
+  that created them and cannot modify configured sources, wallet settings, or
+  spending limits. Persistent listeners must each use a distinct
+  `source_registry_file`; sharing one file across listeners is rejected.
+- **No wallet allocation or funding:** Listing, searching, probing, and
+  registering APIs never create wallet pools or trigger funding. Registered
+  APIs share the listener's explicit wallet and its `max_api_payment_usdc` cap.
+- **Wrapper visibility:** Enabling either `provider_management_local` or
+  `provider_management_remote` automatically advertises
+  `x402_treazury_tools_search` and `x402_treazury_tool_call` so clients can
+  discover and invoke newly registered APIs even if they cache `tools/list`.
+  Enabling only `raw_url_calls` does not advertise those wrappers or restore
+  persisted dynamic sources.
+- **Directory selection:** `coinbase` searches both curated and non-curated
+  Coinbase resources; `coinbase_curated` restricts the same search to curated
+  resources. Leaving `remote_provider_directories = []` with
+  `provider_management_remote = true` omits `x402_treazury_providers_search_remote`
+  and `x402_list_id` lookups while keeping `base_url`, `documentation_url`, and
+  `providers_add_remote` available.
+- **Obsolete keys:** The retired keys `source_management` and
+  `sources_search_tool_instructions_text` are rejected at parse time.
 
 ## Agent tools
 
-| Tool | Arguments |
-| --- | --- |
-| `x402_treazury_providers_list_local` | Local management: optional capability keywords `q`, `page`, `per_page`; list bundled definitions offline. |
-| `x402_treazury_providers_add_local` | Local management: required exact `provider_id`, optional registration `name`. |
-| `x402_treazury_providers_search_remote` | Remote management and nonempty directory list: optional `q`, `limit`, `max_price_usd`; query every configured directory. |
-| `x402_treazury_providers_add_remote` | Remote management: required public HTTPS OpenAPI 3 JSON `spec_url`, optional registration `name`. |
-| `x402_treazury_provider_details_remote` | Remote management: exactly one `x402_list_id`, public HTTPS `base_url`, or `documentation_url`. ID mode is available only with `x402-list` selected. |
-| `x402_treazury_raw_call` | Raw URL permission: required `method`, public HTTPS `url`; optional `query`, `headers` and JSON `body`. |
-| `x402_treazury_tools_search` | Either management capability or on-demand discovery: optional `query`, `source_name`, `cursor`, `limit`. |
-| `x402_treazury_tool_call` | Same exposure as tool search: required readable `tool_id` and `arguments`. |
-| `x402_treazury_swap_assets` | Either direct capability: identity/name keyword `query`, `offset`, `limit`; [literal-priority/BM25 asset search](configuration.md#direct-swap-control), local native ZEC and explicit foreign-list availability. |
-| `x402_treazury_payment_request_create` | Receive capability: `asset_id`, `chain`, atomic `amount`, `request_id`; foreign assets additionally require payer-owned `refund_address` and exact one-time counterparty payment plus network fees. Optional foreign `refund_after_seconds` defaults to two hours before requested refund handling. |
-| `x402_treazury_swap_preview` | Send capability: destination `asset_id`, `chain`, atomic `amount`, `recipient`; inspect the optional send limit, SDK spendable balance, estimated fees and whether the payment fits. Dry result grants no execution authority. |
-| `x402_treazury_swap_send` | Send capability: destination terms and `request_id`; obtains foreign pricing internally and respects the optional operator total-debit limit. |
-| `x402_treazury_swap_status` | Owned saved work: either `operation_id`, or `kind` plus original `request_id`; receive instructions include current UTC time and available expiry/refund-start countdowns. Remains available after admission disablement. |
+| Tool | Enabled by | Purpose |
+| --- | --- | --- |
+| `x402_treazury_tools_search` | `discover_on_demand` or either provider-management flag | Searches callable tools on this endpoint and returns full input schemas. Makes no network requests. |
+| `x402_treazury_tool_call` | `discover_on_demand` or either provider-management flag | Invokes a callable `tool_id` with `arguments`, applying normal payment caps and filters. |
+| `x402_treazury_providers_list_local` | `provider_management_local` | Lists or searches bundled provider definitions offline (`q`, `page`, `per_page`). |
+| `x402_treazury_providers_add_local` | `provider_management_local` | Registers a bundled provider by exact `provider_id` and optional `name`. |
+| `x402_treazury_providers_search_remote` | `provider_management_remote` plus nonempty `remote_provider_directories` | Queries every selected remote directory concurrently (`q`, `limit`, `max_price_usd`). |
+| `x402_treazury_provider_details_remote` | `provider_management_remote` | Checks bundled matches, then probes `base_url`, reads `documentation_url`, or looks up `x402_list_id` (requires `x402-list`). |
+| `x402_treazury_providers_add_remote` | `provider_management_remote` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url` and optional `name`. |
+| `x402_treazury_raw_call` | `raw_url_calls` | Calls a documented public HTTPS URL (`method`, `url`, optional `query`, `headers`, and JSON `body`). |
 
-Only enabled tools and permitted follow-ups are advertised. Neither authored
-endpoint instruction text nor API tool filters grant management authority.
+Recommended agent workflow:
 
-### Listing and URL discovery
+1. Search already callable tools with `x402_treazury_tools_search`.
+2. Search bundled definitions offline with `x402_treazury_providers_list_local`
+   before spending on remote directories, and add matches with
+   `x402_treazury_providers_add_local`.
+3. If no bundled provider covers the need, search remote directories with
+   `x402_treazury_providers_search_remote`.
+4. Inspect a candidate with `x402_treazury_provider_details_remote`
+   (`x402_list_id`, `base_url`, or `documentation_url`) to find its OpenAPI
+   spec or usage guide.
+5. Register a discovered OpenAPI 3 spec with
+   `x402_treazury_providers_add_remote`, or call a documented non-OpenAPI
+   endpoint directly with `x402_treazury_raw_call`.
+6. Use `x402_treazury_tools_search` and `x402_treazury_tool_call` to inspect
+   and invoke the newly registered tools.
 
-All details modes require remote management. `x402_list_id` is hidden and rejected
-before identity lookup or I/O unless `x402-list` is configured; URL modes work with
-Coinbase-only or empty directory selections.
+## Tool search matching and results
 
-Given a resource URL such as `https://api.example.com/weather/v2/forecast?city=London`,
-try `provider_details_remote(base_url="https://api.example.com/")` when no API base
-is documented. This probes fixed document locations at the supplied root; it does
-not call the resource or prove that the root is the API base. Prefer an explicitly
-documented base path: root discovery can miss documentation beneath another path
-or on another host. Bundled matching remains exact by origin and base path.
-`x402_list_id` is the exact native `slug` from x402 List, not a registration ID
-or Coinbase resource URL. A Coinbase usage-document URL can be passed directly
-as `documentation_url`.
+`x402_treazury_tools_search` searches only the current endpoint's callable tool
+inventory (configured tools, enabled dynamic registrations, and enabled
+direct-swap tools, after listener filters and duplicate-name suppression).
 
-With `documentation_url`, `provider_details_remote` reads an exact caller-supplied public
-HTTPS usage-document URL, including its query when present. This is optional;
-sufficient documented method, URL and arguments already permit `raw_call`, and a
-known OpenAPI URL can go directly to `providers_add_remote`. A Coinbase `skillUrl` is a lead,
-not a verified instruction source. The response labels provenance
-`caller_supplied` and returns `documentation` with the requested URL, content type
-when available, and visible status. `ok` and `empty` include complete `text`;
-failures omit text and report safe reasons, HTTP status or the affected byte limit.
+- **Ranking:** Nonblank queries split on Unicode alphanumeric tokens using
+  multi-term OR matching (no stemming, wildcards, Boolean operators, or
+  quoted-phrase syntax), rank tools with BM25 over tool names, descriptions,
+  and parameter names, prioritize literal substring matches, and break ties
+  deterministically by `tool_id`. Blank queries enumerate the inventory in
+  `tool_id` order.
+- **Filtering and pagination:** Optional `source_name` restricts results to one
+  source. `limit` defaults to 25 (any positive integer is accepted). `cursor`
+  binds to the listener and catalog snapshot; if a catalog refreshes or a new
+  source is registered, restart pagination from the beginning.
+- **Response fields:** Responses return `available` (total tools in the scoped
+  inventory), `total` (number of tools matching the query), `next_cursor`,
+  `catalog_generation`, full input schemas for the returned page, and a
+  zero-match `hint` distinguishing `available > 0, total = 0` from
+  `available = 0`.
 
-The reader uses the shared unsigned origin sequence and, when configured, the
-on-demand GET relay list. It performs no HEAD request or linked traversal. The
-listener's available documentation identity, transport, public-destination policy,
-`max_help_bytes` and response-read inactivity policy apply. Missing wallet identity
-leaves origin retrieval available under the URL's discovery identity. Origin HTTP
-remains no-follow; configured relays may follow redirects under the
-[documented trust boundary](configuration.md#relay-fallback). A separate skill host must independently satisfy the origin policy.
-Accepted text is complete UTF-8 without NUL, with `text/plain`, `text/markdown`,
-`text/x-markdown` (parameters allowed), or no content type. HTML MIME and leading
-HTML/doctype markup are rejected, as are other MIME types and invalid UTF-8.
-Unrequested partial responses (HTTP 206 or Content-Range) fail without text.
-Returned text remains untrusted content; reading it never executes instructions,
-registers a source or extends payment authority.
+## Listing and URL discovery
 
-`provider_details_remote` resolves bundled provider definitions before discovering OpenAPI,
-x402 discovery and LLM documentation URLs. With a directory `x402_list_id`, it fetches that
-service's listing once. After validating the API base, exact normalized origin/base
-path matches return selectable `provider_matches` with provider IDs and schema
-provenance. Companion definitions sharing a base remain separate candidates; they
-are not combined. `url_discovery.status = "bundled_provider_found"` and empty
-`results` report that speculative probes were skipped. These offline matches make
-no reachability or qualification claim. Unknown bases retain common-URL probes
-under the API base, origin root and allowed website origin.
-With `base_url`, it skips the directory lookup. A slug is the external directory's
-service identifier, not a local registration name or UUID.
+### Bundled provider listing
 
-The response contains `listing` (the exact parsed directory response, or null for a
-base URL), `provider_matches` (empty when none) and `url_discovery`. Discovery includes an overall `status`, per-URL
-`results`, and available base/website metadata. A received directory response is
-preserved when discovery cannot proceed, including missing/rejected API bases or an
-unavailable optional discovery work. Non-JSON directory output is preserved as text
-with `directory_response_not_json`; the tool does not automatically repeat a paid
-lookup. Directory request failures propagate through ordinary response handling.
+`x402_treazury_providers_list_local` runs offline against embedded metadata from
+`providers/`. Nonblank `q` uses the same literal-priority BM25 ranking over
+`provider_id`, display name, description, and `api_base`. Blank `q` lists in
+`provider_id` order (`page` defaults to 1, `per_page` to 25). An absent
+`api_base` means the provider takes its server URL from its OpenAPI spec.
 
-Provider probes use one validated GET per fixed, deduplicated candidate, with four
-probes in flight. They share origin retries and configured on-demand relay fallback;
-blocked retrieval can charge, while terminal `401`/`404`/`410`, target `402`, complete
-invalid content and partial-document rejection do not buy another read. Results
-include URL, candidate kind, GET status, content type and outcome; no synthetic HEAD
-status is reported. Document contents stay server-side. Existing spec/help byte
-and response-read-inactivity limits apply. `verified_openapi` means structural OpenAPI 3 JSON checks passed;
-`providers_add_remote` still performs full import validation. `documentation_found` points to
-concise documentation; `directory_json_unverified` is only an unverified lead.
-Other statuses expose missing, redirected, blocked, invalid, oversized or unavailable
-candidates. Nothing found does not prove the API is unusable.
+### Remote provider details and usage documents
 
-Probes use a pinned available provider-management wallet isolation identity, including
-listener overrides and Tor remote DNS. Without one, the URL's discovery identity
-keeps unsigned origin retrieval available. Identity selection does not allocate, fund or
-promote a wallet. Directory and probe work remain owned through caller cancellation.
-No new discovery cache or registration is created.
+`x402_treazury_provider_details_remote` requires exactly one of `x402_list_id`,
+`base_url`, or `documentation_url` and returns `provider_matches` alongside
+`url_discovery` status and results when probing:
 
-If you already know a published OpenAPI URL, pass it directly to `providers_add_remote`;
-`provider_details_remote` is optional. Otherwise it can locate a specification or concise
-provider documentation with a published link. Do not download large OpenAPI
-specifications or full API directories into agent context: import them server-side,
-then retrieve relevant tool schemas with `tools_search`. Never invent specification
-URLs or paid request arguments. If no specification exists, a documented API can be
-called with `raw_call` without registration.
+- **`x402_list_id`:** Takes an exact x402 List `slug` (available only when
+  `x402-list` is in `remote_provider_directories`). Performs one directory
+  lookup (potentially paid), checks exact bundled matches by origin and base
+  path, and probes the listing's API base when no bundled match applies.
+- **`base_url`:** Checks exact bundled matches by origin and base path first.
+  When no bundled match exists, probes a fixed list of common OpenAPI and
+  documentation paths (`/openapi.json`, `/swagger.json`, `/docs/openapi.json`,
+  `/.well-known/openapi.json`, `/llms.txt`, `/llms-full.txt`, and related
+  locations) using up to four concurrent validated GET requests under normal
+  `max_spec_bytes` and `max_help_bytes` limits. Origin `401`, `404`, `410`, and
+  target `402` probe responses never trigger a paid relay read. When probing
+  from a resource URL with no documented base path, start with the origin root
+  (`https://host/`) and keep in mind that specs hosted under a deeper subpath
+  or separate host may require a documented base URL.
+- **`documentation_url`:** Fetches one exact public HTTPS URL (preserving query
+  strings) with no redirects, under `max_help_bytes` (4 MiB) and the network
+  read-inactivity timeout. Accepts complete UTF-8 without NUL for `text/plain`,
+  `text/markdown`, `text/x-markdown`, or no `Content-Type`; rejects HTTP `206`
+  and `Content-Range` responses, leading HTML or doctype markup regardless of
+  `Content-Type`, and HTML, JSON, YAML, XML, binary, and other MIME types with
+  an explicit error rather than returning truncated or scraped markup.
 
-### Direct calls to x402 URLs
+Configured `relay_fallback` applies `source_discovery` to directory lookups and
+`provider_metadata` to spec probes and usage-document reads.
 
-Imported OpenAPI tools expose declared business headers and automatically manage
-declared `Idempotency-Key` headers under the [shared header contract](configuration.md#openapi-header-parameters-and-idempotency).
-This applies equally to direct tool invocation and on-demand `tool_call`; a new
-invocation is a new operation, even with identical arguments.
+## External directory matching
 
-`raw_call` calls any documented public HTTPS x402 API URL. Supply its exact HTTP
-`method`, optional `query` parameters and optional JSON `body`. The method is
-validated as an HTTP token and forwarded without changing its spelling. Query
-values can be strings, numbers, booleans or arrays of those scalars; arrays repeat
-the key. They are URL-encoded and appended to any existing URL query. A supplied
-body is sent exactly as JSON with `Content-Type: application/json`, including
-explicit `null`; omission sends no body. The wrapper adds no method/body policy.
+`x402_treazury_providers_search_remote` queries every configured directory
+concurrently with `q`, `limit` (default 5, range 1-20 per directory), and
+optional `max_price_usd`:
 
-The tool requires `raw_url_calls` and uses the endpoint's existing wallet, ordinary payment
-admission, configured direct/Tor transport and response limits. It creates no
-registration or wallet. API tool-name filters do not restrict it. Existing public
-HTTPS, no-URL-credentials, origin and redirect checks remain server responsibilities;
-wallet selectors and payment settings are not agent arguments. Binary
-PNG/JPEG/WebP output uses the normal bounded image path; JSON image mappings require
-a configured provider and are not inferred by raw calls.
+- **Coinbase (`coinbase` and `coinbase_curated`):** Queries Coinbase's public
+  resource directory unsigned, constrained to Base mainnet USDC `exact` offers
+  and enforcing Coinbase's 400-character query limit. `max_price_usd` filters
+  resource prices. Coinbase origin `402` challenges are never signed, and HTTP
+  `206`, `Content-Range`, and invalid JSON fail without paid fallback or replay.
+- **x402 List (`x402-list`):** Queries `/best` for Base services with
+  `prefer=balanced` and `require_verified=false`, filtering by minimum service
+  price. Has no 400-character query limit when used alone. Directory data from
+  `x402-list.com` carries a CC BY 4.0 attribution requirement.
 
-Calls can spend Base USDC and can change provider state. Follow the documented
-method and arguments. Directory verification and a payment challenge do not prove
-a request schema or guarantee useful output. Unsigned requests retain the
-[accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries).
-A signed, timed-out or ambiguous call may already have charged or acted; a new
-invocation is a new logical call and may authorize another payment.
+Responses return a map keyed by directory name (`coinbase`, `coinbase_curated`,
+`x402-list`): each successful entry contains the full upstream JSON object,
+while a failed directory returns `local_error` without cancelling healthy
+siblings. Relay advisories and possible-payment notices sit outside individual
+directory objects. Because `x402-list` and configured `source_discovery` relay
+fallbacks can charge via x402, one search call can authorize multiple payments;
+no automatic federation replay or merged truncation is performed.
 
-#### Manual raw headers
+### Registration matching and naming
 
-Optional `headers` is an object of HTTP header names and string values. Supply
-only headers documented by the API, including custom `X-*`, explicit
-`Authorization` (for example `Bearer example-token`) and a caller-owned
-`Idempotency-Key`. No OpenAPI registration is required. Omitted or empty headers
-retain ordinary raw-call behavior. Accept, Content-Type, cookies, HTTP
-transport/proxy/framing and x402 protocol headers remain reserved. Names and values
-are validated before I/O; case-insensitive duplicates and nonstring values fail.
-MCP supplies an already parsed JSON object: exact duplicate JSON keys have already
-collapsed and cannot be detected here. Case variants remain detectable.
+- **Local registration (`providers_add_local`):** Looks up an exact bundled
+  `provider_id` and defaults the source name to `provider_id`. It preserves the
+  provider's compatibility flags, filters, timeouts, byte limits, operation URL
+  extensions, and embedded schema, while disabling static disk caching
+  (`http_cache_enabled`), cover traffic (`cover_traffic`), and recommendation
+  filtering (`use_recommended_tools`).
+- **Remote registration (`providers_add_remote`):** Fetches a public HTTPS
+  OpenAPI 3 JSON specification. If the canonical `spec_url` (including query
+  string) uniquely matches a bundled provider and no generic registration
+  already owns that URL, it adopts the bundled definition (preserving its
+  compatibility repairs) even when `provider_management_local` is off. If
+  multiple bundled providers share that URL, it returns the bundled choices
+  (when local management is enabled) or asks the operator to disambiguate.
+  Otherwise it registers the spec generically using strict HTTP/2 and TLS 1.3
+  defaults and defaults the source name to the specification hostname.
+- **Names, filters, and idempotency:** Registration names are case-preserving,
+  at most 64 ASCII letters, digits, underscores, or hyphens, cannot contain
+  `__`, and must be unique on the endpoint across disabled registrations and
+  effective static bindings (including pending `send_tools` targets;
+  exclusion-only sources reserve no name). Registered tool names receive a
+  `dyn_<name>__` prefix (with numeric collision suffixes if needed), and
+  `x402_treazury_` and `dyn_` are reserved static tool namespaces. Listener
+  `include_tools` allowlists still filter dynamically registered tools, so
+  endpoints using `include_tools` must include `dyn_*` (or `dyn_<name>__*`) to
+  expose dynamic registrations. Repeating a registration for the same
+  `provider_id` or `spec_url` returns the existing registration without
+  refreshing it. Concurrent registrations on the same endpoint share one import
+  slot and publish complete snapshots atomically.
 
-Every nonempty manual set is caller-private: arbitrary names can hold credentials,
-including innocuous business names. The call never uses a paid relay and stays on
-its initially selected existing payer. A price handoff or recognized insufficient
-funds stops the operation before another wallet's I/O, retaining any possible-charge
-evidence; it allocates no wallet and waits for no funding. Eligible same-payer
-GET/HEAD retries preserve exact values. Manual state-changing requests can execute
-without payment, so they recover only from TLS connection-establishment failures,
-with no status/body-driven or post-dispatch TLS replay. A failure before response
-headers arrive does not prove the write was undelivered. An actual 402 can still
-be signed once.
+## Manual raw headers
 
-A supplied idempotency key is sent unchanged, never generated, replaced or remembered.
-It grants no replay authority, vendor deduplication guarantee or protection against
-multiple x402 debits. Reusing a key in a new invocation is a separate caller decision.
-Accepted work retains its exact request after waiter disconnect until processing
-finishes; no host credential store, cross-call deduplication or recovery journal is added.
+`x402_treazury_raw_call` accepts `method`, public HTTPS `url`, optional
+`query`, optional string-valued `headers`, and optional JSON `body` (omitting
+`body` and passing JSON `null` are distinct). It uses the listener's wallet,
+payment cap, `max_response_bytes` default (16 MiB), network read timeout, and
+public-destination policy, and is unaffected by tool-name filters.
 
-Manual secrets appear in agent-authored arguments and may remain in client history.
-They do not satisfy a provider's host-only credential contract. Application-owned
-diagnostics, route previews and validation errors omit manual values. The
-unmodified `rmcp` SDK can log raw tool arguments at DEBUG/TRACE, including
-`Authorization` supplied to raw GET calls or any other method, before application
-validation. SDK malformed-frame diagnostics, result/error logging and some
-HTTP transport-error bodies can also expose caller input or upstream credential
-echoes. Avoid verbose SDK logging with secrets, including in embedded consumers
-with their own tracing subscribers. Upstream raw responses and HTTP error bodies
-are not redacted: an upstream can echo a credential into ordinary output. This
-feature cannot clear secrets held by an agent; resending them after rotation can link wallet identities.
-Authorization is an invocation-local raw-call exception. Generated tools and
-public Rust routed business headers still cannot inject it. Automatic OpenAPI
-credential lookup/capture remains a separate, unimplemented mechanism; manual calls
-have no access to host-managed credentials. When managed auth is implemented, reject
-mixed manual/managed modes before credential lookup or I/O; raw permission cannot
-authorize automatic credential access or a cross-payer continuity override.
+Rules for caller-supplied `headers`:
 
-### Registration and tool invocation
-
-`providers_add_local` accepts an exact `provider_id`; `providers_add_remote` accepts
-a public HTTPS OpenAPI 3 JSON `spec_url`. Both accept optional `name` and share
-the same import/commit path under their respective operation permissions.
-For example, `providers_add_local({"provider_id":"exa"})` registers the bundled Exa definition. A bundled
-registration uses its reviewed catalog configuration and acquires its remote or
-embedded schema server-side; it preserves base repair, selections, overrides,
-help, guidance and response mappings without activating provider recommendations.
-No agent-selectable local path or data installation is needed.
-
-A specification URL first returns any existing generic registration for that
-endpoint and canonical URL unchanged. Otherwise a unique exact match against
-current bundled remote specification URLs selects the bundled definition; multiple
-matches require operator resolution, or an available local choice through
-`providers_add_local` when local management is enabled. Remote import does not
-accept a provider-ID escape hatch. Full canonical specification URL matching
-includes significant query components and works even with local management disabled;
-API bases, hostnames and inferred resource paths are not specification matches. Other URLs retain generic OpenAPI 3 JSON
-import, with the API base from the first root server resolved against the spec URL.
-An arbitrary document's `servers` claim never selects a bundled provider.
-It returns `name`, `tool_prefix`, filtered `tool_count`, `status` and `next`; disabled registrations also include `reason`. Bundled results and operator inspection also report the accepted `provider_id` and schema provenance.
-`next` suggests search then invocation only when tools are visible. A disabled
-registration needs operator repair/refresh; repeating its accepted selector with
-the corresponding add tool returns that same registration. An enabled registration with zero visible tools retains
-`status="available"` and points to source selections and listener filters. Searching
-without `source_name` can find other endpoint tools, but does not alter operator
-filters or guarantee a callable result.
-Registration never funds wallets or probes prices.
-
-Static deployment [source distribution](configuration.md#source-tool-distribution)
-does not extend registration authority. Dynamic imports cannot supply `send_tools` and
-remain owned by the authenticated endpoint; they cannot target sibling listeners.
-Raw-call permissions remain independent of static routing and are not constrained
-by its tool selectors.
-
-Names preserve case and allow at most 64 ASCII letters/digits/underscores/hyphens;
-`__` is reserved as the source/operation separator. Explicit names must be unique
-within the endpoint, including disabled registrations and configured source names.
-Configured names are reserved for every effective static binding, including
-declared `send_tools` destinations whose catalogs are pending or currently contribute no
-tools. Exclusion-only sources reserve no endpoint name.
-When omitted, bundled sources use their short stable provider ID and generic
-sources use a readable hostname-derived name (for example `api-example-com`), with a numeric suffix such as `-2` if occupied. Name allocation
-and duplicate-URL checks share the existing publication lock. Choose `netintel` to
-produce `dyn_netintel__<operation>` tools; operation suffixes use normalized OpenAPI
-paths, adding method/numeric suffixes where necessary.
-
-Curated registrations deduplicate by authenticated owner and provider ID; generic
-registrations retain owner plus canonical specification URL. Repeating a provider
-ID returns its accepted registration before consulting the current bundle, without
-implicit refresh or a new label. Concurrent provider-ID and current known-spec
-additions converge under the publication lock. A legacy generic URL registration
-remains generic when its URL is repeated; explicitly selecting its provider ID can
-create a separate bundled source, subject to existing name/tool collision checks.
-Busy errors can be retried with the same selector. Persistence follows operator
-configuration.
-Accepted catalog construction is retained in memory with its source record, without
-persisting a second catalog cache. It includes the exact document and accepted
-provider/selection/name inputs; changing those inputs rebuilds the result. Current
-listener filters and payer/help policy are applied at each publication, independently
-of that reusable result. Repeated publication does not reload an unchanged source
-or retain obsolete guidance. An add chooses its final source name before its one
-catalog construction in the existing blocking mutation worker; it does not build
-a provisional catalog on the serving runtime. Validation still precedes durable
-commit, and transport promotion follows successful validated publication.
-Known registration results and source-filtered search read the same published
-generation as visible tools and instructions, including disabled or fully filtered
-registrations. These reads continue while a registry mutation is pending. A missing
-add owns its authenticated owner and resolved registration identity before the final
-duplicate check, through document acquisition, initial validation and publication.
-Same-identity adds wait for that owner and reuse its published registration even
-after completed-fetch eviction or payer replacement. Caller cancellation retains
-the accepted add; unrelated identities proceed independently. Mutex ownership lasts
-only while owners or waiters remain; the next missing add removes dead weak map
-entries. There is no separate admission cap or registration-result ledger. Durable
-commit and publication ordering are unchanged.
-Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
-available through operator inspection; no registration-result receipt ledger is
-needed. These source records are separate from payment and financial journals.
-
-Search with optional `source_name` and a targeted query, or omit the source filter
-to search all available endpoint tools. Results contain readable `tool_id`, complete
-`description` and `input_schema`. Invoke `tool_call` with that ID and matching
-`arguments`. The server resolves the currently visible bound tool and captures its
-route, payer and internal source identity before executing. Names are local to the
-selected MCP endpoint; the same name on another endpoint resolves that endpoint's
-tool. Removed, hidden or filtered tools fail before provider I/O. Management tools
-cannot be recursively invoked through this API-tool lookup.
-
-Tool IDs are reusable across turns and restarts while present. Refreshing or
-re-adding a source with the same tool name intentionally selects its current
-operation; search again when you need the current schema. Accepted calls retain
-their captured binding even during publication/removal. Existing direct MCP tool
-calls use the same name-based semantics. API responses and payment admission remain
-unchanged.
-
-Enabled capabilities determine the management definitions advertised. Eager endpoints also advertise
-registered API tools, including restored registrations; `discover_on_demand` keeps
-those API definitions out of `tools/list`. HTTP is stateless and does not advertise
-list-change notifications, so clients may cache their inventory. Search/call remains
-usable with that cached inventory. Search cursors bind the running catalog,
-endpoint, query/filter and generation; stale cursors require restarting pagination.
-All listeners return the complete advertised inventory in one `tools/list` response,
-without `nextCursor`; supplied listing cursors are ignored. Descriptions and
-schemas and accepted tool outputs are returned complete. The removed listener
-`max_response_chars` field and CLI flag reject visibly; byte acquisition and image
-bounds still reject oversized content explicitly.
-
-Help and imported specifications share the common complete-document acquisition
-path. Only validated complete content can promote an origin transport. Complete
-invalid schemas/text, unsolicited `206`/`Content-Range`, local bounds and destination
-rejections are terminal; blocking HTTP/transport failures can use configured
-on-demand fallback. A relayed target `402` is never signed. Relayed content retains
-requested/reported-destination checks and the configured relay trust boundary.
-
-Help caches and active import coalescing include retained payer authority and
-effective document policy. A static help binding pins the exact payer independently
-of later ordinary API payer replacement. Help, imports, and pricing can fetch
-public documents from their origins without resolving a managed payer. An
-eligible paid relay captures its payer before dispatch, without activating
-funding. With bootstrap policy, metadata and built-in discovery relay fees stay
-on the bootstrap group across API cutover. API/raw relay fallback keeps its
-captured API payer. Compatibility keys retain the actual metadata authority.
-Existing in-flight acquisitions and cached
-possibly-paid outcomes keep their accepted authority through later handoff. Accepted help/add/refresh work survives waiter cancellation through
-validation and cache/source publication. Shared failures preserve typed bounds and
-possible-charge facts. Possible-paid help failures remain cached so joined waiters
-cannot sequentially purchase the same failed initialization; proven unpaid help
-failures retain normal explicit retry behavior. These readers allocate no wallets,
-start no funding and create no new replay authority.
+- **Reserved and duplicate headers rejected:** `Accept`, `Content-Type`,
+  framing, connection, proxy, cookie, and x402 payment headers
+  (`PAYMENT-SIGNATURE`, `X-PAYMENT`, `PAYMENT-REQUIRED`, `PAYMENT-RESPONSE`,
+  `X-PAYMENT-RESPONSE`), as well as case-insensitive duplicate header names,
+  are rejected before I/O. Header values are never included in validation errors
+  or logs.
+- **Manual `Authorization`:** Allowed in `raw_call` only as an explicit
+  caller-supplied header; it is never stored, registered, or injected into
+  generated OpenAPI tools.
+- **No relay, price handoff, or cross-payer handoff:** Supplying any nonempty
+  `headers` map disables paid relay fallback, price handoff, and cross-payer
+  insufficient-funds handoff so caller headers (which may carry credentials or
+  vendor idempotency keys) are never forwarded to third-party relays or
+  replayed across wallets. Manual-header writes also drop status- and
+  body-driven POST retries and recover only from pre-dispatch TLS
+  connection-establishment failures; see
+  [unsigned x402 retries](architecture.md#unsigned-x402-requests-and-post-retries).
+- **No automatic idempotency:** Unlike generated OpenAPI tools, `raw_call` does
+  not synthesize or remember `Idempotency-Key` headers; the caller owns any
+  idempotency header it passes.
+- **Logging, error-echo, and linkability limits:** Unmodified `rmcp` can log
+  raw MCP tool arguments (including `Authorization` headers) at `DEBUG` or
+  `TRACE`, upstream HTTP responses and error bodies are not redacted and may
+  echo credentials, and resending the same manual credential across wallet
+  rotations can link wallet identities.
 
 ## Limits and network policy
 
-There is no tool-count admission quota. A `tools/list` request with more than 500
-advertised definitions emits one advisory WARN whose message states the endpoint
-name and current tool count and suggests `discover_on_demand = true`. Counts include
-filtered static/dynamic API definitions and advertised management wrappers;
-on-demand listeners count only wrappers. Each listing may warn again. This observes
-advertised inventory, not client/model context, and never rejects registration or
-changes access/mode. The operator must explicitly opt in to on-demand discovery.
+Dynamic discovery, registration, probes, usage reads, and raw calls all use the
+centralized factory in `src/network.rs`:
 
-Generic imports use the shared specification default of 32 MiB, response default
-of 16 MiB and help default of 4 MiB. Raw calls and exact usage-document reads use
-the same response and help defaults. Bundled imports preserve the provider's
-configured byte limits and read-inactivity timeout; an omitted provider timeout
-inherits the network default (60 seconds in either transport). Generic imports,
-raw calls and exact usage-document reads inherit the network timeout. There are no
-provider-management overrides. Spec, help and API responses have no total HTTP
-download deadline.
-
-Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior.
-Remote imports have no separate per-listener, global-import or active-cache admission
-quota; they retain the existing foreground work ownership. Equivalent aliases share
-an active fetch keyed by payer authority, document policy and transport settings.
-Active fetches cannot be evicted by retention age or completed-cache churn.
-Completed fetches retain successes for 300 seconds and failures for one second;
-optional completed retention is trimmed on lookup and completion to four entries.
-This is a cache-retention allowance,
-not a total bound on documents retained by active callers.
-At most 16 mutation jobs can be outstanding. Dynamic registration saturation
-emits WARN and returns an explicit busy error; static catalog publication emits
-DEBUG with limit 16 and waits for the same shared gate. Publication and collision
-checks are serialized, so concurrent additions cannot publish partial sources.
-
-Catalog physical structure and actual reference traversal/copy work share bounds
-of depth 64, 500,000 nodes and 64 MiB of string/key bytes. Local pointer bytes and
-repeated targets count for each lookup/expansion. These guards also protect
-authored local, downloaded, cached, relayed and direct-Value catalog conversion;
-unused authored definitions are not hypothetically expanded. Dynamic import keeps
-its stricter whole-document reference-admission policy. Import rejects over 10,000 operations,
-generated schemas above 256 KiB, names above 512 bytes, external/unresolved/cyclic
-references, and per-path/operation server overrides. Accepted live documents total
-at most 128 MiB; serialized registry state is at most 256 MiB. Stored registration
-records, including removed records, are governed by that same serialized byte bound
-on save and load. Record counts introduce no separate admission or reload
-gate. Resource-limit
-rejections emit WARN diagnostics with safe counts, thresholds and adjustment
-settings where applicable. Rejected mutations, terminal transport failures and rejected destination/reference/server
-policies also warn. Retained waits and completed-cache eviction log at DEBUG.
-Limits reject visibly rather than trimming documents; warnings never include
-submitted names, URLs, schemas or upstream prose.
-
-Agent destinations require public HTTPS without userinfo or fragments. Local/special
-addresses, private names, redirects and local files are rejected. Direct connections
-validate DNS answers at dial time. Undeclared cross-origin API routes and generic cross-origin help URLs are rejected.
-Bundled providers retain their reviewed, authored help origin. An accepted provider's
-explicit [operation URL extension](configuration.md#operation-url-extensions) also
-permits the public HTTPS targets declared by that extension, including other
-origins; generic imports retain same-origin API routing. All production traffic uses the network factory. Dynamic API
-clients and lazy help retain public-destination restrictions at execution, including
-after binding, while help uses its own discovery-origin isolation identity. Accepted
-bundled protocol compatibility applies to schema acquisition, refresh, API and help
-through that factory; generic imports and raw calls retain strict defaults.
-
-Tor uses authenticated remote-DNS SOCKS with no direct fallback. Private DNS-answer
-rejection depends on Tor's `ClientRejectInternalAddresses`; the application does not
-resolve destinations locally or inspect proxy-hidden answers. Keep that protection
-enabled. Vendor descriptions are untrusted data and grant no additional authority.
-
-## Trusted invocation and payment scope
-
-Every direct or fallback invocation captures one immutable catalog snapshot and
-its trusted `BoundTool`. When `wallet_bootstrap` is configured, a validated remote
-API invocation records first-use demand for its participating destination and
-captures the effective group before dispatch. This covers static tools,
-`tool_call`, restored/registered tools and `raw_call`, including free responses
-and response-cache hits. Invalid arguments, denied permissions and unresolved
-names never activate demand. Tool/source listing, search, registration, catalog
-and pricing loads, document/help metadata and paid discovery relays remain
-non-activating. An authored API operation containing `help` in its name is still
-an API invocation.
-
-The bootstrap group's payment cap applies until the destination's first positive
-initial credit has ever been recorded, including partial credit and retired
-wallet history. Later calls then use the destination's cap; depletion never returns
-them to bootstrap. A call captured earlier keeps its effective group, original
-payer transport, journals and liabilities through completion or cancellation.
-Activation survives a cap refusal and merely wakes background funding; calls
-neither allocate wallets nor wait for swaps. Bootstrap policy grants no new relay,
-registration or disclosure permission.
-
-Advisory price hints belong to the acquired static catalog
-cache generation and original HTTP method/path template. Compatible aliases,
-listeners and wallet groups share these observations. Tools without that acquired
-handle, including local catalogs and dynamic imports, do not use the shared hint
-cache. Agent arguments, query values and request bodies cannot choose the hint
-key, payer, reserve claim or funding authority. Current payer ownership and the
-actual payment offer govern signing. Removing or refreshing a source cannot rebind
-an already captured call; removal does not erase its financial obligations.
-
-Dynamic sources use the endpoint's `wallet`. Endpoints referencing the same named
-wallet share its payment identity. Registration never creates per-source funding groups.
-Hints contain amounts, not reusable payment challenges or signatures. Every call
-uses a fresh request/challenge and current payment admission. See the
-[selection and isolation decision](architecture.md#wallet-selection-and-network-isolation)
-for connection, cover-state and Tor reuse limitations.
-
-Published API definitions can refresh after a final unsigned target 404, 405 or 410,
-once existing recovery finishes; see
-[runtime source refresh](configuration.md#runtime-source-refresh). Signed target
-outcomes and relay-service failures are excluded; a decoded relay destination
-remains unsigned target evidence even if the relay fee was signed. Existing tools,
-search results and hints remain usable during refresh and after failure under their
-original expiry. Successful replacement retires old API handles and their hints. The
-original API call is never replayed. Refresh preserves the accepted registration
-settings and listener principal; a concurrent removal or newer revision prevents
-obsolete publication. Static clients may need to reload cached schemas.
-Initial and restored dynamic sources bind external price hints to the saved
-catalog acquisition expiry too; optional metadata acquisition cannot renew that
-expiry or restore estimates after it has elapsed.
-Their optional pricing task is prepared with the tools and starts only after an
-enabled source is published. Failed registration persistence or restore conflicts
-do not start optional pricing acquisition.
+- **Public HTTPS only:** Non-HTTPS URLs, URLs with embedded credentials or
+  fragments, loopback, private, and link-local destinations, and HTTP redirects
+  are rejected before I/O or signing. Tor mode relies on `socks5h` remote DNS
+  and Tor's `ClientRejectInternalAddresses` to reject private DNS answers.
+- **Strict transport for generic imports:** Remote generic registrations and
+  `raw_call` require HTTP/2 and TLS 1.3; agents cannot enable `allow_http1` or
+  `allow_tls12`. Bundled imports retain their reviewed provider transport
+  flags.
+- **Origin routing:** Generic imports enforce same-origin API routing and
+  reject undeclared cross-origin routes and cross-origin help URLs. Bundled
+  imports keep their reviewed help origin and declared `operation_url_extension`
+  public HTTPS targets.
+- **Byte, schema, and registry limits:** Management tool requests cap at 64 KiB.
+  Specs use `max_spec_bytes` (32 MiB) and `document_complexity_limit` (depth 64,
+  500,000 nodes, 64 MiB traversal work); dynamic catalogs also cap at 10,000
+  operations, 256 KiB per generated tool schema, 64 bytes per source name, and
+  512 bytes per tool name, and reject external, unresolved, or cyclic `$ref`s
+  and per-path or per-operation server overrides. Accepted live dynamic
+  documents cap at 128 MiB in memory, and serialized SQLite registries cap at
+  256 MiB. Usage documents use `max_help_bytes` (4 MiB) and API responses use
+  `max_response_bytes` (16 MiB); bundled imports keep their configured provider
+  limits.
+- **Timeouts:** Bundled imports preserve the provider's `read_timeout_seconds`
+  (falling back to `[network].read_timeout_seconds`, 60 seconds). Generic
+  imports, `raw_call`, and `documentation_url` reads inherit
+  `[network].read_timeout_seconds` directly with no source-management override.
+- **Tor isolation:** In Tor mode, directory searches, spec fetches, and probes
+  use discovery-origin identities (or the pinned wallet identity when a paid
+  relay or directory fee applies), with no direct fallback.
 
 ## Persistence and operator maintenance
 
-The separate owner-only SQLite registry holds accepted specification bytes, hashes,
-source UUIDs, endpoint ownership, revisions and tombstones. A bundled source also
-saves its provider identity and effective catalog settings as one accepted
-definition. Catalog construction applies canonical provider names and name-keyed
-overrides before rebinding tools to `dyn_<registration-name>__<operation>`; the
-provider prefix is not repeated. Accepted settings preserve base repairs,
-compatibility filters, descriptions, help, instructions, pricing metadata and image
-mappings. They do not activate static caches, warming, relays,
-cover configuration or recommendation selection, and grant no wallet/payment
-authority. Legacy generic records retain their existing settings and identity.
+When `source_registry_file` is set on a listener, registrations are stored in
+an owner-only SQLite database separate from wallet state (no wallet encryption
+key is needed). Each record stores the owning listener name, source UUID,
+revision, readable name, canonical `provider_id` or `spec_url`, accepted schema
+bytes, and (for bundled imports) the accepted provider configuration.
 
-Private registry/database and lock creation uses the shared Linux/macOS storage
-boundary; descriptor checks reject unsafe permissions, hard links and macOS access
-grants. Existing SQLite sidecars are checked before opening, including read-only
-inspection. macOS parents must not supply file-inheriting ACL grants to newly
-created SQLite sidecars; non-inheriting grants remain valid. Linux POSIX ACLs are
-constrained by the database and copied sidecar owner-only modes. Unsupported privacy operations and ACL-inspection failures
-return errors. The disk HTTP cache uses the same boundary in its private directory.
+On startup, a listener restores its persisted registrations only when at least
+one of `provider_management_local` or `provider_management_remote` is enabled.
+Restored sources rebuild from their saved bytes and settings without network
+fetches. Records belonging to a different listener name fail restoration
+without modifying the database.
 
-The registry contains no wallet keys, but URLs and documents can reveal operator interests. Back it up while
-serving is stopped. Never delete or replace its ownership sidecar while serving.
-Registry files and sidecars cannot alias configuration or treasury paths. Each
-endpoint uses its own registry file; exclusive ownership prevents two endpoints
-from opening the same file. The shared private-storage guard explicitly releases
-ownership after SQLite closes, so duplicated descriptors or transient child-process
-inheritance cannot retain the lock after the owning Store ends. A live Manager
-still retains its registry ownership until all accepted work and owners are gone.
-Saved records owned by another endpoint fail restoration
-without altering the registry, including when all saved records are tombstones.
-A new empty database initializes the current registry format. Unsupported snapshot
-fields and malformed structure fail both restoration and inspection; neither path
-converts the snapshot or discards accepted records. Invalid saved record identities
-fail restoration, while inspection preserves and displays saved identity metadata.
-
-`config show` inspects configuration without opening registry state or secrets.
-`sources inspect --config FILE` returns an object keyed by endpoint ID, with each
-persistent endpoint's saved generation and source inventory. It never creates a
-missing registry. It does not require listener tokens, wallet keys or catalog requests.
-Each source includes `tools`, an array of generated `name`, HTTP `method` and
-`path` entries rebuilt from its accepted specification and saved catalog settings
-or legacy generic selection. Inspection does not resolve the current bundle.
-Disabled sources retain their saved inventory; removed sources have an empty list
-because removal clears the specification and accepted provider settings. An invalid
-saved catalog reports
-`tools: null` and `tools_error: "saved_catalog_invalid"` without hiding other
-sources or exposing specification/error prose. Existing registration metadata is
-preserved. Inspection can run while serving and does not acquire registry ownership.
-
-This is the saved registration inventory, before current listener filters; it does
-not assert that a tool is presently available or funded. Use
-`x402_treazury_tools_search` on the owning listener for its loaded tools, complete
-schemas and callable tool IDs.
-
-Stop serving before operator maintenance; exclusive registry ownership is enforced:
+Operator CLI commands (stop `serve` before running `refresh` or `remove`):
 
 ```sh
-x402_treazury sources refresh --config FILE --server research --source SOURCE_ID_OR_NAME
-x402_treazury sources remove --config FILE --server research --source SOURCE_ID_OR_NAME
-x402_treazury sources remove --config FILE --server research --all
+x402_treazury sources inspect --config deployment.toml
+x402_treazury sources refresh --server toolbox --source NAME --config deployment.toml
+x402_treazury sources remove --server toolbox --source NAME --config deployment.toml
 ```
 
-`--source` selects an exact saved ID first, then an exact name among sources that
-have not been removed. A removed ID fails rather than selecting another source by
-name. An ambiguous name fails without changing the registry;
-use its ID instead. Disabled sources can also be removed. `remove` requires exactly
-one of `--source` or `--all`; `refresh` requires `--source`. Both commands require
-`--server` and operate only on that endpoint's registry. `remove --all` atomically
-records tombstones for all remaining sources on the endpoint. An empty selection
-succeeds without saving the registry. Removal performs no network or wallet work.
+- `sources inspect`: works while `serve` is running (even when both management
+  flags are disabled) and lists persisted registrations, visible tool counts,
+  enabled status, and any load error without unlocking wallets. An invalid saved
+  catalog reports `tools: null` and `tools_error: "saved_catalog_invalid"`
+  without hiding sibling sources.
+- `sources refresh`: requires at least one of `provider_management_local` or
+  `provider_management_remote` to be enabled on the target listener, re-fetches
+  a generic spec (or adopts the current bundled provider settings and schema
+  together), and saves the updated bytes. External pricing enrichment runs on
+  the next load rather than during offline refresh.
+- `sources remove`: works even when both management flags are disabled, revoking
+  one persisted registration (or every registration on that listener with
+  `--all`) while leaving financial records and wallet history intact. For both
+  `refresh` and `remove`, `--source` matches an exact saved UUID first and then
+  an exact name among non-removed records (ambiguous names fail).
 
-Generic refresh fetches and validates new bytes through the configured network
-policy without pricing probes. Origin retrieval needs no wallet credentials. Only
-when an eligible relay acquisition is necessary does refresh load its existing
-metadata payer. Bootstrap policy selects its bootstrap group, including generated
-groups. Otherwise refresh uses the saved owner's selected payer. Static mode
-reads only that profile's key, and managed mode
-opens the authenticated existing store and named pool with Base transport, without
-SDK reconstruction, pool/wallet allocation or funding workers. Unrepresentable
-relay requests do not load a key or store. The owner remains alive through registry
-publication and closes on success or failure; errors retain possible charge facts. Curated refresh resolves the
-current bundled provider definition and acquires its remote or embedded schema,
-then atomically replaces settings, provenance and document together while retaining
-owner, name and source identity and advancing the revision. A missing provider or
-failed refresh preserves the accepted revision. Removal records a tombstone. Neither
-command
-changes wallets, payment reservations, funding/refund records or reconciliation.
-Temporary registrations need no registry maintenance; they disappear on exit.
+## Endpoint instruction placement
 
-Restart rebuilds from accepted bytes and saved settings without vendor requests
-or bundle re-resolution; a binary upgrade alone cannot change accepted provider
-semantics. Saved inventory, restoration, publication and refresh use the same
-catalog construction path. Runtime publication applies the listener's tag and
-tool-name projection after full catalog validation; operator refresh validates the
-full catalog without tool-count admission checks. Saved inventory inspection remains
-unfiltered. A listener may filter every tool
-without invalidating the accepted source. Disabled endpoints,
-nonlocal saved bindings, invalid formats and tool-name conflicts cannot regain access
-silently. Corrupt/unsupported registries fail startup. Persistent additions commit
-before publication; cancelling an accepted commit's waiter cannot undo the write.
+MCP `initialize` instructions combine guidance in a fixed order so operational
+notices are never hidden by custom text:
+
+1. **Operator or source guidance:** `[servers.NAME].instructions_text` replaces
+   composed source guidance (an empty string suppresses it).
+2. **Generated pricing caveat:** Appended once ("Prices are estimates or
+   sampled payment offers, not guaranteed quotes...").
+3. **Operational coverage notices:** Appended last and never suppressed by
+   `instructions_text`, covering pending or unavailable sources, omitted
+   unsupported operations, and ambiguous duplicate tool names.
+
+Place endpoint-specific search hints in the right field depending on client
+behavior:
+
+- Put high-level endpoint purpose and domain boundaries in
+  `[servers.NAME].instructions_text` (shown at MCP `initialize`).
+- Put local search keyword hints for on-demand endpoints in
+  `discovery_search_tool_instructions_text` (appended to
+  `x402_treazury_tools_search`'s description, which clients re-read with tool
+  definitions even if they ignore server instructions).
+- Put remote directory selection hints in
+  `providers_search_remote_tool_instructions_text` (appended to
+  `x402_treazury_providers_search_remote`'s description).
+- Neither `*_tool_instructions_text` setting enables discovery or provider
+  management on its own. Refresh endpoint summaries and search keywords
+  whenever routed sources or capabilities change.
+
+## Tool documentation
+
+Keep agent-facing tool descriptions and parameter descriptions concise, direct,
+and actionable:
+
+- **Include:** What the tool does, required and meaningful optional inputs,
+  what the response contains, and constraints that affect the caller's next
+  step (such as exact-amount requirements, single-use deposit addresses,
+  partial-result semantics, or non-retry warnings).
+- **Omit:** Internal Rust module names, TOML configuration keys, maintainer
+  rationale, provider probe history, and repetitive boilerplate.
+- **Pricing separation:** When overriding a tool description in TOML, keep
+  behavioral rules in `description` and place the current-call price estimate
+  in `pricing_description` so live observed offers replace only the price line.
+- **Keep maintainer notes in docs:** Put compatibility rationale, probe limits,
+  and upgrade caveats in `providers/CAVEATS.md` and the owning reference guide,
+  not in MCP tool text.

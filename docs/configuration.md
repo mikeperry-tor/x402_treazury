@@ -2,82 +2,75 @@
 
 For an operator-oriented introduction, start with the
 [configuration guide](usage/configuration.md) and the
-[managed-wallet quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools);
-[advanced deployments](../README_ADVANCED.md) cover the multi-listener Zcash-and-Tor
-walkthroughs. This reference covers exact TOML composition, tool selection,
-transport and pricing.
-Commands run from the repository root. The executable requires an explicit
-subcommand; running it without arguments displays help and never starts serving.
+[managed-wallet quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools).
+[Advanced deployments](../README_ADVANCED.md) cover multi-listener Zcash and
+Tor walkthroughs. This reference specifies TOML composition, tool selection,
+wallet bindings, direct swap control, transport, caching, relay fallback, and
+pricing.
+
+Run commands from the repository root. The CLI requires an explicit subcommand;
+running `x402_treazury` without arguments prints help and never starts serving.
 
 | Command | Purpose |
 | --- | --- |
-| `serve --config FILE` | Start a multi-listener deployment and its configured funding workers |
-| `serve --provider FILE` | Serve one provider, using stdio by default |
-| `catalog tools --config FILE` or `--provider FILE` | Print selected tool inventories as JSON with authored prices |
-| `catalog warm --config FILE` | Warm catalogs; configured relay may pay, `--direct` stays unsigned |
+| `serve --config FILE` | Start a multi-listener deployment and its background funding workers |
+| `serve --provider FILE` | Serve one standalone provider (stdio by default) |
+| `catalog tools --config FILE` or `--provider FILE` | Print selected tool inventories as JSON with advertised prices |
+| `catalog warm --config FILE` | Download and cache catalogs; relay fallback may pay, `--direct` stays unsigned |
 | `catalog tags --config FILE` or `--provider FILE` | Print available OpenAPI tags |
-| `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
-| `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
-| `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices or funding |
+| `catalog route TOOL --provider FILE --args '<...>'` | Preview an HTTP request without sending it (standalone providers only) |
+| `config show --config FILE` or `--provider FILE` | Resolve file settings and wallet bindings offline |
+| `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices, or funding |
 | `config check --config FILE --explain-routing` | Print JSON validation results and per-tool source distribution decisions |
-| `wallet bootstrap --config FILE` | Fund captured managed reserve claims, without listeners; requires `auto_fund=true` |
-| `wallet sync --config FILE` | Discover ZEC and existing configured managed-USDC balances once, including outstanding funding recipients |
-| `wallet preview --config FILE` | Compare validated wallet assignments with saved public state without changing it |
-| `wallet rename OLD NEW --config FILE` | Rename a saved managed group offline, preserving its UUID and work |
+| `wallet bootstrap --config FILE` | Fund enabled managed reserves without listeners (requires `auto_fund = true`) |
+| `wallet sync --config FILE` | Scan ZEC and managed Base USDC balances once, including active funding recipients |
+| `wallet preview --config FILE` | Compare deployment wallet assignments with stored public metadata without changing state |
+| `wallet rename OLD NEW --config FILE` | Rename a stored managed group offline while preserving its UUID and work |
 | `wallet ...` | Administer the treasury |
-| `sources inspect --config FILE` | Read persisted agent-added source records |
+| `sources inspect --config FILE` | Inspect persisted agent-added source records |
 | `build-info` | Print build identity and provenance |
 
-Use `x402_treazury COMMAND --help` for the options available to each operation.
-Keep these modes in the shared Clap command tree. Only `serve` accepts listener,
-authentication and supervised-funding options; administration and inspection must
-retain their distinct authority and side effects.
+Run `x402_treazury COMMAND --help` for subcommand options. Only `serve` accepts
+listener, authentication, and background-funding flags.
 
 ## Configuration file roles
 
-`X402_TREAZURY_CONFIG` supplies the default path for every deployment `--config`
-option, including wallet, catalog, config and source commands. An explicit
-`--config FILE` overrides it. This variable must be in
-the process environment; `--env-file` is loaded after CLI parsing. The selected
-deployment retains the same conflicts with standalone provider options and wallet
-`--state-dir`, `--key-file` and `--treasury-id`; unset the variable to use those
-options without a deployment.
+`X402_TREAZURY_CONFIG` sets the default path for `--config` across `serve`,
+`wallet`, `catalog`, `config`, and `sources` commands, and `--config FILE`
+overrides it. Export `X402_TREAZURY_CONFIG` in the process environment because
+`--env-file` loads after CLI parsing. Unset it before passing standalone
+provider flags or wallet `--state-dir`, `--key-file`, and `--treasury-id`.
 
-`--config FILE` selects a deployment: sources, listeners, wallets and network
-policy. Wallet commands accept the same file without loading API sources.
-`wallet sync` requires exclusive administration ownership (stop `serve` first).
-It resolves treasury and relevant managed-Base settings without provider catalogs,
-NEAR credentials or automatic funding. Treasury-only deployments need no Base
-configuration; independent per-asset results report partial failure. `wallet status`
-reads saved observations without network traffic. See the
-[CLI output and discovery scope](wallet-cli.md#one-configuration-for-wallet-commands).
-`--provider FILE` selects a reusable
-provider for standalone serving and catalog inspection. `--network-config FILE`
-selects a file containing `[network]` and optionally `[relay_fallback]`. It
-replaces the complete deployment `[network]` section for that invocation; omitted
-fields use network defaults rather than inheriting deployment values. A supplied
-relay section replaces the complete deployment relay section; an omitted section
-preserves the deployment relay. Its provider paths resolve relative to the file
-that declares them. Relay settings apply to deployment reads; standalone provider
-and wallet commands accept the same file without loading relay providers. Other
-standalone provider options still cannot be combined with `--config`.
+- **`--config FILE`:** Selects a deployment file defining sources, listeners,
+  wallets, and network policy. Wallet commands accept `--config` without
+  loading API sources. `wallet sync` requires stopping `serve` first, resolves
+  treasury and Base settings without catalogs or automatic funding, and reports
+  ZEC and Base results independently. `wallet status` reads local state offline.
+  See [wallet CLI configuration](wallet-cli.md#one-configuration-for-wallet-commands).
+- **`--provider FILE`:** Selects a reusable provider TOML for standalone
+  serving or inspection. Cannot be combined with `--config`.
+- **`--network-config FILE`:** Selects a file containing `[network]` and
+  optionally `[relay_fallback]`. It replaces the entire `[network]` table for
+  that command (omitted fields fall back to network defaults rather than
+  inheriting from the deployment). If `[relay_fallback]` is present, it
+  replaces the deployment's relay table; if omitted, the deployment's relay
+  table stays intact. Relative paths inside the file resolve from that file.
+  Standalone provider and wallet commands accept `--network-config` without
+  loading relay providers.
 
-Ordinary deployment examples live in `examples/deployments/`, reusable network policies in
-`examples/network/`, and reusable APIs in `providers/`. Paths resolve from the file
-that declares them. Existing user-owned local copies are not moved automatically.
+Example deployments live in `examples/deployments/`, network policies in
+`examples/network/`, and reusable providers in `providers/`. Relative paths
+resolve from the file that declares them.
 
-Ordinary enabled managed serving starts initial and replacement funding after
-listeners bind, without requiring an eligible funded payer before serving available tools. `wallet bootstrap --config FILE`
-waits for its captured enabled reserve claims without catalogs
-or listeners. Explicitly set
-`funding.auto_fund = false` to pause it. Merely inspecting a config or compiling
-Zcash support does not spend funds. Source limits remain required. See the
-[wallet defaults and commands](wallet-cli.md#one-configuration-for-wallet-commands).
+Managed serving binds listeners before starting background funding, so
+available tools stay visible while wallets prepare. Set
+`funding.auto_fund = false` to pause new funding; inspection commands never
+spend funds.
 
 ## Bootstrap wallet policy
 
-The optional root table declares one ordinary managed group and explicit managed
-participants:
+The optional `[wallet_bootstrap]` table lets participating managed groups share
+one bootstrap group until each deferred group receives its first USDC credit:
 
 ```toml
 [wallet_bootstrap]
@@ -85,112 +78,71 @@ bootstrap_group = "general"
 deferred_groups = ["personal", "health", "financial"]
 ```
 
-Names resolve against the complete wallet assignment, including explicitly named
-generated groups. Missing or static groups, self-membership, duplicate participants
-and an empty participant list are errors. Omit the whole table to opt out.
-Source/listener bindings continue to name destination groups; the table does not
-merge groups, transfer balances or change generated names.
-
-`config show` and `wallet preview` report the resolved table and the selected
-group's nominal `bootstrap_setup` bounds separately from the eventual initial
-inventory bounds across all configured groups. The setup projection describes the
-explicit bootstrap command; ordinary serving also funds nonparticipants normally.
-The routing projection identifies the bootstrap group's payment authority before
-a participant's first positive initial credit. Inspection makes no activation,
-allocation or network request.
-
-A validated remote API invocation records durable first-use demand for its
-participating destination, even for a free response or API cache hit. Invalid,
-denied and unresolved calls, discovery/search, registration, catalogs, pricing,
-metadata help and warming do not activate funding. Calls select the bootstrap
-payment authority until the destination has recorded any positive initial credit,
-including partial credit on a historical or retired wallet. That handoff is
-permanent: depletion, refunds and later role changes cannot restore bootstrap use.
-The captured group's cap, inventory, payer transport and financial journal govern
-the whole call. Changing routing affects later captures only; agent/session inputs
-cannot select policy or owners. Inventory exhaustion never makes a call wait for
-funding, and no cross-group retry is introduced.
-
-Dormant participants receive no new allocations in serving. First use wakes the
-existing background owner and arms an independent uniform integer 30–120-second
-opportunity; both enabled slots may fill then. Calls, credit and unrelated completions
-do not move an armed due time. All eligible groups use this same interval. Restart retains
-UUID-bound demand/credit and redraws volatile intervals. Bootstrap/nonparticipants
-keep ordinary funding. Accepted work retains its original recovery ownership;
-`auto_fund=false` still prevents new funding. Removing the table or a participant
-restores ordinary routing/allocation; re-adding preserves historical facts.
-Paid metadata relays permanently use the bootstrap group, including catalogs,
-pricing, help, imports, probes and built-in directory discovery. This takes
-precedence over `relay_fallback.wallet` while bootstrap policy is enabled.
-The bootstrap group's payment cap applies. A cap refusal is terminal for that
-acquisition. Metadata does not activate participants or switch payer at API cutover.
-Off-by-default API/raw relay fallback retains the API call's captured group.
-Serving catalogs can wait for ordinary bootstrap funding and resume on its
-capacity notifications. Bootstrap funding is independent of catalogs and first-use
-demand. Explicit bootstrap prepares only the configured bootstrap group.
-If a relay payer still needs a wallet and new managed funding is unavailable,
-the catalog reports that operator action is required.
-Catalog readiness and the advisory startup announcement consider effective
-inventory and caps.
-With this table, explicit `wallet bootstrap` promptly funds and waits only for the
-bootstrap group's captured enabled reserve claims, without participant activation,
-catalogs or listeners. It also excludes ordinary nonparticipants from this setup
-selection; serving funds them on their usual opportunities. Without the table,
-the command captures every declared managed group's enabled reserves. Existing
-durably allocated jobs outside selection may continue under current enabled funding
-authority; accepted source liabilities retain their original recovery ownership.
-Selection limits new allocations and command completeness. Sync, status, preview and
-offline initialization remain non-activating; qualification retains its named
-allocation and payment authority.
+- **Validation:** Group names resolve against all configured and generated
+  managed groups. Unknown groups, static groups, listing `bootstrap_group` in
+  `deferred_groups`, duplicate entries, and empty `deferred_groups` fail
+  validation. Omit the table to fund all groups independently from startup.
+- **Inspection:** `config show` and `wallet preview` report the bootstrap
+  table, `bootstrap_setup` nominal bounds (the bootstrap group alone), and the
+  full multi-group initial inventory bounds offline without activating demand
+  or allocating wallets.
+- **First-use activation:** The first validated API call targeting a deferred
+  group (including a free call, cache hit, or cap refusal) records durable
+  UUID-bound demand and wakes the funding owner to arm an independent 30-120
+  second funding opportunity (uniform integer seconds). Invalid or denied
+  calls, discovery, catalogs, pricing, registration, help, and warming never
+  activate deferred funding.
+- **Permanent handoff:** Calls use the bootstrap group's wallet, cap, and
+  transport until the deferred group records any positive initial USDC credit
+  (including partial credit or credit on a now-retired wallet). Once credited,
+  that group uses its own wallet permanently across restarts; depletion,
+  refunds, or reorg repair never revert it to bootstrap. Calls never wait for
+  funding or retry across groups.
+- **Metadata relays and `wallet bootstrap`:** While `[wallet_bootstrap]` is
+  configured, paid metadata and directory relay fees permanently use
+  `bootstrap_group` (overriding `relay_fallback.wallet`), and API or raw relays
+  use the API call's assigned group. `wallet bootstrap` funds only
+  `bootstrap_group`'s enabled reserves without activating deferred groups or
+  starting listeners; non-participating groups fund normally during `serve`.
+  Without `[wallet_bootstrap]`, `wallet bootstrap` funds every declared managed
+  group.
 
 ## Deployment composition and multiple listeners
 
-A deployment file composes reusable providers into named sources and exposes them
-on one or more authenticated MCP listeners. This section covers catalog loading,
-listener startup, source and wallet composition, and managed reserve settings.
+A version-1 deployment file composes reusable providers into named sources and
+exposes them on one or more authenticated MCP listeners.
 
 ### Catalog loading and listener startup
 
-Deployment catalog acquisition shares capacity for active Tor isolation scopes.
-The default is 2 scopes; set a value from 1 to 64 in the deployment TOML:
+Deployment catalog downloads share a Tor concurrency gate controlling how many
+active Tor SOCKS isolation scopes may fetch concurrently (default `2`, range
+`1` to `64`):
 
 ```toml
 [startup]
 catalog_concurrency = 2
 ```
 
-The default of 2 comes from the operator's live Tor performance testing, which
-identified two concurrent isolation scopes as a sweet spot for catalog downloads.
-Tor normally works to maintain [three fresh prebuilt multipath Conflux sets](https://lists.torproject.org/mailman3/hyperkitty/list/tor-commits@lists.torproject.org/thread/NGD4PUZLR2YNGSVBS3XIGXT56OM7RAGB/); using
-two leaves headroom for replenishment and makes Conflux use more likely for these
-downloads. Counting effective SOCKS isolation scopes reflects demand for separate
-circuit sets: parallel requests sharing credentials do not consume another slot.
-Tor's [Conflux prebuilding policy](https://spec.torproject.org/proposals/329-traffic-splitting.html)
-is consensus-controlled, and exhausting the prebuilt pool can fall back to ordinary
-circuits. This gate neither reserves Conflux sets nor guarantees their use. See
-[startup qualification](../tests/STARTUP.md) for offline versus live evidence.
+Tor maintains
+[three prebuilt multipath Conflux sets](https://lists.torproject.org/mailman3/hyperkitty/list/tor-commits@lists.torproject.org/thread/NGD4PUZLR2YNGSVBS3XIGXT56OM7RAGB/)
+by default, so a default of 2 leaves headroom for replenishment (Conflux
+prebuilding is consensus-controlled under
+[Proposal 329](https://spec.torproject.org/proposals/329-traffic-splitting.html)).
+See [startup tests](../tests/STARTUP.md).
 
-Catalog, optional pricing and relay requests using the same effective SOCKS
-isolation credentials share one slot and can proceed in parallel while other
-scopes wait. Distinct transport or retry scopes count separately even on the same
-domain. A slot lasts through full response-body collection and is released when
-its last active holder finishes, before retry delays or wallet handoffs. Cache
-hits, local files, relay serialization/readiness waits and direct egress consume
-no slots; this includes `catalog warm --direct`. Idle Tor circuits and pooled
-sockets do not count. The same scheduling applies to inspection, warming and
-deferred serving. Strict inspection requires complete selected results; warming
-reports unavailable sources and compatible partial catalogs in its completed summary. Dynamic imports outside deployment catalog acquisition retain their
-existing scheduling. Accepted ownership retains publication. Synchronous relay
-fallback traverses its configured list once;
-only deferred serving waits for discovery readiness.
-
-Ordinary deployment serving loads
-local catalogs and binds every listener socket before funding and background remote
-catalog discovery start. Each endpoint defaults to `wait_for_catalogs = true`:
-it accepts MCP HTTP requests only after its effectively bound sources have loaded and
-their tools have been published. Unrelated sources and other endpoints do not
-gate it. Set the endpoint's setting to `false` to serve available tools immediately
-and publish remote tools as they arrive:
+- **Slot accounting:** Catalog, pricing, and relay requests sharing the same
+  SOCKS isolation credentials share one slot and run in parallel. Distinct
+  transport or retry scopes count separately even on the same domain. A slot is
+  held until its last active response body finishes downloading, and released
+  before retry delays or wallet waits. Cache hits, local files, relay readiness
+  waits, and direct traffic (including `catalog warm --direct`) consume no
+  slots.
+- **Listener binding and `wait_for_catalogs`:** Serving loads local catalogs
+  and binds every listener socket before starting background funding and remote
+  catalog fetches. Each listener defaults to `wait_for_catalogs = true`,
+  accepting MCP HTTP requests only after its bound sources settle (other
+  endpoints do not block it). Set `wait_for_catalogs = false` to serve
+  available tools immediately and publish remote catalogs as they arrive:
 
 ```toml
 [servers.research]
@@ -198,177 +150,138 @@ listen = "127.0.0.1:8000"
 sources = ["company_stableenrich"]
 wallet = "research"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wait_for_catalogs = true # Default; false enables incremental availability.
+wait_for_catalogs = true # Default; false publishes remote tools incrementally.
 ```
 
-Sockets are reserved early, so TCP connections can queue while MCP HTTP service
-waits. `MCP listening at /mcp` is logged only when that endpoint starts serving.
-The one-time INFO message `All MCP endpoints listening, funded, and ready` follows
-successful catalog startup for every endpoint, every listening message, and saved
-USDC estimates covering each bound managed wallet pool's finite
-`max_api_payment_usdc` on at least one eligible payer. Effective source bindings,
-successfully published sources and provider-management wallets are included; unused pools and
-complete reserve inventory are not required. Existing balance/credit notifications
-can complete the announcement after swaps finish. Eager endpoints keep serving
-while this announcement waits for their catalog outcomes. Optional catalog failures
-retain their normal allowed behavior; required catalog or selection failures
-suppress the announcement.
+Because sockets bind early, TCP connections can queue while MCP HTTP waits.
+`MCP listening at /mcp` logs only when an endpoint begins serving MCP requests.
+Remote spec aliases within one deployment load share a single download and
+parsed document when their exact URL, timeout, byte limit, transport flags, and
+discovery identity match, while keeping separate tools, filters, base URLs, and
+wallet bindings. Local files always read independently.
 
 #### Startup announcement
 
-This is an advisory startup observation, identified by the log's `funding_basis`,
-not a payment guarantee or a new serving gate. It performs no extra network reads,
-funding actions or periodic polling. Estimates may subsequently change; payment
-permission and challenge validation remain authoritative. Static payers have no
-saved balance observations, and unlimited payment caps have no finite funding
-threshold, so those bindings suppress this funded announcement. Unsigned or
-unavailable wallet bindings cannot establish funding either.
-There is no overall catalog-startup deadline: progress, server-directed retry
-waits, Tor availability or relay payer readiness can keep a dependent endpoint
-waiting. Funding and discovery workers run during this wait under their existing
-authority. Shutdown still cancels unsigned discovery and drains accepted paid work.
+Once every endpoint is listening after successful catalog startup and every
+bound managed pool has at least one eligible payer whose saved USDC estimate
+covers its finite `max_api_payment_usdc`, serving logs one `INFO` line:
+`All MCP endpoints listening, funded, and ready` (tagged with `funding_basis`).
+
+- Unused pools and full reserve inventory are not required; balance and credit
+  notifications can trigger the announcement after swaps settle.
+- Static payers (no saved balance observations), unlimited payment caps, and
+  required catalog or selection failures suppress the announcement.
+- The announcement is advisory and runs no extra network reads or polling.
+  There is no overall catalog-startup deadline: progress, `Retry-After` waits,
+  Tor startup, or relay readiness can keep a waiting endpoint waiting while
+  shutdown still cancels unsigned fetches and drains accepted paid work.
 
 #### Catalog failures and strict inspection
 
-A required remote catalog failure leaves its waiting endpoints unavailable,
-closes their sockets and emits an ERROR identifying each failed endpoint and the
-source. Other endpoints keep running, even if every waiting endpoint fails.
-Restart to retry. `sources.NAME.allow_catalog_failure = true` lets waiting endpoints
-start after that source's failure, with its tools omitted as a complete unit.
-This includes failures discovered during remote parsing, tool generation or filter
-selection. For `wait_for_catalogs = false`, any failed remote source is omitted,
-regardless of `allow_catalog_failure`. Stderr and MCP instructions identify pending or
-unavailable sources. Errors preparing source configuration or reading/parsing local
-catalogs remain fatal; supported projection omissions are coverage results in
-ordinary serving/warming regardless of document location.
-Ordinary serving permits empty source and listener selections, including local
-catalogs, missing names/tags, contradictory filters and empty opted-in advice.
-These outcomes emit coverage diagnostics and MCP instructions while endpoints
-remain available; they never widen the authored selection. Accepted empty selection
-alone does not require `allow_catalog_failure`. Invalid selector syntax, invalid
-configuration references and actual acquisition/admission failures retain their
-existing failure boundaries. Strict inspection and qualification reject invalid or
-empty inventory selections.
-Reserved static tool namespaces invalidate source admission: a late invalid source
-is omitted as a unit while healthy aliases, published tools and captured calls
-remain usable. Strict catalog inspection rejects reserved namespaces without
-opening wallets or listeners.
-Ordinary serving does not infer ownership of missing names from source prefixes.
-Shared/nested namespaces and pending completion order cannot turn an absent
-selection into an endpoint failure. Listener coverage diagnostics wait for that
-listener's own loads to settle and run after successful refresh publication;
-unrelated catalog completions do not repeat them. Unmatched positive selectors
-and empty inventories emit ERROR for reduced coverage; unmatched exclusions emit
-INFO and have no current effect. See [framework integration](framework-integration.md).
-Inspection, frozen inventories and qualification wait for complete catalogs and
-remain strict. The synchronous unsigned-serving loader can omit remote failures
-only with `sources.NAME.allow_catalog_failure = true`; required failures cancel its
-unfinished loads. It uses the same permissive selection policy as deferred serving; qualification
-continues to use strict inspection semantics. Ordinary deployment serving publishes remote catalogs as they
-finish. Failed sources are not retried during the run;
-restart to retry them. A Tor source that keeps downloading retains its shared
-isolation slot until its last active response finishes. Tool ordering and wallet
-bindings do not depend on completion
-order for unambiguous names. If loaded catalogs define the same tool name on a
-listener after tag selection, ordinary serving omits every binding of that name
-and reports the ambiguity in MCP instructions. Unique tools and other listeners
-remain usable. A previously published name is withdrawn when a later catalog
-reveals its ambiguity; calls that already captured a binding finish with that
-original provider and wallet. Exact selectors still recognize ambiguous names.
-Strict inspection rejects duplicate names. Deployment `config check`,
-`catalog tools` and `catalog tags` use strict loading;
-`config show` remains offline and reports the effective limit and each endpoint's
-`wait_for_catalogs` setting. Progress, source
-fetch/parse and generation timings go to stderr; a ten-second
-waiting message identifies remaining work. No response content or source URL is
-included in these progress messages. Remote spec aliases share a download and parsed document within one deployment
-load when the exact URL, requested timeout, byte limit, transport compatibility flags and discovery identity match.
-Each alias retains its own tools, filters, base URL and wallet binding. Local files
-are read independently. Compatible remote responses can also use the disk cache described below.
-
+- **Required remote failures:** If a remote source fails to load and does not
+  set `allow_catalog_failure = true`, waiting endpoints that depend on it close
+  their sockets and emit `ERROR` naming each failed endpoint and source.
+  Unrelated endpoints keep running. Restart to retry failed sources.
+- **Tolerant remote failures:** Setting `sources.NAME.allow_catalog_failure = true`
+  (or `wait_for_catalogs = false` on the listener) omits a failed remote source
+  as a unit and lets the endpoint serve healthy siblings while reporting
+  pending or unavailable sources in stderr and MCP instructions.
+- **Local fatal errors:** Malformed configuration, unreadable local files,
+  malformed local documents, and structural-safety violations fail startup.
+- **Permissive selection in serving:** Serving accepts empty source or listener
+  selections (missing tool names, missing tags, contradictory filters, empty
+  opted-in `recommended_tools`, or all-unsupported operations), emits `ERROR`
+  coverage diagnostics after the listener's sources settle, and lists gaps in
+  MCP instructions without widening filters. Unmatched exclusions log at
+  `INFO`.
+- **Ambiguous tool names:** If two sources on the same listener publish the
+  same tool name after tag selection, serving omits every binding of that name
+  and reports the collision in MCP instructions. Calls already in flight finish
+  with their active binding. Reserved static tool namespaces (`x402_treazury_`
+  and `dyn_`) invalidate the offending source as a unit without harming healthy
+  siblings.
+- **Strict inspection:** `config check`, `catalog tools`, deployment
+  `catalog tags`, and qualification require complete catalogs and reject
+  missing exact names, empty inventories, duplicate names, and reserved
+  namespaces. `config show` runs offline and prints effective
+  `catalog_concurrency` and `wait_for_catalogs`.
+  Progress logs go to stderr (with a 10-second waiting message for remaining
+  work) without response bodies or URLs. See
+  [framework integration](framework-integration.md).
 
 ### Example deployments and serving
 
-[examples/deployments/managed.toml](../examples/deployments/managed.toml) exposes
-Exa web search, page contents and provider-management tools through an authenticated
-research listener and one managed pool. Exa's catalog loads from its public
-specification. Agent-added APIs share the research pool; registrations last until
-exit unless a registry file is configured. Optional `config show` inspection stays
-offline; `config check` and `catalog tools` load the remote catalog.
-
-Initialize the treasury explicitly and fund its shielded address before paid use;
-see the [quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools). Serving needs
-the initialized treasury and binds the listener before
-background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
-adds multiple research listeners, Tor, relay and persistent source registrations.
+- [examples/deployments/managed.toml](../examples/deployments/managed.toml):
+  one authenticated `research` listener, Exa search and contents, one managed
+  pool, direct networking, and ephemeral agent-added APIs. See the
+  [quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools).
+- [examples/deployments/comprehensive.toml](../examples/deployments/comprehensive.toml):
+  four-listener Tor deployment with curated sources, bootstrap funding, relay
+  fallback, and persistent agent-added APIs (`source_registry_file`).
+- [examples/deployments/research_desk.toml](../examples/deployments/research_desk.toml):
+  twelve-listener Tor deployment with curated sources, bootstrap funding, relay
+  fallback, and ephemeral agent-added APIs. See
+  [README_ADVANCED.md](../README_ADVANCED.md) and
+  [examples/README.md](../examples/README.md).
 
 ### Listener transport
 
-Each listener serves stateless Streamable HTTP at `/mcp`. Deployment listeners bind
-their configured address, and standalone HTTP listeners accept any host that
-resolves to bind addresses; use a literal such as `0.0.0.0` when serving from a
-container. There is no hot reload; restart to apply changes.
-Static wallet profiles remain supported and use `mode = "static"` with
-`private_key_env`; they do not require treasury configuration. Static serving
-loads only the keys used by selected tools.
+Each deployment listener serves stateless Streamable HTTP at `/mcp` on its
+configured bind address (use a literal such as `0.0.0.0` in containers).
+There is no hot reload; restart to apply config changes.
+
+Static wallet profiles use `mode = "static"` with `private_key_env` and require
+no `[treasury]`. Static serving loads only the private keys used by selected
+tools.
 
 ### Deployment file structure
 
-The version-1 TOML schema separates named sources, wallets and servers, with
-optional wallet templates and an automatic assignment policy:
+Version-1 deployment files define top-level `sources`, `wallets`, and
+`servers`, plus optional `wallet_templates` and `wallet_assignment`:
 
-- `sources`: provider settings written inline or imported with
-  `extends = "../providers/pdl.toml"`. Every generic catalog setting is
-  available here, including `spec`, `name`, `description`, `base_url`, `prefix`, `read_timeout_seconds` (inherits the network default of 60),
-  path/tag filters, `include_tools`, `exclude_tools`, pricing options, overrides
-  and guidance. A deployment source
-  can also set `wallet` to override the server default and `send_tools` to distribute
-  its tools to endpoints. Both fields are forbidden in reusable provider files.
-- `wallets`: `mode = "static"`, `private_key_env`, and `max_api_payment_usdc`
-  (decimal string, default `"1.00"`), or a managed `zcash_rotation` profile
-  described below. Bindings referencing the same profile share payer state.
-  The cap applies per payment; it is not an aggregate budget.
-- `servers`: `listen`, `sources`, and `bearer_token_env` when `auth = true` (the default), with an optional default
-  `wallet` and optional
-  `include_tools`, `exclude_tools`, `tags`, and `exclude_tags`.
-  Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
+- **`sources`:** Provider settings written inline or imported via
+  `extends = "../providers/pdl.toml"`. Supports all generic catalog settings
+  (`spec`, `name`, `description`, `base_url`, `prefix`, `read_timeout_seconds`,
+  path and tag filters, `include_tools`, `exclude_tools`, pricing, overrides,
+  and guidance) plus deployment-only `wallet` and `send_tools` (both forbidden
+  in reusable provider files).
+- **`wallets`:** Either `mode = "static"` (`private_key_env`,
+  `max_api_payment_usdc` defaulting to `"1.00"`) or `mode = "zcash_rotation"`
+  (requires explicit `max_api_payment_usdc`). Bindings referencing the same
+  wallet share payer state; `max_api_payment_usdc` caps a single payment, not
+  cumulative spend.
+- **`servers`:** `listen`, `sources`, `bearer_token_env` (required when
+  `auth = true`, the default), optional default `wallet`, and optional
+  `include_tools`, `exclude_tools`, `tags`, and `exclude_tags`. Identifiers use
+  lowercase letters, digits, and `_`, starting with a letter.
 
 ### Source selection and tool filters
 
-Provider/source `description` is optional searchable capability metadata. It inherits
-and replaces as an ordinary whole field and appears in `config show` with its
-origin. It does not replace tool descriptions or `instructions_text`. Shipped
-providers require nonblank descriptions; see [bundle membership](../providers/README.md#bundled-provider-metadata).
-
-Provider/source `include_operations` and `exclude_operations` match exact original
-`METHOD path` identities (uppercase GET, POST, PUT, PATCH or DELETE), independently
-of generated names and prefixes. Paths use the specification's original path or
-absolute HTTP(S) URL. Exclusions win over inclusions before method preference and
-naming. Unlike subtree `exclude`, an exact parent exclusion preserves supported
-child routes. Absent operation entries do not fail inventory validation; an
-independent source tag/path filter can remove them. Lists replace on inheritance;
-`[]` clears the inherited list. Ordinary exact generated-name validation remains
-unchanged. Catalog selection does not constrain explicitly authorized raw calls.
-
-Provider/source `prefer_post` defaults to true. After path/operation/tag
-compatibility filters, exact original-path GET/POST pairs retain POST before
-collision counting and naming. Intentionally suppressed GET twins are outside
-both the selected tools and omission diagnostics. With preference disabled, their
-actual compatibility issues remain visible and strict inspection rejects them.
-An unsupported POST never hides a compatible GET. Other methods, different paths
-and GET-only routes remain. Name filters and recommendations cannot restore a removed GET; explicitly
-set `prefer_post = false` before selecting its collision-resolved name. This is an
-internal integration escape hatch, inherited like any scalar; a source can override
-either value. It is not a CLI option or ordinary provider boilerplate. Review
-request, response and payment contracts before collapsing meaningful differences.
-The full default catalog includes this collapse; disabling preference exposes the
-preference-free method inventory. Exact selections using removed `_get`/`_post`
-suffixes must migrate to canonical names; no hidden aliases are installed. Raw calls
-retain their requested method, and selection grants no retry authority.
-
-Provider and source `include_tools` / `exclude_tools` select generated tool names,
-using the same case-sensitive `*` (any characters) and `?` (one character) patterns
-as server filters. For example:
+- **`description`:** Optional searchable metadata for `config show` and bundled
+  provider listing (required nonblank on bundled providers; see
+  [bundled provider metadata](../providers/README.md#bundled-provider-metadata)).
+  Inherits and replaces as a whole field; does not replace tool descriptions or
+  `instructions_text`.
+- **`include_operations` and `exclude_operations`:** Match exact original
+  `METHOD path` entries (uppercase `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`)
+  independently of generated names and prefixes. Exclusions take precedence
+  before method preference and naming. Unlike subtree `exclude`, excluding a
+  parent path keeps supported child routes. Lists replace on inheritance (`[]`
+  clears).
+- **`prefer_post`:** Defaults to `true`. After path, operation, and tag
+  compatibility filters, exact-path `GET` and `POST` twins keep `POST` before
+  collision counting and naming (an unsupported `POST` never hides a compatible
+  `GET`). Suppressed `GET` twins do not appear in omission diagnostics. Set
+  `prefer_post = false` to expose both methods with `_get` and `_post`
+  suffixes.
+- **`include_tools` and `exclude_tools`:** Match generated tool names using
+  case-sensitive `*` and `?` patterns after path, operation, and tag filtering,
+  so excluding a tool never renames its siblings. Exclusions take precedence.
+  Help tools participate in name filters. Strict inspection rejects unknown
+  exact inclusions and empty selections (unmatched wildcards warn); serving and
+  warming report missing selections as reduced coverage and log unmatched
+  exclusions at `INFO`. Listener filters narrow source selections further and
+  cannot restore excluded tools:
 
 ```toml
 [sources.company]
@@ -376,21 +289,9 @@ extends = "../../providers/otto.toml"
 include_tools = ["otto_equity_intel", "otto_financial_statements", "otto_help"]
 ```
 
-Names are assigned after path, operation and tag selection, before tool-name
-filtering, so removing a tool by name does not rename its remaining siblings.
-Tool-name filters intersect the earlier filters; exclusions win. Help tools also
-participate: include their name or a matching pattern to keep them in an allowlist.
-Strict inspection rejects unknown exact inclusion names and empty toolsets;
-unmatched inclusion wildcards emit a warning. Ordinary deployment serving and
-warming retain missing inclusion patterns for local and remote catalogs, report
-reduced coverage and preserve selected siblings. Unmatched exclusions report INFO
-and have no current effect. Empty selections do not fail ordinary serving or
-warming, including contradictory inclusion/exclusion filters. Listener filters
-further narrow the inventory and cannot restore excluded source tools.
-
-Provider/source `recommended_tools` is advisory metadata using the same generated-name
-selector syntax. The full compatible catalog remains visible unless the source
-explicitly sets `use_recommended_tools = true` (default false):
+- **`recommended_tools` and `use_recommended_tools`:** `recommended_tools`
+  holds an advisory list using the same generated-name syntax. All compatible
+  tools stay visible unless `use_recommended_tools = true` (default `false`):
 
 ```toml
 [sources.research]
@@ -399,123 +300,68 @@ recommended_tools = ["otto_equity_intel", "otto_financial_statements", "otto_hel
 use_recommended_tools = true
 ```
 
-Recommendation, inclusion and exclusion selectors all validate against the same
-compatible inventory after names and help are generated. Opt-in intersects advice
-with the ordinary source filters; exclusions win, and listener filters narrow the
-result further. Selection never renames siblings or changes source/wallet identity.
-Include help deliberately. Empty opted-in advice selects no tools in ordinary
-serving/warming and reports reduced coverage. Strict inspection rejects empty
-opted-in advice, missing exact recommendations and entirely unmatched advice.
-Ordinary deployment serving/warming retain missing recommendation patterns without
-widening selection. Unused stale advice warns without hiding compatible tools.
-Malformed selector syntax or field types remain errors even when advice is unused.
+  Opt-in intersects recommendations with source filters (exclusions win).
+  Lists replace on inheritance (`recommended_tools = []` clears); changing a
+  source's `prefix` does not rewrite inherited names. `catalog tools` marks
+  each tool with `recommended: true` or `false` without changing MCP schemas,
+  and `catalog tools --all-tools` bypasses only `use_recommended_tools` while
+  keeping path, operation, tag, name, and listener filters intact. Unused stale
+  recommendations warn without hiding compatible tools; malformed selector
+  syntax always fails validation.
 
-Lists replace on inheritance, and `recommended_tools = []` clears advice. Names are
-not rewritten when a source changes its prefix: replace inherited advice with the
-new generated names or disable opt-in. A provider that recommends its entire
-compatible catalog can omit advice and leave opt-in disabled rather than enumerate
-today's inventory.
+### Listener settings, host validation, and authentication
 
-`catalog tools` JSON marks every tool with `recommended: true` or `false`; these
-markers are operator metadata and never modify MCP schemas or descriptions.
-`catalog tools --all-tools` bypasses only recommendation opt-in, after typed
-configuration resolution. Ordinary path,
-operation, tag, source-name and listener filters remain effective. Clear those
-filters explicitly in a separate inspection configuration to inspect a broader
-compatible inventory; set `prefer_post = false` to inspect both method twins.
-This inspection never initiates extra pricing probes or changes serving selection.
-Offline `config show` reports effective advice, opt-in and field origins without
-catalogs or secrets, including selections that cannot currently yield tools.
-Selector syntax is checked before acquisition and wallet initialization. Strict
-inspection validates actual inventory selections after applying `--all-tools`.
-Ordinary serving/warming report empty or unmatched selections as degraded coverage
-without speculative pattern satisfiability checks.
-
-Composition follows the ordinary replacement rule: omitted lists inherit,
-present lists replace, and `[]` clears. To select tools outside an inherited
-`include_operations` allowlist, explicitly clear or replace that allowlist too.
-
-### Listener settings, host validation and authentication
-
-Host validation defaults to `localhost`, `127.0.0.1` and `::1`, independently of
-the listener's bind address. Replace that allowlist per listener when using a
-custom hostname or reverse proxy:
+- **Host validation:** Defaults to `localhost`, `127.0.0.1`, and `::1`
+  regardless of bind address. Override per listener with `allowed_hosts` (exact
+  hostnames or IPs, optionally with `:port`; no URLs or wildcards; replaces the
+  default list) or `disable_host_check = true` (cannot be combined with
+  `allowed_hosts`; `allowed_hosts = []` also disables Host checking).
+  Standalone HTTP accepts `--allowed-hosts` and `--disable-host-check` with
+  `--transport http`. Disabling Host checking emits a startup warning.
 
 ```toml
 [servers.research]
 allowed_hosts = ["mcp.example.com", "localhost"]
-# Alternatively, omit allowed_hosts and disable the allowlist:
+# Or disable Host validation (requires auth = true):
 # disable_host_check = true
 ```
 
-Entries are exact hostnames or IP addresses, optionally with a port. A hostname
-without a port permits any port; `"mcp.example.com:8443"` permits only that port.
-URLs and wildcards are not supported. The list replaces rather than extends the
-defaults. `allowed_hosts = []` also disables the allowlist. Do not combine
-`allowed_hosts` with `disable_host_check = true`.
-
-Standalone HTTP serving accepts `--allowed-hosts mcp.example.com,localhost` or
-`--disable-host-check`, both requiring `--transport http`. Deployments configure
-these settings in TOML. Disabling the allowlist emits a startup warning and removes
-this DNS-rebinding defense; it does not change authentication. Disabling both
-authentication and Host checking is rejected, including `allowed_hosts = []`. Malformed/missing Host headers
-and HTTP/2 authority validation still follow the MCP library's protocol rules.
-`config show` exposes each server's settings without starting listeners.
-
-To reduce the initial tool context for a listener, add `discover_on_demand = true`
-to its `[servers.NAME]` table (default: `false`). It advertises only search/call
-wrappers plus independently enabled provider-management and raw-call tools.
-Search returns complete tool descriptions and schemas, 25 results at a time by
-default. Filters, payment routing, source permissions, and startup catalog loading
-are unchanged. Queries use BM25 keyword ranking over names, descriptions and
-parameter names, with literal substring matches prioritized. Omit the query to
-enumerate the catalog; `available` and `total` distinguish scope size from matches.
-See [tool search matching and results](agent-sources.md#tool-search-matching-and-results)
-for query semantics, diagnostics and pagination.
-
-Endpoint `instructions_text` overrides composed source guidance (an empty string
-suppresses it), while generated pricing and operational notices remain.
-`discovery_search_tool_instructions_text` appends to the local tool-search description;
-`providers_search_remote_tool_instructions_text` appends to configured remote-directory search help.
-Neither setting enables discovery or provider management. See
-[endpoint instruction placement](agent-sources.md#endpoint-instruction-placement)
-for defaults, client caching and guidance placement.
-
-
-Every authenticated listener requires its configured `bearer_token_env` value,
-including `X402_TREAZURY_MCP_TOKEN`. Missing, empty and whitespace-only values fail
-startup before provider or funding I/O. Offline inspection does not require tokens.
-
-To disable HTTP authentication for one listener, set `auth = false` and omit
-`bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own
-authentication policy. Standalone HTTP uses `--transport http --no-auth`; this
-explicit flag ignores `X402_MCP_BEARER_TOKEN` and conflicts with `--bearer-token`.
-Startup warns when a listener allows clients to call tools without authentication.
-Disabling authentication requires Host checking to remain enabled. An empty
-`allowed_hosts` list also disables Host checking and is rejected in that combination.
-Prefer `X402_MCP_BEARER_TOKEN` to standalone `--bearer-token`: the latter exposes
-the credential to process inspection and emits a warning.
-Stdio needs no authentication. Live integration qualification still requires
-authenticated listeners and fresh runner-generated tokens.
-
-Authenticated HTTP clients send `Authorization: Bearer <token>`; the scheme name
-is case-insensitive while the token comparison remains exact and constant-time.
-`bearer_token_env` names the
-environment variable containing only the token. HTTP 401 responses distinguish
-missing headers, malformed or duplicate authorization headers, and incorrect token
-values. Warnings identify the listener and failure category without including
-credentials. Each category logs at most once per listener per 30 seconds; warnings
-state this limit and the next warning reports the suppressed count. Every rejected
-request receives the error response even when its warning is suppressed.
+- **Authentication:** Enabled by default (`auth = true`). Every authenticated
+  listener requires a nonempty value in `bearer_token_env` (such as
+  `X402_TREAZURY_MCP_TOKEN`) at startup. To disable authentication on one
+  listener, set `auth = false` and omit `bearer_token_env` (standalone HTTP
+  uses `--transport http --no-auth`). Disabling both authentication and Host
+  checking (including `allowed_hosts = []`) is rejected. For standalone HTTP,
+  prefer `X402_MCP_BEARER_TOKEN` over `--bearer-token` so the token does not
+  appear in process arguments.
+- **Bearer header handling:** Clients send `Authorization: Bearer <token>`
+  (case-insensitive scheme, exact constant-time token comparison). HTTP `401`
+  distinguishes missing, malformed or duplicate, and incorrect headers.
+  Warnings log without credentials at most once per 30 seconds per listener and
+  failure category (reporting suppressed counts on the next warning).
+- **On-demand discovery and instructions:** Set `discover_on_demand = true`
+  (default `false`) to advertise only `x402_treazury_tools_search` and
+  `x402_treazury_tool_call` plus any enabled provider-management tools and
+  `x402_treazury_raw_call` (when `raw_url_calls = true`). Enabled direct-swap
+  tools are omitted from `tools/list` and remain discoverable via
+  `x402_treazury_tools_search` and callable via `x402_treazury_tool_call`.
+  Search uses BM25 keyword ranking with literal-substring priority (25 results
+  per page by default); see
+  [tool search matching](agent-sources.md#tool-search-matching-and-results).
+  `instructions_text` overrides composed source guidance (an empty string
+  suppresses it) while preserving pricing and operational notices.
+  `discovery_search_tool_instructions_text` and
+  `providers_search_remote_tool_instructions_text` append guidance to those
+  tool descriptions without enabling discovery or management; see
+  [endpoint instruction placement](agent-sources.md#endpoint-instruction-placement).
 
 ### Wallet bindings
 
-Payment identity sharing is controlled by named wallet references. For every
-server/source binding, precedence is **source `wallet` → server default `wallet`
-→ automatic assignment**. A server may omit its default if every listed source
-assigns a wallet or an automatic policy supplies the fallback. Missing assignments
-and unknown explicit wallet names are configuration errors, even when
-a source is filtered out or a default would be overridden.
+For each listener-source binding, wallet precedence is **source `wallet` ->
+server default `wallet` -> automatic assignment**. A server may omit its
+default `wallet` if every bound source sets `wallet` or `[wallet_assignment]`
+provides a fallback. Missing assignments and unknown wallet names fail
+validation even when tools are filtered out.
 
 | Arrangement | Wallet sharing |
 | --- | --- |
@@ -523,10 +369,6 @@ a source is filtered out or a default would be overridden.
 | Each server has its own default, with no source overrides | Shared within each server |
 | Each source specifies its own wallet | Shared across listeners using that source |
 | Several sources reference one wallet | Shared within an operator-defined group |
-
-For example, these deployment excerpts use a dedicated `social` wallet for
-SocialFetch and the listener's `general` default for PDL. Both names must be
-defined in `[wallets]`; this works with static or managed profiles:
 
 ```toml
 [sources.socialfetch]
@@ -543,59 +385,38 @@ wallet = "general"
 sources = ["socialfetch", "pdl"]
 ```
 
-A source override retains its payment identity across listeners. For finer
-isolation, create separate source aliases extending the same provider and assign
-different wallet names; provider files describe APIs, while deployments choose
-payment identities. Sharing scope controls wallet reuse, not a guarantee of
-complete unlinkability. Every additional managed pool requires its own configured reserve funding. Referencing one profile from more bindings does not create
-additional pools or funding jobs.
+To isolate two copies of the same provider into separate wallets, define two
+source aliases extending that provider with different `wallet` names.
+Referencing one profile from multiple bindings never creates extra pools or
+funding jobs.
 
-`config show` includes `wallet_bindings.<server>.<source>` with the effective
-`wallet` and its `origin`, such as `sources.socialfetch.wallet` or
-`servers.research.wallet`. Resolved sources display their optional `wallet`
-separately from provider `settings`. Inventory (`catalog tools`) includes each
-server's `default_wallet` and the same `wallet_bindings` map; each tool's `source`
-identifies its binding. `config check` prints these mappings as well. Mappings cover
-all declared server/source bindings, including sources whose tools are filtered
-out; only effective static wallets used by selected tools load private keys.
-Inspection never reads wallet secrets or opens treasury state.
-
-`wallet preview --config FILE` compares the same pure validated wallet resolution
-with a coherent saved-state snapshot, without keys, catalogs or credentials.
-It reports reuse/reactivation, policy changes, missing and omitted managed groups,
-and static-name conflicts. Static-only startup does not disable saved groups.
-Configured reserve sizing is nominal; balances and pending work are saved
-observations. See [preview output and authority](wallet-cli.md#preview-configuration-against-saved-groups).
-
-Managed names select saved group UUIDs. Editing a TOML name alone selects a new
-group rather than moving the old group's keys or work. To retain an existing
-identity under a different name, back up and stop serving, run
-`wallet rename OLD NEW --config FILE`, then update declarations and references
-before restarting. Both names need not appear in the file used by rename. A saved
-destination, even empty or disabled, blocks rename. See
-[managed group rename](wallet-cli.md#rename-a-managed-wallet-group) for identity,
-collision and historical-linkability contracts.
+- `config show`, `catalog tools`, and `config check` report `wallet_bindings`
+  with origins (such as `sources.socialfetch.wallet`) offline without reading
+  secrets or treasury state.
+- `wallet preview --config FILE` compares validated assignments against stored
+  public metadata without modifying state or unlocking keys; see
+  [wallet preview](wallet-cli.md#preview-configuration-against-saved-groups).
+- Managed wallet names map to stored group UUIDs. Renaming a wallet in TOML
+  creates a new empty group; use `wallet rename OLD NEW --config FILE` with
+  `serve` stopped to keep the same identity and funds, then update TOML
+  references. See
+  [wallet rename](wallet-cli.md#rename-a-managed-wallet-group).
 
 ### Wallet templates and automatic assignment
 
-To avoid repeating managed wallet definitions, define one template and an
-automatic assignment policy. To adapt the managed starter, replace its
-`[wallets.research]` definition and reserve with this template/policy and remove
-`wallet = "research"` from the listener. For this variant, also remove the
-listener's provider-management/raw-call capabilities and any `source_registry_file`:
-these capabilities require an explicitly named wallet. Keep its treasury, funding, source and
-other listener settings. This substitutes automatic pools for the explicit pool:
+Define `[wallet_templates.NAME]` and `[wallet_assignment]` to generate managed
+wallet groups automatically without repeating `[wallets]` blocks:
 
 ```toml
 [wallet_templates.small]
 mode = "zcash_rotation"
-max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
-max_retirement_remainder_usdc = "0.001" # Default per group; explicit "0" requires exact zero.
+max_api_payment_usdc = "1.00" # Required per-payment cap.
+max_retirement_remainder_usdc = "0.001" # Default per group; "0" requires exact zero.
 
 [wallet_templates.small.reserves.small]
 # Default randomized nominal funding: $2-3.
 
-# Explicitly enabling a large slot opts into its $10-25 default range:
+# Optional large reserve (default $10-25 when declared):
 # [wallet_templates.small.reserves.large]
 
 [wallet_assignment]
@@ -603,371 +424,240 @@ scope = "source"
 template = "small"
 ```
 
-Sources and servers can then omit `wallet`; `[wallets]` may also be omitted.
-See [funding limits and fees](wallet-rotation.md#funding-limits-and-fees) for
-actual spendable treasury capacity, SDK-calculated fees and nominal reserve sizing.
-The singleton `[treasury]` and `[funding]` settings are still required when the
-resolved deployment has managed pools. Explicit source/server wallet references
-continue to take priority and must refer to entries in `[wallets]`, not templates.
-They provide custom sharing groups and exceptions to the automatic policy.
-
 | Automatic scope | One generated pool per | Sharing |
 | --- | --- | --- |
-| `deployment` | Deployment/state owner | All otherwise-unassigned bindings |
-| `server` | Server name | Otherwise-unassigned sources within that server |
+| `deployment` | Deployment treasury | All otherwise-unassigned bindings |
+| `server` | Listener name | Otherwise-unassigned sources on that listener |
 | `source` | Source name | That source across otherwise-unassigned listeners |
-| `binding` | Server/source pair | Each otherwise-unassigned binding separately |
+| `binding` | Listener and source pair | Each otherwise-unassigned binding separately |
 
-Templates accept the same settings and defaults as a named `zcash_rotation`
-profile; static templates, unknown fields/scopes, missing templates and invalid
-risk limits fail validation. A template never allocates a pool by itself.
-Automatic pools are generated only for declared server/source bindings that need
-the fallback. Unreferenced sources and unused templates create none. Tool filters
-do not change these identities or suppress a declared binding's generated pool;
-inspection can therefore resolve the exact set before fetching API catalogs.
-All explicitly declared managed profiles still request pools, even if unreferenced.
-
-Generated names use the reserved `auto_v1_` prefix: `auto_v1_deployment`,
-`auto_v1_server_<server>`, `auto_v1_source_<source>`, and
-`auto_v1_binding_<server-name-length>_<server>_<source>`. The length prefix avoids
-ambiguous pairs containing underscores. Explicit `[wallets]` entries cannot use
-this namespace. Pool identity belongs to the initialized treasury/state directory;
-it does not depend on the configuration file path, ordering, template name or
-template contents. Separate deployments require separate initialized treasuries
-as described in the managed-wallet section.
-
-Configuration changes take effect when the deployment is reopened. Managed
-profiles require an explicit `max_api_payment_usdc`; the static-wallet default
-remains unchanged. The cap applies to every active, reserve and retained wallet,
-independently of original funding size. Explicit unlimited spellings retain their
-existing meaning for payment authority only. Empty and whitespace-only caps are
-errors; use `"none"` or `"off"` explicitly for unlimited authority. Missing static
-caps retain their default; missing managed caps remain errors.
-A cap above every nominal bound is valid, and nominal bounds above the cap are
-valid; neither arrangement authorizes extra funding.
+- `[treasury]` and `[funding]` are still required when resolved pools are
+  managed. Explicit source and server `wallet` references take precedence and
+  must reference `[wallets]` (not templates); provider management and raw calls
+  still require an explicit listener `wallet`.
+- Templates validate the same fields as `[wallets]` (static templates are
+  rejected) and allocate nothing unless referenced by an unassigned binding.
+  Tool filters never suppress or alter generated pool names. Explicitly
+  declared `[wallets]` profiles always request pools even if unreferenced.
+- Generated names use the reserved `auto_v1_` prefix (`auto_v1_deployment`,
+  `auto_v1_server_<server>`, `auto_v1_source_<source>`, and
+  `auto_v1_binding_<len>_<server>_<source>`), which explicit `[wallets]`
+  entries cannot use. Pool identity belongs to the initialized treasury state
+  directory, not the config filename or template name.
+- Managed profiles require an explicit `max_api_payment_usdc` (use `"none"` or
+  `"off"` for unlimited; empty strings fail). The cap applies to active,
+  reserve, and retained wallets alike and is independent of reserve sizing.
 
 ### Managed reserves and funding
 
-`reserves.small` defaults to a randomized $2-3 nominal range when omitted or empty.
-`reserves.large` is optional; an absent large table stays disabled, while an
-explicit empty `reserves.large` enables the randomized $10-25 default. Defaults are
-resolved per slot, so the small range never applies to large. A slot configures
-either `funding_amount_usdc` (fixed target, with optional
-`max_funding_amount_usdc` bridge-minimum headroom) or both
-`min_funding_amount_usdc` and `max_funding_amount_usdc` (inclusive randomized
-range). Equal range endpoints are valid. Amounts are positive exact micro-USDC
-decimals; a maximum must be at least its minimum/target. Do not combine a fixed
-target with a minimum or leave a custom range incomplete. Small and large ranges
-are independent; no cross-slot ordering is required. New groups fund only the
-enabled slots, with no separate active allocation. The first journaled payment
-promotes its READY payer to ACTIVE and opens that slot for refill. Vacancies
-allocate small-first, independently of which wallet can pay.
-Consumed reserve wallets become active, previous active wallets become retained,
-and retained wallets remain usable without automatic top-ups or slot reassignment.
-First positive external credit permanently consumes the initial funding claim,
-including partial credit. Disabling a slot retains accepted source ownership.
-
-Each new operation selects a nominal USDC amount at the serialized unsigned quote
-boundary: the fixed target, or one unbiased draw within the configured inclusive
-range. It then sizes its ZEC principal from a dry `EXACT_OUTPUT` preview with zero
-slippage. If NEAR reports that the selected amount is below its bridge minimum,
-the operation raises its local floor to `max(configured minimum, suggested USDC
-minimum)` and draws again uniformly within the remaining authorized range. A
-fixed target keeps its deterministic bridge adjustment. The replacement choice is
-persisted before the next request and reused across ordinary failures and
-restarts. Sizing continues while each rejection raises the provider floor within
-the authorized USDC ceiling and the original quote deadline remains valid; there
-is no separate attempt cutoff. A provider minimum
-above the configured maximum stops that round with a funding amount-limit
-explanation and no deposit; the same
-saved draw is retried with normal backoff until configuration or external
-conditions change. This is not an empty treasury. The ceiling
-does not reject beneficial extra execution output. The executable `EXACT_INPUT`
-quote fixes the preview's NEAR-priced ZEC principal and applies
-`funding.slippage_bps` (default 500 basis points; range 0–10000, or 0–100%) once to its
-expected output. Its `minAmountOut` is the execution floor, not the route's
-minimum supported size. USD valuations and commission metadata are advisory. No external exchange-rate oracle
-or mutable balance tracking is introduced. Accepted older `EXACT_OUTPUT` work
-retains its original terms; configuration changes govern new quotes.
+- **Reserve slots:** `reserves.small` defaults to a randomized $2-3 nominal
+  range when omitted or empty. `reserves.large` is disabled when omitted and
+  defaults to a randomized $10-25 range when declared empty. Each slot accepts
+  either a fixed `funding_amount_usdc` (with optional `max_funding_amount_usdc`
+  headroom for bridge minimums) or both `min_funding_amount_usdc` and
+  `max_funding_amount_usdc` (inclusive exact micro-USDC range). Do not combine
+  `funding_amount_usdc` with `min_funding_amount_usdc`.
+- **Lifecycle:** New groups fund only their enabled reserve slots (small first
+  when both are vacant). The first journaled payment promotes a `READY` wallet
+  to `ACTIVE` and opens its slot for refill; displaced `ACTIVE` wallets become
+  `RETAINED` and remain spendable without top-ups. A wallet's first positive
+  USDC credit (even partial) permanently consumes its initial funding claim.
+- **Quote sizing and bridge floors:** Each funding job draws its nominal USDC
+  amount (fixed target or uniform draw in range) and previews the ZEC principal
+  via a dry `EXACT_OUTPUT` quote with zero slippage. If NEAR reports a higher
+  bridge minimum within the configured maximum, the job raises its local floor,
+  redraws within the remaining authorized range (or adjusts a fixed target),
+  and persists the choice before retrying. If the bridge minimum exceeds the
+  configured maximum, the job stops that round with an amount-limit error and
+  retries on normal backoff without silently raising the ceiling. The
+  executable `EXACT_INPUT` quote locks that ZEC principal and applies
+  `funding.slippage_bps` (default `500`, range `0` to `10000`) once to its
+  expected output.
 
 #### Retired-wallet tolerance
 
-`max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
-`"0.001"` (1,000 atomic units) independently per managed group. Explicit `"0"`
-requires exact zero. It authorizes eligible retained-wallet retirement on the
-canonical-publication path, independently of `auto_fund`, vacancies and treasury
-capacity. Ordinary serving considers low-estimate retained candidates through
-scoped authorization resolution and compatible confirmed/latest balances; both
-must satisfy the group's tolerance. Active, ready, disabled-group, current-claim
-and wallets with unresolved original delivery obligations cannot retire. A
-never-credited completed job can close that guard only when every current and
-archived accepted swap has its bound NEAR terminal outcome and no unresolved
-source work remains, or nondisclosure is proven and any private source work is closed.
-Source confirmation or expiry alone does not close a disclosed bridge obligation.
-A preserved intent for a fulfilled swap does not keep that guard open.
-Explicit sync attempts eligible
-candidates once without starting a watcher. Qualification funding permits confer
-no retirement authority. Retirement leaves
-funds and keys at their address, stops routine polling/selection, transfers nothing
-and never releases financial obligations. Positive tolerance trades purchasing
-power for less observation work; it does not bound cumulative stranded capital.
+`max_retirement_remainder_usdc` defaults to `"0.001"` (1,000 atomic units) per
+managed group; set `"0"` to require an exact zero balance.
+
+- During serving, low-estimate `RETAINED` wallets whose finalized and latest
+  balances both fit the tolerance and have no unresolved payment authorizations
+  or pending delivery obligations retire automatically (regardless of
+  `auto_fund`). Active, ready, and disabled-group wallets never retire.
+- A never-credited job closes its delivery guard only when every bound swap
+  reached a terminal NEAR outcome with no pending source work, or nondisclosure
+  is proven.
+- `wallet sync` checks eligible candidates once without starting a watcher.
+  Retirement leaves keys and any dust at their address, stops routine polling
+  and selection, and never transfers funds.
 
 #### Base finality and schema
 
-Canonical Base balances, authorization resolution and payment receipts require
-the RPC's `finalized` chain. Financial observations use the finalized anchor;
-there is no additional application confirmation-depth setting. A lagging finalized
-chain delays evidence; unsupported or unavailable finality retains pending work
-and may use a configured RPC fallback, without substituting depth-only evidence.
-Ordinary scalar balance estimates still read `latest`. New confirmation-depth
-metadata describes the observed gap between those anchors rather than a local
-policy. Historical records retain their original minimum-depth metadata.
-Current database schema 23 is required
-for owner opens and read-only inspection; older and future versions fail without
-source-state mutation. Retained histories protect original financial ownership; see
-the [database rollback boundary](wallet-cli.md#database-schema-and-upgrade-compatibility).
+Canonical Base balances, authorization resolution, and payment receipts read
+the RPC's `finalized` block tag (there is no separate confirmation-depth
+setting). If `finalized` lags or is unavailable, pending work waits and may
+fail over across configured Base RPC endpoints rather than substituting
+depth-only checks. Advisory balance estimates still read `latest`.
+
+Current SQLite schema version 23 is required for both owner opens and read-only
+inspection; older and newer schemas are rejected without mutating state. See
+[database schema compatibility](wallet-cli.md#database-schema-and-upgrade-compatibility).
 
 #### Funding capital and automatic funding
 
-Funding capital comes from actual spendable treasury funds after confirmations,
-reservations, liabilities and fees; that spendable ZEC balance is the operator's
-ZEC capital limit. Reserve ranges authorize nominal USDC sizing only and do not
-create a second per-transfer ZEC budget. `max_funding_spend_zec` was removed;
-delete it from existing configurations because unknown managed-profile fields are
-rejected. Displayed total balance is not spendable
-capacity. Adding spendable ZEC restores capacity without another aggregate-budget
-setting. `auto_fund=false` pauses new funding. Enabled unfilled reserve claims
-keep discovering later ZEC deposits and confirmations through the shared treasury
-owner; fully funded idle serving does not watch for incoming funds. Retirement
-continues only while its own unresolved candidate work remains. Keep group
-payment caps, nominal output bounds and SDK transaction checks,
-explicit funding controls and separately authorized qualification allocation counts.
-Qualification has no separate ZEC spending budget. Its `total_test_budget_usdc`
-limits API authorizations using a running durable total, independently of funding.
+Spendable shielded ZEC in the treasury (after confirmations, reservations,
+liabilities, and SDK fees) is the ZEC capital limit for enabled auto-funding.
+Reserve ranges size nominal USDC targets only.
+
+- **`[treasury]` keys:** `state_dir` (required), `key_file` (optional,
+  default `state_dir/wallet.key`), `id` (optional expected UUID verified on
+  open), `indexer_url` or `indexer_url_env` (mutually exclusive; default
+  `https://zec.rocks:443`), `submission_url` or `submission_url_env` (mutually
+  exclusive; defaults to the indexer endpoint), and `confirmations` (default
+  `3`, positive integer). Missing or empty referenced environment variables
+  fail validation.
+- **`[funding]` keys:** `auto_fund` (default `true`), `confidentiality`
+  (default `"basic"`, `"public"` opt-in, `"advanced"`), `base_rpc_url_env` and
+  `base_rpc_fallback_url_envs`, `near_api_key_env`, `near_user_session_env`,
+  `slippage_bps` (default `500`), `poll_seconds` (default `5`),
+  `swap_timeout_seconds` (default `1800`), and `quote_deadline_seconds`
+  (default `1800`).
+- Unknown and obsolete fields (such as `max_funding_spend_zec`,
+  `max_response_chars`, `treasury.max_sync_age_seconds`, and
+  `funding.base_max_block_age_seconds`) fail TOML parsing and must be removed
+  from configurations.
+- `funding.auto_fund = false` pauses new funding while continuing to observe
+  already accepted operations. Unfilled reserve claims keep watching for new
+  ZEC deposits; fully funded idle serving does not poll for incoming ZEC.
+- Live qualification has no separate ZEC budget; its `total_test_budget_usdc`
+  caps API authorizations independently.
 
 ### Reserve settings and state changes
 
-Managed reserve amounts belong in `reserves.small` and optional `reserves.large`;
-`max_api_payment_usdc` sets independent per-payment authority. Configuration uses
-strict current field names: unknown or obsolete settings fail ordinary parsing.
-Aggregate funding budgets and tier/retention aliases are unsupported. Updating
-configuration never converts wallet state. Unsupported legacy schemas are rejected
-without mutation. Existing keys, balances, transactions and liabilities must
-survive. There is no general migration/abandonment framework or manual
-retirement command.
+Config edits take effect on restart and govern future allocations without
+converting wallet state or modifying already accepted swaps or signed bytes.
+Changing assignment scope or renaming a source or server in TOML creates new
+groups and disables absent groups while keeping their keys and history intact.
 
-Reserve settings change future authorized allocations, not existing accepted
-transactions or captured targets. Changing assignment scope or a source/server
-name may create new groups. Startup disables absent groups while retaining keys
-and history; restoring the prior identity resumes that group. Static-only serving
-does not unlock or modify treasury state.
+`config show` and `config check` include `resolved_wallets`,
+`generated_wallets`, and `wallet_summary` with combined nominal lower and upper
+bounds across distinct managed pools (for example, $12-$28 for one group with
+default small and large reserves). The `initial_inventory_target_*` fields hold
+the nominal lower bound for compatibility. None of these inspection commands
+opens keys or allocates funds.
 
-For automatic bindings, `config show` and inventory additionally report
-`template` and `scope`. Configuration inspection includes `resolved_wallets`
-(explicit plus generated profile settings), `generated_wallets` (generation
-metadata), and `wallet_summary` (distinct managed/generated pool counts and their
-combined nominal lower and upper bounds in
-`initial_inventory_target_atomic`/`initial_inventory_target_usdc` and
-`initial_inventory_maximum_atomic`/`initial_inventory_maximum_usdc`; the `target`
-fields are retained for compatibility and mean the nominal lower bound, not an
-exact target or guaranteed credit). `config check`
-also prints that range. The total counts each managed pool once, including
-explicit unreferenced profiles; it excludes unused templates and static wallets.
-These are configured nominal bounds, not a live balance, guaranteed inventory total
-or quote for additional funds: the fresh-group formula is the sum of slot minima
-through the sum of slot maxima, including bridge-minimum headroom. With the
-default small range and an enabled large default it is $12-$28. Existing addresses
-keep their captured targets; accumulated retained holdings, fees and retirement
-amounts are separate. Offline inspection cannot infer migration cost or usable
-capacity.
-None of these inspection commands allocates keys or funds.
-
-Managed refunded funding retains NEAR checks and consensus-paced Zcash scans until
-confirmed Ironwood receipt at its saved receiver. Bound REFUNDED, source closure
-and that receipt permit replacement under current enabled funding and an unused
-initial claim; every replacement obtains a fresh quote and receiver. Provider
-FAILED alone never authorizes replacement. See [refund recovery](wallet-rotation.md#refunds-state-and-recovery).
+Refunded managed swaps keep polling NEAR and scanning Zcash until confirmed
+Ironwood receipt arrives at the saved refund receiver. Only a bound `REFUNDED`
+status plus source closure and confirmed receipt allow a replacement funding
+swap under an unused initial claim. See
+[refunds, state, and recovery](wallet-rotation.md#refunds-state-and-recovery).
 
 ### Funding timing and observation cadence
 
-`funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
-local funding inventory/owner scheduling and successful recurring source and
-provider-status observations after completion, plus existing per-job jitter.
-Failed observations retain independent error backoff with a 60-second floor,
-bounded by 300 seconds before jitter. Base credit acquisitions retain their
-independent 60-second completion floor and backoff. Successful local preparation
-and submission handoffs remain immediate. `funding.swap_timeout_seconds` defaults to 1,800 seconds
-from the first durable broadcast intent and reports degraded health without
-abandoning accepted work or granting replay authority. See the
-[wallet observation policy](wallet-rotation.md#wallet-observation-policy) for
-startup, explicit sync and requested-refresh scopes.
-
-`funding.quote_deadline_seconds` defaults to 1,800 seconds and preserves explicit
-operator overrides. It requests a quote window; the returned deadline governs
-preparation/disclosure independently of the SDK's consensus-derived signed block
-expiry. Existing accepted deadlines and signatures remain unchanged on restart. A shorter
-requested window does not guarantee settlement, refund completion or abandonment
-within an hour; unresolved provider work remains owned.
+- **`funding.poll_seconds`:** Default `5` (range `1` to `60`). Controls local
+  funding scheduling and successful recurring source and NEAR status checks
+  (with per-job jitter). Failed observations back off from a 60-second floor up
+  to 300 seconds before jitter. Base credit checks keep a 60-second completion
+  floor.
+- **Treasury scans:** Requested at startup, explicit `wallet sync`, enabled
+  funding demand, and pending source, refund, or direct receive work.
+  Successful scans schedule the next recurring scan 60 seconds after completion;
+  failures back off at 90, 180, and 300 seconds. Idle treasuries do not poll.
+  See [wallet observation policy](wallet-rotation.md#wallet-observation-policy).
+- **`funding.swap_timeout_seconds`:** Default `1800` (from first durable
+  broadcast intent). Marks pool health degraded without abandoning accepted
+  work or authorizing a replacement swap.
+- **`funding.quote_deadline_seconds`:** Default `1800`. Requests a quote window
+  for preparation and disclosure independently of the Zcash SDK's block-height
+  transaction expiry. Accepted deadlines and signed bytes remain immutable
+  across restarts.
 
 ### Reserve sizing and fragmentation
 
-Size large to at least twice the largest expected payment, preferably four times
-when prices vary. This is guidance, never an admission restriction. Prefer a
-separate large reserve over enlarging the small slot for expensive calls: both
-wallets then rotate after fewer calls, reducing usage tracking and linkability.
-Larger sizes reduce some remainders but can keep more calls on one payer address. Small-funded
-wallets provide more frequent rotation opportunities for cheap calls while a large
-reserve supports occasional expensive calls. Selection may still use large-funded
-wallets for cheap calls; retained reuse, request content, funding and network
-observations can link activity. These settings do not promise unlinkability or
-strict price-class separation.
+Size `reserves.large` to at least 2x your largest expected payment, and
+preferably 4x when prices vary. Keeping a separate large reserve lets cheap
+calls continue rotating on small wallets while expensive calls draw from the
+large reserve.
 
-A $10 wallet settles two $4 calls and retains $2; two $3.34 calls retain $3.32.
-A later smaller call can use retained capacity, but fragmented balances cannot be
-summed to authorize one payment. Before its first unsigned request, selection uses
-a fresh observed price or otherwise a usable advertised amount. With a hint,
-prefer estimated-affordable RETAINED, ACTIVE, then READY wallets, oldest within each
-role. Without a hint, prefer healthy positive ACTIVE, then RETAINED and READY.
-Low, unknown and zero estimates remain fallbacks. A sufficient bound payer stays
-stable after challenge discovery; role preference alone adds no unsigned handoff.
-It does not sort by balance or sum fragments.
-
-A uniform default small allocation has a $2.50 nominal mean. Preparing its first
-wallet and first replacement takes two $2-3 allocations: $4-6 nominal, averaging
-approximately $5 before bridge-floor adjustments, source fees and bridge costs.
-The first funded wallet starts READY; its first journaled payment makes it ACTIVE
-and opens a vacancy. The replacement becomes READY later. This estimates capital
-across two allocations; it does not require both at startup or promise $5 remains
-simultaneously spendable after payments. Allow randomization headroom to $6, plus
-fees, ongoing use/replacements and any separately enabled large reserves. A
-bridge-minimum floor can bias draws upward, so $5 is neither an all-in cost nor a
-universal observed mean. A route requiring a nominal minimum above $3 is refused
-under the existing amount-limit/backoff behavior; the ceiling is not raised
-silently and is not a ZEC spending cap.
-
-With the default small and large ranges, each fresh wallet draws between $2-3 or
-$10-25 respectively. Repeated calls can still leave remainders at several
-addresses; those balances cannot collectively authorize one payment. This
-illustrates sizing below the recommendation, not a wallet-count limit, and
-randomized draws do not promise a particular remainder distribution.
-Observed or advertised cheap calls can use compatible retained balances, including
-on their first invocation. Missing or expired hints can keep using a healthy ACTIVE.
-Neither case establishes a quantitative privacy guarantee.
-
-For target `L` and repeated settled payments `p`, the unusable remainder for
-another same-price call is `L - floor(L/p)*p`. At a maximum payment of 25% of the
-wallet target, the remainder is below 20% for identical prices and below 25% for
-mixed prices. These bounds assume settled payments, no other liabilities or
-unexpected credits, and replacement because the next payment no longer fits; proactive early rotation
-can retain a larger remainder.
-They describe one wallet's remainder, not total deployment holdings; pending
-payment authorizations can cause earlier reserve consumption.
+- **Fragmentation:** Balances across separate wallets cannot be combined to pay
+  one challenge. For target `L` and repeated settled payments `p`, the leftover
+  remainder unable to cover another payment `p` is `L - floor(L / p) * p`.
+  Keeping payments at or below 25% of `L` keeps remainders under 20% for fixed
+  prices and under 25% for mixed prices (early rotation or pending
+  authorizations can leave larger remainders, which later smaller calls can
+  still use).
+- **Small-reserve capital planning:** A default $2-3 small allocation averages
+  $2.50 nominal. Funding a group's first wallet plus its first replacement
+  spans two allocations ($4-6 nominal, about $5 on average before bridge
+  minimums and fees). Allow headroom up to $6 plus fees, ongoing refills, and
+  any large reserves. If a bridge minimum exceeds $3, `x402_treazury` refuses
+  the route rather than silently raising the $3 ceiling.
+- **Payer selection summary:** Before the first unsigned request, managed
+  selection checks a fresh observed offer, then a valid advertised per-call
+  price. With a hint, it prefers estimated-affordable `RETAINED` wallets
+  (oldest first), then `ACTIVE`, then `READY`. Without a hint, it prefers
+  healthy positive `ACTIVE`, then `RETAINED`, then `READY`, with low, zero, and
+  unknown estimates as fallbacks.
 
 ### Startup readiness and configuration changes
 
-Ordinary enabled serving binds listener sockets before starting funding;
-MCP availability follows each endpoint's `wait_for_catalogs` setting independently
-of wallet funding readiness.
-Ordinary serving first waits for an independent 30–120-second refill opportunity
-per eligible group (uniform integer seconds, nominal mean 75). It does not eagerly
-allocate on startup or refill immediately on exhaustion. Restart redraws and
-suspension/Store/source delays can extend wall-clock waiting beyond 120 seconds.
-Existing allocated work resumes promptly. At opportunities, a used ACTIVE at its
-stable private 5%–25% initial-credit threshold may promote a funded READY reserve;
-retained balances remain usable. The current cap scales both threshold endpoints.
-No credit history, balance RPC or additional monetary budget is introduced. See
-[early rotation](wallet-rotation.md#early-rotation-and-refill-opportunities).
-Small and large reserve funding may finish in either order. An empty managed pool
-returns typed unavailability until an eligible funded payer exists. No ACTIVE wallet is
-required: a funded READY reserve can serve immediately. Unsigned requests do not
-promote wallets or create replacement vacancies. `wallet bootstrap` instead
-captures the enabled slot generations and waits for those original
-destination obligations, without chasing replacement generations or source-only
-settlement backlog. A stopped or cancelled waiter preserves accepted work.
-`auto_fund=false` still observes accepted operations but cannot allocate or prepare
-new funding. The first positive credit—even a partial credit below the slot's
-nominal minimum—consumes its initial funding claim permanently and publishes the
-funded role. No top-up follows;
-existing source liabilities remain owned even after disablement. Insufficient accepted source work remains owned for reconciliation,
-not automatically abandoned or replaced.
+Serving binds listener sockets before starting background funding, and MCP
+availability follows each listener's `wait_for_catalogs` setting independently
+of wallet readiness.
 
-Reopen applies changed caps, reserve bounds and slot enablement. Existing accepted
-terms, job identities and original allocation floors remain immutable; current
-policy is rechecked before new quote acceptance. An unprepared quote that no longer
-satisfies current claim policy is refreshed, while prepared work keeps
-its fixed payment amount, input ownership and exact signed bytes. Configuration edits do not convert state.
-Ordinary startup rejects unsupported legacy schemas without mutation. Configuration
-edits and `wallet recover` cannot supply missing immutable destination-readiness
-evidence or convert unsupported state. Preserve complete backups and all accepted
-financial obligations; restoring an older backup cannot undo subsequent work.
-See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
-for the bounded selector and its accepted limitations.
+- **Refill opportunities:** Eligible groups wait for an independent 30-120
+  second refill opportunity (uniform integer seconds, mean 75) rather than
+  allocating immediately on startup or exhaustion. Already allocated work
+  resumes promptly on restart. At an opportunity, a used `ACTIVE` wallet that
+  dropped to its private 5%-25% initial-credit threshold (scaled by the current
+  cap) can promote a funded `READY` reserve; see
+  [early rotation](wallet-rotation.md#early-rotation-and-refill-opportunities).
+- **Serving with `READY` wallets:** A funded `READY` wallet serves immediately
+  without needing a preexisting `ACTIVE` wallet; unsigned requests never
+  promote wallets. An empty managed pool returns a typed unavailable error
+  until a funded payer exists.
+- **Reopen and schema discipline:** Restarting applies updated caps, reserve
+  bounds, and slot enablement to future allocations. Unprepared quotes that no
+  longer fit updated policy are refreshed; prepared transactions retain their
+  exact inputs, amounts, and signed bytes.
 
-Rust configuration is TOML-only. [providers/](../providers/README.md) contains
-the reusable provider definitions. AgentUtility, Glassnode, Concordance,
-Straits and Locus have a `provider.toml` and a locally curated `openapi.json` in their own directory.
-JSON remains the format for API documents, fixture data and inventory output.
-Dynamic bundled provider catalogs retain accepted provider configuration with their schema
-bytes; restart and offline source inspection rebuild that accepted definition.
-Explicit source refresh adopts current bundled settings and schema together.
-Source-management byte limits and wallet/origin policy remain authoritative; its
-explicit read-inactivity setting overrides the provider value, then the network
-default applies. See [source persistence and maintenance](agent-sources.md#persistence-and-operator-maintenance).
-Small PNG/JPEG/WebP results are returned as MCP image attachments; provider TOML
-can also extract explicitly mapped base64/data-URI images from JSON while keeping
-metadata. See [inline image configuration](../providers/README.md#inline-image-results)
-for byte/count limits and supported formats. Asset URLs are not automatically fetched.
+Configuration is TOML-only; reusable definitions live in
+[providers/](../providers/README.md) (with locally curated `provider.toml` and
+`openapi.json` pairs for providers such as AgentUtility, Glassnode,
+Concordance, Straits, and Locus). Small PNG, JPEG, and WebP responses become
+MCP image attachments, and provider `response_mappings` can extract inline
+base64 or data-URI images from JSON; see
+[inline image results](../providers/README.md#inline-image-results).
 
 ### TOML composition and filtering
 
-Composition is one level: a source may extend a provider file, but that provider
-must not contain `extends`. Local fields replace inherited fields in full;
-arrays are not concatenated, and an `overrides` table replaces the whole inherited
-table. An empty list or table clears the inherited value. Omitted fields inherit,
-then use defaults. Unknown fields are errors.
+Composition is single-level: a deployment source may `extends` a provider file,
+and provider files cannot themselves use `extends`.
 
-Paths resolve where declared: `extends` is relative to the deployment file;
-a provider's local `spec` is relative to the provider file; a deployment's local
-`spec` override is relative to the deployment file. There is no global `root`.
-URLs are unchanged. A provider's explicit tool prefix is preserved regardless of
-its source identifier; otherwise the source ID becomes the prefix. Two aliases
-with overlapping names cannot be mounted in the same listener.
-
-Source path/tag filters and description overrides run first. Each listener then
-filters its assigned generated tools by tags and tool names. Source `send_tools` rules,
-when present, assign tools before this final listener narrowing. Tag inclusion matches any
-listed tag, exclusions win, and matching is case-sensitive; untagged tools
-(including help) do not match a positive tag filter. Tool-name patterns support
-`*` and `?`. Ordinary deployment serving accepts unmatched exact and wildcard
-inclusions without widening exposure. Empty listener selections, including missing
-tags, remain available with coverage instructions and ERROR diagnostics.
-Strict inspection retains exact-name and empty-inventory validation. Unmatched exclusions, exact or wildcard, report INFO
-without failing catalog loading or endpoint readiness. Listener diagnostics identify
-`include_tools` or `exclude_tools` after that listener's source loads settle. When a generated name proves that a source
-tool-name filter removed a matching tool, the diagnostic names the resolved `sources.NAME` setting and a matching tool as
-evidence. This includes source allowlists, exclusions and explicitly enabled
-recommendations. For bound sources, diagnostics identify the winning
-`sources.NAME.send_tools[index]` rule when distribution removes matching tools, stating
-whether it excluded the tool or assigned it to other endpoints. Missing exact
-listener inclusions include this evidence in the inspection error; advisory
-exclusion and wildcard diagnostics use the same assignment/tag candidate view
-as publication. Listener filters cannot restore tools removed by source filters;
-an exclusion for an already removed tool can simply be redundant. Other unmatched
-patterns report source availability and suggest checking source/listener filters,
-without inferring a conflict from tool prefixes alone.
-Strict inspection rejects duplicate tool names and unexplained empty server
-inventories. Ordinary serving omits ambiguous names and permits empty inventories
-without inferring whether provider drift or an authored selection caused them. Calls enforce
-the same selection as listing. Sources referenced by multiple listeners are
-loaded once and retain one catalog; selected instructions are combined without
-hidden truncation.
+- **Field inheritance:** Local fields replace inherited fields completely
+  (arrays do not concatenate; `overrides` and `response_mappings` replace in
+  full). Empty lists or tables clear inherited values. Omitted fields inherit,
+  then fall back to defaults. Unknown fields fail parsing.
+- **Path resolution:** `extends` resolves relative to the deployment file; a
+  provider's local `spec` resolves relative to the provider file; a
+  deployment's local `spec` override resolves relative to the deployment file.
+- **Prefixes and filter order:** A provider's explicit `prefix` stays intact;
+  otherwise the source ID becomes the prefix. Source path, operation, and tag
+  filters run first, then `send_tools` (when present), then listener tag and
+  name filters. Tag matching is exact and case-sensitive (exclusions win;
+  untagged tools including help do not match positive tag filters).
+- **Filter diagnostics:** After a listener's sources settle, diagnostics
+  identify unmatched `include_tools`, `exclude_tools`, source filters, or
+  winning `send_tools[index]` rules that removed matching tools. Sources shared
+  across listeners load once, and their instructions combine without silent
+  truncation.
 
 ### Source tool distribution
 
-Deployment version 1 supports optional ordered `sources.NAME.send_tools` rules. Omit
-`send_tools` to retain listener `sources` attachments. Routed and legacy sources may
-coexist, but a routed source cannot also appear in any listener's `sources` list.
-Reusable provider files, dynamic imports and raw-call arguments do not accept `send_tools`.
+Deployment sources support optional ordered `send_tools` rules to route tools
+to specific endpoints or exclude them. Routed and listener-`sources` sources
+may coexist in a deployment, though a source using `send_tools` cannot also
+appear in any listener's `sources` list. Reusable provider files, dynamic
+imports, and `raw_call` do not accept `send_tools`.
 
 ```toml
 [sources.vaaya]
@@ -979,851 +669,374 @@ send_tools = [
 ]
 ```
 
-`send_tools` must be nonempty. Each rule accepts only required `to` and optional `tools`.
-`to` names an existing endpoint, a nonempty array of distinct existing endpoints,
-or scalar `"exclude"`. Exclusion cannot appear in an array. The endpoint name
-`exclude` is reserved when any source uses `send_tools`; legacy deployments retain their
-existing identifier behavior. Exactly one rule must omit `tools`, and it must be
-last. This catch-all may assign or exclude. Present `tools` must be nonempty.
+- **Rule structure:** `send_tools` must be nonempty. Each rule takes required
+  `to` (one endpoint name, a nonempty array of distinct endpoint names, or
+  scalar `"exclude"`) and optional nonempty `tools`. Exactly one rule must omit
+  `tools` and must appear last as the catch-all. Using `send_tools` reserves
+  the endpoint name `exclude`.
+- **Pattern matching:** Selectors use case-sensitive `*` and `?` against
+  generated names with the resolved `<prefix>_` stripped once (for prefix
+  `locus`, `locus_locus_zoning` matches `locus_zoning`, `locus_list` matches
+  `list`, and `locus_help` matches `help`). Callable names are unchanged.
+- **Evaluation order:** Source compatibility, path, operation, and tag filters,
+  and recommendation opt-in run first. The first matching rule consumes each
+  surviving tool (sending it to every listed endpoint or excluding it). Later
+  rules cannot reclaim a consumed tool. Every non-exclude target in any rule
+  establishes a potential binding for wallet resolution and startup
+  dependencies; an exclusion-only source adds no endpoint bindings.
+- **Validation and diagnostics:** Strict inspection rejects missing exact
+  assignment selectors and empty inventories (unmatched wildcards log at
+  `DEBUG`). Serving and warming accept missing selectors and empty inventories
+  with `ERROR` coverage diagnostics (unmatched `exclude` selectors log at
+  `INFO`, and fully shadowed rules log at `DEBUG`).
+- **Inspection:** `config show` prints configured rules and effective bindings
+  with origins such as `sources.vaaya.send_tools[1].to`.
+  `config check --explain-routing` prints one JSON object (`wallet_summary`,
+  `servers`, and `routing`) detailing each surviving tool's winning rule,
+  routed targets, post-filter targets, and wallet bindings without reading
+  secrets or allocating wallets.
 
-Selectors use case-sensitive `*` and `?`, matching generated names after removing
-exactly the resolved provider prefix plus `_` once. For prefix `locus`,
-`locus_locus_zoning` matches `locus_zoning`, `locus_list` matches `list`, and
-`locus_help` matches `help`. A source ID is stripped only when it supplies the
-resolved prefix. Method/collision suffixes and callable names remain unchanged.
+### Graceful shutdown
 
-Provider compatibility, ordinary source filters and recommendation opt-in run
-first. The first matching rule consumes each surviving tool: assignment sends it
-to every named endpoint, while exclusion publishes it nowhere. Later rules cannot
-restore or redistribute it. Explicit destination arrays express sharing. Exact
-selectors validate against the full surviving source inventory before consumption;
-a known tool consumed earlier is still known. Strict inspection rejects missing exact assignment selectors.
-Ordinary deployment serving/warming retain missing local or remote assignment selectors and report reduced coverage, preserving
-the authored rule order. Unmatched selectors in `to = "exclude"` rules, exact or wildcard, report INFO
-and have no current effect. Unmatched assignment wildcards report missing-selection
-notices and ERROR coverage diagnostics during ordinary serving/warming; strict
-inspection emits DEBUG for those wildcards. Fully shadowed rules emit DEBUG because
-earlier rules can legitimately consume all their matches. Syntax, rule order and exclusions apply equally across
-operations; malformed selectors remain errors. Missing inventory selections are
-best effort only for ordinary deployment serving/warming, as described in
-[framework integration](framework-integration.md).
-Inventory-dependent diagnostics
-wait while their source is pending or unavailable. Listener filters can only
-narrow assignments. Existing duplicate-name handling still applies across sources.
-During ordinary serving, missing listener selections and empty static-only
-destinations report reduced coverage while endpoints remain available, including
-waiting endpoints once their catalogs settle. Authored routing and listener filters
-remain in force; no additional tools are exposed. Strict inspection rejects missing
-exact selections and empty static-only inventories. Invalid selector syntax and
-configuration references remain errors. Shared-payer cover-policy conflicts retain
-their cross-listener validation.
+Startup validates credentials and binds every listener before serving (a bind
+failure releases already-bound sockets). On `SIGINT` or `SIGTERM`, serving
+stops accepting new requests and drains accepted calls with 10-second stderr
+progress reports and no fixed drain deadline. A second `SIGINT` or `SIGTERM`
+forces exit with an unknown-outcome warning without releasing reservations or
+replaying signed work.
 
-Every non-exclude target mentioned in any rule establishes a potential binding,
-including a shadowed or currently unmatched target. These catalog-free bindings
-determine wallet resolution, startup dependencies and reserved static source names.
-An exclusion-only source adds none of those demands; existing metadata loading of
-unused sources remains. Wallet precedence stays source override, listener wallet,
-then configured automatic assignment. Rule order and catalog contents do not enter
-automatic wallet identities. Raw-call and source-management permissions remain
-independent of distribution.
-
-`config show` prints the composed file settings and per-source field origins,
-including defaults, without reading secrets or loading specs. It accepts
-`--provider` or `--config`, plus optional `--network-config` to inspect the selected network policy; CLI/environment runtime overrides are outside
-this file inspection command. Wallet/token fields show environment variable
-names, never their values.
-
-For routed deployments it retains authored rules and reports effective source
-bindings with rule origins such as `sources.vaaya.send_tools[1].to`, separately from
-wallet origins. It does not predict catalog-dependent matches.
-
-`config check` validates and reports inventories; `catalog tools` prints per-server
-JSON including source attribution. `catalog tags` reports unfiltered source tag
-counts. These commands do not create signers, bind ports, or fetch help documents.
-Remote specs still require network access. Deployment operations accept `--env-file`
-except offline `config show`.
-
-Deployment-only `config check --explain-routing` prints one JSON object containing
-`wallet_summary`, `servers` and `routing`; ordinary check output remains unchanged.
-The explanation includes each surviving source tool's full name, suffix, original
-method/path, zero-based winning rule, matching selector or catch-all, assignment or
-exclusion, routed targets, targets remaining after listener filters and published
-wallet bindings. Excluded tools remain visible here. Earlier source-filtered tools
-retain existing selection diagnostics; explanation does not rebuild an unrestricted
-catalog or fetch additional pricing. Diagnostics go to stderr. Neither inspection
-mode reads secrets, creates signers, allocates wallets or starts funding workers.
-
-Standalone CLI overrides cannot accompany a deployment `--config`; configure
-those values in its TOML instead. Serving/authentication flags belong only to
-`serve`.
-
-Startup validates credentials and binds every listener before serving any.
-A bind failure releases listeners already acquired. Both standalone HTTP and
-meta-config serving handle SIGINT/SIGTERM by stopping listeners and allowing
-accepted calls to finish without a fixed drain deadline. Stderr announces the drain
-and reports stages, call counts and elapsed time every ten seconds. A second
-SIGINT/SIGTERM forces exit with an unknown-outcome warning; it never releases
-reservations or replays signed work. The same registered signal streams remain
-owned across cancellation and drain, so the second signal is retained during
-that handoff. Windows uses Ctrl-C for both steps. After EOF or supervisor shutdown,
-the first subsequent operator signal forces exit. MCP client disconnect and stdio EOF stop
-response delivery without abandoning application-owned calls. Funding and
-reconciliation remain available until accepted deployment calls finish. A listener failure also stops its
-siblings. Catalog startup failure instead disables only dependent waiting endpoints
-and emits ERROR; their peers and financial owners keep running. Managed profiles
-retain durable payment uncertainty through shutdown;
-automatic NEAR funding is controlled by `funding.auto_fund`.
+Client disconnects and stdio EOF stop response delivery without abandoning
+in-flight calls. A listener failure stops sibling listeners; a required catalog
+startup failure disables only dependent waiting endpoints.
 
 ## Direct swap control
 
-The [Ironwood-only policy](zingo-integration.md#ironwood-only-policy) applies to all
-Zcash operations, including this toolset and managed funding. NEAR-owned external
-deposit addresses are its sole transparent-output exception; wallet transparent
-receiving, shielding and RPC address queries are unsupported.
+All Zcash operations (both direct swaps and managed funding) follow the
+[Ironwood-only policy](zingo-integration.md#ironwood-only-policy). The sole
+transparent-output exception is a NEAR-issued deposit address paid from
+Ironwood under its saved quote; wallet transparent receiving, shielding, and
+transparent-address RPC queries are unsupported.
 
-A listener can opt into native shielded Zcash payments and foreign-asset swaps.
-Native work requires `auth = true` and configured `[treasury]`, with no NEAR
-credentials, `[funding]`, Base wallet, provider registration or Base RPC prerequisite.
-Foreign routes use the optional `[funding]` NEAR settings:
+Enable direct native ZEC and foreign-asset tools per authenticated listener
+(`auth = true`) with an initialized `[treasury]`:
 
 ```toml
 [servers.toolbox.swap_control]
 receive = true
 send = true
-# max_send_zec = "0.05" # Optional per-send total debit; omit or use "none" for no limit.
+# max_send_zec = "0.05" # Optional per-send total debit; omit or use "none" for no cap.
 ```
 
-Omitting `swap_control` grants no new financial authority. Persisted operations
-retain status on their original authenticated listener, including after table
-removal. Keeping the table with both flags false also declares status-only access.
-Background observation retains accepted work even after its listener is removed.
-Missing funding/SDK configuration can degrade recovery to saved Store status; it
-does not disable independent static or managed capabilities. Configuration and
-catalog inspection remain independent of wallet state and list declared controls.
-Serving infers only status access from history, including when an otherwise valid
-inspected deployment is subsequently bound. A history-only endpoint without API
-sources uses the serving loader; retain a disabled `swap_control` table when an
-explicit status-only inventory is needed during strict inspection. Unsigned
-loading and binding never recover treasury history.
-The authenticated listener ID owns requests; all users of its token share that
-principal. Existing `auto_fund`, raw calls and provider-management settings do not
-grant direct swap permission. First-party tools remain discoverable on endpoints
-using `discover_on_demand`. Unavailable SDK or treasury transport configuration disables new direct work
-while saved status remains available from the Store. Unavailable NEAR settings
-affect foreign routes; native Zcash work remains available. Base outages
-affect managed Base service independently of direct receive availability.
-
-`payment_request_create` accepts a full source asset ID, its chain, an atomic decimal
-amount and a caller request ID. Native ZEC uses asset ID `nep141:zec.omft.near` and
-chain `zec`; this selects the embedded treasury directly, without any NEAR request.
-Omit `refund_address` for native ZEC. Each new ID derives a fresh shielded-only
-Ironwood-capable, Orchard-receiver-only UA; retries return the same saved address and can safely resume an
-address-less reservation. Native receipts report actual SDK receiver matches,
-confirmations, historical spent funds and separate snapshot spendability. Partial
-receipts remain pending until confirmed funds reach the requested amount. Public
-status refreshes derived native evidence from a newer available SDK snapshot
-without requesting another scan. `receipt_matches_saved_snapshot` distinguishes
-current saved evidence from fallback history when the SDK is unavailable. No
-transparent-address lookup RPC is enabled.
-
-Foreign assets additionally require a payer-owned source refund address. Each uses
-an `EXACT_INPUT` swap: tell the counterparty to deliver **exactly** `amount` atomic
-units to the returned deposit address, with network fees paid in addition, including
-the mandatory memo when present. Send once; a different amount can fail or refund.
-ZEC output and swap fees remain estimates/minimums until settlement.
-Optional `refund_after_seconds` requests when refund handling should begin, relative
-to quote creation. It defaults to 7200 seconds (two hours), an application preference,
-not a documented NEAR maximum or a promise of refund completion. Native requests
-reject this field. Managed-funding and foreign-send quote windows remain separate.
-Use the returned deposit address and mandatory memo exactly once for that request. Never reuse a swap receive address.
-Another payment requires a new request ID and fresh quote/address; retrying an
-identical ID only retrieves the original operation, without executing its quote
-again. Native ZEC addresses may be reused; `address_reusable` distinguishes these
-instructions.
-Stellar sources use the service's required `MEMO` deposit mode; other supported
-source routes default to `SIMPLE`, retaining any returned mandatory memo.
-A repeated request ID with identical terms returns the same saved operation;
-conflicting terms fail. An uncertain quote-creation response is retained without
-automatically creating another payment request. A fresh ID is a separate request.
-
-`swap_assets` always includes native ZEC locally; foreign metadata reports its
-availability/completeness explicitly, without promising route liquidity. Native
-ZEC includes the name `Zcash`. Nonblank queries use the shared case-insensitive
-literal-priority/BM25 search across asset ID, chain, symbol and available string
-CoinGecko ID, contract address, name and description. Prices, timestamps and JSON
-field names are excluded. Terms use OR matching; literal query substrings rank
-first, then BM25 relevance, with asset-ID ties. Use spaced queries such as
-`base USDC`; chain aliases and concatenated words are not inferred. Results are
-ranked before pagination. Blank queries retain native-first provider order. Missing
-or invalid NEAR configuration affects foreign work while native work remains
-available. Optional native polling uses the positive configured funding cadence
-or the existing default when absent; it grants no automatic managed funding or
-shielding authority.
-`swap_status` accepts either `operation_id` or `kind` plus the original
-`request_id`, allowing recovery after a lost response with admissions disabled. It
-reports native SDK receipts, or the saved exact foreign quote/provider outcome and
-separate SDK wallet observations; attributable receipt can remain unknown.
-Foreign `payment_instructions` contain the payer's source asset, exact atomic amount,
-provider deposit address and required memo, together with requested refund-start,
-returned deposit-address expiry and optional cold-address time. Native instructions
-retain partial-receipt semantics and have no provider expiry. Create, identical retry
-and status lookup share this presentation, including status-only operation without
-the SDK or NEAR. `current_time_utc` accompanies UTC-Z timestamps and nonnegative
-`seconds_until_*` countdowns sampled from the same clock; missing optional times
-remain null. The saved original quote remains untouched. Cold-address time means
-processing may be slower, not that the address has expired. Zero time remaining
-does not prove nonpayment, refund or terminal provider status and does not stop
-observation or renew instructions. A local deadline
-does not prove nonpayment, revoke disclosed instructions, or manufacture a provider
-expiry. Disabled admissions and process restart preserve these bindings.
-
-`swap_preview` accepts a destination `asset_id`, `chain`, positive atomic
-`amount` and `recipient`. It returns `executable = false` and creates no payment
-authority or input reservation. Both routes report principal, the operator's
-optional total-debit preference. `fee_estimate` reports the advisory SDK spendable
-Ironwood balance, ZIP317 network fee, principal-plus-fee total and `fits`. The
-`available_debit_zatoshis` is the smaller of the spendable balance and optional
-operator limit; without that limit it is the spendable balance. A successful
-proposal with a known total within that available debit reports `fits=true`.
-Insufficient proposal funds report false even when the advisory balance appears
-sufficient. Unknown balance/fee data report null unless an exceeded known limit
-already proves the payment cannot fit. Unknown observations are never zero balances. This query waits behind accepted SDK work, creates no proof and reserves
-no inputs. The actual fee and accepted authority are checked during preparation.
-Native estimates use the validated Ironwood recipient. Foreign preview obtains a
-dry exact-output quote using an existing shielded refund receiver, without deriving
-a new address or creating an executable quote. Its fee basis is explicitly
-`near_deposit_output_shape`: a private standard transparent-output assumption,
-since a dry quote has no actual deposit address. The estimate grants no authority
-to pay that assumed output.
-
-`swap_send` accepts the same destination terms and a caller `request_id`. Native
-ZEC uses the exact principal and a shielded-only recipient, with no NEAR request
-or provider deadline. Foreign sends obtain their executable quote internally;
-the agent supplies no ZEC source ceiling or exchange-rate calculation. The provider fixes the requested
-foreign output amount; its exact input, deposit address/memo, refund receiver and
-deadline are saved before source preparation. Destination memos/tags are
-unsupported. A source deposit does not establish destination delivery: status
-reports treasury transaction facts and provider progress separately.
-
-Direct sends have a separate optional `swap_control.max_send_zec` preference for
-principal plus the **actual** Zcash network fee. Omission or the quoted string
-`"none"` means unlimited; TOML has no null literal. `"0"` denies acceptance of new
-sends. A finite decimal limit is checked against the SDK proposal and calculated
-transaction's real total debit, rather than principal plus a maximum fee estimate.
-The accepted operation persistently retains its original authority; later
-configuration changes do not cancel it or grant replacement payment authority.
-This preference applies only to this toolset's outgoing payments, without changing
-managed funding or other SDK sends. SDK fees have no separate application ceiling.
-There is no caller-supplied source cap, conversion-overhead rejection or commission
-metadata gate. USD values and provider fee metadata are reported as advisory data.
-
-Identical send retries return the original operation; conflicting request-ID reuse
-fails. Accepted work survives disconnection, listener removal, disabled admissions
-and restart through the shared treasury owner and exact signed-byte journal.
-Capability disablement retains owned `swap_status` access. An uncertain quote
-creation or submission never authorizes another quote, replacement deposit or
-signature. A provider refund is a provider outcome, not authority to pay again.
-Native sends have no swap-provider deadline; signed transaction expiry and
-canonical recovery retain their existing blockchain meaning.
-
-The host owns 1Click credentials configured through the existing `[funding]` NEAR
-credential environment names. Direct quotes retain provider-added fee metadata
-(including default `appFees`); inspect returned amounts and fees. The existing
-slippage and quote-window settings apply. These tools use origin-chain deposits
-and destination-chain delivery, without a foreign-chain signer or NEAR wallet.
-Destination tag/message contracts outside the implemented service schema are
-rejected; symbols alone never select assets.
+- **Prerequisites and persistence:** Native shielded ZEC transfers require only
+  `auth = true` and `[treasury]` (no NEAR or Base setup). Foreign swaps also
+  use `[funding]` NEAR settings (credentials, slippage, and quote window).
+  Omitting `swap_control` disables new sends and receives; persisted operations
+  stay inspectable via `x402_treazury_swap_status` on their original listener
+  even after `swap_control` is disabled or removed, and background observation
+  continues even after listener removal. Keep `receive = false` and
+  `send = false` in TOML if you need strict inspection to see a status-only
+  inventory.
+- **Principal and isolation:** The authenticated listener owns its requests;
+  all callers sharing its token share that principal. `auto_fund`, raw calls,
+  and provider management never grant swap permissions. First-party swap tools
+  remain discoverable under `discover_on_demand`.
+- **`x402_treazury_swap_assets`:** Always includes native ZEC (`Zcash`,
+  `nep141:zec.omft.near`, chain `zec`) locally; foreign asset metadata reports
+  availability explicitly. Nonblank queries use literal-priority BM25 search
+  over asset ID, chain, symbol, CoinGecko ID, contract address, name, and
+  description (use spaced terms such as `base USDC`); blank queries return
+  native-first provider order.
+- **`x402_treazury_payment_request_create`:**
+  - **Native ZEC (`nep141:zec.omft.near`, chain `zec`):** Omit
+    `refund_address` and `refund_after_seconds`. Derives a fresh
+    Orchard-receiver-only Unified Address (reusable; partial receipts
+    accumulate until confirmed funds reach the requested amount). Retrying the
+    same `request_id` with identical terms returns the original address.
+  - **Foreign assets:** Requires a payer-owned `refund_address` and optional
+    `refund_after_seconds` (default `7200`, two hours). Uses an `EXACT_INPUT`
+    quote (Stellar sources use `MEMO` deposit mode; others default to `SIMPLE`
+    while keeping any mandatory memo).
+    - Tell the payer to send **exact** `amount` atomic units plus network fees
+      and any mandatory memo, once only. Never reuse a foreign swap deposit
+      address: each new payment requires a new `request_id` and quote.
+    - Retrying an identical `request_id` returns the saved operation;
+      conflicting terms fail. An uncertain quote creation never authorizes
+      another quote.
+- **`x402_treazury_swap_status`:** Accepts `operation_id` or `kind` and
+  `request_id`. Reports native SDK receipts (using `receipt_matches_saved_snapshot`
+  when refreshing from a newer snapshot without triggering a scan) or saved
+  foreign quotes, provider outcomes, and separate wallet observations. Includes
+  `payment_instructions`, `current_time_utc`, UTC-Z timestamps, and nonnegative
+  `seconds_until_*` countdowns (`deposit_address_cold_at_utc` and
+  `seconds_until_deposit_address_cold` signal slower processing, not expiry).
+- **`x402_treazury_swap_preview`:** Non-executable (`executable = false`,
+  reserves no inputs, creates no proof). Reports principal, `max_send_zec`, and
+  `fee_estimate` (advisory spendable Ironwood balance, ZIP-317 fee, total,
+  `available_debit_zatoshis = min(spendable_balance, max_send_zec)`, and
+  `fits`). When balance or fee data is unknown, `fits` is `null` (never
+  treating an unknown balance as zero) unless a known limit already proves
+  `fits = false`. Foreign previews run a dry `EXACT_OUTPUT` quote against an
+  existing shielded refund receiver with fee basis `near_deposit_output_shape`.
+- **`x402_treazury_swap_send`:** Sends native ZEC to a shielded-only recipient
+  or runs an internal `EXACT_OUTPUT` NEAR quote for a foreign amount (no
+  destination memos or tags). `swap_control.max_send_zec` caps principal plus
+  the SDK-calculated network fee (`"none"` or omitted means unlimited; `"0"`
+  denies new sends) and applies only to direct swap sends, never managed
+  funding. Identical `request_id` retries return the original operation;
+  conflicting reuse fails. An uncertain quote creation or submission never
+  authorizes another quote, replacement deposit, or signature, and a provider
+  refund is a provider outcome rather than authority to pay again. Accepted
+  work survives disconnects, disablement, and restarts through the shared
+  treasury owner and signed-byte journal.
 
 ## Download and display limits
 
-Sources and reusable provider TOML files accept these positive byte limits:
+Provider and source tables accept these positive byte limits:
 
 | Setting | Default | Applies to |
 | --- | --- | --- |
-| `max_response_bytes` | 16 MiB (16777216) | API response bodies, including payment challenges and errors |
-| `max_help_bytes` | 4 MiB (4194304) | Lazy help documents and exact provider-management usage-document reads |
-| `max_spec_bytes` | 32 MiB (33554432) | Static specs fetched from URLs; local operator-authored files are unaffected |
+| `max_response_bytes` | 16 MiB (`16777216`) | API response bodies, including payment challenges and errors |
+| `max_help_bytes` | 4 MiB (`4194304`) | Lazy help documents and `documentation_url` reads |
+| `max_spec_bytes` | 32 MiB (`33554432`) | Remote OpenAPI specifications (local files are unaffected) |
 
-Standalone CLI flags `--max-response-bytes`, `--max-help-bytes` and
-`--max-spec-bytes` override provider settings. Meta-config sets them per source;
-`config show` reports resolved values and origins. Generic agent-added sources, raw calls and exact usage-document reads use the
-shared defaults. Bundled imports preserve the provider's configured limits.
-Agents cannot change these limits.
+Standalone CLI overrides are `--max-response-bytes`, `--max-help-bytes`, and
+`--max-spec-bytes`. Generic agent-added sources, `raw_call`, and
+`documentation_url` reads use the defaults; bundled imports keep their provider
+limits. Agents cannot change these limits.
 
-Catalog structural safety bounds apply to local files as well as downloaded,
-cached, relayed and directly supplied JSON values: depth 64, 500,000 nodes and
-64 MiB of string/key traversal and copy work, including repeated reference lookup
-and expansion. Schema projection checks increasing depth before each descent and
-charges each actual pointer lookup once, without a separate validation/projection
-pass. These protect conversion stack and allocation work, independently
-of download size. Rejections are visible and preserve whole-document semantics;
-no partial catalog is cached. See [catalog architecture](architecture.md#catalog-configuration-and-execution).
-
-A declared Content-Length over the cap is rejected immediately. Streaming reads
-also enforce the cap when Content-Length is absent. An oversized document
-is rejected entirely: the agent gets an error naming the limit and setting, and
-stderr logs the rejection. No partial content is returned or cached as success.
-A paid response may already have settled before its size is known; an oversize
-response does not trigger another payment attempt.
-
-Completed tool output is returned in full, including JSON and image metadata,
-except for explicitly configured JSON field omissions. Each omission is disclosed
-in the tool result; it is not silent character truncation. See
-[JSON response projection](#json-response-projection).
-The listener setting `max_response_chars` and CLI flag `--max-response-chars` have
-been removed and reject by name; remove them from existing configurations/commands.
-`max_description_chars` remains an explicit provider-description display control:
-shortened descriptions include a marker and stderr records the event. It does not
-control download size. MCP HTTP requests have a 4 MiB incoming-body limit;
-exceeding it returns HTTP 413 with the limit in its message and a stderr warning.
+- **Enforcement:** Both declared `Content-Length` and streaming reads enforce
+  the cap. Oversized downloads are rejected whole with an error naming the
+  limit and setting, logged to stderr, and never cached or retried for payment.
+- **Structural safety budget:** All OpenAPI documents (local, remote, cached,
+  or relayed) share a limit of depth 64, 500,000 nodes, and 64 MiB of string
+  and key traversal work across `$ref` expansion; exceeding it rejects the
+  document whole.
+- **Display limits:** Completed tool output is returned in full except for
+  explicit JSON field omissions (disclosed in the result). The obsolete
+  `max_response_chars` setting and `--max-response-chars` flag fail parsing.
+  `max_description_chars` remains an explicit tool-description limit with a
+  visible truncation marker and stderr log. Incoming MCP HTTP requests have a
+  4 MiB body limit (HTTP `413` with a stderr warning).
 
 ### JSON response projection
 
-Sources and reusable providers can omit verbose JSON fields from a successful
-response by exact HTTP method and original OpenAPI path:
+Sources and providers can omit verbose JSON object fields locally by exact HTTP
+method and original OpenAPI path:
 
 ```toml
 [response_mappings."GET /search"]
 omit = ["/results/*/figures"]
 ```
 
-Paths use RFC 6901 segment escaping (`~0` for `~`, `~1` for `/`), with `*`
-additionally traversing array elements. Wildcards do not match object keys.
-Only object fields can be removed; array elements cannot be deletion targets.
-Removing a field removes its whole value, including nested content. Empty root
-paths and invalid pointer escapes are rejected at configuration
-load. A path that matches no removable field leaves the response unchanged.
-
-The returned advisory identifies each path that removed fields and its removal
-count, alongside any transport advisories. Other JSON fields, pagination and
-upstream partial-result markers remain intact. When the same mapping extracts
-images, image extraction runs before omissions on the same parsed response;
-the image mapping's required-field checks still apply. A mapping must contain
-at least one image extraction or omission. See the
-[provider mapping reference](../providers/README.md#response-mappings).
-
-Projection runs locally after the response arrives, without another HTTP request
-or payment attempt. It reduces selected content, not the download size, and does
-not guarantee a model context size. Unmapped raw calls return the full response;
-requesting it later is a new explicit call that may require another payment.
-The entire `response_mappings` table replaces the inherited table when overridden;
-an empty table clears inherited mappings. Agent source registration cannot supply
-mapping configuration.
+- Paths use RFC 6901 pointer escaping (`~0` for `~`, `~1` for `/`), with `*`
+  traversing array elements (never matching object keys). Only object fields
+  can be removed, not array elements. Empty root paths and invalid escapes fail
+  config load.
+- Each tool result advisory lists every path that removed fields and its
+  removal count. When a mapping extracts images and omits fields on the same
+  operation, image extraction runs first on the same parsed response.
+- Projection runs locally after the response arrives (never issuing another
+  request) and does not affect `raw_call`. Overriding `response_mappings`
+  replaces the inherited table in full (`{}` clears). Agents cannot supply
+  mappings. See [response mappings](../providers/README.md#response-mappings).
 
 ## Supported behavior and CLI defaults
 
-- Composed TOML provider settings and local/remote JSON OpenAPI specs or digests;
-  local `$ref` resolution, path/tag selection, deterministic names, flattened
-  schemas and routing, vendor prices, description overrides and explicit
-  `max_description_chars`. Vendor text has no default truncation.
-- `help_url` adds a lazy, cached documentation tool. Proven unpaid fetch failures
-  can retry; failures with possible relay charges remain cached.
-  `instructions_text` and `name` populate the initialize response.
-- MCP stdio and Streamable HTTP. The HTTP bearer gate runs before MCP dispatch;
-  no session header or sticky session is required. The SDK's default Host checks
-  remain enabled, so the demonstrated setup is localhost. Deployment behind a
-  different hostname needs an explicit allowed-host configuration change.
-- Base canonical USDC payments: v1/v2 `exact` and v2 `upto`, signed by the SDK.
-  V2 challenge descriptions are capped at 500 characters for facilitator
-  compatibility. The accepted requirements themselves remain intact.
-  Static Permit2/`upto` requires an externally provisioned allowance; never
-  automatically approve one. Managed profiles support v2 `exact` only.
-- Asset/network filtering and an exact decimal per-payment cap before signing.
-  `--max-api-payment-usdc` overrides `X402_MAX_PRICE_USD`, default `1.00`.
-  `none` or `off` removes the amount cap **but retains the Base USDC restriction**.
-  Present-but-empty values are errors, including CLI and environment overrides.
-- Static profiles perform one signed payment attempt after the unsigned challenge.
-  Managed profiles may traverse existing eligible wallets after recognized
-  insufficient-funds headers; see the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
-  Other ambiguous failures grant no paid replay. Redirects are disabled.
-- `PaidClient::replace_payer` swaps the signer for subsequent requests. A
-  request captures its payer before the unpaid attempt and retains it until
-  completion. This API is for static profiles. Managed profiles acquire an
-  immutable signer lease after challenge validation and durable admission.
-
-The CLI supports `--spec`, `--provider`, `--base-url`, `--prefix`, `--include`,
-`--exclude`, `--tags`, `--exclude-tags`, `--read-timeout-seconds`,
-`--transport`, `--host`, `--port`, `--bearer-token`, and `--env-file`.
-Filters accept comma-separated values. Supported
-`X402_MCP_GENERIC_*` overrides are `SPEC`, `BASE_URL`, `PREFIX`, `NAME`,
-`PRICING_KEY`, `INCLUDE`, `EXCLUDE`, `TAGS`, `EXCLUDE_TAGS`, `INSTRUCTIONS_TEXT`,
-`HELP_URL`, and `MAX_DESCRIPTION_CHARS`. Precedence is CLI > environment > config
-> default; explicit env-file values override inherited environment values.
-Use `--help` for the complete CLI. `catalog route NAME --args '{...}'` prints
-method, URL, query, declared headers and JSON body without making a request or
-loading a signer. Previewed idempotency keys belong only to that preview; an actual
-tool invocation generates its own key.
-
-All MCP listeners return their complete advertised inventory in one `tools/list`
-response, without `nextCursor`; supplied listing cursors are ignored.
-Tool search defaults to 25 results per page; explicit positive `limit` values are
-supported without a local ceiling. Search cursors bind the listener and catalog
-snapshot; publication requires restarting search enumeration. Remote directory
-browse defaults to 25 and retains its upstream maximum of 100. Pagination selects
-pages and does not reject or trim the full inventory.
+- **Formats and schemas:** TOML providers, local or remote OpenAPI 3 JSON,
+  local `$ref` resolution, path and tag filters, deterministic tool names,
+  flattened object schemas, lazy cached `help_url` tools (unpaid fetch failures
+  can retry; failures with possible relay charges stay cached), and
+  `instructions_text`.
+- **Payments:** Base canonical USDC. Static profiles support x402 v1 and v2
+  `exact` plus v2 `upto` (Permit2 `upto` requires an external allowance and
+  never auto-approves one); managed profiles support x402 v1 and v2 `exact`
+  EIP-3009 only.
+  - V2 challenge descriptions cap at 500 characters for facilitator
+    compatibility, and HTTP redirects are disabled.
+  - `--max-api-payment-usdc` overrides `X402_MAX_PRICE_USD` (default `1.00`);
+    `none` or `off` removes the amount cap while keeping the Base USDC
+    restriction.
+- **CLI and environment precedence:** CLI > environment > config > default
+  (`--env-file` values override inherited environment values, and `--env-file`
+  applies to `serve`, `config check`, `catalog tools`, `catalog tags`, and
+  standalone `catalog route` under `--config` or standalone `--provider`,
+  except supervised qualification modes). Standalone flags include `--spec`,
+  `--provider`, `--base-url`, `--prefix`, `--include`, `--exclude`, `--tags`,
+  `--exclude-tags`, `--read-timeout-seconds`, `--transport`, `--host`,
+  `--port`, and `--bearer-token`. Supported `X402_MCP_GENERIC_*` variables are
+  `SPEC`, `BASE_URL`, `PREFIX`, `NAME`, `PRICING_KEY`, `INCLUDE`, `EXCLUDE`,
+  `TAGS`, `EXCLUDE_TAGS`, `INSTRUCTIONS_TEXT`, `HELP_URL`, and
+  `MAX_DESCRIPTION_CHARS`.
+- **Listing and pagination:** `tools/list` returns the complete advertised
+  inventory in one response without `nextCursor`. `tools_search` defaults to 25
+  per page (any positive `limit` accepted), with cursors bound to the listener
+  and catalog snapshot. Local bundled-provider browse defaults to 25 per page
+  with no local ceiling; remote directory search defaults to 5 per directory
+  (range 1-20).
 
 ## Operation URL extensions
 
-`operation_url_extension = "x-direct-url"` opts a provider or deployment source
-into absolute request URLs from that operation-level OpenAPI extension. Each URL
-must use public HTTPS without credentials or a fragment, with a fixed authority.
-Declared path parameters are substituted using the normal escaping rules; query,
-header and body arguments retain their OpenAPI routing. Fixed query strings are
-preserved. An absent extension retains ordinary `base_url` plus path routing;
-a present invalid value fails catalog construction for that operation.
+Set `operation_url_extension = "x-direct-url"` on a provider or source to read
+absolute public HTTPS request URLs from that operation-level OpenAPI extension:
 
-The original OpenAPI path still controls tool names, method selection, path/tag
-filters and response mappings. URL validation follows path/method/tag selection
-and POST-twin preference, before tool-name and recommendation filters. Generic
-imports ignore vendor URL extensions. Accepted bundled definitions preserve their
-explicit opt-in across registration, refresh and restart, permitting declared
-cross-origin targets through the existing public-destination network policy.
-This setting does not enable HTTP redirects.
-
-Optional cover profiles remain bound to the configured `base_url` origin. A call
-to a different operation URL origin emits a warning and continues without cover;
-see [cover configuration](cover-traffic.md#enable-and-inspect). Disable cover for
-sources whose operations span origins, as the bundled Lonestar provider does.
+- URLs must be public HTTPS without credentials or fragments and with a fixed
+  authority; path parameters substitute normally and fixed query strings stay
+  intact. Absent extensions fall back to `base_url` with the OpenAPI path;
+  invalid values fail catalog construction for that operation.
+- The original OpenAPI path still controls tool naming, filters, and
+  `response_mappings`. Generic dynamic imports ignore URL extensions; bundled
+  imports preserve them. HTTP redirects remain disabled.
+- Cover traffic profiles stay bound to `base_url`'s origin; calling a different
+  operation URL origin logs a warning and proceeds without cover (disable cover
+  on multi-origin providers such as Lonestar). See
+  [cover configuration](cover-traffic.md#enable-and-inspect).
 
 ## OpenAPI inputs and request bodies
 
-Path, query, JSON-body and business-header inputs retain distinct identities.
-Operation parameters override inherited definitions only at the same location/name
-(header names compare case-insensitively). Merging keeps the first position and last resolved definition,
-including its wire spelling, using a transient identity index rather than scanning
-prior parameters for each entry. Unique argument names keep their spelling. A cross-location
-collision adds `_query`, `_body` or `_header`, with numeric suffixes when an authored
-or generated name already occupies that spelling. Original wire names persist in
-routing metadata; a query `id_query` alias still sends the declared query key `id`.
-
-Required simple object bodies remain flat when that preserves the contract.
-Property-bearing allOf, exclusive/closed alternatives and unfamiliar root
-constraints retain their complete schema under one `body` argument. Ordinary
-explicit object roots can remain flat with pure required-only oneOf/anyOf/allOf
-alternatives; child property declarations are never merged into the parent. Optional HTTP
-bodies always use that argument so callers can omit the body, provide `{}`, or
-provide JSON null distinctly. Inner `required` fields apply only when the optional
-body exists. A required body with no required fields still sends `{}` in flat
-mode; a required whole-body argument must be supplied. If another argument is
-named `body`, the JSON argument receives a collision-safe name such as `body_body`.
-For a path `ident` plus a whole JSON body, pass `ident="flight"` and
-`body={"ident":"flight","intent":"scheduled"}`.
-
-Unknown outer arguments in whole-body mode fail before HTTP; arbitrary body keys
-belong inside its body value. `additional_properties` controls the flat outer
-schema; the whole-body outer schema remains closed because extra outer arguments
-have no wire destination. Its body schema retains authored additionalProperties
-and other constraints. Parameter-description overrides target existing outer
-arguments first, then an unambiguous existing whole-body property; legacy `_body`
-metadata aliases may target that existing nested property. They never fabricate
-new caller arguments or rewrite the body schema into a flat shape.
-
-The JSON encoder chooses a representable offered application/json first, then a
-concrete +json alternative ([structured JSON suffix](https://www.rfc-editor.org/rfc/rfc6839.html#section-3.1)). Each candidate uses its most-specific applicable
-OpenAPI content declaration and its own schema. An unsupported preferred offer
-does not remove another usable JSON offer. Exact selected Content-Type parameters
-are retained. Candidate/range and nested parameter comparisons share the catalog
-structural work budget; exhaustion rejects the catalog rather than returning a
-partial selection. UTF-8 is the supported encoding, and a declared non-UTF8 charset is
-not sent with UTF-8 bytes. Form, multipart, XML and binary-only bodies need another
-encoding and are omitted explicitly rather than advertised as empty JSON inputs.
-
-Path inputs serialize scalars; query inputs serialize scalars or repeated scalar
-arrays. Authored boolean schemas and no-type constraints remain intact; only an
-absent schema uses the legacy string default. Composed parameter schemas need an
-explicit representable root wire type, except two-arm query `anyOf` unions of
-explicit scalar types (string, integer, number, boolean or null, with at least one
-non-null arm), or the exact union of a string and an array of strings. Scalar
-unions preserve arm constraints and use the existing scalar codec; null query
-values are omitted. The string/array union uses the existing form/explode query codec
-without rewriting its schema/default, and still requires repeated-value array
-encoding (`explode = true`, the form default). Without an explicit root wire type,
-other compositions (including coexisting applicators) and path-array unions remain
-unsupported; the builder does not evaluate arbitrary alternatives to infer a wire
-type. Untyped inputs still use these scalar wire contracts, and object or
-nested-array arguments fail before outbound I/O or payment.
-An explicitly null-only path/query input is unsupported. For an array-or-null-only
-root without `prefixItems`, an explicit item type domain containing only objects,
-arrays or nulls is also unsupported. These checks identify direct codec mismatches,
-not arbitrary unsatisfiable schemas. Scalar alternatives, tuple prefixes, unknown
-item types, boolean schemas and other constraints remain subject to existing
-compatibility rules and runtime value checks; no general schema evaluator is added.
-
-Unsupported cookies, parameter/header serialization, input references and request
-representations omit only affected selected operations. The current resolver cannot
-preserve assertion-bearing OpenAPI3.1 (or unspecified-version) input-schema `$ref`
-siblings; these receive `schema_reference_siblings` instead of losing constraints.
-The seven JSON Schema2020-12 basic annotations (`title`, `description`, `default`,
-`examples`, `deprecated`, `readOnly`, `writeOnly`) are preserved alongside the target
-through `allOf` when their shapes are valid. Annotation payloads remain opaque;
-`default` does not insert omitted request fields. Unknown siblings, assertions and
-malformed annotations remain unsupported. OpenAPI3.0 retains its existing target-replacement semantics. An exact
-recursive union of all six JSON types with unrestricted array/object members and
-string keys is normalized to an unconstrained schema, retaining its description:
-it accepts every finite JSON value. Constrained near matches and other cycles
-remain explicit unsupported inputs; no general recursive-schema evaluator is added.
-These two new normalizations require known OpenAPI3.1/JSON Schema2020-12 semantics:
-custom catalog `jsonSchemaDialect`, a custom used or referenced-ancestor `$schema`,
-or a used schema's `$vocabulary` leaves them unsupported. This does not add a general
-dialect resolver or change ordinary preexisting reference projection. Opaque data
-and schema entries merely named `$schema` or `$vocabulary` do not select a dialect.
-A used schema reference under a string-valued schema `$id` receives
-`input_reference`: the builder does not guess URI/resource resolution. A local
-pointer selecting a target below an ID carries that lexical context; only further
-used refs that depend on it are unsupported. An exact no-ref target remains
-supported because it needs no additional base-dependent lookup.
-No-reference schema IDs remain unchanged; IDs inside opaque example/default data
-and schema entries merely named `$id` do not establish that resource context.
-Catalog-root metadata IDs do not change ordinary OpenAPI-root local references.
-Used `$dynamicRef` and `$recursiveRef` receive `input_reference`: copying them
-into a tool schema can change or lose their resource targets. No dynamic/recursive
-reference resolver is provided. Such keys inside opaque examples, defaults,
-unknown annotations and unused definitions remain data; properties or definitions
-merely named after a reference keyword remain valid. OpenAPI3.0 `$ref` target
-replacement still ignores its unused siblings.
-General authored Reference Object semantics and stricter dynamic-import reference
-policy are unchanged. Unknown schema annotations, including readOnly/discriminator,
-are retained and do not by themselves make an operation unsupported.
-
-Serving and registration retain usable siblings and append concise source omission
-notices after instruction overrides, including an empty override. Registration and
-public library catalog construction WARN for unexpected omitted operations using
-safe counts and fixed reasons; total construction failure also WARNs. Strict
-completeness conversion does not duplicate that diagnostic. Expected unsupported
-operations should be explicitly excluded at the source, with their rationale in
-provider caveats; no separate incompatibility suppression setting is needed.
-These exclusions precede compatibility, while structural safety guards still apply.
-Registration and operator details identify each omitted method/path with a fixed reason. Header
-issues distinguish invalid/reserved names, duplicate declarations, serialization,
-managed Idempotency-Key incompatibility and argument conflicts. A dependent
-waiting endpoint reports these fixed causes at generation failure without
-including catalog paths or upstream prose. Strict
-tool/configuration/qualification inspection and the public Vec builder reject partial
-catalogs. Standalone `catalog tags` instead inventories raw source metadata without
-tool compatibility validation. To intentionally remove an unsupported operation from that issue domain,
-use operation/path/method/tag selection such as `exclude_operations`. Tool-name
-filters run after compatibility and POST preference; they match compatible names,
-never hypothetical names for omitted operations, and do not erase source notices.
-Ordinary deployment serving publishes accepted catalogs even when their selected
-API inventory is empty or every selected operation is omitted as unsupported.
-Omissions and empty selections remain visible in instructions and ERROR coverage
-diagnostics; they do not close waiting endpoints. A help document does not turn an
-unsupported API contract into a usable operation. Actual acquisition or source
-admission failures retain the configured `allow_catalog_failure` readiness policy.
-Dynamic registration may reject an all-unsupported candidate without changing
-existing registrations. Strict inspection and qualification still reject omissions
-and invalid inventory selections. Authored filters never widen access.
+- **Parameter merging and collision naming:** Path, query, body, and header
+  inputs keep separate identities. Operation parameters override inherited
+  path-level parameters at the same location and name (headers compare
+  case-insensitively). Cross-location name collisions append `_query`, `_body`,
+  or `_header` (plus numeric suffixes when needed) while keeping the original
+  wire name.
+- **Flat vs. whole-body JSON:** Required simple object bodies flatten into
+  top-level tool arguments (including pure required-only `oneOf`, `anyOf`, and
+  `allOf` constraints); set `additional_properties = false` (or `true`) on a
+  provider or source to control `additionalProperties` on the flat outer tool
+  schema. Optional bodies, property-bearing `allOf`, exclusive or closed
+  alternatives, and unfamiliar root constraints wrap under a single `body`
+  argument (or `body_body` on collision) with a closed outer schema so callers
+  can omit the body, pass `{}`, or pass JSON `null` distinctly. Parameter
+  description overrides target outer arguments first, then unambiguous
+  whole-body properties.
+- **Media types:** The encoder prefers representable `application/json`, then a
+  concrete `+json` type ([RFC 6839](https://www.rfc-editor.org/rfc/rfc6839.html#section-3.1)),
+  requiring UTF-8. Form, multipart, XML, and binary-only bodies are omitted
+  explicitly rather than exposed as empty JSON.
+- **Scalar and union parameter schemas:** Path inputs serialize scalars; query
+  inputs serialize scalars or repeated scalar arrays (`explode = true`).
+  Composed parameter schemas need an explicit root wire type except two-arm
+  query `anyOf` scalar unions (with at least one non-null arm; `null` is
+  omitted) and `string | string[]` query unions. Null-only inputs and object,
+  array, and null-only query array items are omitted as unsupported.
+- **OpenAPI 3.1 `$ref` and recursion:** OpenAPI 3.1 (and unspecified-version)
+  `$ref` siblings preserve the seven JSON Schema 2020-12 basic annotations
+  (`title`, `description`, `default`, `examples`, `deprecated`, `readOnly`,
+  `writeOnly`) via `allOf`; assertion-bearing or unknown siblings omit the
+  operation with `schema_reference_siblings`. Exact unconstrained recursive
+  all-JSON-types unions normalize to an unconstrained schema (preserving
+  description) under standard JSON Schema 2020-12 dialects. Used `$ref` targets
+  under string `$id` scopes, `$dynamicRef`, and `$recursiveRef` omit the
+  operation with `input_reference`.
+- **Omission handling:** Serving and dynamic registration keep supported
+  siblings, log a `WARN` summary, and append omission notices to MCP
+  instructions. Expected unsupported operations should be excluded via
+  `exclude_operations` and documented in
+  [provider caveats](../providers/CAVEATS.md). Strict inspection and
+  qualification reject partial catalogs (standalone `catalog tags` inspects raw
+  tags without compatibility validation).
 
 ## OpenAPI header parameters and idempotency
 
-OpenAPI `in: header` business parameters become ordinary tool arguments. Header
-names are case-insensitive on the wire and for operation overrides of inherited
-parameters. Argument names preserve the declared spelling; a collision with a
-query/body argument adds `_header` and a numeric suffix where needed, retaining
-the original wire name. Required headers must
-be supplied before dispatch; absent/null optional values are omitted.
+OpenAPI `in: header` business parameters become tool arguments preserving their
+declared spelling (adding `_header` on cross-location collision). Required
+headers must be supplied before dispatch; absent or null optional headers are
+omitted.
 
-Header serialization supports OpenAPI `simple` style: scalar values become text,
-arrays join with commas, and flat objects become `key,value` pairs or `key=value`
-pairs with `explode = true`. Unsupported styles, content-based header parameters,
-nested values and invalid HTTP names/values fail explicitly. Caller business
-headers share the narrow
-null-only/array-item compatibility checks above, with `header_contract` omissions;
-flat-object headers remain supported. These checks do not apply to ignored protocol
-declarations or replace managed Idempotency-Key validation. Values are never
-included in validation error messages. As required by OpenAPI, header parameters
-named Accept, Content-Type and Authorization are ignored. Declarations of x402
-protocol headers (`PAYMENT-SIGNATURE`, `X-PAYMENT`, `PAYMENT-REQUIRED`,
-`PAYMENT-RESPONSE`, `X-PAYMENT-RESPONSE`) are also ignored, case-insensitively,
-even when marked required: they describe the payment protocol, which Treazury
-handles automatically. They never become tool arguments or business headers.
-Direct or persisted routing metadata cannot supply these runtime-owned headers.
-Cookies and HTTP framing/connection/proxy header declarations are rejected.
-Generated and manual raw requests share fallible HTTP header construction and
-runtime-header headroom checks before inventory or network activity. Sets that
-exceed the HTTP library's representation capacity fail visibly rather than panic;
-there is no additional local header-count quota.
-Explicit custom API-key headers are ordinary declared arguments. Paid relay for
-actual API requests remains opt-in (`api_requests=false` by default); when enabled,
-adapters forward required business headers they can preserve and skip the entry
-otherwise. x402 payment headers are runtime-owned and are not relayed.
-
-A header named `Idempotency-Key` is managed automatically, even when optional in
-the schema. It is omitted from tool arguments. Each invocation generates a random
-UUID string and preserves it through the existing unsigned retries, signing and
-recognized insufficient-funds wallet traversal. Identical arguments in two calls
-produce different keys and can intentionally buy twice. Automatic generation
-accepts unconstrained string declarations, optional `format = "uuid"` and length
-bounds admitting 36 characters; incompatible formats or other validators fail
-visibly at catalog construction rather than inventing a vendor key format.
-Pure local schema references are followed. References with sibling constraints,
-unresolved references and cycles remain unsupported and fail explicitly; the
-general tool-schema projection cannot erase constraints to permit generation.
-
-Accepted in-process work retains the request after waiter cancellation. No HTTP
-key/request recovery journal or cross-call deduplication is added; interrupted
-calls are not automatically replayed after restart. A key neither proves vendor
-deduplication nor prevents a second x402 debit, and ambiguous signed outcomes
-still grant no automatic replay authority. This behavior applies to static and
-registered OpenAPI tools, including on-demand calls. The separate `raw_call`
-interface accepts caller-owned headers and keys without generating or remembering
-them; see [manual raw headers](agent-sources.md#manual-raw-headers). Every nonempty
-manual set disables paid relays and cross-payer handoff. It does not change
-generated-tool idempotency or provide automatic credential lookup. Manual raw
-Authorization is explicitly caller-supplied, without OpenAPI registration, storage
-or automatic injection; generated tools and public routed business headers retain
-their Authorization restriction. A future managed OpenAPI-auth mode must reject
-mixed manual/managed input before credential lookup or I/O.
+- **Serialization:** Supports OpenAPI `simple` style (scalars as text, arrays
+  comma-joined, flat objects as `key,value` or `key=value` with
+  `explode = true`). Unsupported styles, content-based headers, nested values,
+  and invalid header names or values fail without logging header values.
+- **Ignored and forbidden headers:** `Accept`, `Content-Type`, `Authorization`,
+  and x402 payment headers (`PAYMENT-SIGNATURE`, `X-PAYMENT`,
+  `PAYMENT-REQUIRED`, `PAYMENT-RESPONSE`, `X-PAYMENT-RESPONSE`) are ignored
+  case-insensitively and never become tool arguments. Cookies and framing,
+  connection, or proxy headers are rejected. Header sets exceeding the HTTP
+  library's capacity fail cleanly rather than panicking.
+- **Automatic `Idempotency-Key`:** Any OpenAPI `Idempotency-Key` header is
+  managed automatically and hidden from tool arguments. Each tool invocation
+  generates a fresh random UUID string and reuses it across unsigned retries,
+  signing, and recognized insufficient-funds wallet traversal (two separate
+  calls generate two different keys). Catalog construction accepts
+  unconstrained strings, `format = "uuid"`, and length bounds admitting 36
+  characters, and rejects incompatible formats. Interrupted calls are not
+  replayed after restart. See [manual raw headers](agent-sources.md#manual-raw-headers)
+  for `raw_call`, which does not synthesize `Idempotency-Key`.
 
 ## Optional agent API discovery
 
-Authorize agents to register public OpenAPI sources in a running multi-server
-HTTP deployment with independent `provider_management_local`,
-`provider_management_remote` and `raw_url_calls` booleans (all default `false`),
-and an explicit existing `wallet` on each participating endpoint. Local management
-authorizes bundled listing and ID registration; remote management authorizes
-remote details and public HTTPS OpenAPI registration; raw permission authorizes
-documented URL calls. None allocates or funds a wallet.
-
-`remote_provider_directories` defaults to `[]` and accepts any subset of
-`coinbase`, `coinbase_curated` and `x402-list`. Unknown values reject; repeated
-identical entries select a directory once. `coinbase` includes curated and
-non-curated resources; `coinbase_curated` restricts the same search to curated
-resources. The list has no authority with remote management disabled. Empty
-selection omits remote search while permitting URL details and registration. It
-is not a destination allowlist. Retired `source_management` and
-`sources_search_tool_instructions_text` settings reject without aliases.
-
-The [comprehensive example](../examples/deployments/comprehensive.toml)
-uses its existing company pool on the toolbox listener; the managed starter uses
-its research pool. The [agent source guide](agent-sources.md#configuration-and-authority)
-explains persistence and wallet sharing. Registered APIs share their pool's
-existing reserve claims regardless of registration count.
-Registration does not create wallet pools or trigger funding.
-Tool counts do not gate registration, restoration, publication or refresh.
-A `tools/list` request with more than 500 advertised definitions produces an advisory
-WARN whose message states the endpoint name and current tool count and suggests
-explicit `discover_on_demand = true`. Each listing may warn again. The advisory
-counts filtered API definitions plus wrappers (only wrappers in on-demand mode)
-and never changes access.
+Enable dynamic API discovery per authenticated listener with
+`provider_management_local`, `provider_management_remote`, and `raw_url_calls`
+(all default `false`), an explicit `wallet`, optional
+`remote_provider_directories` (subset of `coinbase`, `coinbase_curated`, and
+`x402-list`), and optional `source_registry_file` for persistence.
 
 | Arrangement | Configuration | Payment identity sharing |
 | --- | --- | --- |
 | All agent-added APIs share one wallet | Each listener sets `wallet = "agent_shared"` | Across APIs and participating listeners |
-| Listener-specific wallets | Each listener names its own `wallet` profile | Across added APIs on that listener |
-| Operator-selected listener groups | Several listeners reference the same named `wallet` profile | Within the configured group |
+| Listener-specific wallets | Each listener names its own `wallet` | Across added APIs on that listener |
+| Operator-defined listener groups | Several listeners reference one `wallet` | Within that group |
 
-A listener's bearer token defines its authority. Registrations remain local to that
-endpoint; they cannot be published to another endpoint. The operator selects persistence
-with each endpoint's `source_registry_file`; agents cannot choose scope or lifetime.
-Omit it for registrations that last until exit. Persistent endpoints need distinct
-registry files: exclusive ownership prevents sharing one file, and saved records
-owned by another endpoint fail restoration without modifying the registry.
-Existing listener filters still constrain imported API tools. Parallel callers on the
-same endpoint share one import slot. Concurrent additions publish complete snapshots;
-repeat a busy or lost add with the same selector. Repeated provider IDs and generic
-specification URLs return the accepted registration on that endpoint. See the [agent source guide](agent-sources.md).
-
-`x402_treazury_providers_list_local` lists or searches bundled reviewed definitions
-offline, including compatibility repairs and filters. Optional `q` uses BM25 and
-literal-priority matching across ID, name, description and API base. Blank queries
-enumerate in provider-ID order. `page` defaults to 1 and `per_page` to 25, with any
-positive page size. Listing performs no wallet or network work. Metadata describes
-addable providers; live `tools_search` returns callable tools on the endpoint.
-An absent `api_base` means import uses the schema's API server. Unknown cost does
-not mean free, and registration/help do not establish live paid qualification.
-
-`providers_add_local` takes an exact `provider_id`; `providers_add_remote` takes a
-public HTTPS OpenAPI 3 JSON `spec_url`. Both accept optional `name`. A unique exact
-canonical bundled specification URL, including its query, selects that definition
-even with local management disabled, unless an accepted generic registration
-already owns the URL. Ambiguity returns available local choices when permitted,
-otherwise operator-resolution guidance; remote import has no ID override. Base,
-hostname and inferred resource paths do not match specifications. Bundled settings
-and embedded schemas are preserved, and names default to short IDs (`exa` yields
-`dyn_exa__search`). Repeated registration returns accepted state without refresh.
-
-`providers_search_remote` queries every selected directory concurrently with `q`,
-`limit` (default 5, range 1–20 per directory), and `max_price_usd`. Either Coinbase
-selection imposes its 400-character query bound; x402-list alone does not. Coinbase
-uses the selected curated scope and Base mainnet USDC/exact constraints; x402 List
-uses `/best`, Base, `prefer=balanced`, `require_verified=false`. Price filters cover
-Coinbase resources or x402 List minimum service prices, not spending authority.
-Results form a dictionary keyed by configured identifiers: each success is the
-complete upstream JSON object. Local failures use `local_error` and preserve
-successful siblings; attribution, relay advisories and typed possible-payment facts
-remain outside successful objects. One call can authorize multiple charges. There
-is no automatic federation replay, whole-search deadline, merged output or combined
-truncation. See [remote search contracts](agent-sources.md#external-directory-matching).
-
-Either management capability exposes `tools_search` and `tool_call`, independently
-of `discover_on_demand`; raw-only permission does not. Disabled operations fail
-before identity lookup, I/O and side effects. Saved registrations retain existing
-visibility, filters and payer bindings when either management capability remains
-enabled. Disabling both disables restored dynamic registrations; raw permission
-alone does not restore them. Operator inspection/removal remains
-available regardless of capabilities; refresh requires either management capability
-before loading the existing payer, for generic and bundled records alike.
-
-Given a resource URL such as `https://api.example.com/weather/v2/forecast?city=London`,
-try `provider_details_remote(base_url="https://api.example.com/")` when no API base
-is documented. This probes fixed document locations at the supplied root; it does
-not call the resource or prove that the root is the API base. Prefer an explicitly
-documented base path: root discovery can miss documentation beneath another path
-or on another host. Bundled matching remains exact by origin and base path.
-`x402_list_id` is the exact native `slug` from x402 List, not a registration ID
-or Coinbase resource URL. A Coinbase usage-document URL can be passed directly
-as `documentation_url`.
-
-`x402_treazury_provider_details_remote` resolves exact bundled provider matches before
-probing specification/documentation URLs. Exactly one `x402_list_id`, HTTPS
-`base_url` or `documentation_url` is required, and every mode requires remote
-management. ID mode is advertised and accepted only with `x402-list` selected;
-URL modes remain available with Coinbase-only or empty directory lists. Matches return IDs and schema provenance, skip speculative provider
-requests and make no live reachability/qualification claim. A slug causes one
-ordinary potentially paid directory lookup; a base URL skips it. Results retain the listing alongside URL-discovery status, even when a missing
-or rejected API base prevents probing. Each candidate gets one validated GET,
-with four candidates in flight and existing spec/help limits. Available wallet
-identity is pinned; without it the URL's discovery identity keeps origin retrieval
-available. No wallet is allocated or funded for probes. Configured on-demand
-fallback can charge for blocked document retrieval.
-
-Alternatively, `provider_details_remote(documentation_url=...)` reads one exact public HTTPS
-usage-document URL, allowing a query. This selector is exclusive with `x402_list_id`/`base_url`.
-It uses the shared unsigned origin sequence with provider-management identity,
-transport, public-destination policy, shared help-byte default and network response inactivity. Configured
-on-demand fallback can acquire the document through the GET relay list. Complete accepted UTF-8 text is returned with caller-supplied
-provenance; failures are visible without partial text. See the
-[document contract](agent-sources.md#listing-and-url-discovery) for accepted MIME
-types and HTML rejection. Reading help grants no execution or payment authority.
-
-With `raw_url_calls = true`, `x402_treazury_raw_call` calls a documented public HTTPS x402 API URL without
-registering an OpenAPI catalog. It takes a required HTTP `method`, `url`, optional
-`query`, string-valued `headers` and optional JSON `body`; omitted body and explicit JSON null are distinct.
-It uses the endpoint's wallet, ordinary payment admission, public-destination
-policy, shared response-byte default, network timeout and network factory. It is independent of API
-tool-name filters and accepts no agent wallet or payment settings. Nonempty
-[manual headers](agent-sources.md#manual-raw-headers) disable relay forwarding and
-cross-payer handoff; header-free calls retain ordinary behavior.
-
-Registration returns a readable name, prefix, visible tool count, status and next step.
-Disabled registrations direct operator repair/refresh; enabled registrations with
-zero visible tools direct inspection of source selections and listener filters.
-Repeating registration does not refresh it or make hidden tools callable.
-An omitted name defaults to its provider ID for bundled sources or its specification
-hostname for generic sources, with collision suffixes.
-Search filters use optional `source_name`; calls use stable readable `tool_id`
-names resolved against the current endpoint catalog. Internal source UUIDs,
-revisions and operator registry inspection remain available. Legacy registration
-receipt fields are ignored; source records remain durable before publication.
-
-The stable `x402_treazury_tools_search` and `x402_treazury_tool_call` tools let clients use new
-APIs even when they cache their initial tool list. HTTP remains stateless and does
-not advertise list-change notifications. Imports require public HTTPS, use the same
-direct/Tor network factory, and never run pricing sweeps. Persistent registrations
-use a separate owner-only SQLite registry; they do not require a wallet encryption key.
-
-`providers/x402-list.toml` exposes the supported public directory catalog with
-advisory research recommendations. Directory reads may become paid after a
-shared-IP quota; ordinary spend caps apply. Specific owner-token workflows and
-an unrepresentable submission schema are excluded. The embedded directory keeps
-its separate intentional three-read contract.
-Directory results are leads, not automatically imported schemas.
-
-See [agent source management](agent-sources.md) for the complete configuration,
-agent workflow, limits, wallet/privacy behavior and recovery procedures.
-`config show` inspects grants and wallet bindings offline;
-`x402_treazury sources inspect --config FILE` inspects saved registrations.
+- Tool counts do not gate registration or refresh. A `tools/list` response with
+  more than 500 advertised definitions logs an advisory `WARN` suggesting
+  `discover_on_demand = true`.
+- `providers/x402-list.toml` exposes the public x402 List API as a regular
+  provider (separate from the built-in directory search).
+- See [agent source management](agent-sources.md) for the complete tool table,
+  directory matching, URL discovery, raw headers, limits, and `sources` CLI
+  maintenance.
 
 ## Provider reliability observations
 
-Provider TOML files may carry `reliability_tags` and a concise `reliability_note`.
-These describe observed behavior, independently of OpenAPI tool-selection
-`tags`. They do not hide tools, block payments, or enable retries.
+Provider files may declare `reliability_tags` and a `reliability_note` to warn
+at serving startup (unrelated to OpenAPI `tags`). Tags never hide tools, block
+payments, or enable retries.
 
 | Tag | Startup warning |
 | --- | --- |
-| `upstream_timeout` | Provider reported upstream timeouts, possibly inside an otherwise successful response. |
+| `upstream_timeout` | Provider reported upstream timeouts, possibly inside a 200 response. |
 | `upstream_rate_limited` | An upstream dependency rate-limited the provider. |
-| `intermittent_response_body` | Response delivery failed after payment; a failed download can still be charged. Do not automatically replay it. |
+| `intermittent_response_body` | Response delivery failed after payment; do not auto-replay. |
 | `catalog_http_403` | Repeated catalog HTTP 403 responses can prevent live catalog startup. |
 | `intermittent_catalog_connection` | Catalog connections have intermittently timed out. |
 | `intermittent_help_connection` | Help retrieval has intermittently timed out. |
 | `degraded_upstream_data` | Successful responses have contained failed or missing upstream inputs. |
 | `questionable_result_relevance` | Result metadata did not match the query; check relevance. |
+| `slow_pricing` | External pricing document retrieval has been slow or intermittent. |
 
-Serving startup writes a warning to **stderr** for each unique tag, including the
-source name and evidence note, before fetching that source's catalog. A deployment
-warns once per listener-bound source/tag, even when several listeners share it.
-Declared unbound sources do not warn; bound sources warn even if later tool filters
-remove all their tools. Standalone serving also warns. Inspection commands
-(`config show`, `config check`, `catalog tools`, `catalog tags`, `catalog route`)
-remain quiet; `config show` exposes the annotations and their origins.
-
-Annotations follow normal TOML composition: omission inherits, a supplied list
-replaces the entire list, and `reliability_tags = []` suppresses its warnings.
-`reliability_note` is replaced independently. Unknown tags are configuration
-errors. Describe the affected stage and revise notes when new evidence warrants it;
-keep dated measurements in private local reports.
-
-Bundled annotations currently cover OneShot catalog access. Individual API
-failures belong in the provider caveats and runtime operation diagnostics; they
-do not justify a provider-wide startup warning when other operations work,
-especially when the deployment excludes the affected operation. These observations
-do not establish Tor causation or long-term failure rates. Annotations apply in
-both network modes. See the [provider caveats](../providers/CAVEATS.md) and
-[qualification scope](testing.md#qualification-status).
-
-Clearing annotations suppresses only their startup notices. Actual API and help
-transport, unsuccessful HTTP status and incomplete-response failures still emit
-WARN after applicable retries and fallback finish. Unusable help text also warns
-without logging its contents. Required catalog failures retain source diagnostics
-and affected-endpoint ERRORs. Payment warnings retain possible-charge context;
-clearing metadata never authorizes replay. Successful HTTP responses retain their
-content, including upstream completeness and relevance markers, for the caller to
-interpret; annotations do not turn those markers into tool failures.
+Serving emits one stderr warning per listener-bound source and tag before
+fetching its catalog (standalone serving warns too; inspection commands stay
+quiet, and `config show` prints the tags). Lists replace on inheritance
+(`reliability_tags = []` suppresses startup warnings without affecting runtime
+failure warnings). Unknown tags fail validation. Put individual operation bugs
+in [provider caveats](../providers/CAVEATS.md) rather than provider-wide tags.
 
 ## SocialFetch and tag selection
 
-`providers/socialfetch.toml` uses the vendor's live OpenAPI tags through the generic
-catalog. It exposes platform routes, excludes `Auth`, account/monitor ownership
-and webhook lifecycle operations, and deliberately omits `GET /health`.
-Other public `System` operations remain available. Credit prices are embedded in the spec.
-Each selected tool retains credit terms and a USDC estimate calculated with the
-provider’s explicit `credit_pricing` rate, independently of server instructions.
+`providers/socialfetch.toml` loads SocialFetch's OpenAPI tags, excludes `Auth`,
+account and monitor ownership, webhooks, and `GET /health`, and calculates
+credit-to-USDC estimates via `credit_pricing`.
 
 ```sh
 target/debug/x402_treazury catalog tags --provider providers/socialfetch.toml
 target/debug/x402_treazury catalog tools --provider providers/socialfetch.toml --tags Twitter,YouTube
 ```
 
-The [comprehensive deployment](../examples/deployments/comprehensive.toml) selects
-separate social and web/community platform sets. TOML sources accept `tags` and `exclude_tags`: each specified list
-replaces the corresponding provider list; omission inherits it, and `[]`
-clears it. Matching is exact and case-sensitive. Include tags match any listed
-tag; exclude tags win. Tag selection combines with source path filters, then
-listener tool-name selection. Untagged operations cannot match an include tag.
-
-`catalog tags` prints JSON counts from the unfiltered source (grouped by source
-in meta-config mode). Standalone counts include unsupported operations and need no
-base URL; they help select operations and do not certify a usable tool catalog.
-Deployment mode still requires strict catalog loading before reporting counts.
-It loads no credentials, fetches no help, and performs no
-pricing probes. A remote spec is still fetched once. Use `--spec tests/fixtures/socialfetch_openapi.json` on the single-source command for an
-scoped offline inventory. This scoped capture is not the complete vendor API.
-It is mutually exclusive with other inventory commands.
-
-SocialFetch's `include: ["/v1", ""]` uses the longest matching naming anchor:
-`/v1` strips that segment; the empty fallback preserves other paths. Consequently
-`socialfetch_twitter_profiles_handle` routes to `/v1/twitter/profiles/{handle}`,
-while LinkedIn v2 names retain `socialfetch_v2_linkedin_*`. Both API versions
-have the `LinkedIn` tag. Setting `--include /v1` selects v1 only. Naming never
-changes the HTTP path or adds a version to `base_url`.
+- `tags` and `exclude_tags` match exact case-sensitive OpenAPI tags (`exclude_tags`
+  wins; lists replace on inheritance and `[]` clears; untagged operations never
+  match `tags`).
+- `catalog tags` prints raw JSON tag counts without loading keys, help, or
+  pricing (standalone mode tolerates unsupported operations; deployment mode
+  uses strict catalog loading). Pass `--spec tests/fixtures/socialfetch_openapi.json`
+  for a scoped offline preview.
+- SocialFetch's `include = ["/v1", ""]` strips `/v1` from generated names
+  (`socialfetch_twitter_profiles_handle`) while keeping `/v2` prefixes
+  (`socialfetch_v2_linkedin_*`) without altering HTTP paths.
 
 ## Optional Tor routing
 
-Direct networking is the default. Add this table to a deployment meta-config to
-route all application outbound HTTP and gRPC through an existing Tor SOCKS port:
+Direct networking is the default. Add `[network]` to route all outbound HTTP
+and gRPC traffic through a running Tor SOCKS listener:
 
 ```toml
 [network]
@@ -1836,43 +1049,31 @@ read_timeout_seconds = 60
 tor_isolation_retries = 2
 ```
 
-`tor_isolation_retries` defaults to 2 and counts fresh owner-bound scopes after
-an initial unsigned Tor attempt. Zero allows one origin attempt. Nonnegative
-values are accepted when their total attempt count fits the platform's `usize`;
-overflow is rejected. Typed TOML 1.2 deserialization and JSON support that unsigned
-range. An intermediate `toml::Value` represents integers as signed 64-bit values
-and rejects larger numbers. Inspection exposes the effective value. Direct mode and
-explicit direct warming use one origin attempt (Base's existing direct transport
-recovery remains separate). This is an attempt count, not a timer or permission
-to replay a signed request. Whole-section network-file replacement also resets
-an omitted count to its default. See [retry policy](network-egress.md#retry-ownership)
-for participating callers and transient versus local setup failures.
-
-`read_timeout_seconds` defaults to 60 seconds in **both direct and Tor modes**.
-It limits inactivity while waiting for headers or reading the body. Every
-successful read renews the budget; catalogs and API responses have no total HTTP
-download deadline. The same setting on a provider/source
-overrides the network default for that scope, including catalogs and help. Bundled
-dynamic sources preserve that setting; generic imports and raw calls use the network default.
-
-`connect_timeout_seconds` is separate, defaulting to 15 seconds direct and 120
-seconds Tor. Both settings work in either mode; there is no Tor read-timeout floor.
-Read timeout accepts 1..86400 seconds at network level and
-positive fractional seconds at provider level. Connection timeout accepts 1..300.
-Base RPCs, chain views and receipt verification have no separate total deadline;
-they use these connection and read-inactivity limits. Tor Base reads exhaust the
-selected scope plus `tor_isolation_retries` fresh scopes per endpoint before configured fallback;
-direct mode retains its two-attempt transport recovery. See [Base policy](wallet-cli.md)
-and [network policy](network-egress.md) for status eligibility, validation and
-provider evidence boundaries. Protocol transaction expiry
-and qualification deadlines remain independent. Managed payment
-admission has no total timeout. Use `read_timeout_seconds` in network and
-provider/source configuration, or `--read-timeout-seconds` for a standalone CLI
-override. Configuration and CLI parsing reject obsolete names. Provider inheritance
-checks typed fields before local overrides, so an override cannot hide a malformed
-inherited value.
-
-For deployment, standalone or wallet commands, use a separate network file:
+- **`socks_endpoint`:** Nonzero `host:port` (IP or hostname, such as `tor:9050`)
+  or Unix socket `unix:/absolute/path`. If unreachable during serving startup,
+  `serve` logs `ERROR` (repeating every minute while waiting), retries every 5
+  seconds, and resumes automatically once reachable without blocking ready
+  listeners or cached catalogs.
+- **`socks_auth`:** `"tor_extended"` (default, username `<torS0X>0` with
+  namespace and token in password) or `"legacy"` (username `x402_treazury` with
+  derived password). Tokens are deterministic SHA-256 hashes of
+  `isolation_namespace` and identity; use distinct namespaces to separate
+  deployments. Tor resolves DNS remotely, validates TLS, ignores ambient
+  proxy environment variables, and never falls back to direct connections.
+- **`tor_isolation_retries`:** Default `2` fresh Tor isolation scopes after the
+  initial unsigned attempt (`0` allows one attempt). Direct mode and
+  `catalog warm --direct` use one origin attempt (Base direct transport
+  recovery stays two attempts). Applies only to unsigned reads, never signed
+  requests. See [retry ownership](network-egress.md#retry-ownership).
+- **Timeouts:** `read_timeout_seconds` defaults to `60` in both modes (range
+  `1..=86400` at network level; positive floats up to `86400` on providers, with
+  a `1ms` floor in standalone mode) and measures inactivity per read rather than
+  total download time. `connect_timeout_seconds` defaults to `15` direct and
+  `120` Tor (range `1..=300`). Base RPC reads use these same timeouts with no
+  separate total deadline.
+- **`--network-config FILE`:** Overrides `[network]` (and `[relay_fallback]` if
+  present) for `serve`, `catalog`, `config`, `sources refresh`, and `wallet`
+  commands:
 
 ```sh
 x402_treazury catalog tools --provider providers/socialfetch.toml \
@@ -1881,345 +1082,221 @@ x402_treazury wallet init --state-dir state/public-demo \
   --network-config examples/network/tor.toml
 ```
 
-Paths above assume the repository root as the current directory. Deployment commands,
-including wallet commands, use their embedded policy unless `--network-config` is
-provided. The external file replaces the entire network policy and any supplied
-relay section before validation or client creation; it does not rewrite the
-deployment or change wallet identities. This also applies to `catalog warm` and
-`sources refresh`. `examples/network/tor.toml` configures ordered paid relay fallback for
-deployment catalog discovery and Coinbase search. Standalone provider and
-wallet commands use only the transport policy and never load the relay provider.
-`catalog warm --direct` retains its
-explicit direct-fetch behavior even when a network override is supplied.
-Qualification snapshots, bound/supervised serving and supervised wallet sync keep
-the policy in their pinned deployment and reject an external override; select the
-policy in that deployment before preparation. Provider files and MCP tool arguments
-cannot choose transport.
-`config show` reports effective settings without reading keys or contacting Tor.
-Offline wallet inspection, backup and explicit-birthday init remain offline.
-
-The SOCKS endpoint is a nonzero `host:port` where the host may be any IP literal
-or network name, including a Docker service name. On Unix it may instead be a
-Tor filesystem socket written as `unix:/absolute/path`, such as
-`unix:/run/tor/socks`; the path must be absolute. Run Tor Browser or a Tor daemon
-on that endpoint; 9150 is an example, not an auto-discovered port. TCP and Unix
-endpoints share remote destination DNS, credential isolation and startup probing.
-If that port is unreachable during ordinary serving startup, an ERROR names the
-configured SOCKS endpoint, with a reminder on the next failed probe after each
-minute while startup discovery is waiting. Finite startup discovery retries the
-configured connection every five seconds, then resumes automatically without a restart.
-Ready listeners, fresh cached catalogs and independent financial work remain
-available. This checks endpoint reachability only, not Tor bootstrap or destination
-connectivity, and stops after the first successful connection. Explicit sync,
-inspection and qualification retain their normal failure behavior.
-A standalone daemon can use `SocksPort 127.0.0.1:9050 IsolateSOCKSAuth`. Optional
-`socks_auth = "legacy"` uses username `x402_treazury` and an identity-derived password.
-The default extended format uses username `<torS0X>0` and places the namespace and
-token in the password. Both carry the same isolation boundaries. No authentication
-downgrade or direct fallback is allowed. There is no additional key file or setup
-command: tokens are deterministic, domain-separated SHA-256 hashes of the namespace
-and existing identity. They provide circuit isolation, not secrecy from local Tor.
-
-Paid challenge/retry traffic, Base address queries and NEAR funding jobs use the
-actual EVM address identity. A rotated address gets a new pool of connections.
-Shared treasury sync uses the treasury UUID; specs and help use discovery
-origin identities. Pending operations keep their original recipient identity after
-restart and retirement. All modes use these same pools and payment state machines.
-Paid traversal follows the [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules):
-a recognized structured insufficient-funds 402 after a signed attempt can visit
-each captured eligible wallet once. Earlier authorizations remain chargeable;
-other failures and restarts do not grant a logical-call replay.
-
-Tor mode sends destination DNS through SOCKS, preserves TLS validation, and ignores
-ambient proxy/NO_PROXY settings. Direct mode also ignores those settings: the explicit
-network policy is authoritative. Local MCP listeners remain local. Tor outage yields
-bounded errors and retains financial journals; it never permits direct egress. Tor
-can reject private-address destinations, and vendors can reject exit traffic.
-Existing operation and quote deadlines still apply. Changing mode, namespace or
-authentication format requires restart.
-
-Isolation prevents different identities from sharing a circuit when the configured
-Tor listener honors it; it does not guarantee different exit IPs or hide public-swap
-links, shared API credentials or identifying request contents. Identical identities
-and namespaces intentionally derive the same token across deployments. Use distinct
-namespaces for deployment separation. Build-time dependency/parameter downloads are
-outside runtime routing. See [runtime egress and verification](network-egress.md)
-for the constructor inventory, tests, optional live smoke command and OS-enforced
-egress boundary.
+  Qualification snapshots and supervised serving reject `--network-config`;
+  set `[network]` in their pinned deployment file before preparation.
+- **Identity separation:** Payments, Base balance checks, and NEAR funding use
+  the EVM address; treasury sync uses the treasury UUID; catalogs and help use
+  discovery-origin identities. See [network egress](network-egress.md).
 
 ## Creating offline OpenAPI fixtures
 
-The `snapshot_spec` development utility accepts a local JSON file or an HTTP(S)
-URL and a required output path. It removes operation responses and
-`components.responses`, preserving request schemas, tags, descriptions and
-vendor extensions. Output has recursively sorted keys, compact JSON, ASCII
-Unicode escapes and a trailing newline. It replaces the destination only after
-successful download, parsing and serialization. The destination directory must
-already exist. No wallet, pricing probes or Python installation is needed.
+The `snapshot_spec` example converts a local JSON file or HTTP(S) OpenAPI URL
+into a compact, sorted-key request-only fixture (stripping responses and
+`components.responses` while keeping request schemas, tags, descriptions, and
+extensions). The destination directory must exist:
 
 ```sh
 cargo run --locked --example snapshot_spec -- \
   https://www.socialfetch.dev/openapi.json /tmp/socialfetch-requests.json
 
-# Offline input and utility tests:
-cargo run --locked --example snapshot_spec -- \
-  /tmp/socialfetch-openapi.json /tmp/socialfetch-fixture.json
 cargo test --locked --example snapshot_spec
 ```
 
-Use it for JSON OpenAPI request fixtures from any provider. Review fixture diffs
-when refreshing a vendor spec, including changes to the pinned catalog contracts.
-
 ## Provider HTTP and TLS policy
 
-Participating catalog, unsigned API and Base reads may recover TLS
-failures on `network.tor_isolation_retries` fresh Tor scopes after the selected
-scope (default 2). Every attempt
-retains certificate, hostname and configured protocol verification. This grants
-no replay authority to signed requests and does not change direct-mode recovery.
-
-HTTPS provider traffic requires **HTTP/2 and TLS 1.3** by default. This applies to
-catalogs, lazy help and unsigned/signed API requests. Set
-compatibility flags in the provider TOML or override them on a deployment source:
+Provider HTTPS traffic (catalogs, help, and API requests, including
+cross-origin operation URLs) requires **HTTPS, HTTP/2, and TLS 1.3** by
+default. Cleartext URLs are rejected before I/O or signing (local spec files
+remain supported). Override per provider or source only when needed:
 
 ```toml
-allow_http1 = true  # permit HTTP/1.1 fallback; still offer HTTP/2
-allow_tls12 = true  # permit TLS 1.2; still prefer TLS 1.3
+allow_http1 = true  # Permit HTTP/1.1 fallback while still offering HTTP/2.
+allow_tls12 = true  # Permit TLS 1.2 while still preferring TLS 1.3.
 ```
 
-Both default to `false`, inherit through `extends`, and appear in `config show`.
-They are independent: an HTTP/1.1-only server with TLS 1.3 needs only
-`allow_http1`. There is no automatic downgrade retry on a strict connection
-failure. These flags do not relax certificate or hostname checks. Provider catalog, help
-and unsigned/signed API URLs require HTTPS, including
-authored cross-origin operation URLs. Cleartext URLs are rejected before provider
-I/O, signing or relay fallback. Local specification files remain supported. Treasury/NEAR/RPC and lightwalletd
-transports keep their
-own existing policies. Agent-added providers use the strict defaults; agents
-cannot supply compatibility overrides.
+Both default to `false`, inherit via `extends`, never relax certificate or
+hostname checks, and never trigger automatic downgrade retries. Generic
+agent-added providers keep the strict defaults.
 
-Private PKI can add trust anchors through the deployment's `[network]` section
-or an explicit `--network-config` file:
+- **Private trust anchors:** Add PEM certificate files via
+  `[network].trusted_ca_files` (absolute paths; extends both HTTP and gRPC
+  trust stores; missing or malformed files fail startup; requires restart to
+  reload; preserved by `catalog warm --direct`):
 
 ```toml
 [network]
 trusted_ca_files = ["/absolute/path/private-ca.pem"]
 ```
 
-Paths must be absolute native filesystem paths. Each file contains one or more
-PEM certificates; these extend the existing HTTP and gRPC trust stores while
-certificate-chain, hostname and protocol validation remain enabled. Files are
-loaded into an immutable transport context before provider I/O. Missing, empty or
-malformed files fail explicitly. Changing file contents does not alter existing
-transports; restart to change process trust. `config show` reports configured paths
-without reading certificate contents. Ordinary defaults contain no additional
-anchors. Explicit direct catalog warming retains the configured trust anchors.
-
-Concurrent requests may multiplex over one HTTP/2 connection when origin,
-wallet/discovery identity, timeout and transport policy match. Different wallets
-and discovery traffic retain separate pools and SOCKS identities. A wallet
-rotation never reuses the previous wallet's TLS connection. Server limits and
-connection closure can require additional connections. Protocol changes do not
-add signed-payment retries.
-
-DEBUG logs report the actual response `http_version` and stage (catalog,
-help, agent import, payment challenge/result), without URLs or payment credentials.
-This is HTTP version telemetry, not negotiated TLS-version telemetry; a successful
-strict HTTPS handshake enforces the TLS 1.3 minimum. Provider compatibility has
-not been surveyed live; use the flags only for demonstrated compatibility needs.
-Cover traffic defaults on with Tor and off in direct mode. Same-origin HTTPS
-catalog/help documents are bounded range candidates; explicit profiles can add
-randomized padding. Set `network.cover_traffic_enabled = false` globally, or
-`cover_traffic_enabled = false` in a provider/source to opt out. Explicit profiles
-can set `fallback_url` to a same-origin `llms.txt`. These requests use the same pools. See
-[cover traffic](cover-traffic.md) for configuration, five bounded distributions,
-scoped status and experimental limitations. Periodic/randomized PINGs are not implemented.
+- **Connection pooling and telemetry:** Concurrent requests multiplex over
+  HTTP/2 only when origin, identity, timeout, and transport flags match.
+  Rotating wallets never reuse a prior wallet's TLS connection. `DEBUG` logs
+  record negotiated `http_version` and request stage without URLs or
+  credentials.
+- **Cover traffic:** Enabled by default in Tor mode and off in direct mode. Set
+  `network.cover_traffic_enabled = false` globally or
+  `cover_traffic_enabled = false` per provider or source to opt out. See
+  [cover traffic](cover-traffic.md).
 
 ## Pricing metadata and runtime hints
 
-Tool descriptions retain authored provider/schema prices and configured credit-to-USDC
-estimates. Missing structured prices remain unknown. Startup, inspection and warming
-never send endpoint requests to discover prices. Actual calls still acquire a fresh
-unsigned x402 challenge and enforce the selected payer's payment authority.
+Startup, inspection, and warming never send API calls to probe prices; tool
+descriptions use authored metadata, and live calls still obtain and cap their
+own x402 challenge.
 
-Managed initial selection uses a fresh observed offer before a usable advertised
-per-call amount, including on the first call. Either hint prefers affordable
-RETAINED wallets oldest first, then ACTIVE, then READY. With neither hint,
-selection prefers healthy positive ACTIVE, then RETAINED, then READY; low,
-zero and unknown estimates remain eligible fallbacks. Present zero remains a
-hint. The actual challenge preserves a suitable bound payer rather than handing
-off solely to spend retained funds.
+### Runtime price hints and MCP offer metadata
 
-Validated challenges from actual managed calls update estimates attached to the
-remote catalog cache entry. Compatible aliases, listeners and wallet groups share
-these estimates. Hints advise existing wallet selection and fresh MCP descriptions;
-they never authorize signing or initiate HTTP. Cache identity and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
-and [resource limits](local-resource-limits.md).
+- **Selection order:** Before the first unsigned request, managed selection
+  checks a fresh observed offer first, then a valid advertised per-call USDC
+  estimate, then unknown pricing.
+- **Shared hint cache:** Validated managed challenges update estimates on the
+  remote catalog cache entry, shared across compatible aliases, listeners, and
+  wallet groups without sharing signers or transports. Hints expire with the
+  parent catalog (`catalog_cache_ttl_seconds`).
+- **Per-call MCP pricing block:** Managed API results append a second MCP JSON
+  text block (`{"x402_pricing":{"amount":"...","currency":"USDC","basis":"observed_offer"}}`)
+  on both successes and post-validation errors (omitted when no target offer
+  was validated or for static SDK signing). Relay fees never supply a target
+  offer. See [output boundaries](architecture.md#mcp-and-output-boundaries).
 
-Advertised pricing evidence can be refreshed and reviewed with the
-[provider maintenance sweep](provider-updates.md#pricing-evidence-and-variation-review);
-its key-pointer signals are discovery aids, not price authority.
+### Advertised pricing configuration
 
-Managed API results also carry their own latest validated offer in a separate MCP
-JSON text block, including errors after validation. `x402_pricing.amount` is an
-exact decimal string, `currency` is `USDC` and `basis` is `observed_offer`. It is
-independent of the shared hint cache and does not represent settlement or the sum
-of multiple authorizations. Calls with no validated offer and static SDK signing
-produce no pricing block. A final unsigned success after a payer handoff retains
-any target offer validated earlier in that logical invocation, including when a
-configured API relay delivers the response. Relay fees do not supply a target offer.
-See [output boundaries](architecture.md#mcp-and-output-boundaries)
-for block order and body-only convenience methods.
+Configure embedded catalog pricing or an external pricing document under
+`[pricing]`:
+
+```toml
+[pricing]
+source = "catalog"
+format = "payment-info"
+key = "x-payment-info" # Optional; default for payment-info.
+unit = "call" # Fallback unit when metadata omits one ("call" or "request").
+usd_as_usdc = true # Opt in to treating reviewed USD tariffs as 1:1 USDC hints.
+```
+
+- **Catalog formats:** `payment-info` reads structured operation metadata
+  (`pricing_key` is shorthand for `source = "catalog"`,
+  `format = "payment-info"`). `x402` defaults to `x-x402` and parses
+  dollar-prefixed `price` strings. A local `pricing` or `pricing_key` replaces
+  both inherited pricing settings as one unit.
+- **External formats:** Set `source` to an HTTPS URL with
+  `format = "x402-resources"` (`resources` array with explicit HTTP methods) or
+  `format = "x402-discovery"` (`items` array; may omit method when one catalog
+  operation matches). External pricing loads asynchronously during serving
+  (sharing Tor `catalog_concurrency` slots and relay fallback), never delays
+  tool publication, and is skipped by inspection and qualification. Refreshing
+  a catalog re-downloads its external pricing document and binds its expiry to
+  the parent catalog.
+- **Normalization:** Selection hints require exact nonnegative per-call Base
+  USDC amounts (at most 6 decimal places; USD amounts require `usd_as_usdc = true`).
+  Metered, credit, dynamic, range (`min` and `max`), and unsupported-asset
+  tariffs stay display-only. Unhandled vendor pricing shapes are tracked in the
+  [custom pricing adapters plan](plans/custom-pricing-adapters.md); refresh
+  advertised evidence via
+  [provider pricing review](provider-updates.md#pricing-evidence-and-variation-review).
+- **Description suffixes:** Generated descriptions append compact suffixes such
+  as `Cost: ~$0.015/call [spec].`, `Cost: ~$0.01-$0.20/call [spec].`,
+  `Cost: free [spec].`, or `Cost: unknown.` (preserving explicit vendor units
+  and `[spec, dynamic]` tags). Server instructions include the pricing caveat
+  once:
+  > Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.
+
+### Credit tariff conversion
+
+Providers with structured credit tariffs can display approximate USDC costs:
+
+```toml
+pricing_key = "x-socialfetch-credits-pricing" # Keep original billing prose.
+[credit_pricing]
+credit_cost_key = "x-socialfetch-pricing"
+usdc_per_credit = "0.014"
+```
+
+Conversion uses exact integer arithmetic (positive decimal rate, at most 6
+decimal places) for display only; it never affects challenges or caps. Supports
+`baseCredits`, `maxCredits`, `normalizationFailureCredits`, `surcharges`
+(including `includes` array conditions), URL batches, per-record metering,
+`billableDomainErrors`, and `x402ExactPolicy` hints. Malformed metadata retains
+original prose, marks estimates unavailable, and logs one `WARN` summary per
+catalog build (`DEBUG` logs per-tool failure reasons without raw metadata).
+SocialFetch uses `0.014` USDC per credit as a fixed display estimate.
+
+### Observed prices and description overrides
+
+When a fresh observed offer exists in the runtime cache, MCP tool definitions
+and search results replace the generated pricing suffix with
+`Observed cost: ~$0.005/call.` (restoring the fallback on expiry; CLI
+inspection and canonical search text keep the fallback).
+
+When overriding a tool description in TOML, separate the current-call price
+line into `pricing_description` so observed offers replace only the price while
+preserving behavioral text:
+
+```toml
+[overrides.example_search]
+description = "Search records. Billed per returned record; empty results are free."
+pricing_description = "Cost: ~$0.01/record [spec]."
+```
+
+`pricing_description` requires a paired `description`. `max_description_chars`
+applies to generated fallbacks and observed renderings (marking truncation
+visibly), while plain override fallbacks bypass it.
 
 ## Automatic discovery disk cache
 
-Deployments with an **existing** `treasury.state_dir` automatically use its
-`http-cache/discovery-v1.sqlite` for remote API catalogs.
-No wallet is opened and no state directory is created for caching. Standalone
-providers and deployments without existing treasury state load catalogs without
-disk caching. Local catalogs and dynamic imports do not gain disk caching for prices.
-Calls without a catalog entry retain their own validated-offer results.
-`config show` remains offline. A provider or source can opt out with
-`http_cache_enabled = false`; this also prevents sharing a disk-enabled alias's
-catalog load.
-
-Catalogs are local snapshots, using a provider/source setting:
+Deployments with an existing `treasury.state_dir` automatically cache remote
+catalogs in `http-cache/discovery-v1.sqlite` without opening wallet keys or
+creating directories. Standalone providers, local specs, and dynamic imports do
+not use this disk cache. Opt out per provider or source with
+`http_cache_enabled = false`.
 
 ```toml
-catalog_cache_ttl_seconds = "indefinite" # default; 0 disables disk caching; positive seconds set expiry
+catalog_cache_ttl_seconds = "indefinite" # Default; 0 disables disk caching; positive seconds set expiry.
 ```
 
-Catalogs and their operation estimates have one lifetime. Reads, restart and price
-observations do not renew it. The default is indefinite; a positive seconds override
-expires on the next acquisition, without a background timer. Expiry, forced refresh,
-changed bytes or a previously loaded source's configuration update discard cached
-challenge estimates together. A forced refresh also resets estimates when bytes are
-identical. Accepted in-flight work retains its validated offer.
-Standalone serving also binds external price hints to the loaded catalog expiry;
-slow metadata acquisition cannot extend a finite catalog lifetime.
-Alias selection and listener publication preserve prices; configuration revisions
-are recorded per source alongside the shared entry, without partitioning lookup.
-
-A deployment source can override its provider's value. `"indefinite"` or any positive integer sets
-local retention regardless of upstream `Cache-Control` or `Expires`, including
-`no-store`, `no-cache` and `max-age=0`. DEBUG logs record
-`cache_policy="local_override"`, `ttl_seconds`, and a fixed `origin_policy` label.
-`http_cache_enabled=false` disables disk caching. Changing the catalog TTL separates disk entries and shared startup loads.
-
-Caching uses the normal unsigned GET; there are no extra HEAD probes. The TTL
-starts after a complete catalog download. Once expired, catalogs with `ETag` or
-`Last-Modified` use one conditional GET; a matching 304 reuses the body and starts
-a new local lifetime. Without validators, the catalog is downloaded again.
-Failed refreshes retain the previous complete disk snapshot but return the refresh
-error; they never serve an expired document as a successful refresh. Ordinary
-startup, explicit warm and runtime refresh stage downloaded or revalidated bytes
-until source generation and source tool routing validate. Strict inspection requires
-completeness; warming can accept compatible partial catalogs with visible omissions. A rejected response cannot create an
-indefinite snapshot or renew a previous one. Optional pricing documents are
-persisted only after their configured format is validated. Generic library JSON
-loaders accept parsed JSON; callers of `load_json_discovery_bounded` must explicitly
-commit after validating content for their intended use.
-If an older version cached semantically invalid JSON, replace it with explicit
-`catalog warm` or clear the stopped application's disposable cache. Ordinary source
-validation errors do not evict shared entries: another alias may still accept them.
-
-This owner-only private cache permits `private` responses and responses carrying
-`Set-Cookie`; cookies are neither saved nor sent. Ordinary `Vary` is supported by
-pinning the unsigned discovery request profile (`Accept: */*`,
-`Accept-Encoding: identity`, no cookies, credentials or custom request headers).
-The profile version and URL are part of the cache key. `Vary: *`, conditional-header
-variants and credential-bearing URLs remain excluded. A relay's effective target
-request headers are not established by origin transport, so relay responses with `Vary` are not persisted.
-Relay catalogs use the same local TTL, measured from the original completed relay
-response so sharing it cannot renew its lifetime.
-
-The lifetime-aware cache key causes one initial miss and re-download after this
-upgrade, including for catalogs written with the old seven-day default; those disposable entries are left for eviction. Missing or incompatible
-current cache metadata also causes a quiet miss and a fresh origin request, without
-reusing saved validators.
-
-Keys separate exact URLs, discovery network/isolation policy, transport flags,
-timeouts, limits and resource kind. The owner-only SQLite cache holds at most
-4,096 entries and 128 MiB of payload/metadata, evicting oldest entries with a log.
-Its database is capped at 144 MiB; rollback journals can temporarily add up to
-another database-sized file. Cache I/O errors log a fixed warning and fall back to
-normal origin loading, without retrying a failed origin request. Oversized origin
-catalogs still fail with the normal `max_spec_bytes` error. Cache contents may
-reveal provider interests; treat the directory as private disposable state. To
-clear it, stop the application and remove only `http-cache/`.
-
-Live qualification and captured qualification catalog loads bypass disk caching,
-so a historical cache hit cannot qualify a fresh network observation. Ordinary
-loads report source-specific cache decisions on stderr at DEBUG: catalog
-`miss`, `disk_hit`, `revalidate`, `revalidated`, `shared_load`, and successful
-`stored` events. Configuration logs distinguish disabled caching from a missing
-cache directory. Response policy labels explain `local_override`,
-`requires_revalidation`, `no_store`, `vary_star`, or invalid/unsupported policies
-without exposing raw headers or validators. A fresh policy is eligibility;
-`stored` confirms a successful disk write. Relay cache reuse and directly warmed
-cache provenance remain explicit.
-
-Catalogs with `max-age=0, must-revalidate` reuse local snapshots until the configured
-TTL expires; then a 304 can reuse the saved body. Missing entries alone do not prove a provider forbids
-caching: expiration, eviction, network/timeout policy changes, and failed writes
-also affect reuse.
+- **Lifetime and invalidation:** Catalogs and their cached price hints share
+  one lifetime starting when the download completes. Local TTL overrides
+  upstream `Cache-Control` and `Expires` (including `no-store` and `max-age=0`).
+  Reads and price observations never extend expiry. Expiry, forced refresh,
+  changed bytes, or source config edits discard cached price hints together.
+- **Revalidation and staging:** Expired entries with `ETag` or `Last-Modified`
+  use one conditional GET (HTTP `304` reuses the body and starts a new TTL).
+  Downloaded or revalidated bytes are staged and committed only after
+  generation and `send_tools` validation pass (failed refreshes keep the old
+  snapshot on disk while returning the refresh error).
+- **Private cache rules and bounds:** Permits `private` and `Set-Cookie`
+  responses (cookies are never saved or sent) and supports `Vary` by pinning
+  the unsigned discovery header profile (`Vary: *`, conditional variants,
+  credentialed URLs, and relayed `Vary` responses are not stored). Keys
+  separate URL, network and isolation policy, transport flags, timeouts,
+  limits, TTL, and resource kind. Caps: 4,096 entries, 128 MiB payload and
+  metadata, 144 MiB SQLite file (oldest entries evict with a log). Cache I/O
+  errors warn and fall back to origin fetches. Treat `http-cache/` as private
+  cache state; stop the app before deleting it.
+- **Bypass and logging:** Live qualification always bypasses disk caching.
+  `DEBUG` logs report `miss`, `disk_hit`, `revalidate`, `revalidated`,
+  `shared_load`, and `stored` along with response policy labels without raw
+  headers.
 
 ### Runtime source refresh
 
-Automatic refresh covers deployment sources and registered dynamic sources.
-Standalone `serve --provider` loads definitions once at startup; restart it to
-reload them.
+Deployment sources and dynamic registrations automatically coalesce a
+background refresh on a final unsigned target HTTP `404`, `405`, or `410` after
+normal retries and relay fallback finish (standalone `serve --provider` loads
+once at startup). Signed target outcomes, relay service errors, `400` and `422`,
+and price changes do not trigger refresh.
 
-A final unsigned target HTTP 404, 405 or 410 from an operation in these sources is a
-heuristic signal to refresh that source's definitions. The existing request retry
-and relay policy finishes first; no extra request, probe or API replay is added.
-Signed target outcomes and a relay service's own failures do not trigger refresh.
-A decoded relay destination remains unsigned target evidence even when the relay
-fee was signed. Generic 400/422, challenge price changes, document timestamps and
-HTTP validators are not triggers.
-Offline operation/override drift requires an explicit warm or provider edit; it
-does not signal an already running process.
-
-Refresh coalesces within the affected source generation and uses the existing
-acquisition/publication owner. Existing tools, search results and price hints remain
-usable while refresh runs and after catalog acquisition or publication failure,
-under their original expiry; refresh does not renew them. Accepted calls retain
-their original definitions, payer and financial obligations. Refresh uses existing
-metadata authority and does not allocate wallets or start funding.
-If replacement tools select a static wallet that was unused and therefore not
-initialized at startup, publication fails and existing tools remain available.
-Restart to initialize that newly selected wallet under the current configuration.
-If every selected API operation becomes unsupported, the accepted source publishes
-an empty API inventory with omission instructions, just as at startup; endpoints
-and healthy sibling sources remain available. If no API tools remain, that source cannot produce another refresh
-signal; restart after repairing its catalog to restore it.
-Refresh publishes the complete replacement catalog without waiting for optional
-pricing. Its generation owns asynchronous pricing enrichment, just as at startup.
-Until enrichment completes, operations without catalog prices or new challenge
-observations have unknown estimates; pricing failure does not withdraw tools or
-erase observations. Successful replacement retires old API handles and invalidates
-their hints before replacement definitions become visible. Failed publication
-preserves old admission; calls already admitted can finish through retirement.
-Old observed prices cannot populate the replacement generation, even when its
-catalog bytes are unchanged. New challenge observations remain separate from
-advertisements and take precedence when optional pricing completes. The static
-observed-price cache attaches best effort after successful definition publication;
-calls captured before that attachment do not retain observations.
-Replacement pricing ownership attaches before publication for both static deployment
-and registered dynamic sources, but its I/O
-starts only after publication succeeds and the old generation retires. Retired
-pricing work cannot commit shared metadata, even if its blocking cache write was
-already dispatched; retained old handles cannot restore stale pricing on restart.
-
-The triggering call keeps its actual outcome. Failure alone schedules no retry;
-a later fresh unsigned removal signal may start another attempt.
-Late outcomes cannot expire the replacement generation. If an operation disappeared,
-subsequent lookup returns its actual absence.
-
-Dynamic discovery is the supported way to obtain current definitions. Static MCP
-clients may cache schemas and require reconnect/reload after a schema change.
-The server maintains no session registry for tool-list broadcasts; client
-notification support is not a correctness dependency.
+- Existing tools and price hints stay callable while refresh runs and if
+  refresh fails. Accepted calls keep their active definitions and payers.
+  Refresh never allocates wallets or starts funding.
+- If a replacement catalog selects an uninitialized static wallet, publication
+  fails and existing tools stay active until restart. If all operations become
+  unsupported, the source publishes an empty inventory with omission notices
+  while healthy siblings stay available.
+- Replacement definitions publish immediately without waiting for optional
+  pricing; old handles and hints retire before the replacement's pricing task
+  starts so retired work cannot overwrite new metadata. Refresh failures do not
+  auto-retry until a later fresh `404`, `405`, or `410` arrives. Static MCP
+  clients that cache `tools/list` may need to reconnect after a schema change.
 
 ### Warming a selected source, including directly for a Tor deployment
 
@@ -2228,84 +1305,38 @@ x402_treazury catalog warm --config deployment.toml --source provider_id
 x402_treazury catalog warm --config deployment.toml --source provider_id --direct
 ```
 
-`--source` selects authored source IDs from the deployment, not provider file paths;
-repeat it or use a comma-separated list. Omitting it selects every declared source.
-Selected remote catalogs and external pricing documents for their usable API tools
-are downloaded unconditionally, including with a fresh cache entry or saved validators. It adds no
-conditional GET or API replay. The command requires an existing treasury state directory and rejects
-`http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on a selected source. Without `--direct`, it uses the
-deployment's network policy, replaced by `--network-config` when supplied. It starts
-no listeners or funding workers. It opens
-only the resolved discovery wallets when paid relay warming is enabled below;
-otherwise it remains unsigned and opens no wallet. Optional pricing failure leaves
-prices unknown and does not make usable API definitions unavailable. Warm updates
-the shared SQLite cache; a running server keeps its in-memory snapshot until its
-runtime source refresh or a restart. Serving and ordinary startup never force a
-refresh.
-
-`--direct` is an explicit exception for this dedicated warming process. Its
-unsigned discovery requests use direct egress through the normal network factory,
-so those providers can observe the machine's direct IP address. The deployment
-file and serving policy remain unchanged. Successful accepted replacement retires older compatible origin, direct-warm and
-relay disk variants together, so eviction cannot uncover obsolete definitions.
-An accepted response that cannot be persisted also retires those variants; failed
-acquisition or validation retains them. Entries have separate direct-warm
-provenance and are bound to the original configured network/isolation policy,
-URL, transport flags, timeouts and limits. Ordinary direct-mode cache entries do
-not gain this cross-policy permission.
-
-Normal serving/inspection can reuse explicitly warmed entries only while fresh,
-with a stderr warning identifying their direct origin. It never sends a directly
-fetched validator over Tor. Once entries expire, normal loading uses the configured
-network; it does not fall back to direct access. Repeat the explicit warm command
-to refresh directly. Paid requests, real payment challenges, lazy help, agent
-imports and treasury traffic always retain their configured policy. Qualification
-continues to bypass all disk caches and cannot invoke this warm path.
-
-The command prints one JSON summary with `direct`, `outcome` (`ok` or `degraded`)
-and one result per selected source. Valid remote attempts finish independently:
-a failed source does not cancel healthy sibling acquisition. Both outcomes return
-zero, including when every remote source is unavailable. Invalid local
-configuration/state, local catalog errors, cancellation and internal failures remain
-nonzero. Accepted paid work drains before its owner closes.
-
-`catalog_cache` distinguishes `fresh`, `fresh_via_relay`, `requires_revalidation`,
-`not_stored` and `local_file`, separately from source availability. Catalogs use the
-configured local TTL, including when upstream requests no storage or immediate
-revalidation. Variant, size and provenance restrictions still apply; `--direct`
-does not override them or extend lifetimes. Warming validates source generation and
-`send_tools` routing before cache acceptance. Compatible partial catalogs may be
-accepted with omissions; wholly unsupported or invalid replacements retain previous
-accepted bytes, prices and provenance. Missing remote selections are reported without
-broadening authored filters. Combined listener selection is not validated by warming.
-
-See [framework integration](framework-integration.md) for the exact JSON fields,
-failure vocabulary, exit contract and framework preparation/readiness behavior.
+- `--source` takes deployment source IDs (repeatable or comma-separated; omit
+  for all sources). Selected remote catalogs and external pricing documents
+  download unconditionally, requiring an existing `treasury.state_dir` and
+  rejecting `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on
+  selected sources.
+- Warming starts no listeners or funding workers and opens discovery wallets
+  only when paid relay warming is enabled. A running server keeps its in-memory
+  snapshot until runtime refresh or restart.
+- `--direct` fetches unsigned discovery documents over direct networking
+  (exposing your direct IP to those providers) without changing the deployment
+  file. Direct-warm entries carry separate provenance bound to the original
+  network policy; serving reuses them while fresh (with a stderr warning) and
+  never sends directly fetched validators over Tor. Once expired, normal
+  loading returns to the configured network.
+- Prints one JSON summary (`direct`, `outcome: "ok"` or `"degraded"`, and
+  per-source status), exiting `0` for both completed outcomes and nonzero on
+  local config, state, cancellation, or internal errors. See
+  [framework integration](framework-integration.md) for the full JSON schema.
 
 ## Relay fallback
 
-A deployment can configure ordered paid relay fallback for catalogs, document
-reads, built-in directory searches and explicitly enabled API requests, in its
-own configuration or through
-`--network-config`. Origin acquisition has one attempt in direct mode, or the
-initial attempt plus `network.tor_isolation_retries` fresh owner-bound Tor scopes.
-Eligible origin statuses are `400`, `403`, `408`, `429`, `500`, `502`, `503` and
-`504`; eligible transport/body failures share that sequence. Valid `Retry-After`
-on `429`/`503` applies before another attempt and before a configured relay handoff.
-No origin sequence restarts between relay entries. Local destination, authority,
-setup and download-limit rejections cannot purchase fallback. Complete catalogs
-reject unsolicited `206` or `Content-Range` responses without paid fallback.
-Static remote HTTP and JSON-parse failures retain their broader fallback contract;
-Coinbase also preserves remote-status/JSON fallback. Successful empty or partial
-search-result metadata is terminal success.
+Deployments can configure ordered paid relay fallback for catalogs, document
+reads, directory searches, and opt-in API requests, either inline or via
+`--network-config`:
 
 ```toml
 [relay_fallback]
-source_discovery = true # directory/resource searches; default true
-api_requests = false # actual API data; default false
-provider_metadata = true # catalogs/help/imports/probes; default true
-# wallet = "web" # static payer override outside bootstrap policy
-# sources = ["social"] # optional static source selection; empty selects all
+source_discovery = true   # Built-in Coinbase and x402 List searches (default true).
+provider_metadata = true  # Catalogs, help, imports, and URL probes (default true).
+api_requests = false      # Generated API tools and raw_call (default false).
+# wallet = "web"          # Optional static payer override when [wallet_bootstrap] is absent.
+# sources = ["social"]    # Optional static source filter; empty selects all.
 
 [relay_fallback.relays]
 GET = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
@@ -2313,363 +1344,63 @@ POST = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
 HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
 ```
 
-Method keys are exactly `GET`, `HEAD` and `POST`, selected by the original target
-method. A missing or empty list means origin-only for that method; lists do not
-inherit from GET. Supported consumers are static discovery, Coinbase searches,
-source imports, help, explicit usage documents, URL-discovery probes and
-representable unsigned API, directory and raw GET/HEAD/POST requests. Ordering is
-operator-authored, with no implicit vendor ranking or extra provider. Each listed
-provider declares `relay_format = "curl"`, `"agproxy"`, `"horizonpulse"` or
-`"readfetch"` in its own TOML. Ordinary providers need no format field. Unsupported request bodies,
-bytes or required headers skip the entry before paid I/O; headers and bodies are
-never silently discarded to fit another adapter. Paid API relays are opt-in, and
-their adapters forward ordinary business headers, including explicit API-key
-headers, when they can preserve them. x402 payment headers remain runtime-owned and
-are not relayed.
+### Configuration and categories
 
-The section is named `relay_fallback`, with provider lists under `relays`.
-The old `discovery_relay` section, `fallbacks` lists and single `provider` shorthand
-are rejected. Every listed provider requires explicit `relay_format` metadata.
-Inspection emits canonical method lists without reading
-provider files. Paths in lists resolve relative to the declaring deployment/network
-file; schemas/help paths inside providers resolve relative to their TOML.
+- **Method lists:** Keys are `GET`, `HEAD`, and `POST` (matched by the original
+  request method; lists do not inherit from `GET`). Each listed provider must
+  declare `relay_format` (`"curl"`, `"agproxy"`, `"horizonpulse"`, or
+  `"readfetch"`). Obsolete names (`discovery_relay`, `fallbacks`, single
+  `provider`, `serve`, `warm`, `on_demand`, `search`) are rejected.
+- **Local schema validation:** Runtime startup validates every relay adapter
+  using its bundled local schema (`curl`, `agproxy-openapi.json`,
+  `horizonpulse-openapi.json`, `readfetch-openapi.json`) with no remote fetches.
+  See [provider caveats](../providers/CAVEATS.md) for adapter details.
+- **Categories:** Defaults apply only when `[relay_fallback]` is present:
 
-Runtime bootstrap validates every configured adapter, operation and filter using
-local schemas before payment. The bundled Curl schema, `agproxy-openapi.json`,
-`horizonpulse-openapi.json` and `readfetch-openapi.json` are complete pinned runtime assets; bootstrap fetches
-no schema or help document and rejects nonlocal schema references.
-[Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
-
-Relay preferences classify each request by trusted caller purpose, independently
-of HTTP method or destination:
-
-| Preference | Eligible fallback | Default |
+| Flag | Covered requests | Default |
 | --- | --- | --- |
-| `source_discovery` | Built-in Coinbase resource search and x402 List browse, recommendation and service-detail requests | `true` |
-| `api_requests` | Ordinary generated/configured API tools and `raw_call`, including application search APIs or direct calls to directory URLs | `false` |
-| `provider_metadata` | Static schemas at serving startup and explicit warming, imports/refreshes, help, usage documents and provider URL/specification probes | `true` |
+| `source_discovery` | Built-in Coinbase and x402 List searches and service details | `true` |
+| `provider_metadata` | Static catalogs and warming, dynamic imports, help, usage docs, and URL probes | `true` |
+| `api_requests` | Generated API tools and `raw_call` | `false` |
 
-These defaults apply only when the section exists. Without it no paid relay is
-created. Disabled preferences leave origin retrieval available but authorize no
-relay request or signature. `serve`, `warm`, `on_demand` and `search` are rejected
-configuration keys. Method lists, formats and static `wallet`/`sources` bindings
-remain separate settings. With bootstrap policy, metadata and directory relay
-fees use its bootstrap group. API/raw relay fees retain their captured API payer.
-Without bootstrap policy, runtime reads use their authenticated endpoint/source's
-payer. Enabling metadata permits paid catalog fallback during ordinary serving and
-explicit non-direct warming. Inspection remains unsigned, `--direct` warming
-bypasses relays, and no warming starts automatically.
+### Origin sequence, traversal, and limits
 
-A mixed `provider_details_remote` call applies discovery permission to its directory lookup
-and metadata permission to each later provider document/probe. Help remains
-metadata when invoked through a tool wrapper. No agent argument can override a
-category, and an application search API remains API work. Metadata contains no API
-argument map, but its URL and query string can still disclose sensitive information.
-Every enabled relay sees the request it handles and supplies its response plaintext.
-
-No runtime read allocates wallets, starts funding or waits for funding. For document reads, missing
-payment authority leaves unsigned origin retrieval available and relay fallback
-unavailable. Runtime relay exchange adds no sticky response cache, readiness queue
-or provider breaker; existing help/import coalescing remains with those owners.
-Repeated Coinbase searches are fresh operations and may authorize new payments.
-The caller's response bound covers the outer envelope; its spec/help/response
-bound applies to decoded content. Inactivity precedence is source management,
-relay provider, then network. Provider transport permissions govern the relay leg.
-
-Unsigned API/directory/raw requests use the original method's list after the
-common eligible origin sequence. Origin `402` retains normal payment handling;
-relay-supplied target `402` is terminal and never signed. Any earlier signed target
-attempt suppresses generic fallback, including later wallets' unsigned failures.
-Requests preserve their built URL/query, bytes and required headers. Unsupported
-entries skip before payment; complete invalid output cannot purchase another read.
-Legitimate API `206`/`Content-Range` responses remain allowed. Curl's text envelope
-cannot establish binary response bytes and rejects such API responses terminally;
-AGProxy/Horizon decode only their documented binary encodings. HEAD returns empty
-text regardless of representation MIME. Relay fees stay distinct from a target
-payment, with possible fees retained through output and directory processing.
-
-Runtime document readers use the common unsigned origin sequence and ordered GET
-relay list after blocking transport failures or HTTP `400`, `403`, `408`, `429`
-or `5xx`. Complete invalid schemas/text, unsupported content, unsolicited `206`
-or `Content-Range`, local policy/byte bounds, redirects and other `4xx` are terminal.
-A relayed `402` never reaches target signing. Origin HTTP remains no-follow;
-configured relays can follow redirects under the trust boundary below. Accepted
-work retains fetching, validation and cache/source publication after disconnect.
-Shared document cache identities retain the effective document policy and the
-pinned static payer or fixed managed metadata authority. Each accepted exchange
-captures the effective payer. Possible charges survive parsing, publication and
-cleanup errors.
-
-After exhausted origin attempts, each authored position has at most one logical
-acquisition. Its unsigned relay-service requests use the same configured Tor
-count, or one attempt in direct mode; signed requests never gain generic replay.
-A relay-service HTTP or eligible transport failure, incomplete outer delivery,
-or malformed relay envelope advances to the next configured provider even after
-possible payment. This includes a relay service's own HTTP `402`; a decoded target
-`402` remains terminal. Complete attributable failed target results and declared
-truncation advance according to the consumer contract. Local authority,
-destination and download-policy rejections remain terminal. Delivered error or
-truncated results and failed relay purchases may already be billed. A refund promise,
-timeout or vendor prose cannot prove nonpayment. Every actual authorization retains
-ordinary per-payment authority and possible liability; no cumulative spending
-counter is added.
-
-Static acquisition retains each accepted provider-position/request outcome.
-An uncertain outcome is not repurchased by a fresh read of that same acquisition;
-traversal can still use later providers, and unrelated targets remain eligible.
-Possible charges from earlier providers survive later success, exhaustion and
-wallet-readiness errors. There is no provider-wide failure blackout.
-
-A relayed challenge never authorizes target signing.
-
-With bootstrap policy, every eligible static source uses the bootstrap group for
-metadata relay fees, including after destination credit and with an explicit
-`relay_fallback.wallet`. Without that policy or `wallet`, each static source uses
-an effective assigned wallet profile.
-An explicit source wallet takes precedence through normal binding resolution.
-A shared source chooses the highest SHA-256 score of the JSON tuple
-`["discovery-wallet-v1", source_id, wallet_name]`, with wallet name breaking ties.
-This remains stable across restarts/listener ordering; balances, keys and rotating
-addresses do not select it. A failed wallet does not select another profile to
-repeat relay spending. An unbound source needs its own wallet or the explicit
-relay override. An exclusion-only routed source has no relay payer demand: its
-metadata still loads under the configured network policy, with no paid relay
-fallback. Separately declared wallet profiles retain their existing authority.
-`config show` reports `discovery_wallets`; distinct payer scopes
-keep separate requests/caches even for the same URL.
-
-Every relay connection uses the configured network factory and existing payer.
-Tor never falls back to direct egress. The relay sees target URLs and reaches them
-from its own network. Origin HTTP remains no-follow; configured relays may follow
-redirects remotely. Requested and reported final destinations must satisfy the
-caller's public-destination policy, and every Curl-reported hop is checked.
-AGProxy/Horizon Pulse expose only a final URL: intermediate destinations remain
-unknown. Missing chain evidence does
-not exclude an adapter. This explicitly trusts remote redirect/public-destination
-policy and the relay's plaintext content, headers and status; our TLS verifies
-the relay, without establishing target TLS or content authenticity. A relay service
-endpoint is separate from the requested target. Never use this path for
-authenticated target requests. Adding a relay does not expose it as an MCP tool.
-
-Ordinary managed serving binds listeners before funding. Static fallback waits
-on existing eligible-payer notifications without allocating funds or consuming
-network attempts. Endpoints with `wait_for_catalogs = false` keep available tools
-callable during discovery. Paid warming opens the resolved relay wallets and the
-bootstrap group when bootstrap policy is enabled. Otherwise an explicit relay
-wallet keeps its selected authority. Warming denies new funding and starts no
-workers. Prepare the chosen payer before warming. `--direct` warming stays
-unsigned and bypasses the relay. Ordinary
-`config check` and catalog inspection never
-pay through the relay. Qualification rejects paid relay startup.
-
-Static paid fetches serialize per provider across wallets through decoding and
-publication. Waiter cancellation does not release accepted ownership or duplicate
-same-provider I/O. Shared state locking is brief, so cached results and independent
-providers remain available during another provider's exchange. Initial
-origin-to-relay delay precedes accepted relay ownership/provider gates;
-between-provider delays retain the logical call owner without a provider gate.
-This partitions existing serialization without adding a resource cap. Static aliases
-with the same wallet, catalog contract, authored provider position and
-target URL share their first process acquisition and outcome. A terminal decoded
-body-bound failure from that acquisition remains shared even if a later alias
-allows a larger body; changing the bound does not authorize a second fee. Reusing
-a successful cached response still checks the requesting alias's bound. Uncertain
-paid outcomes stay with that acquisition while later providers and unrelated
-targets remain eligible. There is no separate attempt counter or independent
-backoff. Strict inspection requires complete selected results; warming reports
-failed sources and compatible partial results, while ordinary serving can expose a
-failed catalog as unavailable. Successful cached results remain usable.
-
-Outer provider and decoded target bounds are separate allocations. JSON escaping
-or base64 can enlarge the envelope; raising only the target limit cannot enlarge
-the provider's `max_response_bytes`. Adapter external request limits are checked
-against actual encoded bytes before payment. A caller's larger accepted-response
-maximum alone does not make the request incompatible. Neither local size rejection
-permits another paid acquisition. Explicit vendor truncation is distinct from a
-local limit or a target's unsolicited partial-document response.
-
-Relay catalogs use the configured local catalog lifetime and the existing private cache, rejecting
-relay `Vary` metadata. Disk slots partition adapter/provider, authored position,
-payer, target URL and configured bounds, alongside ordinary
-HTTP-cache transport policy; their bound-specific keys differ from process outcome
-sharing. Relay-disabled inspection cannot reuse them. The outer relay's cache
-headers are ignored. Expired relay entries return to ordinary origin-first
-acquisition, without origin validator promotion or stale delivery. Warming scans all configured GET provider slots and reports
-`fresh_via_relay` for a fresh catalog; responses excluded by cache policy report
-`not_stored`. No live paid delivery or Tor qualification is implied by offline tests.
-
-Provider advertisements use explicit pricing configuration:
-
-```toml
-[pricing]
-source = "catalog"
-format = "payment-info"
-key = "x-payment-info" # optional; this format's default
-unit = "call" # reviewed default only when metadata omits its unit
-usd_as_usdc = true # explicit nominal USDC interpretation of reviewed USD tariffs
-```
-
-`payment-info` reads structured operation metadata; `x402` defaults to the
-`x-x402` operation member and also supports its dollar-prefixed `price` strings.
-`pricing_key` remains shorthand for catalog `payment-info` with that key, preserving
-legacy display behavior. A local `pricing` or `pricing_key` declaration replaces
-both inherited declarations as one setting; the `pricing` table replaces in full.
-Same-file declarations may coexist only when they select the same catalog
-payment-info member. Configuration inspection reports the winning fields' origins.
-
-A pricing source can instead be an explicitly configured HTTPS URL with
-format `x402-resources` (a `resources` array) or `x402-discovery` (an `items` array).
-External formats use resource payment requirements and do not accept `key`.
-Both read x402 v2 exact Base USDC offers. Resource records require an explicit
-HTTP method; discovery items may omit it only when the original catalog identifies
-one matching operation, including methods hidden by tool filtering. Original operation
-URLs are parsed once and indexed by origin, query, method and literal path or
-a static template segment; literal/template overlaps remain ambiguous. Bulk
-inventory and matching run off the async runtime workers.
-Operator-configured pricing URLs follow catalog destination rules; dynamic source
-management retains its existing public-destination restrictions.
-There is no automatic well-known lookup. External acquisition starts for serving sources, including runtime registrations;
-inspection and qualification catalog loads start no optional pricing requests.
-Pricing completion is not a readiness condition for tool publication or invocation.
-During deployment acquisition, its active Tor response shares the catalog
-isolation capacity: matching SOCKS credentials share one slot, while a distinct
-scope may wait for capacity held by other catalog or pricing work. Already
-published tools remain usable. Direct acquisition bypasses that capacity; there
-is no additional pricing gate or deadline.
-It uses the source catalog's retry policy and configured paid relay fallbacks,
-with the same payer authority and payment limits. Source refreshes also refresh
-the configured pricing document; a newly downloaded or revalidated catalog forces
-that document to download again, including unchanged bytes or HTTP 304. Reusing a
-cached catalog may reuse cached pricing data. Advertisements inherit the parent
-catalog's acquisition expiry; reading pricing data does not renew it.
-Stopped-server maintenance refreshes save accepted catalog bytes; external runtime
-enrichment starts when those sources are next loaded. It does not buy transient
-pricing data for a source with no running tools.
-
-Normalized advertisements preserve unknown, explicit free/zero, fixed,
-dynamic/range and unsupported tariffs. Selection estimates require exact
-nonnegative per-call USDC amounts with at most six decimal places. The optional
-`unit` default accepts `call` or `request`; explicit vendor units, including
-unsupported or malformed units, take precedence. Legacy display's `/call` default
-does not itself establish a selection unit. USD amounts require the provider's
-explicit `usd_as_usdc` opt-in to nominal one-dollar/one-USDC ranking; generic
-x402 metadata alone does not establish that interpretation. This does not claim
-live settlement verification. Unsupported explicit
-assets or networks do not become USDC hints. Atomic payment alternatives require
-Base mainnet's USDC contract and six-decimal units; compatible alternatives are
-chosen individually rather than summed. Metered, credit, dynamic and ambiguous
-tariffs remain display-only. Explicit `min`/`max` fields keep a tariff display-only
-even alongside an `amount` or payment alternative; incomplete or malformed ranges
-retain vendor details rather than becoming fixed estimates. Authored prose and
-credit conversion never become monetary inputs.
-
-The normalized amount is advisory: valid observed offers take precedence, then
-fresh advertisements, then unknown-price selection. Each invocation still obtains
-and validates its own challenge. Advertised metadata is separate from the observed
-price cache, so a local catalog can supply its first hint without a cache row or
-previous API request. Remote advertisements share the acquired catalog lifetime
-(indefinite by default), including configured external hint documents. A new
-catalog acquisition forces its external hints to download again; unrelated reads
-do not renew their expiry. Storage success is not a prerequisite. Loading a replacement source creates new
-advertisement handles.
-
-Pricing suffixes use compact provenance labels:
-
-- `Cost: ~$0.015/call [spec].` or `Cost: ~$0.01–$0.20/call [spec].`
-- `Cost: free [spec].` or `Cost: unknown.`
-
-An explicit vendor `unit` is preserved instead of `/call`. Dynamic fixed estimates
-use `[spec, dynamic]`; unrecognized vendor pricing structures retain their details
-with `[spec]`. Unknown assets retain their denomination and network information.
-Dollar amounts elsewhere in prose do not suppress the suffix: only an identical
-suffix already at the end is omitted.
-
-Providers with structured credit tariffs can opt into display conversion:
-
-```toml
-pricing_key = "x-socialfetch-credits-pricing" # preserve original billing prose
-[credit_pricing]
-credit_cost_key = "x-socialfetch-pricing"
-usdc_per_credit = "0.014"
-```
-
-The decimal rate must be positive, with at most six decimal places. Conversion uses
-exact integer arithmetic and changes descriptions only, never payment challenges,
-spending caps or signing. The supported version-1 metadata describes `baseCredits`,
-`maxCredits`, `normalizationFailureCredits`, `surcharges`, optional URL batches and
-per-returned-record metering. Conditional surcharge amounts are shown as upper
-bounds, since the metadata may describe a maximum across multiple assets.
-The `includes` surcharge condition names a value in a query parameter's array.
-Optional `billableDomainErrors` entries name an error `code`, `httpStatus` and
-`credits`; estimates show each error's charge separately from successful-request
-costs. Error charges cannot exceed `maxCredits`.
-Recognized `x402ExactPolicy` hints (`always`, `fixed_price_only`) leave credit
-estimates unchanged; payment negotiation still uses the actual challenge.
-The canonical fallback retains original credit prose alongside the estimate.
-A live observed offer replaces that entire generated pricing section. Missing, malformed or unknown
-metadata retains that prose and the configured rate, explicitly marks the per-call
-estimate unavailable, and logs one WARN summary per catalog build. The summary
-identifies the provider prefix, configured metadata key, affected-operation count
-and failure-category counts. Only tools retained by the provider's final name
-filters count. DEBUG diagnostics identify each affected tool and method with a
-fixed reason; raw tariff metadata and parser error text are never logged. Separate
-source builds or catalog reloads each report their own summary. Payment limits are
-unchanged.
-
-SocialFetch enables this using the historical 0.014 USDC/credit estimate; it is not
-a verified current x402 tariff. The fallback names the configured rate and
-states that the payment challenge is authoritative. Source instruction overrides
-and tag filtering (including `comprehensive.toml`) preserve these fallback estimates.
-An explicit tool description override still replaces the generated description.
-
-MCP server instructions preserve authored guidance and include this caveat once:
-
-> Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.
-
-Fresh MCP tool definitions and tool-search results replace generated pricing with
-`Observed cost: ~$0.005/call.` when a matching validated managed offer remains in
-the runtime cache. Amounts use exact decimal USDC; no units are inferred from
-vendor tariffs. Expiry restores the complete fallback. No notification or client
-cache refresh is promised. Canonical search text, catalog generation, cursors,
-CLI inspection and persisted definitions retain the fallback.
-
-Authored description overrides apply last. A description-only override remains
-opaque: observations append to it. Separate an authored current-call tariff when
-it should be replaced, including a claim that the call is free:
-
-```toml
-[overrides.example_search]
-description = "Search records. Billed per returned record; empty results are free."
-pricing_description = "Cost: ~$0.01/record [spec]."
-```
-
-`pricing_description` must be a string paired with a string `description`. The
-fallback joins both with one space even without `pricing_key`; the observed
-rendering uses the description plus one observed line. Preserve billing conditions,
-quotas, paid options and prices of other operations in the description. This
-explicit field does not parse arbitrary vendor prose. Runtime rendering metadata
-is not serialized; imported registrations rebuild it from their provider settings.
-
-Observed provider pricing shapes that the shared adapters do not yet consume are
-tracked with their affected providers in the
-[custom pricing adapters plan](plans/custom-pricing-adapters.md); a provider
-declaration alone does not establish an adapter.
-
-`max_description_chars` keeps its existing generated-fallback behavior, including
-its visible truncation marker. Authored override fallbacks retain their existing
-limit bypass. New observed renderings apply the configured limit to the complete
-base plus observed line and mark any truncation visibly.
-Display prices and runtime hints are informational: each paid invocation still
-obtains a fresh challenge and enforces its spend cap before signing.
-
-`treasury.max_sync_age_seconds` and `funding.base_max_block_age_seconds` were removed.
-Remove these keys even if their old values were zero. Balances are advisory; SDK
-input selection and protocol deadlines govern spending. Treasury discovery is
-requested at available-capability startup, explicit sync, enabled funding demand
-and validated pending source/shielding work. Successful treasury scans schedule the
-next recurring scan 60 seconds after completion; failures
-retain 90/180/300-second backoff. Successful source/provider observations use
-configured polling plus jitter, with independent failure backoff; Base acquisitions
-retain their 60-second completion floor. Idle treasury performs no balance polling.
-Health thresholds do not change these schedules or delay valid handoffs. See the
-[wallet observation policy](wallet-rotation.md#wallet-observation-policy).
+- **Origin sequence:** Origin runs once in direct mode, or `1 + tor_isolation_retries`
+  fresh Tor scopes, retrying eligible transport errors and HTTP `400`, `403`,
+  `408`, `429`, `500`, `502`, `503`, and `504` (honoring `Retry-After` on `429`
+  and `503`). Local policy, destination, and size rejections, unsolicited `206`
+  on complete catalogs, and other `4xx` responses are terminal and never
+  trigger paid fallback.
+- **Relay traversal:** After origin fails, each configured provider for that
+  method runs at most once (using the same Tor retry count for its unsigned
+  relay-service leg). Adapters skip requests whose method, body, or required
+  headers they cannot preserve before paying. A relay service failure,
+  malformed envelope, or relay-service `402` advances to the next provider even
+  after a possible charge; a decoded **target** `402` is terminal and never
+  signed. Any prior signed target attempt suppresses API relay fallback.
+- **Payer selection:** With `[wallet_bootstrap]`, metadata and directory relay
+  fees always use `bootstrap_group`, and API and raw relays use the call's
+  assigned group. Without `[wallet_bootstrap]`, runtime reads use the endpoint
+  or source wallet, and static sources use `relay_fallback.wallet`, an explicit
+  source wallet, or (for shared sources) the highest SHA-256 score of
+  `["discovery-wallet-v1", source_id, wallet_name]` (reported by `config show`
+  as `discovery_wallets`). Exclusion-only routed sources make no paid relay
+  calls.
+- **Serialization and caching:** Static paid fetches serialize per relay
+  provider across wallets while keeping shared state locks brief. Compatible
+  static aliases share one process acquisition and outcome. Relay catalogs use
+  the private disk cache (rejecting relayed `Vary` responses), partitioned by
+  adapter, position, payer, URL, and size bounds; expired entries return to
+  origin-first loading. Outer relay-envelope and decoded target size limits are
+  enforced separately.
+- **Trust boundary:** Every relay connection uses `src/network.rs` (Tor never
+  falls back to direct). The relay sees the target URL, headers, and plaintext
+  response and may follow redirects remotely (every reported final URL and Curl
+  hop is checked against the public-destination policy; AGProxy, Horizon Pulse,
+  and ReadFetch report only the final URL). Never enable `api_requests = true`
+  for authenticated or sensitive API payloads.
+- **Warming and inspection:** `serve` binds listeners before waiting on relay
+  payers; `catalog warm` (without `--direct`) opens resolved relay wallets
+  without starting funding; `config check`, `catalog tools`, and
+  `catalog warm --direct` never pay relays; qualification rejects paid relay
+  startup.
