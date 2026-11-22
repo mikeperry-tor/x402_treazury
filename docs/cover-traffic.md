@@ -1,67 +1,56 @@
 # Optional HTTP/2 cover traffic
 
-See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
-for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
+See
+[wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for the pooling, cover-state, and Tor isolation tradeoffs.
 
-Treazury can add bounded unsigned range reads and randomized request headers to
-operator-selected API calls. Cover defaults on in Tor mode for eligible configured
-sources and off in direct mode. Explicit profiles can add randomized request-header
-padding and tune concurrency and sampling distributions. This is a research vehicle
-for traffic-shape experiments, **not a demonstrated defense against traffic
-analysis**.
-It uses the same identity-bound network factory and reqwest pools as real calls.
-Pooling permits multiplexing but does not guarantee a shared physical connection.
-No production same-channel or resistance-to-traffic-analysis claim is made.
+`x402_treazury` can add bounded unsigned HTTP/2 range reads and optional
+randomized request-header padding to API calls. Cover defaults to **on** in Tor
+mode for eligible configured sources and **off** in direct mode. This is a
+research mechanism for traffic-shape experiments, **not a demonstrated defense
+against traffic analysis**. Cover shares `src/network.rs`'s identity-bound
+clients and connection pools, which permits HTTP/2 multiplexing without
+guaranteeing a shared physical connection.
 
 ## Enable and inspect
 
-`network.cover_traffic_enabled` overrides the mode-dependent default. Set it false
-for a global opt-out, or true to enable cover in direct mode. In a provider TOML
-file, set the top-level `cover_traffic_enabled = false` to disable both ranges and
-padding for that provider. A deployment source can set the same field beside
-`extends` to override an inherited provider policy. Provider true cannot override
-global false. `config show` shows the effective network switch and authored
-source overrides without opening secrets. Some bundled providers opt out for
-compatibility.
+`network.cover_traffic_enabled` overrides the mode-dependent default (`false`
+for a global opt-out, or `true` to enable cover in direct mode). Providers can
+set `cover_traffic_enabled = false` to opt out, and deployment sources can set
+`cover_traffic_enabled` beside `extends` to override a provider's setting
+(`true` still cannot override a global `false`). `config show` prints the
+effective network switch and source overrides offline.
 
-For authored static sources without a `[cover_traffic]` table, the default uses the
-same-origin HTTPS `help_url` (often `llms.txt`) first, with the same-origin
-catalog URL as fallback. If only the catalog qualifies as a candidate, it becomes
-the primary. This shared default applies to every bundled provider and authored
-static source without an explicit profile; provider opt-outs still apply. Local
-files, cross-origin documents, credentials and fragments are not candidates. When
-neither URL is suitable, startup logs `cover_no_same_origin_resource`, identifying
-HTTP/2 cover traffic, the API/catalog/help origins and each candidate's rejection
-reason (missing or non-absolute URL, non-HTTPS, credentials, fragment or origin
-mismatch). Diagnostics omit URL paths, queries, credentials and fragments. Set an
-explicit profile or disable cover for that provider; ordinary API calls retain
-their configured network policy. No `/llms.txt` path is guessed.
-Candidate selection does not prove range support: runtime qualification is still
-mandatory. Inspection/listing does not send cover requests. Agent-added sources
-remain outside automatic cover; remote document contents never authorize it.
+### Automatic resource selection
 
-[Operation URL extensions](configuration.md#operation-url-extensions) can route
-calls to another origin, while the source's cover profile remains bound to its
-configured `base_url` origin. Such calls emit a warning and continue without
-optional cover. Disable cover for sources whose operations span origins; a cover
-resource on the base origin cannot cover calls to another origin.
+For static sources without an explicit `[cover_traffic]` table, the default
+tries the same-origin HTTPS `help_url` (often `llms.txt`) first and falls back
+to the same-origin catalog URL (or uses the catalog URL as primary when it is
+the only match). Local files, cross-origin URLs, credentials, and fragments are
+skipped, and no `/llms.txt` path is guessed.
 
-The built-in range-only profile uses one stream, at most eight requests / 16 KiB
-per episode, a ten-second deadline, a 1 KiB qualification and a 16 MiB resource
-limit. Additional body targets follow bounded log-normal (median 8 KiB, sigma .65,
-4–16 KiB bounds), ranges are uniform 1–4 KiB, start delay 0–100 ms, Weibull gaps
-50–250 ms (scale 100, shape .8), and tail 1–3 seconds. Global limits also apply.
-Header padding requires an explicit profile with a provider-compatible header.
-Authored profiles replace the automatic profile; normal TOML composition applies.
+- If neither URL qualifies, startup logs `cover_no_same_origin_resource`
+  naming the API, catalog, and help origins and each rejection reason (without
+  paths, queries, credentials, or fragments). Configure an explicit profile or
+  disable cover for that provider.
+- Agent-added sources do not receive automatic cover.
+- If an [operation URL extension](configuration.md#operation-url-extensions)
+  routes a call to a different origin than `base_url`, cover logs a warning and
+  skips cover for that call (disable cover on multi-origin providers).
 
-Choose an explicit HTTPS static resource on the exact API origin. It must permit
-unsigned, identity-encoded single-range reads with exact 206 responses. Do not use
-paid endpoints, pricing probes or another origin. Header padding is independently
-optional; configure a provider-permitted ignored extension field. The example
-values below are engineering examples, not trace-fitted or privacy presets.
+The built-in range-only profile uses 1 stream, at most 8 requests and 16 KiB
+per episode, a 10-second deadline, a 1 KiB qualification probe, and a 16 MiB
+resource cap. Additional body targets follow log-normal (median 8 KiB, sigma
+0.65, bounds 4-16 KiB), ranges are uniform 1-4 KiB, start delay is uniform
+0-100 ms, request gaps are Weibull 50-250 ms (scale 100, shape 0.8), and tail
+is uniform 1-3 seconds. Header padding requires an explicit profile.
 
-The network and provider portions normally belong in separate files. Inline
-sources use `[sources.NAME.cover_traffic]` instead of `[cover_traffic]`.
+### Explicit profile configuration
+
+Choose a static HTTPS resource on the exact API origin that supports unsigned,
+identity-encoded single-range `206` reads (never a paid endpoint or pricing
+probe). The network and provider blocks normally live in separate files (inline
+sources use `[sources.NAME.cover_traffic]`):
 
 ```toml
 # Deployment network configuration
@@ -134,280 +123,146 @@ min_bytes = 32
 max_bytes = 1024
 ```
 
-`ranges_enabled` defaults true. Set it false for padding-only operation; at least
-one of ranges or padding must be configured. All fields validate even when the
-process switch is off. `volume_mode` accepts only `extra_body`: the sampled target
-is additional cover-reader body bytes, including qualification. Real response
-size does not drive this target. Header-value budgets are independent. PING,
-target-total-volume and flow-control pacing settings are not accepted.
+`ranges_enabled` defaults to `true` (set `false` for padding-only; at least one
+of ranges or padding must be configured). All fields validate even when cover
+is globally off. `volume_mode` accepts only `"extra_body"` (additional cover
+body bytes, including qualification, independent of response payload size and
+header padding). PING, total-volume targets, and flow-control pacing are not
+accepted.
 
 ### Distribution choices and sampling contract
 
-Network measurements do not support one universal packet-arrival or length law.
-[Paxson and Floyd](https://web.stanford.edu/class/cs244/papers/paxson1995.pdf)
-found exponential packet interarrivals missed burstiness in their measured traffic.
-An [interarrival-model study](https://ir.canterbury.ac.nz/bitstreams/681998f5-30a2-46e7-a006-20ac74c3d203/download)
-compares exponential, Weibull and log-normal candidates. These motivate flexible
-experiments, not a claim that a particular distribution reproduces current HTTPS.
+Network measurements do not support one universal arrival or length law
+([Paxson and Floyd](https://web.stanford.edu/class/cs244/papers/paxson1995.pdf),
+[interarrival study](https://ir.canterbury.ac.nz/bitstreams/681998f5-30a2-46e7-a006-20ac74c3d203/download),
+[CAIDA packet traces](https://www.caida.org/catalog/papers/1998_inet98/Inet98.pdf),
+[aggregate volume study](https://arxiv.org/abs/2007.10150)). Five independent
+distributions are supported for volume, range size, padding size, start delay,
+request gap, and tail using the workspace's `rand` 0.9 dependency (no extra
+statistics crate):
 
-Length measurements also depend on layer: historical
-[CAIDA packet traces](https://www.caida.org/catalog/papers/1998_inet98/Inet98.pdf)
-show several size peaks related to protocol overhead and MTU, whereas a
-[longitudinal study of aggregate traffic volumes](https://arxiv.org/abs/2007.10150)
-finds log-normal fits. Aggregate volumes are not individual packet or API response
-lengths. Use log-normal for skewed application-byte budgets and weighted discrete
-choices for multiple size modes; do not copy historical packet-size frequencies
-into a claimed modern HTTP/2/Tor profile.
-
-The implementation supports these five distributions for volume, range size, padding size,
-start delay, request gap and tail. Each site samples independently; no recursive
-mixture configuration or correlation model is included.
-
-| Config name | Parameters beyond explicit min/max | Intended use | Sampling route |
+| Config name | Extra parameters | Intended use | Sampling method |
 | --- | --- | --- | --- |
-| `uniform` | None | Baseline/control; bounded sizes or jitter | Integer uniform from `rand` |
-| `exponential` | Positive `mean_ms` or `mean_bytes` | Memoryless timing baseline; skewed sizes if requested | Closed-form inverse CDF; `rand_distr::Exp` also exists |
-| `weibull` | Positive `scale_ms` or `scale_bytes`, positive dimensionless `shape` | Flexible gap shape; shape 1 equals exponential, below 1 favors short gaps with a longer tail | Closed-form inverse CDF; `rand_distr::Weibull` also exists |
-| `log_normal` | Positive `median_ms` or `median_bytes`, positive dimensionless log-space `sigma` | Skewed volume/header/range budgets and optional long-tailed delays | Closed-form Box–Muller normal, `exp(ln(median) + sigma*z)`, plus bounded rejection |
-| `weighted_discrete` | `values_ms` or `values_bytes`, matching positive integer `weights` | Explicit multiple size peaks or a small empirical timing histogram | Integer cumulative weights; `rand::distr::weighted::WeightedIndex` is also available |
+| `uniform` | None | Baseline, bounded sizes, or fixed values (`min == max`) | Integer uniform |
+| `exponential` | Positive `mean_ms` or `mean_bytes` | Memoryless timing baseline | Closed-form inverse CDF |
+| `weibull` | Positive `scale_ms` or `scale_bytes`, positive `shape` | Flexible gap shapes (`shape == 1` is exponential; `< 1` favors short gaps with a longer tail) | Closed-form inverse CDF |
+| `log_normal` | Positive `median_ms` or `median_bytes`, positive `sigma` | Skewed byte budgets and long-tailed delays | Box-Muller normal plus bounded rejection (max 128 tries) |
+| `weighted_discrete` | `values_ms` or `values_bytes` (1-32 distinct values), matching positive integer `weights` | Multiple explicit size peaks or empirical timing histograms | Integer cumulative weights |
 
-The [Rust distributions library](https://docs.rs/rand_distr/latest/rand_distr/)
-provides Exp, Weibull and LogNormal; [WeightedIndex](https://docs.rs/rand/latest/rand/distr/weighted/struct.WeightedIndex.html)
-provides categorical sampling. The implementation uses the already-resolved `rand` 0.9 dependency,
-closed-form transforms and integer cumulative-weight sampling, avoiding an
-additional statistics dependency. Box–Muller consumes two independent open-unit
-uniform draws for each standard normal, without cached cross-owner samples. Constructor parameters are
-those of the untruncated parent law: `mean` and `median` are not promises about the
-bounded, rounded output. Proposed example settings are engineering examples, not
-trace-fitted defaults or privacy claims.
+Sampling rules:
 
-Use explicit inclusive integer bounds L..H at every sampling site. Uniform samples
-integers directly. For continuous laws, sample conditionally on [L, H+1), then
-floor once to bytes or milliseconds; test this exact quantization contract. For
-exponential/Weibull use conditional inverse-CDF sampling without a rejection loop:
-for U uniform in (0,1), let a=(L/scale)^shape, b=((H+1)/scale)^shape and
-`t = a - ln(1 - U * (1 - exp(-(b-a))))`; return `scale * t^(1/shape)`
-before flooring. Exponential is shape=1, scale=mean. Use `expm1`/`ln_1p` and
-validate finite, distinguishable transformed bounds; reject numerically unsupported
-parameters rather than silently switching distributions or clipping.
+- **Bounds and rounding:** Every site uses explicit inclusive integer bounds
+  `L..=H` (continuous laws sample conditionally on `[L, H+1)` and floor once;
+  equal continuous bounds are rejected in favor of `uniform`). Timing and
+  padding may be zero (zero padding omits the header); body budgets and range
+  sizes must be positive.
+- **Exact transforms:** Exponential and Weibull compute `a = (L/scale)^shape`,
+  `b = ((H+1)/scale)^shape`, `t = a - ln(1 - U * (1 - exp(-(b - a))))`, and
+  `scale * t^(1/shape)` using `expm1` and `ln_1p`, rejecting numerically
+  indistinguishable bounds rather than clipping. Log-normal rejects up to 128
+  draws; exhaustion disables that optional work with `sampling_exhausted`
+  rather than clamping endpoints.
+- **Admission capping:** Remaining resource or budget capacity may shorten a
+  requested range size (recording sampled vs. dispatched bytes and limiting
+  reason); padding whose draw exceeds capacity is skipped whole rather than
+  clipped. Production sampling uses an OS-seeded RNG with no persisted seed or
+  cross-wallet sample cache.
 
-For log-normal, accept only draws inside [L,H+1), with at most 128 attempts per
-sample. Exhaustion disables the affected optional work with an explicit
-`sampling_exhausted` reason; never substitute a clamped value or retry forever.
-Narrow or extreme truncation can be inefficient: document this and test both normal
-profiles and exhaustion. A reviewed inverse-normal implementation can replace this
-later without changing the conditional distribution contract. Accepted samples
-must not accumulate artificial endpoint mass from clamping unbounded draws.
+## Identity, scheduling, and payment safety
 
-For weighted discrete, permit 1..32 distinct values, all within declared bounds,
-and checked positive integer weights/sum. No continuous rounding applies. Reject
-oversized lists explicitly; do not truncate. Uniform equal bounds provide a fixed
-value for deterministic profiles. Reject equal continuous bounds (use uniform),
-unknown/inapplicable parameters, non-finite values, overflow and unsupported float
-precision (H+1 must be exactly representable). Timing and header padding may be zero;
-body budgets and range sizes must be positive. A zero padding draw omits the field.
+Cover owners are keyed by Tokio runtime, canonical EVM or discovery identity,
+effective Tor isolation scope (`Owner::from_transport`), exact origin,
+transport policy, read-inactivity timeout, and public-destination policy.
 
-Requested range size may be shortened by remaining resource/budget capacity, with
-sampled versus dispatched bytes and an explicit limiting reason in evidence. This
-is admission adjustment, not a new sample from the configured distribution. For
-padding, skip the whole optional field when its sample does not fit; never clip it
-silently or block the real call. Global/episode caps always take precedence.
-
-
-Production sampling uses an OS-seeded RNG, with no persisted seed or cross-wallet
-sample cache. Deterministic seeds belong only to fixtures.
-
-## Identity, scheduling and payment safety
-
-Owners are keyed by runtime, canonical EVM/discovery identity, effective isolation
-scope (`Owner::from_transport`), exact origin, transport policy, effective timeout
-and public-destination policy. Conflicting settings for one owner fail validation.
-Calls sharing an owner attach to one bounded episode; additional calls do not
-extend its deadline or restart its volume budget. A real call arriving before
-tail expiry clears that tail; once expired, the tail remains expired through
-attachments and their cleanup, so a finished scheduler cannot be revived. Different effective scopes for
-the same canonical identity and origin cannot merge sessions or reuse
-qualification/negative capability; after transport record replacement or eviction,
-retained old sessions finish on their original client while new acquisitions attach
-only to their matching scope. When an unsigned API attempt in Tor mode fails with
-an eligible retry status (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`), the caller drops that
-response and releases its cover lease before trying a fresh candidate scope, so
-the failed scope's session drains without closing active streams or resetting
-other origins, and the new scope qualifies independently (which can add cover
-qualification requests beyond the API attempt count). Cover-only range success
-never promotes an API transport record. A rotation creates a new identity/pool.
-Old in-flight calls retain their original identity. Shared wallet bindings may
-share episodes across listeners when they share the same effective scope.
-
-Every real physical request takes priority: outstanding cover streams are canceled
-and their local cleanup is awaited before dispatch. Cover stays paused through
-challenge/sign/retry until final response headers, then may overlap body download
-and the sampled successful-call tail. Thus cover does not run throughout the
-entire paid handshake. A completed resource refusal remains unavailable while that owner's cache entry
-is retained. Local cancellation and optional episode/tail deadlines do not prove
-resource incompatibility: after range cleanup, interrupted qualification becomes
-unknown and successful qualification remains available. A paused episode may
-qualify again after real response headers, within its original request/body/deadline
-and process budgets. An expired episode leaves unknown capability eligible for a
-later episode. Completed response facts are applied during cleanup even when the
-scheduler reaches its deadline first. Repeated calls do not retry retained resource
-refusals; ordinary eviction of a fully inactive entry forgets them.
-
-Cover never signs, retries a signed request, obtains an allowance, promotes a
-wallet or triggers funding. Static and managed calls retain ordinary financial
-admission and receipt handling. Optional failures are advisory; a real API error
-still follows the normal payment/output path. A rejected padded payment is never
-replayed without padding. Shutdown stops optional cover tasks before draining
-accepted financial work through the retained application owner. Cover cleanup
-cannot abandon payment work; the final aggregate stderr report follows that drain.
-
-An unsigned payer handoff ends the original attempt's cover call and binds the
-replacement attempt to the replacement wallet's owner. It preserves the existing
-identity/origin/transport isolation keys; it does not carry a challenge or cover
-capability across wallets. Each physical request still applies real-call priority
-and cover accounting. See [managed request ownership](network-egress.md) and the
-[one-handoff admission contract](wallet-rotation.md#capacity-and-admission).
-
-Shared connections can still fail or experience resource contention. Optional
-error handling does not guarantee real-call availability. A three-call Tor
-experiment observed one API broken pipe; its cause remains unresolved. Cover can be disabled globally or per provider, and this failure is retained in
-the qualification evidence.
+- **Episode lifecycle:** Calls sharing an owner attach to one bounded episode
+  without extending its deadline or resetting its volume budget. A new API call
+  arriving before tail expiry cancels the tail; once expired, the episode
+  cannot be revived. Different isolation scopes for the same wallet and origin
+  keep separate owners and qualification state.
+- **Tor scope retries:** When an unsigned API call retries on a fresh Tor scope
+  after an eligible status (`400`, `403`, `408`, `429`, `500`, `502`, `503`,
+  `504`), it releases the failed scope's cover lease and qualifies the new
+  scope independently. Cover range success never promotes an API transport
+  record.
+- **API-call priority:** Before every physical API request, outstanding cover
+  streams are canceled and cleaned up. Cover stays paused through challenge,
+  signing, and retry until final response headers arrive, then may overlap
+  body download and the post-response tail.
+- **Payment isolation:** Cover never signs, retries signed calls, obtains
+  allowances, promotes wallets, or triggers funding. Padded payment failures
+  are never replayed without padding. An unsigned payer handoff ends the first
+  wallet's cover call and binds the replacement wallet's owner. Shutdown stops
+  cover tasks before draining accepted financial work.
+- **Shared-connection caveat:** Shared connections can still experience
+  contention or transport faults (a three-call Tor experiment observed one
+  unresolved API broken pipe). Disable cover globally or per provider if a
+  provider reacts poorly.
 
 ## Qualification and refusal
 
-The first range request is a budgeted qualification beginning at byte zero (the
-default requests `bytes=0-1023`). Starting at zero does not ask for the entire
-file: it is an ordinary bounded [HTTP byte range](https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2).
-An arbitrary nonzero qualification offset could exclude short resources before
-their size is known. Once qualified, subsequent ranges choose random offsets
-within the observed resource length. Require HTTP/2, status 206,
-exact Content-Range, a finite resource size, a matching declared length when
-present, identity encoding and an exact bounded body. Subsequent reads preserve
-resource size and any observed validator. Redirects, authentication/payment
-challenges, ignored ranges (200), rate limits, compression, malformed ranges,
-changed validators, overflows and early EOF refuse the resource. Local episode
-and tail deadlines end optional work without refusing the resource. An
-optional `fallback_url` is tried at most once after completed initial qualification
-failure, within the same episode/global budgets. Rate limits, HTTP/2 unavailability,
-deadlines and cancellation do not trigger fallback. Success pins that resource for
-the retained owner's lifetime; failure of both candidates disables ranges while
-that cache entry remains retained. Failure after a
-successful qualification does not switch resources. There is no full-download
-fallback, periodic requalification, paid retry or cross-origin redirect. Logs retain the primary refusal and `cover_fallback_selected`.
+The first range request is a budgeted qualification starting at byte 0
+(default `bytes=0-1023`, a bounded
+[HTTP byte range](https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2)).
+Subsequent ranges pick random offsets within the observed resource length.
+
+- **Acceptance criteria:** Requires HTTP/2, status `206`, exact `Content-Range`,
+  finite size within `max_resource_bytes`, matching `Content-Length` if
+  present, identity encoding, and exact body length. Subsequent reads require
+  the same size and validator.
+- **Refusal and fallback:** Status `200` (`cover_range_ignored`, body not
+  downloaded), redirects, `401`, `402`, `403`, `429`, compression, malformed
+  ranges, changed validators, and early EOF refuse the resource while the owner
+  stays cached. `fallback_url` is tried at most once after initial
+  qualification fails (not on rate limits, HTTP/2 unavailability, deadlines, or
+  cancellation), logging `cover_fallback_selected`. Local episode deadlines and
+  cancellation stop optional work and return an unfinished qualification to
+  unknown rather than caching a refusal.
+- **Header padding:** Uses random visible ASCII, protected-name checks, a
+  separate header-list budget, and never-indexed HPACK fields (no header
+  contents logged). Header rejection disables further padding independently of
+  ranges. When `allow_http1` is set, padding is skipped because the transport
+  cannot conditionally add it after ALPN.
 
 ### Cover diagnostics
 
-Range outcomes identify listener/source, an ephemeral episode ID, primary or
-fallback resource, qualification versus ordinary range, requested offset/length,
-HTTP status/version when received, declared body length, observed bytes, stage
-and elapsed time. They never include resource URLs, raw headers, validators,
-padding contents, payment identities or upstream prose. A 200 response is
-`cover_range_ignored`; its full body is not downloaded. A longer resource alone
-does not establish range support.
+Range and episode events record listener, source, ephemeral episode ID,
+primary vs. fallback resource, requested offset and length, HTTP status and
+version, observed bytes, stage, and elapsed time (never URLs, raw headers,
+validators, padding contents, payment identities, or upstream prose).
 
-Choose severity using the [logging policy](development.md#log-severity).
-Optional cover degradation alone does not fail an agent operation. A fresh
-failure applied as retained unavailability, or fallback selection, uses INFO
-when it explains meaningful user-visible degradation; otherwise it is DEBUG.
-The primary failure remains in the preceding range outcome with the same episode
-ID. `automatic_requalification=true` describes unknown capability eligible for a
-later authorized episode; it does not schedule autonomous periodic probes or
-override shutdown. Cached refusal is DEBUG with `fresh_attempt=false`; repeated calls do not
-imply repeated HTTP probes. Completed attempt facts are also DEBUG before the
-scheduler consumes their result, so an episode-deadline race cannot erase an
-observed timeout. Local cancellation reports its own DEBUG event and observed
-byte count without claiming an HTTP response was received.
-
-Episode summaries include sampled versus received bytes, request count, elapsed
-time, effective deadline kind (tail or episode), whether it expired, any explicit
-stop reason and the actual final capability/retained failure. An ordinary
-`cover_budget_unspent` shortfall is DEBUG; it is neither a wallet-funding failure
-nor proof that the resource is unusable. If cleanup cancels unfinished qualification, the summary records unknown
-capability without a retained failure. Previously available capability remains
-available at the same deadline. Summaries for already
-cached unavailability are DEBUG. Unexpected task or sampling failures and actual
-process-budget refusals retain explicit reasons and applicable limits; their
-severity follows the affected operation's outcome: concrete process-budget
-refusals use WARN, while optional task/sampling failures use INFO. The aggregate `cover_episode_limit` reservation result
-can represent ordinary target, deadline or scheduling completion. Normal budget
-completion, an authorized episode request-count completion, and an available
-resource's deadline shortfall belong at DEBUG. Capacity-driven owner eviction
-logs DEBUG with the owner limit, without logging owner identities. Summaries
-retain the configured episode/process limit fields alongside actual usage,
-including stream and accounting-history bounds. These observations do not change
-retry, cache lifetime, fallback or budget policy.
-
-Header values use random visible ASCII, protected-name/collision checks and a
-separate conservative header-list budget. Sensitive/never-indexed HPACK fields
-avoid dynamic table reuse; Huffman coding still affects encoded length. No header
-contents are logged. Header rejection disables later padding independently of
-ranges. When `allow_http1` is set, padding is conservatively skipped because the
-transport cannot conditionally insert it after ALPN. HTTP/1 real calls still work;
-HTTP/1 range responses are unavailable cover.
+| Event | Log level |
+| --- | --- |
+| Process-wide concurrency or budget refusal | `WARN` |
+| Fresh resource refusal, fallback selection, or optional task or sampling failure | `INFO` |
+| Completed episodes, `cover_budget_unspent`, cached refusals (`fresh_attempt=false`), local cancellation, and owner LRU eviction | `DEBUG` |
 
 ## Bounds and evidence
 
-Global limits default to eight active episodes, six streams, 64 requests and 4 MiB
-cover body per 60 seconds, 64 KiB header values per window, and 1024 retained owners.
-Source concurrency is 1–3. Source request/body/header/deadline/resource bounds also
-apply. Dispatched requests stay charged on failure; in-flight reservations do not
-expire. Completed budget entries remain charged for a full window after completion,
-a conservative rolling limit. Budget/history/owner exhaustion is an explicit
-refusal, never permission to drop accounting or queue real calls indefinitely.
-Preemption and shutdown await local range cleanup. Partially received body bytes
-remain charged when that cleanup releases the unused reservation; cancellation
-cannot turn an incomplete qualification into success.
+Global limits default to 8 active episodes, 6 active streams, 64 requests and
+4 MiB of cover body per 60-second rolling window, 64 KiB of header padding
+values per window, and 1,024 retained owners (source `concurrency` is `1..=3`).
 
-At the owner bound, insertion reclaims the least-recently-used fully inactive
-entry. Reclamation requires an exhausted episode, zero real calls and streams,
-and completed session ownership: task callbacks and cancellation cleanup must
-have released their session handles. Zero counters alone are insufficient. An
-expired episode is not replaced while its old cleanup still owns the session.
-If every owner remains active or draining, optional cover reports unavailability;
-real financial work keeps its existing ownership.
-
-Retained entries preserve capability, chosen fallback and padding rejection
-state. Ordinary eviction forgets completed positive and negative results and the
-used fallback. Recreation starts ordinary bounded qualification; entries are
-never evicted solely to retry a failed qualification. There is no negative-cache
-tombstone registry, suppression timer or periodic collector. Eviction never
-resets process request/byte accounting or an active episode's budgets. Additional
-unsigned qualification after recreation remains charged to those same limits.
-
-Byte counts describe application-reader bytes and uncompressed header values,
-not encrypted wire traffic. Buffered TCP/TLS/Tor bytes can exceed the requested
-range before cancellation. Observed overrun chunks remain accounted. Admission
-adjustments, sampling exhaustion and failures emit structured reasons and applicable
-limits to stderr, attributed to the selected listener/source bindings. Cover diagnostics
-do not add MCP tools or advisories to API results. Disabled mode adds no randomness,
-probes or background tasks.
-
-Clean shutdown emits one stderr `TREAZURY_COVER_REPORT` JSON line with aggregate
-operator counters: episodes, range requests/outcomes, observed cover body bytes,
-qualified ranges, dispatched padding counts/value bytes and stream high-water mark.
-Production connection affinity is explicitly unobserved. Incomplete shutdown or
-truncated output cannot qualify a runner result; counters are not durable billing.
+- **Conservative accounting:** Dispatched requests stay charged on failure,
+  in-flight reservations never expire, partially received bytes remain charged
+  on cancellation, and completed entries stay charged for a full window.
+  Exhausting a limit refuses optional cover without delaying API calls.
+- **Owner reclamation:** At the 1,024-owner cap, insertion evicts the
+  least-recently-used fully inactive owner (expired episode, zero active calls
+  and streams, and all cleanup handles released). Eviction drops cached
+  qualification state without resetting window budgets.
+- **Shutdown report:** Clean shutdown emits one stderr `TREAZURY_COVER_REPORT`
+  JSON line summarizing episodes, range outcomes, observed application-reader
+  body bytes, qualified ranges, dispatched padding bytes, and peak active
+  streams.
 
 ## Testing and follow-ups
 
-See [the integration runner](../tests/live/INTEGRATION.md) for the unsigned fixture
-and local distribution matrix. Local tests cover paid challenge/retry, managed
-promotion, SOCKS separation, actual h2 streams, HPACK, refusal/faults and cleanup.
-Injected paid-response faults use distinct payer transports so an earlier broken
-HTTP/2 connection cannot prevent the next fault's signed request from reaching
-the fixture. Stream-preemption checks retain their shared client. Each injected
-fault must observe exactly one signed request; an absent request is not replay
-evidence.
-Diagnostic cases retain capability transitions, request counts, no paid replay,
-cleanup races and scoped severity/privacy. They avoid complete message or field
-inventories; pure severity classification does not need repeated cached-capability
-setups when that state cannot change the classification.
-Real-Tor unsigned discovery qualification is distinct from funded EVM/rotation
-qualification. More noise or variance alone does not demonstrate less inference.
+Local tests cover paid challenge and retry flows, managed promotion, SOCKS
+separation, HTTP/2 streams, HPACK, fault injection (using distinct payer
+injected fault), preemption, refusal, and cleanup. Production cleanup has no
+cutoff wait (the 3-second wait in `wait_experiment_idle` is test-only).
 
-See [qualification scope](testing.md#qualification-status) for the distinction
-between unsigned Tor observations and combined paid qualification.
-Live padding and funded rotations under cover remain unqualified.
-
-See [deferred cover work](plans/deferred/http2_cover_traffic.md) for connection-owned
-PING, total-volume targets, pacing and privacy measurements.
+See [qualification status](testing.md#qualification-status) for current Tor
+coverage (live padding and funded rotations under cover remain unqualified) and
+[deferred cover work](plans/deferred/http2_cover_traffic.md) for future PING,
+total-volume, and pacing experiments.

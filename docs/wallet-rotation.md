@@ -1,1692 +1,534 @@
 # Zcash treasury and managed wallet rotation
 
-See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
-for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
+See
+[wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for pooling, cover-state, and Tor isolation tradeoffs, and
+[wallet CLI](wallet-cli.md#treasury-and-managed-pools) for commands, backups,
+Base RPC setup, and JSON schemas.
 
-A single embedded Zcash treasury funds named virtual EVM wallets on Base. Each
-virtual wallet is a durable pool with its own keys, balance reservations, payment
-cap, active and retained wallets, and exact small/optional-large reserve claims. Names determine sharing across sources and MCP
-listeners; they are not interchangeable labels for one global payer.
-
-Use the [wallet CLI reference](wallet-cli.md#treasury-and-managed-pools) for TOML,
-initialization, receive addresses, status, backup and recovery commands. The
-[public demo runbook](public-swap-demo.md) supplies bounded operator examples.
-This document explains the implementation and its invariants, not permission to
-execute a funded test.
+One embedded Zcash treasury funds named Base USDC wallet groups (pools). Each
+group owns separate EVM keys, payment caps, active and retained wallets, and
+small (plus optional large) reserve claims. Group names control payer sharing
+across sources and listeners.
 
 ## Binding and ownership
 
-`rotation/assignment.rs` resolves explicit source wallets before listener defaults,
-then expands optional managed-wallet templates for unassigned bindings. Automatic
-scopes are deployment, server, source or binding. Generated names are stable
-within treasury state; changing a template's settings does not change existing
-pool identity. Changing names or sharing scope can allocate different pools.
-`config show` exposes these effective bindings without opening wallet state.
+- **Assignment:** `rotation/assignment.rs` resolves explicit source wallets,
+  then listener defaults, then optional `[wallet_templates]` and
+  `[wallet_assignment]` scopes (`deployment`, `server`, `source`, `binding`).
+  Generated names stay stable within a treasury across template edits; changing
+  names or scope creates new groups and disables absent ones while retaining
+  their keys, balances, and pending work.
+- **Stable group UUIDs:** EVM keys and financial records bind to internal
+  group UUIDs, not lookup names. [`wallet rename`](wallet-cli.md#rename-a-managed-wallet-group)
+  updates only the name under exclusive ownership; [`wallet preview`](wallet-cli.md#preview-configuration-against-saved-groups)
+  compares config against public metadata without unlocking keys. Dynamic
+  provider registration shares its listener's explicit wallet and never creates
+  pools.
+- **Exclusive process ownership:** One process owns `state_dir` exclusively. A
+  serialized treasury actor (`src/treasury/actor.rs`) owns Zingolib sync,
+  preparation, and submission; a dedicated Store worker owns SQLite operations.
+  Database transactions never span remote calls. Accepted actor and Store work
+  survives caller cancellation. Encrypted wallet snapshots and outgoing
+  operations commit atomically with snapshot-revision compare-and-swap (never
+  bypassing this owner with plaintext SDK saves or quick-send helpers).
 
-`deployment.rs` initializes the selected static payers and all declared managed
-pools. Removing a profile disables its pool while retaining keys, balances and
-work. Agent source registration uses an already configured named profile and
-cannot create a new pool or choose arbitrary signing credentials.
+### Wallet grouping, rotation, and linkability
 
-Saved group names resolve stable UUIDs; EVM key authentication and financial
-relationships bind those UUIDs rather than lookup names. The offline
-[`wallet rename`](wallet-cli.md#rename-a-managed-wallet-group) command changes only
-the name under exclusive authenticated store ownership. Disabled and pending-work
-groups remain valid rename sources, and occupied destinations are rejected.
-Configured policy applies on restart; rename itself grants no allocation or funding.
-[`wallet preview`](wallet-cli.md#preview-configuration-against-saved-groups) compares
-pure validated assignments with one read-only public metadata snapshot, including
-while serving. It grants no authority and does not authenticate encrypted contents.
-With no managed profiles startup skips `configure_profiles`, preserving saved group
-enablement, although saved names still prevent static reuse. Direct-swap treasury
-opening remains governed separately.
+Group endpoints by what upstream providers can learn about the caller rather
+than by topic (for example, separating personal, health, and financial queries
+from anonymous general research).
 
-### Wallet grouping, rotation and linkability
-
-Pool names select payer identities, so grouping is a correlation boundary, not
-just an organizational label. Group endpoints by what the upstream can learn
-about the caller: general research reveals an anonymous researcher, personal
-and health requests can carry the caller's own identity, location, contacts or
-medical context, and financial requests carry money interests and crypto
-identities. Isolating health is justified by the sensitivity of medical context,
-not by tool similarity.
-
-Both mechanisms are bounded. Separate pools limit cross-topic payer correlation.
-Funding-tranche rotation limits temporal linkage between calls that use
-different wallets, and smaller nominal reserves create more rotation
-opportunities. Neither hides request content from the vendor on a given call.
-Transport isolation is keyed by payer identity and destination, so the same
-provider reached through different wallets uses separate connections and Tor
-circuits; the vendor can still correlate calls by content or timing within what
-it observes.
-
-Funding uses isolated Tor circuits and a unique shielded refund receiver per
-swap, so its residual correlation is limited to funding time and size against
-the overall volume of ZEC-to-Base USDC swaps; that correlation risk is highest
-during the coordinated consecutive funding of the first USDC wallets, but it
-reduces significantly as USDC wallets rotate independently from then on.
-
-Wallet grouping is therefore a payer-identity control, not a replacement for Tor
-isolation, per-payer transport binding or request-content discipline. More pools
-add funding and rotation work without improving same-vendor content correlation.
-Image or OCR tools disclose the payload itself, which neither wallet grouping
-nor circuit isolation mitigates.
-
-Similarly, remote provider registration and raw URL calls use the endpoint's own
-wallet for those providers, not the wallet of a matching native endpoint (if one
-exists). Routing such calls to that endpoint's wallet is not yet implemented.
-
-A process owns the treasury state directory exclusively. A serialized treasury
-owner manages zingolib sync, preparation and submission; a bounded blocking store
-worker owns SQLite operations. Financial transactions do not hold a database
-transaction across remote calls. Accepted actor/store work survives cancellation
-of its caller. Independent EVM pools share source funds, not payment reservations.
-Encrypted wallet snapshots and outgoing operations commit atomically; snapshot
-revision compare-and-swap prevents stale saves. Do not use upstream plaintext
-wallet saves or SDK quick-send helpers to bypass this owner and journal path.
+- Separate groups prevent payer reuse across topics, and smaller reserve
+  targets create more rotation opportunities. Transport isolation keys
+  connections and Tor circuits by payer identity and destination.
+- Neither grouping nor Tor hides request payloads (such as images or OCR
+  inputs) or timing within a single wallet's calls. Funding uses isolated Tor
+  circuits and a unique shielded refund receiver per swap, leaving residual
+  correlation to swap timing and size against overall ZEC-to-Base-USDC volume
+  (highest during simultaneous initial funding and reduced as wallets rotate
+  independently).
+- Dynamic provider registrations and `raw_call` use their listener's wallet
+  rather than matching a curated endpoint's wallet.
 
 ## Direct receive ownership
 
-Opt-in [direct payment control](configuration.md#direct-swap-control) stores native
-ZEC requests and foreign invoices
-independently of managed Base wallets and initial funding claims. Its encrypted
-operation binds the authenticated listener, original caller request ID and terms,
-shielded receiver, exact provider quote, deposit address/memo and deadlines. A
-serialized SDK derivation commits its snapshot and receiver binding before quoting
-or disclosing instructions. Durable quote publication wakes its background owner from the Store, even when
-the foreground acknowledgment is lost. Its notification is separate from SDK scan
-demand, so provider observation cannot steal a treasury wakeup. Removing admission
-configuration or the listener retains accepted background observation; only the
-original authenticated owner can retrieve its status.
+Opt-in [direct swap control](configuration.md#direct-swap-control) stores
+native shielded ZEC requests and foreign-asset swap invoices independently of
+managed Base pools and funding claims.
 
-Foreign receives use `EXACT_INPUT`. Counterparty instructions require the exact
-source atomic amount in one deposit, network fees additional and any mandatory
-memo; under/excess payment can fail or refund. Never reuse a swap receive address.
-Another payment requires a new request ID and fresh quote/address; retrying an
-identical ID only retrieves the original operation, without executing its quote
-again. Native ZEC addresses may be reused; `address_reusable` distinguishes these
-instructions. The optional relative
-`refund_after_seconds` defaults to a two-hour application preference, independently
-of managed/send quote windows. It requests refund-start handling, not completion,
-and is not a claimed NEAR maximum. Native requests reject the provider-only field.
-
-Common create/retry/status presentation derives UTC-Z times and nonnegative
-countdowns from immutable saved terms, accompanied by current UTC time from the
-same clock. Requested refund start, returned deposit-address expiry and optional
-cold-address time have distinct meanings. Unknown times remain null; zero does
-not create a local terminal state, stop observation or authorize replacement.
-Concurrent duplicate acceptance returns one operation with its original deadline;
-a lost creation response grants no automatic replacement quote.
-
-Native requests have no provider quote or deadline. Each new request derives a
-fresh all-shielded UA through the same serialized SDK and snapshot transaction.
-Repeating native inputs resumes an address-less reservation or returns its
-original receiver; it never creates another address under the same request ID.
-SDK receipt evidence matches actual Ironwood note receivers,
-retains historical confirmed receipts after spending, and reports current snapshot
-spendability separately. Partial confirmed receipts remain pending; native scan
-demand ends when confirmed receipts reach the requested amount. Public status
-refreshes from already available newer SDK snapshots, including after completion,
-without forcing another scan. Older derived receipt publications cannot overwrite
-newer SDK revisions. A recorded reorg can restore the original invoice's incoming
-observation demand without creating a payment, allocation or outgoing authority. The receiver's
-amount does not authorize any treasury spend. No NEAR call or transparent-address
-RPC participates in native receiving. Status accepts the original kind/request ID
-when a response containing the operation UUID was lost.
-
-Provider status owns the swap outcome. SDK scanning owns received ZEC and current
-spendability, independently of optional receipt attribution. Disclosed unsettled
-receive requests request ordinary treasury scans at the shared 60-second completion-based cadence;
-a successful provider observation requests a subsequent completed scan without
-requiring numerical agreement or a particular attributed note. The initial SDK
-scan checkpoint records its existing snapshot revision; a post-success scan must
-start after the snapshot revision observed when SUCCESS was saved. Progress or
-completion of an already-running scan cannot satisfy that demand. Late delivery and
-under/excess deposits retain provider facts without creating local expiry outcomes.
-A corrupt direct-operation payload is isolated during pending/demand inventory;
-its original row and obligations remain retained, while valid sibling operations
-and the shared treasury owner continue. SQL/Store capability failures retain their
-existing scope. Direct lookup of an unreadable operation still fails explicitly.
-
-No receive operation spends ZEC, allocates a Base wallet, reopens a claim, or enables
-transparent-address discovery.
+- **Ownership and persistence:** Each encrypted record binds the authenticated
+  listener, caller `request_id` and terms, freshly derived shielded receiver,
+  exact provider quote, deposit address and memo, and deadlines. Address
+  derivation and snapshot persistence commit before quoting or disclosing
+  instructions. Removing `swap_control` or its listener preserves background
+  observation; only the original authenticated listener can inspect status.
+- **Native ZEC receives:** Derive a fresh Orchard-receiver-only Unified Address
+  (no NEAR calls, no deadline, no transparent-address RPCs). Addresses are
+  reusable (`address_reusable = true`), partial confirmed receipts accumulate
+  toward the requested amount, and scan demand ends when confirmed Ironwood
+  receipts reach the target. Public status refreshes from newer SDK snapshots
+  without forcing a scan; a reorg can reopen observation demand without
+  creating spending authority.
+- **Foreign receives (`EXACT_INPUT`):** Require the payer to send the exact
+  source atomic amount in one deposit plus network fees and any mandatory memo;
+  never reuse a foreign deposit address. Each new payment requires a new
+  `request_id` and fresh quote (`refund_after_seconds` defaults to 7,200
+  seconds as a refund-start preference). Retrying an identical `request_id`
+  returns the saved operation; conflicting terms fail.
+- **Status and observation:** Status returns `current_time_utc`, UTC-Z
+  timestamps, and nonnegative `seconds_until_*` countdowns (zero never creates
+  a local terminal state or authorizes replacement). Disclosed unsettled
+  receives request 60-second ZEC scans; a provider `SUCCESS` requests one
+  subsequent completed scan starting after the snapshot revision recorded with
+  `SUCCESS`. Corrupt direct-operation payloads isolate during inventory scans
+  while siblings continue (direct lookup fails explicitly). Receive operations
+  never spend ZEC, allocate Base wallets, or trigger transparent discovery.
 
 ### Direct send ownership
 
-Native shielded sends and foreign exact-output swaps use the same serialized
-treasury owner, accepted inputs, encrypted snapshots and signed-byte publication
-as managed funding. Each operation binds the authenticated listener, original
-request ID and exact destination terms. Native sends have no provider quote or
-deadline. Foreign sends retain the executable quote's exact principal, deposit
-address/memo, refund receiver and deadline before source preparation. The agent
-provides the requested destination amount; source pricing comes from the quote.
+Native shielded sends and foreign `EXACT_OUTPUT` swaps share the treasury's
+serialized actor, accepted-input ownership, encrypted snapshots, and
+signed-byte journal with managed funding.
 
-The optional listener `max_send_zec` preference bounds principal plus actual
-network fee only for direct sends. Omission or `"none"` is unlimited; zero denies
-new acceptance. The original total-debit authority is
-saved with acceptance, checked against the SDK proposal and actual calculated
-transaction, and retained through restart. Tightening configuration does not
-rewrite accepted authority. Managed funding and shielding do not inherit this
-preference. SDK spendability and shared accepted-input ownership remain the
-capital and concurrency authorities; no additional reserve ledger is created.
-
-Dry previews reserve no inputs or payment authority. Both routes expose configured
-limits and request an advisory SDK spendable Ironwood balance and ZIP317 fee
-through the existing treasury actor. The returned `fits` compares total debit with
-the lesser of known balance and the optional operator limit. Proposal insufficiency
-is false; missing observations otherwise remain unknown. No balance observation
-reserves funds or replaces SDK selection and accepted input ownership.
-The Ironwood-only unsigned proposal is discarded without storing a proposal,
-clearing accepted work, signing, writing a snapshot or reserving inputs. Missing
-spendable funds/scan data leave an explicit unavailable estimate while preserving
-limit reporting. Native estimates use the validated recipient; foreign estimates
-use a private standard transparent deposit-output shape, since the dry exact-output
-quote has no actual deposit address. Foreign preview uses an existing shielded
-refund receiver. Provider waits remain outside the SDK owner. Actual preparation
-rechecks fees and shared accepted-input ownership; advisory selection does not
-promise input availability.
-
-Source preparation/submission and provider observation retain independent facts
-and progress. Native completion follows the treasury transaction's blockchain
-state; depositing ZEC for a foreign swap does not prove delivery of the requested
-foreign output. Missing optional provider evidence does not invalidate a proven
-source result. Disconnection, capability or listener removal, and restart retain
-accepted work and its original transport identity. Recovery reuses the accepted
-transaction journal and original bytes under existing canonical rules; uncertain
-submission, expiry or refund never authorizes an automatic replacement swap or
-deposit. Status access remains scoped to the original authenticated listener.
+- **Spending cap (`max_send_zec`):** Optional per-send total debit (principal
+  plus SDK-calculated ZIP-317 network fee) saved with acceptance, verified
+  against the proposal and final transaction, and preserved across restarts
+  (omitted or `"none"` is unlimited; `"0"` denies new sends). Applies only to
+  direct sends, never managed funding.
+- **Non-executable previews (`swap_preview`):** Request advisory Ironwood
+  spendability and ZIP-317 fee via the treasury actor using an unsigned
+  proposal (for foreign sends, an internal transparent-output shape and an
+  existing shielded refund receiver), then discard the proposal without saving
+  snapshots or reserving inputs. `fits` compares total debit with the lesser of
+  known spendable balance and `max_send_zec`.
+- **Execution and recovery:** Native completion follows the Zcash transaction's
+  chain state; foreign sends track source confirmation and NEAR delivery
+  independently (depositing ZEC does not prove foreign delivery). Disconnects,
+  disablement, and restarts preserve accepted work and transport identity.
+  Uncertain submission, expiry, or refund never triggers an automatic
+  replacement send.
 
 ## Funding limits and fees
 
-The remaining controls are distinct; none imposes a separate ZEC network-fee or
-USD conversion-overhead ceiling:
+Each financial control protects a distinct boundary; there is no daily or
+cumulative ZEC or USDC allocation cap, per-transfer ZEC spending budget, or
+local USD conversion-overhead gate:
 
 | Control | Scope and purpose |
 | --- | --- |
-| `swap_control.max_send_zec` | Optional direct-tool payment plus actual fee ceiling; default unlimited. Accepted authority remains bound to that operation. |
-| Reserve targets and min/max amounts | Nominal USDC allocation size and bridge-minimum headroom; defaults $2-3 small, optional $10-25 large. Not a ZEC budget or cap on beneficial output. |
-| `max_api_payment_usdc` | Per-x402-payment USDC authority, independent of ZEC funding. Managed profiles require an explicit setting; static default is $1. `none`/`off` means unlimited. |
-| `max_retirement_remainder_usdc` | Automatic retirement threshold, default $0.001; no transfer or replacement authority. |
-| Funding recovery authority | No per-job recovery-count cutoff. A replacement requires safe original-source closure, a current unconsumed claim and enabled funding/qualification authority. Direct sends do not gain replacement-payment authority. |
-| `funding.slippage_bps` | Relative quote execution tolerance; default 500 (5%). The full percentage domain 0-10000 basis points (0-100%) is supported; provider quote acceptance remains external. |
-| Quote/refund and signed transaction expiry | External financial authority windows. Managed/send requests default to 1800 seconds; foreign receives request refund handling after 7200 by default. Neither is a completion deadline or replay permission. |
-| x402 signing authority | Newly signed API payment authority lasts at most the lesser of the seller timeout and 300 seconds (`payment/lifetime.rs`); this does not impose an HTTP work deadline. |
-| Confirmations and witnesses | Zcash uses the pinned SDK's trusted default (currently 3), with an explicit uniform-threshold override. Base requires finalized evidence without an additional depth setting. SDK witnesses and consensus state govern spendability. |
-| Monetary representations and exact transaction shape | ZEC uses eight decimals and the SDK 21-million-ZEC domain; nominal USDC reserve/retirement accounting uses signed 64-bit micro-USDC. Exact single-step proposals, recipients, fees, change and Ironwood-only input/output policy remain validated. |
-| [Qualification-only API budgets/job counts](../tests/live/INTEGRATION_REFERENCE.md#registry-authorization-and-preparation) | Separately authorized test restrictions, with test-only concurrency and execution-window bounds; no ordinary funding ZEC budget. |
+| `swap_control.max_send_zec` | Optional direct-send principal and fee cap (default unlimited); bound at acceptance. |
+| Reserve slot bounds | Nominal USDC sizing and bridge-minimum headroom (`$2-3` small default, optional `$10-25` large); never caps API payments or ZEC spend. |
+| `max_api_payment_usdc` | Per-x402-payment USDC cap (required on managed groups; static default `$1.00`; `none` or `off` for unlimited). |
+| `max_retirement_remainder_usdc` | Automatic retirement remainder ceiling (default `$0.001`); never transfers funds. |
+| Spendable treasury ZEC | Operator's ZEC capital limit for enabled `auto_fund` (after confirmations, reservations, liabilities, and ZIP-317 fees). |
+| `funding.slippage_bps` | Executable `EXACT_INPUT` quote tolerance (default `500` bps = 5%, range `0-10000`). |
+| Quote and signed expiry | External financial windows: 1,800s default quote request (7,200s foreign receive); 40-block pre-NU7 and 120-block post-NU7 Zcash consensus expiry; `min(seller_timeout, 300s)` x402 signing validity. |
+| Confirmations | Zcash SDK trusted default (3 blocks, uniform override); Base `finalized` tag with no separate depth setting. |
+| Precision | ZEC 8 decimals (21M domain); USDC 6 decimals (signed 64-bit micro-USDC). |
+| Qualification budgets | Separately authorized test API caps (`total_test_budget_usdc`) and job counts; no separate ZEC funding budget. |
 
-`auto_fund` and direct receive/send flags grant capability, not extra monetary
-budgets. `funding.poll_seconds` (default 5, range 1-60) controls observation cadence;
-`swap_timeout_seconds` (default 1800) reports degraded health without abandoning
-accepted work. The SDK determines actual spendability; balance observations and
-previews grant no reservation. Provider bridge minima remain external constraints.
+### Capital, calculation ownership, and Store supervision
 
-Reserve bounds describe nominal USDC sizing for new allocations; payment caps and
-spendable treasury capacity supply separate authority. The treasury's actual
-spendable ZEC balance is the ZEC capital limit supplied by the operator. Reserve
-ranges do not create or mirror a per-transfer ZEC cap. The complete syntax and
-migration rules are in [managed configuration](configuration.md).
-
-```toml
-[funding]
-auto_fund = true
-slippage_bps = 500
-
-[wallets.research]
-mode = "zcash_rotation"
-max_api_payment_usdc = "1.00"
-max_retirement_remainder_usdc = "0.001"
-
-[wallets.research.reserves.small]
-# Default randomized nominal funding: $2-3.
-
-# Explicitly enabling a large slot opts into its $10-25 default range:
-# [wallets.research.reserves.large]
-```
-
-| Setting | Meaning |
-| --- | --- |
-| `reserves.small` | Omitted or empty defaults to a randomized $2-3 nominal range. |
-| `reserves.large` | Absent stays disabled; an explicit empty table opts into the $10-25 randomized default. |
-| Slot `funding_amount_usdc` | Fixed positive nominal target; optional `max_funding_amount_usdc` adds bridge-minimum headroom. |
-| Slot `min_funding_amount_usdc` + `max_funding_amount_usdc` | Uniform randomized nominal amount within the inclusive range; equal endpoints are valid. |
-| Slot `max_funding_amount_usdc` | Nominal sizing ceiling; for a fixed target it adds bridge-minimum headroom, and in range mode it is the configured upper bound. It is never a guaranteed credited balance or received maximum. |
-
-Enabled automatic funding uses actual spendable treasury funds after confirmation,
-reservations, liabilities and transaction fees. Displayed total balance is not
-spendable capacity. There are no daily/cumulative USDC allocation or daily ZEC
-spending ceilings, and UTC rollover changes no funding authority. Adding spendable
-funds supplies capacity without another budget-setting step. `max_funding_spend_zec`
-was removed; delete it from existing configurations because unknown managed-profile
-fields are rejected. Historical charges and exact reservations remain intact.
-
-A group cap may exceed its reserve bounds, and bounds may exceed the cap.
-Neither case promises that initial funding can serve every allowed price. The
-fresh initial-inventory range is the sum of slot minima through the sum of slot
-maxima, including bridge-minimum headroom and excluding fees. The default small range alone
-is $2-3; with an explicitly enabled large slot it is $12-28. Report actual
-credits, output ceilings, retained holdings and costs separately. Smaller reserve
-sizes offer more cheap-call rotation opportunities; larger sizes support expensive
-calls but can keep more traffic on an address. See
-[sizing and selection limits](configuration.md#reserve-sizing-and-fragmentation),
-including the approximately $5 nominal estimate across the first small wallet and
-its later replacement ($4-6 before bridge-floor adjustments, source fees and
-other costs). The first payment opens the replacement vacancy; both allocations
-are not required at startup. Changes to defaults use current-claim and unsigned
-quote refresh rules; in-bounds saved draws, consumed claims and accepted older
-operations above the new default retain their existing meaning.
-
-`auto_fund=false` pauses new funding, while independently permitted retirement and
-reconciliation continue. Financial completion and current payment usability are
-separate: a consumed wallet need not rebuild its original funding balance to close
-the accepted source operation. First positive credit permanently consumes the initial claim.
-Already accepted work retains its bytes, reservations and original identities
-across disablement. A valid successful operation may receive excess input later;
-SDK-observed returns become ordinary owned capital without reopening funding.
-
-New work uses the current claim and exact quote bindings. An unsuitable unprepared
-quote can be refreshed; accepted preparation retains its fixed payment amount,
-selected-input ownership and exact signed bytes. Network fees come from the SDK's
-standard ZIP317 proposal, with no application fee ceiling or derived input cap.
-Provider USD valuations and commission metadata remain advisory; they do not veto
-quote acceptance or reconciliation and are not an independent price oracle.
-
-Immutable transaction facts report confirmed principal and actual fees. Supported
-capital is the SDK's owned Ironwood balance, including real pending owned change
-when explaining a wait. Unsupported pools and transparent holdings do not authorize
-new preparation or count as capital that shielding might recover. No local refund
-credit, historical monetary equality check or separate spending ledger is added.
-See the [Ironwood-only policy](zingo-integration.md#ironwood-only-policy).
-
-Zingolib selects inputs and calculates standard network fees. The application
-validates the exact proposal and any explicit direct total-debit authority,
-then persists the exact input owner before calculation. Backend calculation
-borrows that same public proposal and retains ordinary consensus expiry, including
-the SDK's NU7 delta, rather than the offline high-level API's epoch-end expiry.
-Ironwood proving uses the exact SDK proposal; the required legacy prover adapter
-refuses unsupported work without initializing parameters. The blocking calculation clears the public wallet proposal before saving; the
-returned client releases its proposal pause through public cleanup after the join.
-Accepted input ownership remains durable.
-Canonical actor validation supplies the network/anchor check without an additional
-connection for local calculation; direct preparation keeps its network validation.
-A configured maximum is a
-rejection ceiling, not a capital reservation. The serialized SDK owner retains live
-calculations and completed results until publication. One started blocking owner
-owns the actual offline client before serialized input acceptance, calculates once,
-and publishes exact bytes through the same Store worker. Dropping a caller, the
-Treasury or its normal Tokio runtime does not discard started accepted work.
-A queued task that never starts cannot accept inputs. Deposit deadline/claim checks
-and shielding stop checks retain their existing acceptance semantics. The preparation phase commits
-with accepted input evidence; known proposal shortages leave the quoted operation
-unstarted. The SDK owns current balances, confirmations, witnesses, spent outputs and chain
-corrections. No full historical source/refund traversal gates publication.
-
-The bridge's USD valuation is not an independent exchange-rate oracle. Actual
-spendable treasury funds and outstanding liabilities govern a swap; there is no separate
-per-operation ZEC spending budget. Qualification runs limit API authorization amounts with a
-running `total_test_budget_usdc` and a cumulative registry authorization. Each
-potentially chargeable API authorization consumes that budget before disclosure,
-including retries; an unsuccessful response does not restore it. Funding transfers
-do not consume the API budget and have no separate ZEC spending limit or equal
-per-job allowance. Reviewed job counts, reserve sizes, current treasury spendability
-and actual SDK transaction fees govern funding. Registry records
-retain run/job/operation ownership across interruption. Their input amount is the
-first proposal observation, which can precede a failed Store commit; it grants no
-monetary authority and cannot veto a different cost on a proven unstarted retry.
-The Store alone owns exact accepted costs, selected inputs and signed bytes.
-A zero-new-funding restriction remains independent of API payment authority.
-
-Treasury command and sync drivers retain their cleanup owner when callers disconnect.
-Async SDK mutations, including direct `submit_prepared` calls, drain a retained
-calculation before checking health and current authority; the join handle stays
-installed throughout cancelable waits. Store-only status, capacity configuration
-and explicitly requested allocation retain their Store authority without an SDK
-health gate. Independent MCP tools and payment work stay available while that SDK capability is busy; SDK-only
-views can report temporary unavailability. A surviving owner installs the actual
-returned client and revision synchronously, remains unhealthy through public async
-proposal cleanup, then restores validated health. Cancellation during cleanup leaves
-reconstruction responsible for the old mutation. An unaccepted proposal left by
-preflight cancellation is cleared only after draining prior ownership and the
-existing unstarted/availability read, before selecting new inputs.
-After an unhealthy SDK mutation, they discard that SDK and reconstruct it from the
-latest committed snapshot through the same serialized Store. Queued commands remain
-queued; an interrupted command is never replayed. Accepted input evidence, funding
-restrictions and Base handles remain preserved. Successful offline reconstruction
-can close an unpublished calculation whose outgoing and factual transaction journals
-are both absent. Completed bytes take precedence:
-only an unacknowledged local publication repeats on the existing 60-second cadence,
-including shutdown. The blocking owner alone owns this retry and its diagnostic;
-its first publication error can return to the caller while identical work continues.
-The exact Store worker is supervised independently of pending requests, including
-store-only serving. A worker failure is terminal for that Store capability, fails
-its callers and stops treasury admission; it is never an SQL-contention retry or
-permission to restart a closure. Other Stores and static wallets remain usable.
-The original exclusive file lock stays with Store handles, so accepted consumers
-still prevent another owner from opening the same state after worker death.
-If completed bytes cannot be published because the worker died, the existing
-blocking owner retains the original client, bytes, snapshot and accepted inputs
-without retries, another calculation or SDK reconstruction. The caller receives
-failure promptly. Graceful close cannot finish while this terminal retained work
-exists; an explicit forced shutdown can lose unpublished bytes and leaves recovery
-responsible for uncertain accepted input claims.
-Normal runtime shutdown can wait for persistent local storage failure to be repaired;
-there is no forced abandonment deadline. A known durable commit clears that retry owner even if its
-submission view cannot be decoded; that view failure requires SDK reconstruction,
-not another calculation or publication. Shutdown releases the SDK and Store worker
-before returning a terminal view error. Expected proven-unstarted or already-fulfilled
-operation dispositions do not turn physical shutdown into a failure. A bound initial claim fulfilled during
-calculation still retains exact calculated bytes, accepted inputs and snapshot;
-it finishes preparation without disclosure authority or a deferred-calculation
-failure. Positive credit alone retains the pending source journal while preventing
-its first disclosure. Invalid completed facts remain a validation failure even
-when the claim is fulfilled. SDK reconstruction also retries unavailable snapshots
-on the existing cadence.
-Exited funding and reconciliation tasks reacquire their existing Store/group gates
-on their ordinary polling cadence; retained source work keeps its existing lease
-and backoff state. Explicit shutdown never starts a replacement. An unavailable
-shared Store or authentication state can still require restart; listeners and usable
-Base payers remain independent. Forced process death or irrecoverable storage can
-lose unpublished bytes; the durable input claim still prevents duplicate calculation.
+- **Supported capital:** Only confirmed owned Ironwood notes count as spendable
+  capital. Sapling, legacy Orchard, and transparent outputs never authorize
+  spending, shielding, or fallback.
+- **Offline calculation:** The SDK selects inputs and calculates ZIP-317 fees;
+  the application validates exact outputs and fees, journals accepted inputs,
+  and runs `create_proposed_transactions` with NU7-aware consensus expiry in
+  one dedicated blocking owner that survives caller drop and runtime teardown.
+  Completed signed bytes and snapshots commit atomically.
+- **Publication retries and Store supervision:** If Store publication fails
+  after calculation finishes, the blocking owner retains the identical bytes
+  and retries local publication every 60 seconds (never recalculating or
+  disclosing without a committed outgoing journal). If the Store worker dies
+  fatally, that Store capability fails closed while retaining its exclusive
+  file lock and unpublished bytes (other Stores and static wallets stay
+  available). After an unhealthy SDK mutation, the actor reconstructs the SDK from
+  the latest committed snapshot; an unpublished calculation with neither
+  outgoing nor factual transaction journals closes automatically after offline
+  reconstruction.
 
 ## Treasury sync coverage
 
-Scan starts log at DEBUG; successful persisted completion logs at INFO. Long
-scans also report saved progress at INFO every 30 seconds. These INFO messages
-show only the saved scanned height; tip and block-count diagnostics remain in
-status and DEBUG output. After SDK input selection rejects a proposal for
-insufficient funds, diagnostics distinguish a capital shortage from funds that
-may become spendable. An incomplete scan under the current owner reports at INFO
-that funds could not be assessed, without asking for a deposit. Pending SDK
-transactions report at DEBUG that funding is waiting for existing funds; those
-funds are not a promise that the next deposit will be affordable. Otherwise,
-SDK-observed confirmed funds, including dust and unreserved transparent funds
-(also immature confirmed coinbase outputs), are compared with the SDK's required
-amount. Sufficient observed funds produce a DEBUG
-spendability wait; an observed shortage produces an INFO message with the existing
-shielded receive address, asking the operator to add ZEC and allow confirmations.
-Bootstrap keeps waiting when the assessment is unavailable or existing funds
-await spendability; only an assessed capital shortage can obstruct bootstrap for
-insufficient funds. Both INFO conditions describe automatic synchronization and
-funding retries while demand remains; repeated identical reports are DEBUG. A new
-preparation deferred by unresolved source work also logs at DEBUG. These classifications only explain
-the existing SDK rejection or source deferral; they add no spending gate, balance
-authority or polling work.
-
-Treasury synchronization interruption reports include a broad `category` and,
-for Zingolib scan/launch failures, a fixed `reason`. Indexer request failures also
-include numeric `grpc_code` and a fixed `grpc_status`, for example
-`reason="indexer_request_failed" grpc_code=14 grpc_status="Unavailable"`.
-Code 4 (`DeadlineExceeded`) distinguishes a request deadline from code 14
-(`Unavailable`); neither alone establishes Tor as the cause.
-Other reasons distinguish tree-size mismatches, missing checkpoints, invalid
-indexer data and mempool shutdown timeouts. Shard-tree errors identify the precise
-variant: for example, `shard_root_conflict`, `shard_checkpoint_pruned`,
-`shard_checkpoint_out_of_order` or `shard_tree_incomplete`. These describe the
-failed tree operation, not its root cause; they do not by themselves establish
-wallet corruption or authorize a reset/rescan. Returned sync-engine tree failures
-also name `pool` (`sapling`, `orchard`, `ironwood`) and `operation`
-(`scan_merge`, `reorg_rollback`, `pool_recovery_rollback`). These fields survive in
-CLI errors and saved status, so a failed retry need not be reproduced just to
-recover the context. Tree addresses, note positions, upstream messages, metadata
-and wallet identifiers are omitted. These diagnostics do not change retry or funding
-policy; a successful sync is still required before new treasury preparation.
-
-
-The Zcash treasury is exclusively spent by this application. Synchronization calls
-the public Pepper engine on the existing isolated session runtime. One spawned
-engine task owns scan progress while periodic encrypted checkpoints wait for the
-wallet lock; successful scans capture migration witnesses through the public SDK
-API. Cancellation tears down that runtime and joins its workers before the final
-snapshot. Task failures retain fixed diagnostics without panic payloads. Direct and Tor sync
-retain completed work without a local age ceiling or ordinary three-block lag
-policy. SDK proposal selection enforces actual confirmations, witnesses, spend
-links and scan coverage. Snapshot revision and the serialized actor bind mutation
-to its owning SDK state. Cancellation cannot turn an interrupted scan into a
-completed observation. An unchanged completed scan can be reused within its owner
-after checking its exact canonical tip height/hash; restart or chain changes scan
-again for an actual preparation or submission. Scheduled source observations share
-the last successful current-owner scan without fresh tip probes between due scans;
-see [wallet observation policy](#wallet-observation-policy).
-
-Status keeps `target_height`, scanned `height`, final `observed_tip_height` and
-the original `checked_at` for diagnostics. Completion never relabels observation
-time. Confirmation and expiry decisions use scanned coverage. Expiry recovery
-requires one fully completed scan to reach its observed canonical tip and validate
-the authenticated original transaction and its buried signed expiry. Final publication checks the same Ready snapshot revision and coverage.
-No host clock age or ordinary lag allowance supplies that proof.
-`max_sync_age_seconds` and `base_max_block_age_seconds` are removed settings;
-configuration explicitly rejects them. Base balance and receipt verification have
-no block-age or host-future gate, and receipt logs use the existing byte bound.
-
-
-Base observations and historical authorization resolution provide reporting facts.
-They do not certify affordability or grant signing permission. Unavailable balance
-or nonce reads do not prevent a permitted payment; existing attempt records remain
-owned even when their outcome is unknown.
+- **Sync logging:** Scan starts log at `DEBUG`; persisted completions and
+  30-second progress updates log saved height at `INFO`. After an SDK
+  insufficient-funds proposal rejection, `funding_assessment` sums confirmed
+  and unconfirmed owned Ironwood notes (excluding spent outputs and ignoring
+  transparent coins): incomplete scans report unavailable assessment at `INFO`,
+  sufficient owned Ironwood awaiting confirmation logs a spendability wait at
+  `DEBUG`, and an assessed Ironwood shortage logs the shielded receive address
+  at `INFO` (asking the operator to add ZEC). Repeated identical reports stay
+  at `DEBUG`.
+- **Structured sync errors:** Interruption reports include `category`, fixed
+  `reason`, numeric `grpc_code` and `grpc_status` (for example, code `4`
+  `DeadlineExceeded` vs. code `14` `Unavailable`), and on shard-tree errors the
+  exact variant (`shard_root_conflict`, `shard_checkpoint_pruned`,
+  `shard_checkpoint_out_of_order`, `shard_tree_incomplete`), `pool` (`sapling`,
+  `orchard`, `ironwood`), and `operation` (`scan_merge`, `reorg_rollback`,
+  `pool_recovery_rollback`) without logging addresses, note positions, or
+  upstream prose.
+- **Sync reuse and coverage:** Synchronization runs the public Pepper engine on
+  an isolated Tokio runtime, captures migration witnesses on completion, and
+  joins workers on cancellation. Unchanged completed scans reuse within their
+  owner after checking the canonical tip hash and height; restart or chain
+  changes rescan before preparation or submission. There is no host-clock age
+  ceiling or three-block lag gate (`max_sync_age_seconds` and
+  `base_max_block_age_seconds` are rejected by config parsing).
 
 ## Capacity and admission
 
-A group has one default `ACTIVE` identity, `RETAINED` wallets with spendable
-remainders, and one `READY` wallet for each fulfilled enabled reserve claim.
-Small-slot allocations use the small slot's nominal bounds; an optional large
-reserve has its own independent bounds and enabled slots fund small-first. Each allocation commits
-independently. A failed large fill cannot roll back successful small funding. Destination credit makes a
-wallet usable independently of source accounting and provider completion.
+Each managed group has one default `ACTIVE` wallet, `RETAINED` wallets with
+spendable remainders, and one `READY` wallet per fulfilled enabled reserve slot
+(small funds before optional large; each commits independently).
 
-For each operation, the funding adapter chooses a nominal USDC amount at the
-serialized unsigned quote boundary: the fixed target, or one unbiased inclusive
-draw from the slot range. It obtains a dry `EXACT_OUTPUT` sizing preview with zero
-slippage. A recognized bridge-minimum rejection raises the operation-local floor
-to `max(configured minimum, suggested USDC minimum)` and draws again uniformly
-within the remaining authorized range; the replacement choice is persisted before
-the next request. A fixed target keeps its deterministic adjustment. Reuse is by
-current numeric bounds, not by the historical mode that produced the saved value,
-so a still-in-bounds saved choice survives a range or fixed configuration change.
-Sizing continues while each rejection raises the provider floor within the
-authorized ceiling and the original quote deadline remains valid. Every valid
-replacement draw is persisted before the next request; there is no separate
-attempt cutoff.
-The preview's NEAR-priced ZEC principal becomes the fixed input of the executable
-`EXACT_INPUT` quote. Acceptance fixes the operation's principal; an unprepared
-quote that no longer satisfies current claim policy is refreshed
-before preparation, and prepared work retains its fixed payment amount and exact
-transaction ownership. Configured slippage
-(`funding.slippage_bps`, default 500 basis points; range 0–10000, or 0–100%) applies once to
-that live quote's expected output.
-Slippage bounds the executable minimum relative to the quoted output; it does not
-certify the quote's initial exchange rate or promise the allocation target as a
-minimum credited balance. Reported USD and commission fields are advisory.
-`minAmountOut` is its execution floor, not the route's minimum supported swap
-size. There is no fixed ZEC conversion or external rate oracle, and this mode
-does not promise smaller swaps, faster execution or absence of refunds. Original
-allocation floors remain immutable, accepted quote terms remain bound to their
-operation, and configuration changes govern new work. Actual spendable treasury
-funds, outstanding liabilities and explicit qualification permits govern funding. Reserve bounds do not cap individual API payments.
+### Quote sizing and initial funding claims
 
-Each wallet has one initial funding claim. Its first positive observed Base USDC
-balance consumes that claim, even below its nominal minimum; later zero or insufficient
-balances never reopen it or authorize a top-up. The saved scalar is an advisory
-estimate, without historical block certificates. Existing claim generation and
-operation bindings publish the wallet role atomically with the first credit.
-Disablement preserves observation of accepted work and detaches a fulfilled reserve
-into RETAINED inventory; it forbids a new deposit. Known prepared source bytes keep
-the destination from automatic retirement until their original outcome is resolved.
-A partial credit never releases those source inputs or permits another deposit.
+- **Sizing:** Each operation draws its nominal USDC amount (fixed target or
+  uniform inclusive draw in `[min, max]`) and runs a zero-slippage dry
+  `EXACT_OUTPUT` preview. If NEAR reports a higher bridge minimum within the
+  slot maximum, the job raises its local floor, redraws within the remaining
+  range (or adjusts a fixed target), persists the choice, and retries while the
+  floor rises and the deadline stays valid. If the bridge minimum exceeds the
+  slot maximum, the round stops without silently raising the ceiling.
+- **Executable quote:** The preview's ZEC principal becomes the fixed input of
+  an executable `EXACT_INPUT` quote with `funding.slippage_bps` applied once to
+  expected output. Accepted quote terms and signed bytes stay immutable;
+  unprepared quotes that no longer fit updated config refresh before
+  preparation.
+- **One-time initial claim:** A wallet's first positive observed Base USDC
+  balance permanently consumes its initial funding claim (even below the
+  nominal minimum). Later low or zero balances never reopen the claim or
+  authorize top-ups. Disabling a group detaches fulfilled reserves into
+  `RETAINED` without cancelling observation of accepted work.
 
-`rotation/manager.rs` admits supported Base USDC v1 and v2 exact EIP-3009 offers. It
-validates the envelope, domain, amount and configured challenge-policy cap before
-acquisition. Payment preparation checks the current Store cap before retrieving
-the signing key, and the authorization journal rechecks it before disclosure.
-The local v1 SDK adapter corrects protocol-version metadata in the pinned client's
-candidates; signing remains in the SDK and the signed payload must still match
-the selected protocol, payer, payee, amount and validity. V1 uses `X-PAYMENT`;
-v2 uses `PAYMENT-SIGNATURE`. Standard body-only v1 challenges are normalized at
-the same bounded response boundary used for header challenges.
-Advertised extensions outside the managed payment contract are omitted
-with DEBUG diagnostics during challenge preparation; this does not establish
-signing, submission or the cause of a later failure. Seller rejection remains
-possible. Terminal payment-call failures are WARN events; see
-[logging and diagnostics](development.md#logging-and-diagnostics).
+### Payment selection and journal admission
 
-Selection uses the saved wallet estimate as described in the
-[best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,
-nonce scan, historical readiness validation or certificate publication. Price hints
-can choose an existing identity before its own unsigned challenge is fetched.
-Initial selection prefers a fresh observed offer, then a usable advertised
-per-call estimate from the configured pricing source, then unknown pricing.
-With a hint, estimated-affordable RETAINED wallets precede ACTIVE, then READY;
-creation sequence orders each role. Present zero is a hint. Without a hint,
-known-positive, non-low ACTIVE precedes healthy RETAINED, then READY. A low,
-zero or unknown ACTIVE estimate does not outrank a healthy sibling. Unknown,
-zero and low estimates remain eligible fallbacks. After fetching a challenge,
-an eligible bound payer whose estimate covers its actual offer stays bound;
-retained-first preference alone does not cause another unsigned request.
-Advertised estimates work on the first call, including local authored catalogs, disabled HTTP caching and failed cache persistence; an observed
-price row is not required. The invocation snapshots its advertised estimate before
-transport acquisition. Advertised prices remain distinct from observed offers
-and never appear as observed-offer evidence in the call result. Missing or expired
-metadata does not block selection or trigger funding or balance observations.
-Wallets with malformed stored EVM addresses are skipped before transport construction;
-healthy sibling identities remain eligible. Unsigned selection is read-only: it
-neither promotes a retained wallet nor consumes
-a reserve claim, and it does not acquire the payment gate. `selection_amount` is
-only a ranking input. Actual challenge amounts and current ownership/caps are
-checked by payment preparation and the authorization journal; balances are not
-spending permission. No additional hint or authority state is maintained.
-
-Runtime hints belong to the acquired remote catalog cache entry and its configured
-lifetime (indefinite by default). Method and original path template identify the
-operation; wallet groups, listeners, payers and store lifetimes do not partition
-lookup. Receipt order controls in-process updates, including lower prices.
-SQLite storage restores estimates across restart without renewing catalog expiry.
-Catalog expiry, forced refresh (including identical bytes), replacement,
-configuration invalidation and eviction discard estimates;
-reads and payment observations do not renew lifetime. These operations cause no
-probe, cached-challenge reuse or new payment authority. See
-[shared cache behavior](architecture.md#wallet-selection-and-network-isolation).
-Heuristic runtime source refresh retains existing hints under their original expiry
-while acquisition runs and after catalog failure. Successful replacement retires
-old API handles and invalidates their hints. Optional pricing enriches the replacement
-asynchronously, without gating its publication or replacing new challenge
-observations. Failure leaves operations without other hints unknown.
-A valid observed offer can update a hint even when current Store authority refuses
-financial admission; that hint grants no permission to sign.
-
-The invocation captures its existing inventory boundary. It may hand off an unsigned
-challenge to an eligible payer suggested by the actual price, and may traverse on
-the narrow insufficient-funds exception below. Each identity is visited at most
-once. Each handoff creates that payer's own isolated transport and unsigned
-challenge while preserving the original request bytes. Within each payer stage in
-Tor mode, unsigned challenge acquisition may try
-`1 + network.tor_isolation_retries` isolation scopes (default 3) on
-HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, or `504` (honoring valid `Retry-After` headers on `429`
-and `503`) with that same pinned payer—never switching wallets, allocating,
-funding or waiting for balance reconciliation during the unsigned retry loop—and
-conditionally promotes the winning scope after valid challenge validation before
-signing and signed submission on that exact pinned record.
-
-Signing produces private bytes. The journal transaction rechecks current pool
-ownership, eligible role, actual reserve claim, amount cap, payer address and signed
-validity. It records the possibly submitted authorization and decrements the
-current advisory estimate once. Concurrent estimate replacement or READY-to-ACTIVE
-promotion does not invalidate another permitted authorization.
-
-A READY payer consumes its exact reserve claim atomically: the former active
-becomes RETAINED, the payer becomes ACTIVE, and the reserve generation advances.
-Ordinary background funding can fill the vacancy at its next independent opportunity.
-Admission never allocates or retires wallets. An expired unpublished signature fails before disclosure; no
-local evidence/signature recovery loop remains. Unknown journal outcomes grant no replay.
-
-The serialized Store owns commits after waiter cancellation. Signing and network
-I/O do not hold a group turn to stabilize advisory balances.
+- **Selection:** `rotation/manager.rs` admits Base USDC v1 and v2 exact
+  EIP-3009 challenges within the group cap (dropping unknown extensions with
+  `DEBUG` logs). Initial selection uses the saved advisory balance estimate
+  with no balance RPC: with a fresh observed or valid advertised per-call
+  price hint, it prefers estimated-affordable `RETAINED` wallets (oldest
+  first), then `ACTIVE`, then `READY`; without a hint, it prefers healthy
+  positive `ACTIVE`, then `RETAINED`, then `READY`, with low, zero, and unknown
+  estimates as fallbacks. After fetching a challenge, an eligible bound payer
+  stays bound rather than fetching another challenge just to spend a retained
+  wallet.
+- **Unsigned Tor retries and handoff:** Within each payer stage in Tor mode,
+  unsigned challenge acquisition may try `1 + network.tor_isolation_retries`
+  scopes on eligible statuses (`400`, `403`, `408`, `429`, `500`, `502`, `503`,
+  `504`, honoring `Retry-After` on `429` and `503`), promoting the winning
+  scope after challenge validation. An unsigned challenge may hand off to
+  another eligible payer suggested by the challenged price (visiting each
+  wallet at most once with its own isolated transport).
+- **Atomic promotion and journaling:** Before disclosure, the Store journal
+  rechecks pool ownership, role, reserve claim, cap, payer address, and signed
+  validity, records the authorization, and decrements the advisory estimate
+  once (saturating at zero). Signing with a `READY` wallet atomically moves the
+  prior `ACTIVE` wallet to `RETAINED`, promotes the payer to `ACTIVE`, and
+  advances the reserve claim generation so background funding can refill the
+  vacancy at its next opportunity.
 
 ### First-use bootstrap participants
 
-The optional [bootstrap policy](configuration.md#bootstrap-wallet-policy) keeps one
-ordinary group available while explicitly participating groups prepare on first
-API use. Demand is one durable UUID-bound fact in the existing serialized Store;
-it carries no monetary amount. The existing consumed initial-claim fact over the
-full funding history records permanent handoff after any positive credit. No
-current-role, balance threshold or second readiness ledger controls that handoff.
-A trusted invocation captures the effective group once before unsigned dispatch.
-All signing, caps, inventory traversal, cover and transport ownership stay within
-that group for the call, including through handoff or cancellation.
+When `[wallet_bootstrap]` is configured, uncredited deferred groups receive no
+new allocations during serving until durable UUID-bound first-use demand is
+recorded by a validated API call (or historical positive credit already
+exists).
 
-Uncredited dormant participants receive no new serving allocations. Durable first-use
-demand or historical positive credit admits a participant to the same independent
-uniform integer 30–120-second opportunity cadence as ordinary groups. Both enabled
-slots keep small-first independent commits. One shared schedule retains every armed
-instant through arbitrary wakes and credit; admission never redraws an existing
-instant. The retained owner discovers unarmed participants at startup, on demand or
-credit notices, and on the existing retry cadence after a busy eligibility read.
-Once every participant is armed, no eligibility discovery remains. Current group
-enablement and financial authority are still checked at each allocation commit.
-New opportunities and busy read retries start from read completion. An unavailable
-eligibility read cannot mask ordinary or already armed participant opportunities;
-accepted work keeps its independent schedules. Restart redraws volatile opportunities.
-Disabling automatic funding prevents allocations without deleting demand or
-recovery ownership. Removing policy restores ordinary behavior; UUID-preserving
-renames and re-addition retain history. No top-up or bootstrap fallback follows
-later depletion. This cadence can weaken funding-time correlation; it does not
-promise unlinkability or erase common-payer history.
+- Each API call captures one effective group before unsigned dispatch and stays
+  within that group through signing, cover, and cancellation.
+- First-use demand admits the group to the standard 30-120 second refill
+  opportunity schedule (retaining its armed instant across wakes; restart
+  redraws volatile timers).
+- Any historical positive initial USDC credit permanently hands the group over
+  to its own wallet and cap across restarts; depletion or refunds never revert
+  it to bootstrap. Disabling `auto_fund` pauses allocations without deleting
+  demand or recovery state.
 
 ### Early rotation and refill opportunities
 
-Ordinary automatic funding gives each configured eligible group an independent
-uniform integer interval of 30–120 seconds (nominal mean 75 seconds). Startup draws
-one interval per group and does not eagerly allocate vacancies. One volatile
-monotonic due instant per group survives unrelated payment/capacity wakes and
-completion activity. Due groups rearm from one captured instant before Store work,
-run once without intervening idle sleeps, and skip missed intervals after suspension.
-Restart redraws; downtime, Store/source load and unavailable capital can extend
-actual waiting beyond 120 seconds. There is no emergency refill on exhaustion and
-no funding-completion or unlinkability guarantee. A group's small/large fills still
-commit independently, and failures cannot stop sibling groups or accepted work.
+Automatic funding gives each enabled eligible group an independent uniform
+integer interval of 30-120 seconds (mean 75 seconds) rather than allocating
+immediately on startup or exhaustion.
 
-At an opportunity, a used ACTIVE wallet can become RETAINED while an existing
-funded READY reserve becomes ACTIVE, small slot first. Use is established by its
-existing payment journal. For immutable first positive observed credit `F` and the
-current payment cap `M`, integer micro-USDC bounds are `U=min(M,floor(F/4))` and
-`L=floor(U/5)` (unlimited cap uses `F/4`). The threshold is a stable private unbiased
-integer in inclusive `[L,U]`, derived by library HMAC-SHA256 with the Store key and
-a versioned, length-framed treasury/pool/wallet identity domain. Rejection sampling
-uses counter-separated blocks. No seed or threshold is persisted or exposed.
-Renames/restart preserve the draw; cap changes can change bounds. Tiny intervals
-can include zero. The first observed credit is advisory, not historical receipt proof.
-
-An immediate Store transaction rechecks current ACTIVE identity, journal use,
-estimate, credit, cap, group enablement and the exact eligible READY claim and
-generation. Estimate at or below the threshold permits one transition only; missing
-credit/estimate or READY skips it without affecting payment eligibility. The new
-ACTIVE must first be used before any later proactive transition. Concurrent first-use
-admission shares the atomic claim transition: captured payers remain usable and a
-generation cannot be consumed twice. Source/retirement protections and permanent
-initial-claim consumption remain intact; early rotation authorizes no top-up.
-A due opportunity can refill the resulting vacancy; immediate READY first-use
-promotion still works when calls outpace preparation and waits for a later opportunity
-to refill. Accepted jobs, quote/source work, retries, credit/status observation and
-recovery retain their existing schedules independently of future opportunities.
-
-The existing owner uses one earliest-due wait for opportunities and eligible
-inventory/retry work, plus completion/shutdown. Exhausted inventory still rereads
-on `funding.poll_seconds` to discover committed work; the redundant one-second
-wake is removed. Whole-second inventory and observation deadlines round outward
-from completion so absolute waits preserve their existing cadence/failure floors;
-financial timestamps, immediate handoffs and recipient-owned credit due times retain
-their separate meanings. Opportunity counts alone establish no process/power saving.
-Explicit bootstrap fills promptly without proactive rotation or chasing replacement
-generations; one-pass tick retains explicit allocation semantics. Offline sync and
-inspection allocate nothing. Qualification retains its separately authorized funding
-semantics. With `auto_fund=false`, no new allocations or proactive rotation occur;
-accepted-work observation continues.
+- **Proactive rotation:** At a due opportunity, a used `ACTIVE` wallet (with
+  at least one payment journal entry) may rotate to `RETAINED` while promoting
+  a funded `READY` reserve (small slot first) if its saved estimate is at or
+  below a private threshold.
+- **Private threshold:** For immutable first positive credit `F` and current
+  cap `M`, integer micro-USDC bounds are `U = min(M, floor(F / 4))` (or
+  `floor(F / 4)` when unlimited) and `L = floor(U / 5)`. The threshold is an
+  unbiased integer in `[L, U]` derived via HMAC-SHA256 with the Store key over
+  a versioned, length-framed treasury, pool, and wallet domain (never persisted
+  or logged; preserved across renames and restarts; recomputed if `M` changes).
+- **Refill and bootstrap distinction:** The new `ACTIVE` wallet must be used at
+  least once before another proactive rotation. Immediate `READY` promotion on
+  first payment still works whenever calls outpace funding. Explicit
+  `wallet bootstrap` allocates promptly without proactive rotation;
+  `auto_fund = false` disables both new allocations and proactive rotation
+  while keeping observation running.
 
 ## Automatic retirement
 
-Ordinary serving and finite explicit sync consider only eligible RETAINED wallets
-in enabled groups for canonical retirement. Low saved estimates select candidate
-work; they neither prove retirement nor exclude an otherwise permitted payer.
-Retirement requires compatible confirmed and latest balances. Both must be at or below
-`max_retirement_remainder_usdc`: the recorded bound is their maximum, not their
-minimum. The default `"0.001"` permits at most 1,000 atomic units per wallet;
-each group can override it, and explicit `"0"` requires both observations to be zero. Pending
-payment exposure, a current enabled reserve claim, an unfulfilled accepted source calculation, pending signed source operation or conflicting canonical retirement evidence
-prevents retirement. A prior partial credit does not close a still-pending NEAR
-delivery obligation. Never-credited wallets remain protected while any original
-delivery obligation is unresolved, including abandoned reserve predecessors whose
-source transaction is confirmed. Source confirmation does not prove destination
-delivery or permanent loss. For a completed funding job, each current/archived
-possibly disclosed swap must have its exact bound NEAR terminal outcome, and no
-unfulfilled accepted calculation or pending source transaction may remain.
-Proven nondisclosure needs no bridge terminal result, including a privately held
-signed transaction after verified source closure. Source expiry alone does not prove terminal bridge
-outcome. Missing original provenance retains the guard. Closure creates no credit
-or funding authority; possible late credit stays attached to the original identity.
+Serving and `wallet sync` consider only low-estimate `RETAINED` wallets in
+enabled groups for automatic retirement (never `ACTIVE`, `READY`, or disabled
+groups).
 
-Candidate work pages only that wallet's original outstanding authorizations, then
-publishes its dual balance proof through the existing canonical transaction. A
-used nonce or confirmed-chain-time expiry with an unused nonce resolves its
-original authorization; local time, seller receipts and request failures cannot.
-More than 64 authorizations continue through pages without a total-history cap or
-reads of unrelated wallets. Publication rechecks current role, reserve claim,
-source obligations and exact evidence after remote acquisition.
-
-Retirement records exact amounts, anchors, endpoint and supporting evidence in the
-same transaction that changes the role. It removes the wallet from routine balance
-polling and payment selection; keys, funds and historical authorization work remain.
-It sends no transfer and creates no replacement allocation. A later contradiction
-marks the saved retirement disputed without silently reactivating the wallet.
-
-The configured tolerance supplies ordinary retirement authority independently of
-`auto_fund`, treasury capacity and reserve vacancies. Qualification restrictions
-can deny that mutation; funding-only permits do not grant it. Positive tolerance
-accepts stranded purchasing power per retirement and has no cumulative loss cap.
-Status reports recorded amounts rather than claiming the funds were spent. Manual
-retirement and incident-specific repair remain [deferred](plans/deferred/managed_wallet_followups.md#manual-retirement-and-incident-repair).
+- **Dual balance requirement:** Both the canonical `finalized` balance and the
+  `latest` balance must be at or below `max_retirement_remainder_usdc` (default
+  `"0.001"`, or `"0"` for exact zero); the recorded remainder is their maximum.
+- **Obligation guards:** Retirement is blocked by unresolved payment
+  authorizations, an active reserve claim, an unfulfilled accepted source
+  calculation, pending signed source work, or conflicting canonical retirement
+  evidence. For a never-credited wallet whose funding job completed, every
+  possibly disclosed current or archived swap must have a bound terminal NEAR
+  outcome (proven nondisclosure needs no bridge outcome) and closed local
+  source work.
+- **Execution and effect:** Candidate work pages outstanding authorizations (64
+  per page, no total-history cap) to verify used nonces or confirmed-chain-time
+  expiry, then commits exact amounts, anchors, endpoint, and evidence
+  atomically with the role change. Retired wallets leave keys and any dust in
+  place, stop routine polling and selection, never transfer funds, and stay
+  retired (marked disputed if later contradicted). Positive tolerance applies
+  independently of `auto_fund` and has no cumulative stranded-funds cap.
 
 ## Payment reconciliation
 
-Managed `PaidClient` calls may repeat an operation on another captured wallet only
-when the signed attempt receives a supported structured insufficient-funds failure.
-Every authorization remains potentially chargeable or executable. A small reserve
-inventory normally leaves few wallets able to cover a price, while retained funds
-can enlarge that set. This is an operational expectation, never an attempt cap:
-low or unknown estimates can remain eligible. Traversal visits each captured
-identity once with its own challenge; it never allocates, tops up or waits for
-funding, and balance reconciliation proceeds independently.
-Other HTTP failures, transport loss,
-malformed replies, successful responses and output conversion failures grant no
-retry. The low-level `ManagedPool::pay_with_cover` API dispatches an already-bound
-challenge/transport once; use `PaidClient::managed` for complete routed calls.
-Settlement receipts take precedence over simultaneous insufficient-funds challenges.
-`X-PAYMENT-RESPONSE` (v1, network `base`) and `PAYMENT-RESPONSE` (v2, network
-`eip155:8453`) share one ambiguity boundary: duplicates, including both names
-together, grant no retry. Qualification normalizes valid legacy receipt networks
-to `eip155:8453` for existing canonical-debit recovery; seller claims remain
-unverified until the chain checks succeed.
-
-`rotation/base.rs` verifies Base chain identity, finalized anchors,
-block-pinned USDC balances and EIP-3009 authorization use. Its confirmed anchor
-is the provider's finalized anchor, without an additional application depth
-requirement. New observation depths describe the actual latest/finalized gap and
-may be zero; they do not select a confirmation policy. Historical records retain
-their original minimum-depth metadata. Missing or inconsistent finalized evidence
-retains the existing observation retry and configured fallback behavior.
-A used authorization
-or an expired authorization proven unused can release its reservation through the
-store's canonical reconciliation transaction. An unused but still-valid signature
-remains a liability. Receipt inclusion must be within the same finalized chain.
-
-Changed canonical history invalidates affected derived evidence. In one Store
-transaction, reconciliation archives the current authorization resolutions,
-reopens their original attempts as potentially submitted, rebuilds their exposure,
-clears derived financial/debit checkpoints and invalidates old captures. Existing
-candidate pages then prove the original nonces against the current chain. An
-unused signature that is still valid becomes an outstanding liability again;
-expiry requires the current confirmed chain time. Historical proofs remain
-available for inspection rather than becoming permanent compatibility gates.
-Malformed derived resolutions encountered during proof publication are rebuilt
-through the same path, without a routine scan of lifetime resolution history.
-Archived resolution and balance-support rows retain their exact audit bytes but
-never veto fresh canonical proof, including well-formed old contradictions.
-Retirement history does not force indefinite revalidation of old block anchors.
-Current authorization bindings, generation fences and debit ordering still
-protect publication; an active cached contradiction invalidates its scope for a
-fresh observation. When confirmed/finalized height is unchanged, newer latest
-height still supersedes an older dual balance observation. A late older callback
-cannot replace that newer latest balance or make retirement eligible.
-Disputed retirement stays retired. This correction grants no payment replay,
-replacement deposit, reopened initial funding claim or signer reactivation.
-
-Ordinary advisory refresh performs scalar unsigned latest `balanceOf` reads.
-Eligible retained-wallet retirement separately acquires candidate-scoped canonical
-authorization and dual balance proofs. It does not run qualification's full-pool
-historical traversal. Historical balance, exposure and repair fields do not gate
-current signing; advisory RPC failure policy is unchanged.
-Retired wallets remain retired. Original attempts and canonical proof records stay
-readable without a historical capacity-repair pass.
+- **Insufficient-funds traversal:** Managed `PaidClient` calls may try each
+  remaining eligible wallet once only after a signed attempt receives a pinned
+  structured insufficient-funds `402` response (`PAYMENT-REQUIRED` with exact
+  `error: insufficient_funds` or failed `PAYMENT-RESPONSE` with that exact
+  `errorReason`). Each attempt uses that wallet's own transport and fresh
+  challenge; all prior signed authorizations remain potentially chargeable.
+  Settlement receipts (`PAYMENT-RESPONSE` and `X-PAYMENT-RESPONSE`) take
+  precedence over simultaneous challenges, and duplicate protocol headers never
+  permit a retry. Other HTTP errors, transport errors, malformed replies, and
+  successful responses never trigger another wallet attempt.
+- **Canonical Base proofs (`rotation/base.rs`):** Verify chain ID, the
+  provider's `finalized` anchor (no separate depth setting), block-pinned USDC
+  balances, and EIP-3009 nonce usage. Used nonces or confirmed-chain-time
+  expired unused nonces release reservations atomically; unused valid
+  signatures stay liabilities.
+- **Canonical history changes:** If confirmed chain history diverges or a
+  derived resolution is malformed, reconciliation archives old resolutions,
+  reopens original attempts as potentially submitted, rebuilds exposure, and
+  re-proves original nonces against the current chain. Archived proofs stay
+  readable as audit history without vetoing fresh canonical proof. A newer
+  `latest` height supersedes an older dual observation even when `finalized`
+  height is unchanged. Reorg repair never authorizes payment replay,
+  replacement deposits, reopened claims, or signer reactivation.
 
 ## Funding and source safety
 
-Allocations and their exact operation journals commit atomically. Inventory reads
-never create missing journals or substitute operation IDs; missing provenance
-requires repair. The runtime funding owner schedules work through captured,
-paged inventory and independent observation lanes.
-The funding owner reconciles previously reopened source work from a bound NEAR
-SUCCESS before choosing a lane, including completed jobs. A delayed destination
-read cannot keep that source work open or block unrelated funding.
-
-`rotation/funding.rs` drives the durable outbox through the states defined in
-`rotation/store/funding.rs`:
+Allocations and operation journals commit atomically. `rotation/funding.rs`
+tracks durable outbox phases:
 
 ```text
-ALLOCATED → QUOTED → PREPARING → PREPARED → DEPOSIT_PENDING
-                                                 ↓
-                                              SWAPPING
-                                                 ↓
-                                         VERIFYING_CREDIT → COMPLETE
+ALLOCATED -> QUOTED -> PREPARING -> PREPARED -> DEPOSIT_PENDING
+                                                      |
+                                                      v
+                                                   SWAPPING
+                                                      |
+                                                      v
+                                           VERIFYING_CREDIT -> COMPLETE
 ```
 
-A confirmed credit path can skip the separate swapping observation. These phases
-describe source progress; they do not serialize independent observations. Refund and
-ambiguous outcomes retain `REFUND_PENDING` or `RECOVERY_REQUIRED` evidence; they
-do not discard the candidate or automatically create another transfer. The saved
-operation ID and recipient remain stable across restart.
+Confirmed Base credit can skip `SWAPPING`. Refund and ambiguous states retain
+`REFUND_PENDING` or `RECOVERY_REQUIRED` without discarding the operation or
+auto-creating another transfer.
 
-`rotation/near.rs` validates token metadata, quote bindings, confidentiality mode,
-amounts, deadlines and cost limits. Public swaps are explicitly selected and were
-qualified without partner authentication. Confidential settings exist but funded
-authenticated confidential execution remains unqualified; there is no fallback
-from confidential to public mode. Current requests do not add application
-commissions. Do not infer a commercial partner agreement from an API key.
-An optional immutable sizing preview travels inside the encrypted quote as
-accepted-input provenance, without new database fields or mutable balance
-tracking. An accepted executable quote uses its own deadline; expiry of its dry
-preview cannot invalidate it. Existing accepted `EXACT_OUTPUT` operations retain
-their original request, response, slippage and signed bytes across restart.
+### Source ownership, settlement, and closure
 
-The SDK selects available confirmed inputs and calculates standard fees. The
-application checks exact output/fee and current operation/run permission, then
-journals the exact selected inputs before calculation. The serialized SDK owner
-prevents overlapping calculations. Completed snapshots and exact signed bytes
-commit atomically; failed publication retains the identical completed result and
-does not grant another calculation. A pending signed original remains a durable
-source-work fence. Historical calculation intents are preserved evidence rather
-than an independent global capital reservation. A full SDK rescan can discard
-unconfirmed calculated transaction records and their input reservations. The
-retained signed original therefore keeps its source-work fence until closure;
-actor serialization alone cannot prevent later input reselection after that reset.
-This protects genuinely unfinished work without auditing completed transactions.
+- **Journal before disclosure:** Exact selected inputs commit before
+  calculation; completed snapshots and signed bytes commit before broadcast
+  authority is granted. A pending signed original keeps a durable source-work
+  fence until closure (protecting against a full SDK rescan clearing pending
+  SDK records).
+- **Unpublished calculation recovery:** After exclusive offline SDK
+  reconstruction with no live calculation owned, a calculation with neither
+  outgoing nor factual transaction journals closes automatically and archives a
+  nondisclosure marker so a new attempt can use a fresh operation ID. A factual
+  record without outgoing bytes is treated as scoped corruption, not
+  nondisclosure.
+- **Quote refresh:** Requires proof of no accepted calculation and no outgoing
+  bytes, archiving the old binding and allocating a fresh operation ID and
+  refund receiver. Expired returned quote deadlines block new preparation and
+  first submission (with no extra 5-minute margin).
+- **Bound NEAR `SUCCESS`:** Validated `SUCCESS` for the exact saved quote and
+  deposit binding closes local source work immediately (even if Zcash
+  confirmation is pending or later reorgs), without fabricating a Zcash
+  `CONFIRMED` label. First positive Base USDC credit independently consumes the
+  initial claim and publishes the ready wallet; `SUCCESS` plus initial credit
+  completes the job.
+- **Source confirmation and expiry:** Confirmation uses the completed SDK scan
+  and ZIP-244 transaction identity and effects at configured depth (allowing
+  valid v5 authorization-data variants while keeping journaled bytes
+  unchanged). Expiry closure requires the authenticated original signed bytes,
+  finite inclusive consensus expiry (40 blocks pre-NU7, 120 post-NU7), and one
+  completed canonical tip scan beyond expiry plus configured depth; the SDK
+  releases expired pending spend links automatically.
+- **Archived swap observation:** After a replacement attempt opens a fresh
+  operation ID, archived accepted NEAR requests retain independent exact-ID
+  status polling (`DEBUG` while unresolved). A late `SUCCESS` on an archived
+  attempt fulfills the initial claim and prevents undisclosed replacement
+  broadcasts without closing an already-disclosed replacement's source
+  liability.
+- **No per-job recovery cutoff:** Replacement requires safe original source
+  closure, an unconsumed claim, and enabled funding authority. Malformed
+  advisory counters, unknown phase labels, or unreadable polling timestamps
+  route to observe-only recovery without blocking canonical confirmation,
+  expiry, or settlement (automatic first submission still requires exact
+  `PREPARED` and zero prior attempts).
+- **Snapshot retention:** Outgoing operations keep their referenced encrypted
+  snapshots as immutable audit evidence.
+- **Transient read isolation and degraded serving:** Inventory scans isolate
+  per-row payload conversion errors when exact job, wallet, pool, and source
+  correspondence stays intact, keeping original obligations while siblings
+  continue. Transient SQLite busy and locked inventory reads retry on normal
+  cadence without replaying financial commits. If treasury state authenticates
+  but the Zcash SDK snapshot or funding-only config (sync, fee, indexer, or
+  NEAR settings) is unusable, serving falls back to a Store-only Base runtime
+  so existing Base wallets keep serving while funding pauses until fixed and
+  restarted.
 
-Production calculation is offline and runs outside async executor threads. SDK
-calculation panics terminate before reconstruction. If exact bytes were already
-extracted, a later facts-validation panic still publishes them without submission
-facts; it cannot authorize a replacement, disclosure or another calculation.
-Broadcasting requires committed outgoing bytes
-and factual transaction metadata before the Store can grant disclosure authority.
-After successful exclusive offline SDK reconstruction, with no completed result
-still owned, a funding calculation with neither journal can close automatically.
-The original accepted inputs remain encrypted under the original operation ID;
-existing recovery archival records the never-disclosed reset. Another calculation
-uses a fresh operation ID, current claim and funding authority, and SDK spendable
-funds. A jobless shielding calculation uses its normal fresh identity. This local
-recovery needs no blockchain absence proof or extra observation. An outgoing
-commit with a lost acknowledgment stays owned, and a factual transaction record
-without its outgoing journal is corruption, not proof of non-disclosure.
+### Funding diagnostics
 
-Bound NEAR SUCCESS independently closes source work. Its preserved calculation
-intent cannot block unrelated work or retirement. The serialized SDK owner still
-journals any live calculation's late result before processing its next mutation,
-without disclosing a new deposit.
-
-A returned quote deadline that has actually expired prevents a new preparation or
-first submission. Untouched quote refresh requires proof of no accepted calculation
-and no outgoing bytes, then archives the old binding and its nondisclosure evidence. No local five-minute margin applies.
-
-Recovery eligibility comes from the original operation and its bound closure
-archive, with liabilities rechecked before reuse. Saved error messages grant no
-recovery permission. Startup obstructions use current typed observations and current
-funding restrictions; reopening does not turn historical diagnostic prose into a
-new policy obstruction.
-
-An uncertain broadcast retains the saved bytes and transaction identity. Recovery
-reconciles that operation; explicit rebroadcast uses the same bytes. A timeout or
-indexer omission does not prove non-submission. For an unfinished source operation,
-confirmation and expiry use completed canonical SDK observations at the configured
-depth. Base credit alone cannot prove source confirmation.
-
-Submission counters and status labels do not establish the transaction's monetary
-effects. Observation treats malformed counters or unknown labels as possibly
-disclosed, preserving the original columns while canonical confirmation, finite
-expiry or exact bound settlement can resolve the work. Immutable transaction
-facts and signed bytes still require authentication. Inspection and disclosure
-remain strict: automatic first submission requires the original PREPARED label
-and a valid zero counter. An observation fallback never grants submission or
-rewrites missing history.
-Saved quote-observation counts, polling times and diagnostic health fields are
-also advisory. Their decoding cannot stop runtime recovery or authorize spending;
-unreadable values use ordinary unknown/default scheduling observations without
-rewriting fields merely on read. An unrecognized runtime phase routes to the
-existing recovery path; it does not authorize a new calculation, satisfy a phase
-mutation guard or invent a replacement state. Full inspection still reports
-malformed stored data. These fields are separate from original source disclosure history and the
-configured recovery authority enforced through archived operations.
-
-NEAR owns cross-chain swap settlement. A validated SUCCESS for the exact accepted
-quote/deposit binding closes local source work, without requiring local Zcash
-confirmation or independently proving the bridge's destination transfer. Original
-bytes, inputs, submission attempts and the last observed source status remain
-available; settlement does not fabricate a Zcash CONFIRMED label. An already
-accepted calculation finishes journaling its exact result as resolved. No new
-calculation or disclosure starts for that fulfilled operation, and already accepted
-network I/O drains under its original owner. Restart applies the same rule to
-previously retained pending rows. Later Zcash reorgs do not reopen settled swaps.
-The SDK independently repairs chain state and determines current spendability.
-
-Destination readiness remains separate: the first positive Base USDC observation
-consumes the initial claim and can publish the usable wallet before settlement.
-This scalar is advisory readiness, not finalized transfer evidence. Bound provider
-SUCCESS plus that initial credit completes the existing funding job. A successful
-operation awaiting credit remains in VERIFYING_CREDIT without source-chain work.
-Earlier negative reports cannot veto success or reopen the claim. Provider SUCCESS
-stops status work. FAILED retains checks until a bound REFUNDED or SUCCESS;
-REFUNDED retains checks until the saved refund receiver has a confirmed Ironwood
-receipt in the SDK snapshot. Failed/refunded current operations request shared ZEC
-scans while that receipt is absent, even after disabling new funding. Original
-source work keeps independent confirmation/finite-expiry observation.
-
-A bound REFUNDED outcome closes that swap's delivery obligation. After positive
-confirmed receipt at its exact saved refund receiver and original source closure,
-managed funding may archive the attempt and obtain a fresh operation, quote and
-refund receiver under current enabled funding authority and the same unconsumed
-claim. Receipt alone, FAILED, elapsed time, unrelated incoming funds and unsupported
-pools cannot authorize replacement. Positive initial USDC credit or bound SUCCESS
-vetoes replacement at its serialized mutation boundary. Direct sends never gain
-replacement authority. Unknown, processing and incomplete bridge outcomes remain
-unresolved automatic waits; they do not manufacture an integrity error or operator
-requirement. Source expiry alone cannot prove the bridge has no delivery obligation.
-Verified finite expiry can permit a fresh attempt under current unconsumed claim,
-funding and qualification authority and actual SDK spendable funds. If later
-canonical confirmation establishes that the original source transaction was
-included, that confirmation supersedes active expiry as the basis for a new
-replacement. The prior expiry proof, pinned snapshot and original operation remain
-audit history; confirmation requires the separate bound-refund recovery path
-before any replacement. The old NEAR
-request remains independently observable until its own terminal outcome.
-
-Status observations retain each accepted request's exact operation and saved quote,
-including archived attempts after the funding job changes identity or completes.
-Their scheduler identity contains the accepted job, operation and wallet identifiers,
-without inventing a funding phase or borrowing replacement health. They share the
-existing independent status lane and cadence; one slow old request
-cannot serialize the newer request's observation. A late bound SUCCESS fulfills
-the same initial claim and prevents any replacement deposit not yet disclosed.
-It does not rewrite another operation's provider result or close that operation's
-already-disclosed source liability. If success arrives during a replacement's
-accepted calculation, the exact result is still journaled as resolved; it cannot
-receive first-disclosure authority. A replacement already disclosed remains owned
-until its own bound fulfillment, source confirmation or finite-expiry recovery, including after
-positive credit completes the funding job. Changed nominal bounds and an unsigned
-redraw do not change these original obligations. Initial credit can finish the job regardless
-of which attempt was current when the scalar observation was saved; unresolved
-external requests and disclosed originals keep their existing observation owners.
-Each actual status lookup for a retained unresolved request emits DEBUG explaining
-that its final outcome is still unknown and additional checks continue. The log
-identifies the original job, operation and wallet; it does not log provider prose
-or signed data. Admission deferral and ordinary current-swap polls remain DEBUG.
-
-One retained funding owner schedules independent status, credit and prerequisite-
-complete unsigned quote observations in bounded lanes, alongside serialized treasury
-commands. DEBUG source-step start/finish messages identify the wallet, job,
-operation, starting phase, elapsed seconds and whether the step returned success;
-step success does not establish swap settlement. An unmatched start narrows the
-investigation but can also reflect incomplete logs, process exit or a panic.
-Repeated capacity diagnostics include the active source operation. They can
-include candidates not yet due and do not establish that funding failed. Per-operation/kind backoff cannot stall another group's observations.
-Advisory reads cannot restore a consumed initial claim. Completion storage failures still
-stop the shared owner; rejected proofs never release liabilities or authorize retries.
-Historical work uses captured boundaries and keyset pages, not full reporting
-snapshots; wallet count is not a deadline. Read-only readiness and quote prerequisites
-precede proposal mutation or reservation. The same treasury actor and worker survive
-bootstrap into serving, and accepted work drains after waiter cancellation.
-
-The scheduler's response waiter does not own the funding lease. Accepted mutable
-source work retains it even if observation publication fails and the scheduler
-returns an error; another worker cannot enter until that source task finishes.
-Once accepted source work has drained, stopping drops any remaining unsigned
-observations without accepting their results or consuming transaction recovery
-attempts. A single pass uses its captured
-inventory boundary; continuous observation lanes can refresh their boundaries
-independently while source work remains occupied. Focused scheduler tests use
-explicit completion barriers and the durable store to exercise these boundaries;
-they do not exhaust all possible async interleavings.
-
-Funding logs distinguish saved local phase, progress and failed checks. The first
-phase message per owner explicitly reports saved/current local state; later phase
-changes use a separate progress message. Each validated NEAR status enum logs at
-DEBUG with the operation identity. Observation unavailable/recovered transitions
-log at INFO using existing job records, with repeated failures at DEBUG. Terminal
-provider outcomes log only after persistence: `FAILED` is not proof of no receipt,
-and `REFUNDED` is a provider claim, not an SDK-observed refund. Safe parsed
-refund reason and reported atomic amounts accompany INFO outcome transitions; these remain provider reports, not wallet receipt evidence. These diagnostics add no state,
-polling or financial authority. Entering deposit confirmation
-emits an informational message; ordinary confirmation-depth and pending Base-credit
-polls log at debug level, clear stale error status and use the normal polling interval.
-They do not release reservations or authorize another deposit. A direct proposal
-exceeding the operator's accepted total-debit preference remains unstarted and
-logs at DEBUG. Retained retryable
-observation attempts (including sync, RPC and storage failures) and retained-owner
-reacquisition attempts log at DEBUG with existing retry behavior. Meaningful transitions into delayed or degraded funding
-belong at INFO; operator-required outcomes belong at WARN and explain the required
-review while observation continues. Repeated observations of the same operator
-requirement log at DEBUG even when height details change; successful observation
-clears that diagnostic episode. Repetition alone does not raise severity; see
-[log severity](development.md#log-severity).
-
-Source confirmation uses the completed SDK scan and computed transaction identity
-bound to the original journaled bytes under the same owner. An SDK-confirmed transaction
-at the configured depth completes source reconciliation without an additional
-indexer lookup or agreement with stale, different or unknown indexer reports.
-Canonical SDK records match the transaction's committed effects, allowing valid
-v5 authorization-data variants; the original disclosed bytes remain unchanged.
-See [SDK transaction identity](zingo-integration.md) for the ZIP 244 boundary.
-Completed source work is not re-audited or reopened after restart or SDK chain
-replacement. Retained source dispositions and referenced snapshots remain audit
-evidence in current stores; they do not drive a lifetime reconciliation pass.
-Outgoing operations keep their referenced encrypted snapshots after resolution,
-so retained snapshot storage can grow with transaction history. Operator visibility
-is planned in the [deferred release plan](plans/deferred/release_followups.md),
-independently of temporary preflight-copy placement. Pruning is not selected:
-referenced snapshots remain immutable recovery evidence.
-Any future retention change must enumerate preparation, outgoing, expiry and
-recovery-history consumers and preserve their immutable evidence; a hash alone
-is not presumed to replace the snapshot they require.
-For records reopened by an earlier implementation, the existing read-only history
-guard still forbids automatic disclosure of previously closed originals. Actual
-unfinished originals keep their existing owner and exact journals.
-
-Source confirmation disagreement has the same classification in ordinary
-reconciliation and recovery. Before the SDK establishes sufficient confirmation,
-an unconfirmed wallet record is pending when its
-known highest scanned block is below the lookup's inclusion height: the lookup
-can observe a new block after the wallet scan. This is an ordinary confirmation
-poll at DEBUG, not an operator requirement. Unknown scan progress, an unconfirmed
-record after scanning the inclusion height, and unequal reported heights retain
-the original work for fresh observation. A sufficiently deep coherent SDK record
-with the original computed transaction identity completes confirmation without
-requiring another lookup or agreement with its reported height.
-Diagnostics retain the
-lookup confirmation height, wallet confirmation height (or `unconfirmed`), and
-highest scanned block (or `unknown`); these facts do not establish a root cause.
-Entering a recoverable canonical-disagreement observation emits INFO with the
-safe rejection context. Unchanged checks and ordinary confirmation-depth waits
-remain DEBUG; a disagreement alone does not require operator repair.
-Existing work, inputs and reservations remain owned, and observations continue on
-their existing schedule. An observation discrepancy grants no replacement deposit;
-source confirmation still requires the configured depth. The SDK's upstream 100-block
-rolling history is a synchronization recovery horizon, not consensus finality.
-A deeper fork requires a full SDK rescan rather than a permanent historical gate.
-Missing required SDK block boundaries and pruned rollback checkpoints use that
-same automatic rescan, including for already-persisted interrupted state. These
-derived-cache failures do not imply lost original transaction provenance.
-A full clear without a proven common ancestor moves the effective scan floor
-back to supported activation, including when the new tip remains above the
-declared birthday, so earlier replacement credits are discovered. Existing scan ranges preserve that
-floor through interruption and reopen without changing the declared birthday,
-keys or accepted operation journals; see [SDK chain recovery](zingo-integration.md).
-
-Bootstrap and the serving funding worker recover eligible jobs automatically.
-The operator can run `wallet recover --config FILE` with serving stopped for one
-pass through the same classifier, without starting funding or submitting transactions.
-Reports distinguish recovered, waiting, failed checks and operator-required cases.
-Unpublished calculations recover at the exclusive reconstructed SDK owner;
-missing immutable records required to resolve genuinely disclosed work still
-require scoped review before replacing that funding attempt. A confirmed source with an
-unresolved swap remains automatic pending work. FAILED/REFUNDED also retain refund
-observation as described below; a refund alone cannot authorize replacement. Ordinary discovery and shielding
-of owned outputs can continue under the current funding authority.
-
-A prepared deposit retains its exact bytes and input owner when its external quote
-deadline expires. Local source closure uses its authenticated original signed
-transaction, finite consensus expiry, and one fully completed canonical SDK tip
-scan beyond expiry plus the configured confirmation depth. A canonical confirmed
-original follows ordinary confirmation instead. A source observation that completed
-that scan in the same command also supplies the expiry proof, including the
-treasury maintenance pass immediately following a successful scan; a cached or
-failed observation does not replace the fresh scan. The final Store publication checks
-the same unchanged Ready snapshot and coverage. No current-input equality,
-unspent-input inventory or alternative-spender proof is required: the SDK already
-expires pending transactions, releases only their own spend links, and owns actual
-spendability. Missing or relocated old inputs do not create another local financial
-liability. Original bytes, accepted inputs and snapshots remain preserved.
-
-Expiry height N allows inclusion through N. Production deposits use ordinary SDK
-expiry (40 blocks before NU7, 120 afterward), and shielding uses the finite backend
-default. A genuinely retained zero-expiry original cannot use this expiry path;
-production does not construct one. Submitted/uncertain operations are observed,
-never automatically replayed. Closing source work does not close an unresolved
-bridge operation. A fresh attempt after expiry requires the original's stored
-canonical closure proof, not an EXPIRED label alone, plus current unconsumed claim,
-funding and qualification authority. An unresolved NEAR request does not veto that
-source-expiry proof; it retains its own status observation. Returned coins are
-ordinary SDK funds, without per-job refund attribution.
-There is no per-job recovery-count limit. Another attempt requires the original
-source's established closure and current unconsumed claim, funding and qualification
-authority. Replacement archives each original idempotently in the Store transaction;
-operation history never disables otherwise permitted recovery. Ordinary
-reconciliation remains pending-only; scanning a replacement chain does not reopen
-completed historical source journals. Disabled automatic funding is an ordinary
-wait after safe source closure, not a manual-repair warning; a later enabled
-configuration can resume eligible work.
-Proven never-disclosed resets, including untouched quote refreshes and unpublished
-calculations closed after offline reconstruction, retain durable markers for source
-and bridge ownership. Unclassified historical records remain preserved obligations;
-they do not consume a retry allowance. Unsigned quote outages retain ordinary
-per-pass work and backoff without authorizing another deposit.
-
-
-The treasury receives/synchronizes Ironwood with capability checks on the injected
-lightwalletd transport. All workspace packages use ordinary upstream Zingolib/netutils
-sources; the application's public-trait RPC adapter preserves the factory transport
-without SDK-owned direct networking. Direct Pepper sync retains its reviewed
-progress/drain and diagnostic patches. The
-[egress inventory](network-egress.md) explains treasury versus immutable recipient
-identities and the remaining upstream timeout boundaries.
+- First phase logs report saved local state; later transitions report progress.
+- Validated NEAR enums, confirmation polls, pending Base credit polls, and
+  retryable observation errors log at `DEBUG` (entering deposit confirmation
+  and observation unavailable and recovered transitions log at `INFO`).
+- Terminal provider outcomes log at `INFO` after persistence with safe parsed
+  refund metadata (noting that `REFUNDED` is a provider claim, not SDK
+  receipt).
+- Operator-required outcomes log at `WARN` once per episode (repeated identical
+  checks stay `DEBUG` until cleared).
 
 ## Recovery and reconciliation policy
 
-Financial state supports recovery of accepted work and current spending authority.
-SDK/blockchain state owns actual funds, spent inputs and chain corrections.
-A shorter indexer height alone cannot replace retained SDK observations. Without
-a correctly bound divergent retained block, a scan preserves those observations
-and waits recoverably; it does not publish a new Ready observation. A prior
-unsigned scan target does not impose a new monetary or readiness watermark:
-only its unscanned tail can be shortened while actual observations remain intact.
-A rescan after demonstrated divergence or damaged local rollback boundaries
-preserves original liabilities and grants no deposit, release or replay authority.
-NEAR owns settlement of the exact accepted cross-chain swap; source reorgs do not
-reopen its validated successful outcome. Use
-authoritative observations to repair derived estimates, outcomes and workflow
-phases, and finish work whose outcome is established. Preserve immutable accepted
-inputs, signed bytes, original identities and liabilities while doing so.
+- **Chain and SDK are truth:** Derive monetary state from chain and SDK facts
+  rather than parallel local accounting. Repair derived estimates, outcomes,
+  and workflow phases without altering immutable accepted inputs, signed bytes,
+  or liabilities.
+- **Reorg protection:** A shorter indexer height alone never overwrites
+  retained SDK observations without a proven divergent retained block. A full
+  clear after deep divergence or missing checkpoints resets the effective scan
+  floor to Sapling activation while preserving keys, declared birthday, signed
+  bytes, and pending source liabilities.
+- **Derive identity from signed bytes:** For signed Zcash operations,
+  transaction ID and expiry come from the authenticated original bytes; stale
+  or malformed plaintext projections cannot delay confirmation or expiry
+  recovery or extend broadcast eligibility.
+- **No unnecessary gates:** Stale phases, provider amount differences, fee
+  deductions, and missing optional corroboration never block authorized work or
+  reopen completed outcomes. Never add a financial check without naming the
+  authority or liability it protects and confirming reconciliation cannot
+  resolve it.
+- **Unresolved `PENDING_DEPOSIT`:** Because NEAR 1Click's status contract has
+  no terminal `EXPIRED` status, an expired source with an unresolved
+  `PENDING_DEPOSIT` swap defers that signer's retirement automatically while
+  other funding continues (not a manual-repair warning). See
+  [deferred swap timing](plans/deferred/near_swap_timing_tightening.md).
 
-A verified chain replacement may reconstruct newly owned credits before the declared
-wallet birthday while dropping orphaned inputs from current SDK observations.
-That repair does not remove an accepted original's Store input manifest, signed
-bytes or immutable preparation snapshot. An actually disclosed original retains
-its liability through failed/canceled observations and reopen until canonical
-confirmation or the existing source-disposition proof resolves it. New spendable
-capital does not authorize another deposit, release or replay; an original below its signed expiry continues to wait.
+## Refunds, state, and recovery
 
-Reuse existing validated observations, exact operation bindings and confirmed
-journals. Acquire a missing fact only when it can advance the affected operation,
-through the existing network/SDK owners and observation policy. Do not add fresh
-agreement checks, historical sweeps, refund watchers, cross-chain accounting
-ledgers or redundant balance certificates to certify an already established
-outcome. Failure to acquire optional corroboration must not invalidate that outcome.
-
-Stale phases, provider amount differences, fee deductions and missing optional
-attribution are reporting or reconciliation matters. They must not create
-financial-repair blockers, pause otherwise authorized payments or funding, or
-reopen proven completed work. For these derived observations, use the actual amount
-without requiring equality to a quote, selected amount, provider report or locally
-calculated refund total. This does not relax quote acceptance or signing authority.
-The first positive USDC credit consumes its initial funding claim even below its nominal minimum.
-An empty refund address after shielding, or later spending of recovered funds,
-does not invalidate historical recovery. Refund receipt and shielding must not
-become additional prerequisites for an independently established SUCCESS; the
-managed refund observation sequence below governs replacement after REFUNDED.
-
-Keep uncertainty attached to the actual unresolved obligation. Preserve current
-authority checks, journal-before-disclosure, accepted input ownership, canonical
-unfinished-source confirmation/finite-expiry recovery and unresolved payment authorizations. Receipt
-or shielding alone does not prove non-submission, release another attempt's inputs
-or authorize another deposit. Managed refund replacement combines bound REFUNDED,
-source closure and current unused-claim authority with the receiver observation
-sequence described below. Genuinely
-conflicting execution/ownership evidence or unrecoverable required facts warrant
-scoped investigation; they do not justify halting unrelated work.
-
-For an existing signed Zcash operation, transaction identity and expiry come from
-the authenticated original bytes. Saved plaintext txid/expiry fields are reporting
-projections: stale, missing or malformed values cannot veto confirmation, delay
-signed-expiry recovery or extend broadcast eligibility. Operational reads derive
-them before scheduling and protocol-validity decisions without rewriting the
-journal. Amount, fee, accepted deadline and input/operation ownership retain their
-original checks; corrupt original bytes or missing required authority are not
-reconstructed from projections. Strict status inspection can still report damaged
-saved metadata independently of canonical recovery.
-
-Before adding a financial gate or consistency check, identify the concrete
-authority, liability or external contract it protects and existing enforcement.
-First assess whether correcting derived state or removing duplicate responsibility
-resolves the problem. Any necessary check must preserve useful recovery and the
-affected operation's ownership without requiring agreement among advisory records.
-Regression coverage should show established recovery completing, genuine
-liabilities remaining owned, and independent work continuing without redundant I/O.
-
-Ordinary retirement preserves unresolved original delivery obligations. A
-never-credited completed job needs each possibly disclosed current/archived swap's
-bound NEAR terminal outcome and closed local source work. Proven nondisclosure
-has no bridge obligation; any privately held source work must still close.
-Completion, abandonment or source expiry/confirmation
-alone does not establish bridge settlement. Observed returned coins alone are not
-a bound provider refund outcome. No credit or consumed claim is fabricated.
-An expired source with an unresolved `PENDING_DEPOSIT` request can therefore defer
-signer retirement indefinitely while other funding continues. This is automatic
-pending observation, not a manual-repair warning. The [1Click quote contract](https://docs.near-intents.org/api-reference/oneclick/request-a-swap-quote)
-defines its deadline as the start of refund handling; the [status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
-provides no terminal EXPIRED result. Neither a local deadline nor additional Zcash
-blocks can manufacture that service's final delivery outcome.
-Optional service-contract and recovery-duration questions belong to the
-[deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md).
-
-## Refunds, state and recovery
-
-Generated and mnemonic-imported wallets persist disabled transparent address
-discovery and publish shielded-only receive addresses. Runtime opens and SDK
-reconstruction override any saved discovery setting, so ordinary operation and
-recovery do not query known transparent addresses or probe address gaps. Issued
-identities and historical financial records remain intact; there is no legacy
-transparent-discovery mode. The SDK may still recognize already-owned transparent
-outputs in transactions encountered through shielded scanning.
-This meets the address-query privacy concern: a refund receiver disclosed to NEAR
-is not also disclosed through transparent-address discovery requests to the Zcash
-indexer. New refunds are shielded-only, and the real-SDK
-[refund/discovery regressions](../src/treasury/lifecycle_tests/refund_addresses.rs)
-check absent transparent requests across construction, import/seed recovery,
-reopen and SDK reconstruction, including all six RPC aliases. Local SDK transparent
-key derivation and incidental owned-output recognition remain supported; complete
-SDK removal is not needed for this query-suppression contract. This is not a claim
-of unlinkability through unrelated network, session or transaction metadata.
-The requested quote window defaults to 1,800 seconds; explicit overrides, returned
-quote deadlines and the SDK's signed block expiry retain their separate authority.
-
-New swaps use a persisted unique shielded-only unified refund address, containing
-the Orchard-format Ironwood receiver derived from treasury account zero. The same Zcash
-seed also derives transparent addresses and unified addresses with transparent
-receivers; no additional seed is needed. Compact-block scanning with the account's
-viewing keys discovers shielded receipts without enumerating every issued address.
-They become spendable under ordinary SDK confirmation rules without a separate
-shielding transaction. Address derivation and the exact job binding are saved
-atomically before a quote can disclose the address.
-Each new logical swap operation gets different Sapling and Orchard receivers. Ordinary
-restart preserves the SDK's address progression; observations and retries of the
-same accepted swap retain its exact refund binding. Replacement attempts and
-quote refreshes remove the old active binding before deriving another address.
-Unsigned quote acquisition retries for the same operation reuse its binding,
-including when a timed-out request may already have reached the provider; this
-does not promise a fresh address for every HTTP request.
-Distinct refund receivers prevent address-reuse linkage, not correlation through
-other request, session or network metadata.
-
-Saved transparent or mixed refund bindings and accepted quotes remain exact
-historical evidence. They are rejected for new quote requests and new managed
-input acceptance, including when a quote was cached before this policy changed.
-Selection fails explicitly rather than silently substituting a different refund
-receiver. Already accepted calculations, signed bytes and source/provider status
-observations retain their original binding and authority. This compatibility is
-financial ownership, not a wallet-format migration or transparent recovery scan.
-New refunds require a network-correct shielded-only unified address containing an
-Orchard receiver. Source deposit addresses retain their transparent-only contract.
-Mnemonic recovery discovers shielded receipts through viewing keys without address
-gap scanning; a seed does not recover off-chain liabilities or undisclosed issuance
-frontiers, so retain the complete encrypted state and key backup.
-
-Managed refund observation reuses the SDK's historical Ironwood notes matched to
-the actual receiver in the exact accepted quote. Positive confirmed receipts count
-when below the deposited amount or subsequently spent; no deposit/refund equality,
-provider amount comparison or per-refund spendability ledger is maintained. Current
-SDK funds still govern the next preparation. This is an observation sequence for
-managed replacement, not an additional balance budget or a prerequisite for an
-independently established SUCCESS. Store-lifetime metadata caches positive and
-absent receipts per operation and snapshot revision, rebuilds from saved SDK facts
-after reopen, and is re-evaluated when the snapshot changes. Committed replacement
-archives the original unchanged; archived terminal refunds are not reopened or
-watched. INFO distinguishes the provider outcome, absent/confirmed receiver receipt
-and committed replacement. Bootstrap's INFO wait message identifies refund discovery
-instead of reporting every refund wait as initial USDC credit.
-
-Refund visibility does not make funds automatically spendable for another deposit.
-Only actual owned Ironwood funds enter supported spendability. A returned payment
-never reopens a consumed initial funding claim. Managed replacement requires
-the bound provider refund outcome and closed source under the existing unused claim. The saved
-`funding_refunds` records retain exact routing evidence; they are not a refund
-balance ledger. New transparent-input shielding and `wallet shield-refunds` are
-unsupported and fail before calculation or network work. Serving never allocates
-that work automatically. Raw SDK recognition of unsupported outputs does not
-change this policy.
-
-Existing accepted transaction bytes, selected inputs and original transport
-identity remain under their generic canonical observation/reconciliation owner.
-No missing optional evidence, refund report or stale workflow phase erases a
-liability or authorizes a replacement payment. The narrow NEAR output exception
-requires its original saved quote and Ironwood source funds; it grants no wallet
-transparent receiving or address-query authority.
-
-`rotation/store.rs` keeps treasury snapshots, EVM keys, funding/outgoing records,
-roles, accepted calculations and payment authorizations in one versioned database.
-The current database contract is schema 23, independent of public output, SDK
-and encryption formats; see [versioned output](wallet-cli.md#versioned-capacity-output).
-Sensitive records are authenticated-encrypted with a separate 32-byte key and record
-identity bindings; public metadata still links addresses and operations.
-The directory, key, database, ownership lock and SQLite sidecars have filesystem
-protections. Wrong key, corruption or identity mismatch never initializes an empty
-replacement wallet.
-
-Back up while serving is stopped. The consistent database and key must be synced
-before atomically publishing `backup.json`; directory sync is also required for
-reported success. A failed backup destination cannot be silently overwritten.
-Seed-only recovery does not recover EVM keys, pending swap bindings or payment
-liabilities. Protect the whole backup as spending material.
-
-`wallet status` reads saved metadata offline. `wallet addresses` displays saved
-receive addresses; singular `wallet address` derives an address. Explicit recovery
-commands distinguish unstarted preparation, signed/ambiguous source operations,
-refund shielding and expiry proof. Use their documented predicates; deleting jobs
-or manually clearing reservations is not recovery.
-
-## Qualification boundaries
-
-Default tests use local services and unfunded keys. Synthetic proving and mined
-consensus tests separately exercise preparation, refunds, expiry and recovery;
-see [testing](testing.md), [LIFECYCLE.md](../tests/LIFECYCLE.md) and
-[REGTEST.md](../tests/REGTEST.md).
-
-Qualification's complete lifecycle snapshots, narrow/full evidence boundaries and
-receipt retention when observation fails are specified in the
-[technical reference](../tests/live/INTEGRATION_REFERENCE.md#planning-and-concurrency-assertions).
-
-Public-swap live exercises have observed funding, promotion/refill, service during
-pending deposits, cross-listener concurrency and restart. These do not establish
-confidential swaps, managed Permit2/upto, all provider routes or a full automated
-lifecycle/restart qualification. See [testing](testing.md#qualification-status) for
-scope and outstanding acceptance. Current operation requires fresh quotes and chain checks.
-
-Base history enumeration isolates payload conversion failures only after validating
-attempt identity, cursor and wallet/pool ownership. It keeps the original liability
-and continues independent history and balance work. A one-pass recovery reports
-incomplete observation after healthy work drains; background observation revisits
-these rows on its normal cadence. Unknown ownership and storage failures remain
-shared errors.
-
-Funding inventory similarly isolates phase, provider and scheduling-health conversion failures only
-when exact job, wallet, pool and source-operation correspondence remains intact.
-The affected operation retains its original journals; independent jobs continue.
-One-pass recovery reports the incomplete inventory after draining healthy work.
-Unclassified source-operation, ownership and storage failures still stop the shared
-owner. Diagnostic text is never substituted for a missing financial fact.
-
-Base background reconciliation retries transient SQLite busy/locked inventory reads
-on its existing cadence while retaining the owner, cursor and active observations.
-One-pass reconciliation reports an incomplete pass after independent work drains.
-This retry applies only to read-only inventory; it never replays a financial commit.
-
-Funding uses the same transient-read classification at inventory boundaries and
-pages. Only the affected inventory lane waits for its normal poll cadence; accepted
-source work and independent credit/status observations retain their owners. Initial
-inventory acquisition also retains its lease while retrying. Financial publication
-and source mutations are never replayed by this mechanism.
-
-For ordinary serving without an enabled discovery relay, catalogs and listeners
-can start before managed wallets are funded. All listener sockets bind before new
-funding starts; an empty pool returns `wallet_not_ready` before provider I/O.
-Explicit `wallet bootstrap` still waits for its captured enabled reserve claims.
-If shared state authenticates but the Zcash SDK cannot decode its snapshot, ordinary
-serving retains that same store for existing Base payments and reconciliation and
-pauses new funding. Schema, key, identity, authentication and owner failures still
-stop initialization. Funding-only configuration or preflight failures also select this Base-only runtime:
-invalid treasury sync/fee settings, source endpoints or NEAR credentials do not
-prevent existing Base service. Correcting those settings or SDK snapshot availability
-requires restart. Shared identity/path remains required; missing treasury/funding sections still
-fail initialization. If Base configuration itself is invalid, static service stays
-available while managed API calls and identity-bound probes return `wallet_not_ready`
-without provider I/O. No Base reconciliation runs through that invalid configuration;
-unsigned catalog/help operations remain independent. Paid relay startup, explicit
-bootstrap, config checking and qualification remain strict. The store-only runtime
-does not reconstruct the SDK or run ZEC/source/swap observers, including startup
-ZEC discovery; their unresolved obligations remain durable and existing Base
-startup discovery still runs when its configuration is usable.
+- **Shielded-only refund receivers:** Every new swap derives and persists a
+  unique Orchard-receiver-only Unified Address (Ironwood) atomically with the
+  SDK snapshot before quoting. Transparent-address discovery is disabled across
+  creation, import, reopen, and reconstruction so NEAR refund receivers are
+  never queried via transparent indexer RPCs. Historical transparent or mixed
+  refund bindings remain preserved audit records and are rejected for new
+  quotes.
+- **Managed refund replacement sequence:** A bound `REFUNDED` status closes that
+  swap's delivery obligation. Managed funding may archive the attempt and start
+  a fresh operation and quote only after **all four** hold: (1) bound `REFUNDED`
+  outcome, (2) original source closure, (3) confirmed positive Ironwood receipt
+  at the exact saved refund receiver (even if less than deposited or later
+  spent), and (4) an unconsumed initial funding claim under enabled funding
+  authority. Provider status alone, receipt alone, `FAILED`, elapsed time, or
+  unrelated funds never authorize replacement. Direct sends never gain
+  replacement authority.
+- **No transparent shielding:** Returned Ironwood receipts become spendable
+  under normal SDK confirmation rules. Transparent-input shielding and
+  `wallet shield-refunds` are unsupported and fail closed.
+- **Encrypted storage and backups:** `rotation/store.rs` stores snapshots, EVM
+  keys, funding and outgoing journals, roles, calculations, and authorizations
+  in one owner-only SQLite database (schema 23), encrypting sensitive records
+  with a separate 32-byte ChaCha20-Poly1305 key bound to record identities.
+  Wrong keys, corruption, or mismatches never create an empty replacement
+  wallet. Back up with `wallet backup` while `serve` is stopped; a Zcash seed
+  alone does not recover EVM keys, pending swaps, or payment liabilities.
 
 ## Wallet observation policy
 
-Base transport recovery is a finite sequence inside the existing logical read and
-retained acquisition owner. New scopes do not create observations, caches, owners
-or faster polling; waiter cancellation does not abandon accepted shared work.
-Transport promotion does not change endpoint generations or release liabilities.
-See [network policy](network-egress.md) for endpoint-first retries and validation.
+Observation scope, cadence, and stop rules belong to the work requesting them.
+Intervals apply per wallet, operation, or serialized treasury scan (not a
+global RPC rate limit); failed recurring observations back off up to 300
+seconds (90, 180, and 300 seconds for treasury scans) without a sibling event
+shortening the cooldown.
 
-The observation scope, cadence and completion rule belong to the work requesting it:
-
-| Trigger / work | Observation and cadence | Completion / stop rule |
+| Work or trigger | Observation and cadence | Stop rule |
 | --- | --- | --- |
-| Fresh managed serving startup | One finite Base pass over existing eligible managed wallets and initial-funding recipients; one background ZEC scan when the treasury capability is available | Finish or report failure of the captured pass; new allocations do not extend it and startup alone creates no recurring watcher |
-| Preparing a new wallet's initial funding | Discover SDK funds as needed, then read that exact Base destination after a valid spendable proposal; reuse applicable same-work observations | Positive credit consumes the unused claim; acceptance rechecks the claim before calculation. An advisory RPC failure does not gate funding, while Store/publication failure defers it |
-| Enabled initial-funding demand waiting for capital or confirmations | Shared ZEC scans; successful completion schedules the next scan after 60 seconds, without another tip query; errors retain 90/180/300-second backoff | Stop when no enabled unfilled claim can advance and no validated accepted transaction needs observation; a new claim wakes discovery |
-| Accepted initial funding without positive destination credit | Shared Base recipient acquisition when due; each repeated read starts at least 60 seconds after the previous read completes | First positive credit permanently finishes that claim's credit lane; source recovery remains independent |
-| Recognized signed-payment insufficient funds | Asynchronous scalar Base refresh when due, coalesced per wallet; each repeated read starts at least 60 seconds after the previous read completes | Success, including zero, finishes the captured request. Failure or a notification arriving during the read retains follow-up work |
-| Eligible retained-wallet retirement | Candidate-scoped canonical authorization pages and dual balance proof under the existing per-wallet owner, 60-second completion floor and error backoff | Retired or verified latest above tolerance finishes captured demand; confirmed above tolerance with latest low, valid unused authorization or transient failure retains work. Canonical-history changes retain reconstruction work; ineligible or unrecoverably corrupt original work stops locally |
-| Validated pending source or shielding transaction | Shared ZEC scans use a 60-second interval after successful completion; source operation observations use configured funding polling plus existing jitter, with independent error backoff. The funding scheduler owns current operations even after job completion; treasury maintenance owns jobless and archived pending originals | Bound NEAR SUCCESS closes swap source work; otherwise canonical confirmation or signed finite-expiry recovery resolves the source obligation, including after credit, disablement, removal or restart |
-| Submitted swap awaiting provider outcome, including archived attempts | Independent exact-operation NEAR status observations; successful completion schedules the next check after `funding.poll_seconds` plus existing jitter; failures retain their independent backoff with a 60-second floor | SUCCESS stops status work; current FAILED keeps polling, and current REFUNDED stops after confirmed receiver receipt; archived terminal outcomes remain stopped; SUCCESS closes its own source work and fulfills the initial claim, without creating spendable funds or releasing a different disclosed original |
-| Current managed FAILED/REFUNDED without confirmed receiver receipt | Shared ZEC scans on the shared 60-second completion-based cadence, independent of new-funding enablement; exact-request NEAR checks retain existing polling/backoff | Confirmed positive Ironwood receipt stops refund scans; FAILED still polls until bound REFUNDED/SUCCESS. Source ownership and destination credit retain separate stop rules. No archived refund watcher |
-| Disclosed direct receive invoice | Shared SDK scan on the shared 60-second completion-based cadence; independent provider status reads on configured funding polling plus operation jitter, with 60–300-second error backoff | Terminal provider failure/refund stops demand; success requests one subsequent completed SDK scan, without attribution or amount equality. Owned status remains available after admission disablement. |
-| Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients and one eligible-retirement attempt | Report asset results and unresolved retirement work; create no background watcher and require serving to be stopped |
-| Completed-result publication or SDK reconstruction | Existing local owner retries after 60 seconds, independently of scan scheduling | Publish the identical result or reconstruct the SDK; this work alone requests no network scan or new calculation |
-| Fully funded idle serving without requested refresh or accepted observation work | No recurring Base or ZEC balance discovery | Relevant new work requests observation again |
-
-Source lookup acquisition or validation failures remain failed observations even
-when the shared SDK scan is healthy. A genuine unknown observation remains
-healthy waiting. Established SDK confirmation and canonical expiry proofs precede
-optional lookup, so a lookup outage cannot veto them or authorize replay.
-
-The interval applies per wallet, operation or serialized treasury scan; it is not
-a global RPC rate limit. A scan, provider fallback or canonical proof can issue
-several requests. Recurring failures retain independent backoff bounded by
-300 seconds and existing jitter where applicable; treasury scan failures wait
-90, 180, then 300 seconds after completion; a new event or sibling success
-cannot shorten that work's interval or clear its failure. Configured local polling
-and healthy handoffs do not change these network observation floors.
-
-Store-only serving retains Base startup discovery and eligible retirement when its configuration is usable.
-It has no SDK/source capability and cannot perform startup ZEC discovery or source
-observation; the reported capability failure requires correction and restart.
-Accepted obligations remain durable. This existing degraded-serving boundary does
-not create a hidden SDK owner or relax strict inspection/qualification requirements.
-
-Listeners bind before startup discovery. Ordinary serving does not sweep idle
-ACTIVE, READY or RETAINED wallets. The [aggregate startup announcement](configuration.md#startup-announcement)
-uses existing saved estimates and capacity notifications to report when all
-listening endpoints can cover their finite maximum payment on an eligible payer.
-It neither sums separate wallets nor requires reserve inventory to be full, and
-rechecks all bound pools together after each wake. It adds no observation or
-financial authority and stops after its single announcement or serving shutdown.
-
-In Tor mode, finite serving startup discovery retains its captured work while the
-configured SOCKS endpoint is unreachable. A shared connection-only check reports
-the endpoint and retries every five seconds until reachable; it then ends and the
-normal finite passes proceed. This does not verify Tor bootstrap, add recurring
-idle discovery or reset an existing wallet/treasury observation cooldown.
-Requested refreshes, accepted work and treasury commands remain independent;
-a successful demanded treasury scan can satisfy its pending startup pass.
-Explicit one-pass sync and qualification do not wait for this startup prerequisite.
-
-Recognized signed-payment insufficient funds requests an asynchronous scalar
-refresh. Multiple requests before a read coalesce; a request arriving during a
-read remains pending for a later read. Success, including zero, finishes the
-captured request. Failed requested reads retain their previous estimate, explicit
-failure and pending request across restart. Successful scalar reads consume any
-unused initial-funding claim on first positive credit, without reopening consumed
-claims or authorizing top-ups. Startup and ordinary requested refresh do not
-traverse retired wallets. Accepted recipient work keeps its original identity,
-including in explicit sync; observing it never reactivates a retired signer.
-
-A shared Store/wallet owner serializes scalar acquisitions for startup, requested
-refresh, preparation and accepted credit checks, retaining them through waiter
-cancellation. New requests cannot shorten the cooldown. Startup and explicit
-one-pass inspection can reuse the owner's completed result during its cooldown;
-reuse does not clear a refresh requested after that acquisition began. Accepted
-initial-funding credit checks retain their separate operation scheduler while
-using the recipient acquisition's existing due time. Cached failures do not add
-another credit retry backoff or count as new recurring observations. Payment
-responses and successful payments alone request no observation. Explicit canonical qualification
-keeps its separate inspection and authority contracts.
-
-Scalar acquisitions lazily discard unused default metadata and expired successful
-results when no acquisition or waiter owns them. Failed observations retain their
-consecutive backoff while the wallet remains live; retired-wallet failures can be
-discarded after their existing cooldown. Cleanup never drops active ownership or
-changes durable claims, estimates or financial journals.
-
-Retirement demand has separate completion from scalar refresh. A Store-lifetime
-marker remembers local eligibility and pending demand independently of disposable
-scalar results and canonical certificates. Committed retirement discards its marker;
-late observation completions cannot recreate it. Committed retirement reports its
-lifecycle change without an additional generic delay-recovery message. Finite startup
-evaluation, fresh low
-scalar observations and transitions into eligibility request work. Local metadata
-pages reevaluate retained roles, claims and source blockers; unrelated wakes and
-canonical minimum publication do not recreate completed demand. A verified latest
-balance above tolerance stops work even when the saved minimum remains low. The
-opposite disagreement retains confirmation progress. Wallets with unresolved
-original delivery/source obligations request no retirement-driven balance polling.
-Evidence-backed closure of the final original obligation is a local eligibility
-transition and requests candidate work through the existing owner.
-Completion follows the effective evidence committed by publication, including a
-newer compatible canonical observation published concurrently by a library caller;
-an older acquisition cannot finish or renew that newer observation's work.
-
-The existing reconciliation owner schedules each candidate under shared wallet
-serialization. Accepted page acquisition and publication survive disconnected
-waiters; no group publication gate spans remote I/O. Demand arriving during an
-acquisition remains pending. Retirement uses the existing 60-second floor and
-independent error backoff without stacking scalar and proof delays or replacing
-a successful scalar outcome with a proof failure. Owner replacement retains
-unfinished work; reopening derives a fresh finite evaluation from durable facts.
-Canonical contradictions and malformed derived checkpoints retain scoped work
-for automatic reconstruction from original authorization identities and fresh
-chain evidence. They do not set a permanent manual-repair latch. A same-hash
-amount contradiction invalidates the affected evidence and requires fresh proof;
-it does not establish a new amount by itself. Stored historical support is audit
-data and supplies no independent veto over a fresh canonical observation.
-Unrecoverable required records preserve obligations, report the affected operator
-requirement and stop proofs that cannot repair them while siblings continue.
-Malformed retirement settings, wallet identities or original authorization
-bindings, and missing accepted inputs or signed bytes, cannot be reconstructed
-from a current balance. These failures need a safe diagnostic identifying the
-affected wallet/group and known cause. Transient database failures retain their
-existing retry behavior.
-An operator-required stop warns once with its safe failure category and affected
-wallet/group. Recoverable proof outages report delay transitions at INFO and
-individual attempts at DEBUG; retry attempts do not warn as terminal failures.
-Finite reconciliation keeps reporting an eligible operator-stopped request as
-failed without repeating its proofs or warning. Fresh eligible scalar demand can
-request another attempt on the existing schedule; a successfully evaluated change
-to an ineligible role, claim or group makes that old retirement stop irrelevant.
-
-Before accepting a new initial-funding calculation, the treasury first obtains an
-SDK proposal using actual spendable funds and validates its inputs and fee. It then
-requests one scalar observation of that exact Base destination, reusing an active
-or recently completed acquisition. Positive credit consumes the unused claim, and
-source acceptance rechecks that claim after the read. A failed advisory destination
-RPC read preserves previous information and does not prohibit funding. Failure to
-publish a positive observation or verify Store ownership defers source acceptance,
-including callers sharing that failed acquisition during its cooldown. Waiting
-for ZEC or rejecting an invalid proposal does not repeatedly probe Base
-destinations; no whole-inventory discovery barrier precedes an individual preparation.
-
-New reserve demand wakes shared treasury discovery. Known shortages keep needed
-scans running so later deposits and confirmations can supply spendable SDK funds.
-New-funding discovery demand comes from enabled current reserve slots and their
-exact pool, wallet and claim-generation bindings, rather than historical funding
-jobs. Completed funding jobs do not request new-funding scans or reopen their original
-funding authority. With automatic funding enabled, the ordinary vacancy pass
-replaces a current `ALLOCATED`, uncredited reserve whose job is complete once all
-current and archived source ownership for that job is closed: no live unresolved
-calculation or pending transaction. Bound NEAR SUCCESS, canonical confirmation,
-verified finite expiry or proven non-disclosure can close the relevant source work. The Store atomically retains the old wallet, clears its exact slot and
-increments the claim generation; ordinary allocation then creates a fresh wallet
-and operation under current funding authority. A crash between these commits
-leaves a vacancy for the next pass. The old financial journal and uncertain bridge
-delivery remain unchanged. Late credit stays usable on the retained wallet and
-cannot reclaim the replacement slot. Low balances on previously credited wallets
-never trigger this recovery or authorize top-ups.
-
-Committed replacement logs at INFO. A completed uncredited slot awaiting
-replacement checks is identified once at funding-owner startup at INFO and in
-wallet status as degraded inventory; recurring checks remain DEBUG. Its original
-source ownership may already be closed while the slot awaits the next randomized
-funding opportunity. These diagnostics do not assert unresolved source ownership
-or insufficient ZEC. Pending
-original source work retains its independent observation and recovery. Replaced
-or disabled claims do not keep discovery running; validated accepted transactions
-retain their independent journal-based observation demand.
-Waiting source operations reuse an applicable current-owner scan without extra
-tip probes. Local quote, preparation and submission handoffs remain immediate.
-Immediate continuation follows an actual successful local result and current
-durable preparation facts; a display-phase change or successful no-op cannot
-shorten the source observation interval. Quote refresh creates a new operation
-identity whose initial work is eligible independently of the obsolete completion.
-SDK proposal selection runs locally before canonical validation; insufficient funds do not trigger intervening tip probes. A selected
-proposal still requires canonical validation, and is cleared and reselected if a
-new scan changes its snapshot. Explicit administration and actual submission/expiry
-release proofs keep their separate correctness checks.
-
-Positive destination credit alone cannot finish a pending source transaction.
-Validated bound NEAR SUCCESS closes source work as described above. Other pending
-originals retain observation demand across stale phases, disabled/removed profiles,
-cancellation and restart. Live calculations and completed results retain their
-serialized SDK owner; unpublished calculation metadata alone does not request a
-network scan or create a global input fence. Invalid retained outgoing bytes keep
-their actual pending-source fence, while local publication and reconstruction
-handle recoverable failures without network scans. Completed-result publication and SDK reconstruction retry
-locally at their own 60-second cadence. A successful needed persisted scan may
-advance canonical observation of already accepted source bytes without creating
-new shielding work. Once source work closes, destination/provider waiting
-alone does not keep ZEC discovery running.
+| Serving startup (Tor waits on 5s SOCKS check first) | One finite Base pass over eligible managed wallets and active funding recipients; one background ZEC scan when SDK is available | Captured pass finishes; creates no idle recurring watcher |
+| New initial-funding preparation | SDK proposal first, then one scalar Base check of that destination (reusing recent acquisition) | Positive credit consumes the claim; advisory RPC error does not veto funding |
+| Unfilled enabled reserve claim waiting for ZEC | Shared ZEC scans (60s after completion; 90s, 180s, and 300s backoff) | Stops when no enabled claim can advance and no pending source work remains |
+| Accepted initial funding awaiting Base credit | Shared scalar Base recipient check (60s completion floor) | First positive credit permanently finishes the credit lane |
+| Recognized signed insufficient-funds `402` | Coalesced asynchronous scalar Base refresh per wallet (60s floor) | Success (including zero) finishes the request; errors retain follow-up |
+| Eligible `RETAINED` retirement | Candidate-scoped canonical authorization pages and dual balance proof (60s floor with error backoff) | Retirement or verified `latest` above tolerance finishes demand; unresolved obligations defer checks |
+| Validated pending source transaction | Shared 60s ZEC scans; source checks on `poll_seconds` with jitter | Bound NEAR `SUCCESS`, canonical confirmation, or verified finite expiry closes work |
+| Submitted swap awaiting NEAR outcome (including archived) | Independent per-operation NEAR status (`poll_seconds` with jitter; 60-300s error backoff) | `SUCCESS` stops; current `FAILED` keeps polling; current `REFUNDED` stops after confirmed receiver receipt; archived terminals stay stopped |
+| Current managed `FAILED` or `REFUNDED` awaiting refund receipt | Shared 60s ZEC scans (even when `auto_fund = false`) | Confirmed positive Ironwood receipt at the saved refund receiver stops scans |
+| Disclosed native ZEC receive request | Shared 60s ZEC scans (no NEAR status calls) | Confirmed Ironwood receipts reaching the requested amount stop scans |
+| Disclosed foreign direct receive invoice | Shared 60s ZEC scans; provider status on `poll_seconds` with jitter | Terminal provider failure or refund stops; `SUCCESS` requests one subsequent completed ZEC scan |
+| Explicit `wallet sync` | One ZEC scan, one managed Base pass, and one retirement attempt | Reports results and exits; no background watcher |
+| Local SDK publication and reconstruction retry | 60s local retry without network scans | Succeeds or stops on shutdown |
+| Fully funded idle serving | No recurring Base or ZEC polling | Resumes when new work requests observation |
 
 ## Best-effort wallet rules
 
-Read the [wallet observation policy](#wallet-observation-policy) when changing
-balance estimation, refresh scheduling, funding or recovery, and apply the
-[reconciliation policy](#recovery-and-reconciliation-policy).
+Read the [wallet observation policy](#wallet-observation-policy) and
+[reconciliation policy](#recovery-and-reconciliation-policy) alongside these
+invariants:
 
-Managed USDC balances are advisory estimates. Before challenge discovery, a price
-hint prefers estimated-affordable RETAINED wallets, then ACTIVE, then READY.
-Without a hint, selection prefers healthy positive ACTIVE, then RETAINED, then
-READY; low, zero and unknown estimates remain fallbacks. After discovery,
-selection preserves an affordable eligible bound payer before considering siblings.
-Old or unavailable RPC observations and missing historical funding readiness do not
-prevent a permitted signature. Actual pool ownership, role, configured amount cap,
-asset/domain and caller authority still apply.
-Observed and advertised price hints rank estimates without excluding an otherwise authorized
-payer, including after a cap change. The current challenge and serialized journal
-enforce the actual payment amount against current authority.
+- **Advisory balances:** Managed USDC balances and price hints are selection
+  estimates only. Old or unavailable RPC observations never block an
+  otherwise authorized signature; pool ownership, role, cap, asset and domain,
+  and caller authority govern signing.
+- **Journaled signing and expiry:** Every authorization is journaled before
+  disclosure with signed expiry capped at `min(provider_timeout, 300s)` from
+  signing (`validAfter` may be backdated for clock tolerance; expiry never
+  permits replay). The journal subtracts the maximum amount once from the
+  advisory estimate (saturating at zero); unresolved exposure is never
+  subtracted twice. Unrepresentable payment headers fail before journaling or
+  dispatch.
+- **Narrow insufficient-funds fallback:** Only the
+  [pinned x402 insufficient-funds encodings](../tests/fixtures/x402/insufficient-funds.json)
+  on a signed `402` earn another wallet attempt (`PAYMENT-REQUIRED` with exact
+  `error: insufficient_funds` or failed `PAYMENT-RESPONSE` with that exact
+  `errorReason`; `PAYMENT-RESPONSE` always governs when present, and duplicate
+  headers earn no retry). The unused error body is dropped immediately, the
+  wallet is marked `low_balance`, an async `balanceOf(..., latest)` read is
+  queued, and traversal visits each remaining eligible wallet once without
+  waiting for reconciliation or funding.
+- **Manual raw headers:** Nonempty manual `raw_call` headers stay pinned to the
+  initial payer (disabling price handoff and cross-payer insufficient-funds
+  traversal while still queueing balance refresh and keeping liability).
+- **No top-ups, no replay:** First positive USDC credit consumes the initial
+  funding claim forever. Exhausting eligible wallets warns that earlier
+  authorizations may still charge; interrupted calls never auto-replay on
+  restart. Multiple charges across insufficient-funds fallback and incomplete
+  external settlement proof are accepted limitations.
 
-Each new authorization is durably journaled before disclosure with its actual
-signed expiry. Newly signed v1/v2 exact USDC authorizations and static upto
-payments expire no later than 300 seconds after signing, or the provider's
-shorter requested lifetime. The original accepted offer remains intact; only the
-signing lifetime is shortened. The SDK may backdate `validAfter` for clock
-tolerance, so this ceiling bounds future validity, not the full interval.
-Previously accepted signatures keep their original expiry. This is financial
-authority, not an HTTP deadline; expiration alone never grants request replay.
-The journal transaction subtracts its maximum amount once from the current
-estimate, saturating at zero.
-Unknown or malformed estimates stay unknown. Unresolved exposure is not subtracted
-a second time. Chain observations may replace estimates even while signatures
-remain chargeable; estimates are not a replica of canonical available capacity.
-Managed signing constructs the actual version's payment header in the owned
-request before journal acceptance. An unrepresentable header map fails without
-recording liability or dispatching, including through the low-level Rust payment
-API. Low-level callers still own their supplied HTTP client's defaults and
-transport policy; use `PaidClient` for factory-managed request construction.
+## Qualification boundaries
 
-A signed attempt's HTTP 402 can earn another wallet attempt only through the
-[pinned x402 seller encodings](../tests/fixtures/x402/insufficient-funds.json):
-`PAYMENT-REQUIRED` with exact `error: insufficient_funds`, or a failed
-`PAYMENT-RESPONSE` with that exact `errorReason`. An unsigned challenge, arbitrary
-prose, a bare 402, allowance failure and malformed protocol headers cannot earn it.
-Duplicate protocol headers cannot grant another attempt. When `PAYMENT-RESPONSE`
-is present, its settlement record governs classification: a simultaneous challenge
-cannot override a successful settlement, another failure or an unreadable receipt.
-The unused error body is dropped immediately: truncation, size and read inactivity
-cannot delay or prevent fallback after recognized headers. Ordinary returned
-responses retain their response-byte and read-inactivity limits.
+Offline suites use local fixtures and unfunded keys; synthetic proving and
+Docker regtest suites cover Zcash proofs, refunds, expiry, and recovery
+separately ([testing](testing.md), [LIFECYCLE.md](../tests/LIFECYCLE.md),
+[REGTEST.md](../tests/REGTEST.md)).
 
-Each recognized failure marks its wallet low balance and queues an advisory
-`balanceOf(..., latest)` read through the existing maintenance owner. Payment
-fallback never waits for that read and never allocates or funds a wallet. A failure
-during an active read leaves a pending follow-up. A successful read replaces the
-estimate; an unsuccessful read retains the previous estimate and reports
-`observation_unavailable`. Low balance is a selection classification, not permanent
-retirement. It survives restart until an ordinary successful observation clears it.
-
-A nonempty [manual raw header set](agent-sources.md#manual-raw-headers) stays on
-its initially selected payer. Price-based handoff stops before another wallet's
-unsigned request. Recognized signed insufficient funds still queues advisory
-reconciliation and preserves liability, then stops before another payer is selected.
-These calls never allocate wallets or wait for funding. Concurrent active/static
-payer replacement affects later calls; accepted work retains its captured identity.
-
-Every captured eligible identity is visited at most once per logical call. New
-wallets do not extend that call. Exhaustion warns that earlier authorizations may
-still charge or execute. No interrupted logical call is automatically replayed on
-restart. The amount cap applies to each authorization, so one call can incur
-multiple charges. Qualification uses its existing case permit for the sum of all
-attempts, retains every receipt/proof, and checks current run authority before
-starting another unsigned attempt. A later success does not erase earlier unknowns.
-
-This traversal is accepted policy: existing eligible wallets can finish a call
-without waiting for balance reconciliation or funding. Normal operation is expected
-to have roughly two or three sufficiently funded wallets, potentially fewer without
-large wallets. This expectation is not an enforced attempt bound: low/unknown
-estimates remain eligible fallbacks and every signed attempt can still charge.
-
-The first positive initial credit permanently consumes that funding claim, even
-below its nominal minimum. No later debit, partial return, disablement or restart
-grants a top-up.
-Source observation continues independently using exact original ownership.
-
-Late initial funding or external transfers may update an estimate when observed,
-without reopening its consumed funding claim. These possibilities do not require
-incoming-transfer surveillance or a new enforcement layer to prove that wallets
-are never topped up operationally. A requested low-balance check can observe those
-funds through the same ordinary advisory read.
-
-Recurring initial-credit polling begins after durable source acceptance or validated provider success,
-not for fresh allocations or unsigned quotes awaiting spendable ZEC. Actual
-preparation has the one-pass destination discovery described above. Accepted preparation and
-signed or previously submitted work remain observable across restart even when
-their current phase is stale or their source is already confirmed. Base credit
-reads start immediately when the shared recipient observation is due; a preceding
-preparation read retains its cooldown. Repeated reads start no sooner than 60 seconds after
-completion, with the shared recipient acquisition's error backoff; credit adds no
-separate jitter or backoff. Unrelated source or provider-status progress cannot
-shorten this interval. This does not change the first-positive
-credit rule or grant authority for another deposit.
-
-Accepted calculations, exact selected inputs, signed bytes and submission intent
-survive cancellation and failed local acknowledgment. Source expiry recovery checks
-the exact authenticated original, buried finite inclusive consensus expiry and
-completed canonical SDK coverage; a refund is never proof
-of non-submission. Owner opens and read-only inspection accept only database
-schema 23; older and future versions fail before source-state mutation, without
-private-state conversion. Current interrupted initialization may finish empty
-source-disposition and payment-resolution histories idempotently. Existing history,
-exact accepted bytes, identities, snapshot references and liabilities remain
-preserved; initialization does not reopen completed work or authorize disclosure.
-
-Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resume
-through existing ownership. New wallet transparent-input shielding is unsupported. Local tests cover these paths without live-funded,
-consensus or Tor qualification; see [testing](testing.md#qualification-status).
-Reopening preserves accepted evidence and does not recover unpublished bytes lost
-with a process. A pending signed shielding original keeps its source-work fence
-until confirmation or verified finite expiry. An unpublished calculation with
-neither outgoing nor factual journal recovers through successful offline SDK
-reconstruction; later shielding uses a fresh identity and current SDK funds.
-Automatic initial submission requires current authority and zero prior attempts;
-uncertain broadcasts are never automatically replayed. A factual transaction
-record with missing outgoing bytes remains a scoped corruption case.
-
-Multiple charges after the accepted USDC failure category and incomplete external
-settlement proof are accepted limitations. The [network guide](network-egress.md#remaining-timers-and-budgets)
-records the unresolved 1Click route contract and gRPC upload-inactivity limitation.
+Public-swap live runs have exercised funding, promotion, refill, serving during
+pending deposits, cross-listener concurrency, and restart; confidential swaps,
+managed Permit2 `upto`, and full automated lifecycle and restart qualification
+remain outside current qualification scope. See
+[qualification status](testing.md#qualification-status) and
+[integration technical reference](../tests/live/INTEGRATION_REFERENCE.md#planning-and-concurrency-assertions).

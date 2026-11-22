@@ -1,1029 +1,405 @@
-# Runtime egress inventory
+# Runtime network egress and timeout policy
 
-The development-only `tools/providers/provider_updates.rs` captures public evidence
-through `NetworkContext::http_policy` with discovery isolation, public-only
-destinations and provider HTTP compatibility settings. It accepts an explicit
-network policy and uses the existing inactivity timeout without an overall
-deadline. Runtime and capture clients send no User-Agent: only CoinMarketCap's
-documentation URLs required one, and the project does not advertise a product
-identity at this stage. That documentation URL is disabled instead. Redirects
-remain disabled, so a redirecting authority must be declared at its final public URL.
-No cache, wallet, payment, relay or direct-fallback path is invoked. Offline replay
-performs no network reads.
+`src/network.rs` is the sole constructor for production outbound HTTP and gRPC
+clients in both direct and Tor modes. Direct and Tor traffic share the same
+factory, callers, and payment and funding state machines.
 
-Explicit pricing documents use the same acquisition policy as their source
-catalogs: static sources reuse the catalog loader and configured relay, while
-dynamic sources use the shared public document reader and authenticated source
-management principal. Pricing has no separate retry count, timeout, destination
-restriction or paid-delivery authority. Existing transport compatibility,
-Retry-After handling and configured metadata relay preferences apply. Optional
-pricing participates in deployment catalog Tor isolation capacity, sharing one
-slot with concurrent requests using the same effective SOCKS credentials. Distinct
-scopes wait for capacity. Direct pricing acquisition bypasses it. There is no
-additional pricing gate or deadline; the source's tools remain usable while
-optional pricing acquisition runs. Runtime refresh publishes complete replacement
-definitions without waiting for optional pricing. Enrichment updates only that
-generation's advertisements; its new challenge observations remain preferred.
-Pricing failure leaves published tools and observations usable;
-catalog failure retains existing tools and hints under their original expiry.
-Individual unmatched or conflicting records use DEBUG diagnostics; exhausted
-source-level pricing acquisition/format failures use INFO without upstream prose.
-Cancelling enrichment stops its publication waiter; existing retained relay work
-still finishes journaled financial obligations and cache publication.
+See
+[wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
+for pooling, cover-state, and Tor reuse tradeoffs, and
+[local resource limits](local-resource-limits.md) for memory, cache, and queue
+bounds.
 
-Each serving source build also acquires its configured pricing URL. A newly
-downloaded or revalidated catalog forces that hint document to download again,
-including unchanged catalog bytes or HTTP 304. Cache reuse preserves the parent
-catalog expiry; pricing has no separate lifetime (the default is indefinite).
-Startup and runtime refresh enrichment remain asynchronous; optional acquisition
-never gates replacement publication. Failure leaves operations without other
-hints unknown. There is no pricing poller or universal readiness gate.
-Inspection and qualification do not start optional pricing enrichment. Explicit
-`catalog warm` downloads selected catalogs and configured hints unconditionally,
-then exits without detached pricing work. A running server keeps its in-memory
-snapshot until runtime refresh or restart.
+## Network policy and client pooling
 
-See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
-for the selected pooling, cover-state and isolated Tor reuse tradeoffs.
+- **Policy resolution:** Commands use the deployment's `[network]` table unless
+  `--network-config FILE` replaces it whole (omitted fields take network
+  defaults). If `--network-config` also contains `[relay_fallback]`, it
+  replaces the deployment's relay table; otherwise the deployment's relay table
+  is preserved. Standalone provider, wallet, and diagnostic commands accept
+  `--network-config` without loading relay providers. Supervised qualification
+  rejects `--network-config` and requires policy inside its pinned deployment.
+- **Base RPC privacy in direct mode:** Direct Base RPC reads expose your public
+  IP alongside queried wallet addresses, so direct serving logs a warning. Tor
+  mode suppresses that warning (RPC providers still see queried wallet
+  addresses). `config show` reports `base_rpc_policy` in both modes.
+- **Local listener DNS:** Listener bind hostnames resolve once via system DNS
+  at bind time and never affect outbound routing or Tor remote DNS.
+- **No User-Agent and no redirects:** Runtime and evidence-capture clients send
+  no `User-Agent` header and disable HTTP redirects.
+- **HTTP and gRPC transport caches (`HttpTransport` and `GrpcIndexer`):** Each
+  `NetworkContext` keeps separate 256-entry LRU caches for outbound HTTP and
+  gRPC clients, keyed by `SelectionPolicy` (`Legacy` vs. `Participating`),
+  protocol flags (`allow_http1`, `allow_tls12`), public-destination
+  enforcement, Tokio runtime, canonical identity, origin, and exact
+  read-inactivity timeout. The mutex guards only lookup and winner publication,
+  never client construction. Eviction drops only cache ownership; active
+  handles finish in-flight work.
+- **Participating Tor scope retries:** In Tor mode, `http_participating` misses
+  and `http_candidate` retries derive fresh owner-bound `tor-scope` isolation
+  credentials (`IsolationId::fresh_scope`) with separate connection pools.
+  `promote_http` replaces a canonical slot only if it still holds the exact
+  starting `Arc<HttpTransport>` (preventing late losers from overwriting
+  winners or resurrecting evicted entries).
 
-In direct mode, Base RPC providers contacted for verification can associate the
-client's public IP address with queried wallet addresses, including when fallback
-providers are used. Serving emits a warning about this exposure. In Tor mode,
-providers see a Tor exit IP instead of the client's public IP, so this warning is
-suppressed. RPC providers still receive the wallet addresses being queried.
-`config show` lists the configured providers under `base_rpc_policy` in both modes.
+### Outbound caller identity inventory
 
-Ordinary CLI commands select the deployment's `[network]` policy unless an explicit
-`--network-config FILE` replaces it. Replacement is whole-policy, before semantic
-validation or client creation; omitted fields use defaults. The external file can
-also contain `[relay_fallback]`, replacing that entire deployment section when
-present and preserving it when omitted. Its provider-list paths resolve relative to the
-external file. Relay settings apply to deployment reads; standalone provider,
-wallet and diagnostic commands accept the same file without loading relay providers.
-The Tor example enables paid relay fallback with existing deployment payers.
-The same resolved policy flows through serving, catalog inspection/warming, source refresh and wallet
-initialization/sync/bootstrap/recovery, including configuration reloads. `config show`
-reports it without installing a transport or contacting the network. Explicit
-`catalog warm --direct` still selects direct fetching for that dedicated process.
-Frozen qualification snapshots, bound/supervised serving and supervised wallet sync
-require policy in the pinned deployment instead of accepting an unpinned external
-file. Changing transport policy does not change signed bytes, wallet identities or
-financial authority.
-
-`src/network.rs` owns the process's immutable transport policy, canonical isolation
-identities, reqwest pools and tonic channels. Direct and Tor use the same factory,
-callers and payment/funding state machines. Its separate local listener resolver
-uses system DNS for the operator's bind hostname and returns the exact resolved
-addresses used for binding without another lookup. It does not select provider
-routing or replace Tor's remote DNS. Each HTTP cache slot holds an immutable
-`HttpTransport` record pairing the pooled client with its canonical owner identity
-and effective isolation scope, keyed by `SelectionPolicy` (`Legacy` versus
-`Participating`), protocol compatibility, public-destination enforcement, owning
-Tokio runtime, canonical identity, origin and read-inactivity timeout. Legacy and
-participating lookups cannot consume or overwrite each other's cache entries.
-The cache mutex covers lookup/touch and winner publication, never client
-construction or private scope observation. Concurrent misses may construct unused
-candidates; after successful construction, a full-key recheck returns/touches the
-canonical winner instead of replacing it or evicting another entry for a loser.
-Construction/observer failure still fails that caller even if a concurrent winner
-exists. Private observations describe constructed scopes, including unused ones;
-they do not establish successful routing or grant financial authority.
-In Tor mode, `http_participating` misses and `http_candidate` retry candidates
-derive fresh owner-bound `tor-scope` isolation scopes (`IsolationId::fresh_scope`)
-with separate `reqwest::Client` pools, while `promote_http` conditionally replaces
-an existing canonical slot only when it still holds the exact originally acquired
-`Arc<HttpTransport>`. Evicted, missing, reinserted or already-promoted entries are
-never overwritten or resurrected, and no separate winner registry, history cache
-or counter is kept; a miss after normal LRU eviction or restart creates a fresh
-scope. Static catalog discovery use participating selection per origin
-(`SelectionPolicy::Participating`): in Tor mode, eligible status (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`)
-or eligible transport/timeout failures retry on fresh candidate scopes according to
-`network.tor_isolation_retries` (default 2, plus the initial attempt), honoring valid `Retry-After` headers on `429`/`503`
-before the next candidate attempt and before any paid discovery-relay fallback.
-A valid delay beyond the platform clock's range remains pending and cancellable;
-it cannot collapse into an immediate retry or relay dispatch. This introduces no
-local delay cap or substitute timer. Deployment discovery capacity counts active
-Tor isolation scopes through full response bodies. Same-scope attempts share one
-slot; the last active holder releases it before server delays. Fresh retry scopes
-count separately, even on the same domain. Direct attempts bypass this capacity.
-All logical source loads can wait
-independently, including inspection and warming, while compatible aliases keep one
-coalesced owner. Unfollowed catalog redirects retain baseline
-complete-body parsing: a valid JSON catalog succeeds, while rejected content can
-use existing relay fallback, without another origin circuit attempt. A
-candidate promotes only after complete valid JSON parse or valid HTTP 304
-revalidation for catalogs; fresh disk-cache hits and relay-supplied results never promote a scope.
-Tor relay attempts share discovery capacity by their actual transport scope
-after serialization, cache and readiness checks, through the full HTTP body.
-Retry delays and wallet traversal release their holders; the
-accepted-work owner retains same-provider serialization through decoding and
-publication even if its waiter disconnects. Other providers and cached results
-remain available.
-Ordinary API, directory and raw-call clients also use participating selection as
-specified below. Base RPC uses participating selection for each logical read;
-excluded infrastructure callers remain legacy. TLS failures are eligible for fresh
-scopes in catalog, unsigned API and Base because a Tor exit may interfere;
-every attempt retains certificate, hostname and protocol verification. Other API
-transport failures retain their existing terminal behavior. Signed requests never
-gain replay authority from TLS failure. `payment.rs` pins its
-acquired `HttpTransport` record and scope-matched cover `Owner` from unsigned
-challenge through signing, signed dispatch and response body
-consumption. Sync releases its
-channels before tearing down its private runtime. Each cache retains at most 256
-entries and evicts one least-recently-used entry when admitting another. Access
-refreshes recency; interleaved wallet traversal does not flush frequently reused
-provider clients. Eviction drops only cache ownership: acquired handles retain
-connections and in-flight work without recreating the evicted cache entry. There
-is no cache-maintenance timer or wallet-inventory limit.
-
-Managed calls select an initial payer before provider I/O. Saved balances and
-trusted price hints guide selection without proving affordability. Each attempt
-obtains its own unsigned challenge and signs through the same wallet's transport
-and cover owner. Original business arguments/body remain unchanged, including
-supported POST requests. A recognized structured insufficient-funds response to a
-managed signed request can traverse the captured eligible inventory once. Each
-attempt retains its own authorization and possible charge. Other signed failures and
-successful signed responses earn no repetition. Unsigned x402 POST follows the same
-[accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries)
-as GET; HTTP method alone does not prohibit an authorized unsigned retry. See the
-[best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules) and pinned public seller fixtures;
-local fixture acceptance is not live-provider qualification.
-
-Accepted calls retain their application owner through all attempts, signed
-dispatch, response consumption and output conversion. A disconnected waiter cannot
-orphan that work or free its financial liability. Ordinary advisory balance reads
-run through the existing reconciliation owner, independently of foreground signing.
-A failure during an active read schedules a follow-up; unrelated progress cannot
-renew another response's inactivity timer or signed authority.
-
-| Caller | Transport and identity |
+| Caller | Transport and isolation identity |
 | --- | --- |
-| `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (configured Tor attempt count; promotes on valid JSON or 304) |
-| `catalog_state.rs` | Shared complete-document help reader, help URL discovery origin; source-bound relay authority and retained cache publication |
-| `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional ordered paid relay list via endpoint payer |
-| `discovery/import.rs` | Shared complete-document OpenAPI reader, URL discovery origin, public destinations and source-bound relay authority |
-| `discovery/source_details.rs` | Complete usage-document GET or fixed GET probes, available endpoint documentation identity or URL discovery identity, public destinations and optional on-demand relay |
-| `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
-| `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; single-owner canonical headers/rechecks by that owner; genuinely multi-owner coherent headers by RPC discovery origin; validates method results before promotion |
-| `rotation/near.rs` | Metadata, quote and status by the job/immutable request recipient; direct swap calls use treasury UUID plus original operation UUID |
-| `treasury/birthday.rs` | Mainnet tip and capability lookup, per-invocation bootstrap identity |
-| `treasury/mod.rs`, `server.rs`, `send.rs` | Scan, witnesses, proposal and capability checks, treasury UUID |
-| `treasury/submission.rs` | Deposit/shielding broadcast and lookup, durable EVM recipient or owned transparent address scope |
-| `treasury/expiry.rs`, `refunds.rs` | Shared scans use treasury identity; per-operation lookup/submission uses durable recipient/address scope |
-| `wallet_cli.rs` | Same configured adapters as serving; local inspection stays offline |
-| `tools/providers/snapshot_spec.rs`, `tools/diagnostics/quote_near.rs` | Same factory; both accept `--network-config` |
+| `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (promotes on valid JSON or `304`) |
+| `catalog_state.rs` | Lazy help reader, help URL discovery origin, source-bound relay |
+| `discovery/coinbase.rs` | Unsigned resource search, endpoint wallet documentation identity, participating origin retries, optional paid relay |
+| `discovery/import.rs` | Complete OpenAPI reader, URL discovery origin, public-only destinations |
+| `discovery/source_details.rs` | Usage-document GET or fixed GET probes, endpoint documentation or URL discovery identity |
+| `payment.rs` | Unsigned challenge, signed retry, and cover traffic pinned to the selected EVM payer |
+| `rotation/base.rs` | Participating read-only RPC: address reads and single-owner headers by EVM owner; multi-owner views by RPC discovery origin |
+| `rotation/near.rs` | Metadata, quotes, and status by funding recipient EVM address; direct swaps by treasury UUID and operation UUID |
+| `treasury/birthday.rs` | Mainnet tip and capability lookup, per-invocation random bootstrap identity |
+| `treasury/mod.rs`, `server.rs`, `send.rs` | Sync scans, witnesses, proposals, and capability checks by treasury UUID |
+| `treasury/submission.rs`, `expiry.rs`, `refunds.rs` | Shared scans by treasury UUID; per-operation lookup and submission by persisted operation or recipient identity |
+| `wallet_cli.rs` | Same factory as serving; local inspection stays offline |
+| `tools/providers/snapshot_spec.rs`, `tools/diagnostics/quote_near.rs`, `tools/providers/provider_updates.rs` | Same factory; discovery or public-only policy with `--network-config` support |
 
-A single-owner Base view derives its identity from all requested wallet addresses and
-pending authorization payers, including history-only retirement pages. Its headers,
-canonical rechecks and fallback views use that EVM owner. Genuine multi-owner views
-retain RPC-origin headers: separately authorized qualification needs one coherent
-inventory anchor, and the public library supports pool-wide queries. Each contract
-read still uses its actual wallet; no sibling is selected to own shared work.
-Coinbase already uses the wallet documentation identity, while participating HTTP
-transports at different origins have distinct scopes. Common credentials, content
-and timing can still correlate service-visible requests. Treasury scans share one
-identity. Generated, mnemonic-imported, reopened and reconstructed wallets disable
-transparent known-address queries and gap recovery regardless of saved settings.
-Historical bindings do not enable an address-recovery mode; accepted transactions
-and incidentally recognized owned funds retain their ordinary handling. Local SDK
-transparent key derivation and incidental output recognition do not
-enable address-specific queries and need not be removed for this privacy contract.
-Shielded-only new refunds and suppressed transparent-address RPCs address the
-refund-address correlation channel between NEAR and the Zcash indexer. Real-SDK
-[refund/discovery regressions](../src/treasury/lifecycle_tests/refund_addresses.rs)
-assert absent requests across fresh/import/reopen/reconstruction paths, guarding
-all six transaction-history, balance and UTXO RPC methods, including aliases.
-Preserve these negative controls on SDK changes. Shared transport/timing and
-other metadata correlation remain separate limitations.
+Identity rules:
 
-`PreparedTransaction` resolves its recipient from funding job/recovery records or
-an immutable `operation_network` binding. Direct operations use their persisted
-operation identity before legacy EVM reconstruction. A previously accepted jobless
-transaction can retain its original encrypted preparation manifest and stable
-`zcash-transparent` domain for canonical recovery; no current role or address
-choice synthesizes new disclosure authority. No new wallet transparent-input
-operation is allocated. Existing EVM bindings retain precedence for their own work;
-shared SDK scans still use the treasury identity. No new identity table or schema
-conversion is needed. Missing/conflicting identities cannot reach submission or
-lookup; invalid completed facts can still retain exact local bytes. Do not guess
-identity from current pool roles.
+- **Base clients:** Single-owner views (including retirement pages) use the
+  queried EVM owner for headers, canonical rechecks, and fallback views.
+  Multi-owner pool views keep RPC-origin headers while still keying each
+  contract read to its wallet. Base clients never use paid relays.
+- **Prepared Zcash transactions:** Resolve transport identity from persisted
+  funding job, recovery, or `operation_network` bindings (never guessing from
+  current pool roles). Direct operations use their persisted operation
+  identity.
+- **Suppressed transparent queries:** Generated, imported, reopened, and
+  reconstructed wallets disable transparent known-address RPCs and gap scans so
+  refund receivers disclosed to NEAR cannot be correlated at the Zcash indexer.
+  See [refund receivers](zingo-integration.md#refund-receivers-and-seed-recovery).
 
-Participating unsigned transport recovery classifies concrete causes. A transient
-SOCKS target failure, remote-resolution failure, reset, TLS failure or timeout can
-use the remaining configured attempts; certificate and hostname verification stay
-enabled. A timeout connecting to the configured SOCKS endpoint also uses
-that count, with no extra loop or direct escape. A proven refusal at that local
-connection stage, SOCKS authentication rejection, protocol parsing/serialization
-failure or invalid local configuration is terminal. An unlocated refusal or the
-opaque “failed to create underlying connection” wrapper alone does not establish
-a permanent local failure. The Reqwest SOCKS boundary preserves the underlying
-local connector cause to make this distinction. Hyper parse/user/canceled errors,
-request construction and redirect failures remain excluded. Other 5xx outside
-the explicit status set (for example 501/505/520) do not earn fresh origin scopes.
-The common classifier applies to catalog, Coinbase, document reads,
-relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
-Other API methods recover only from TLS connection-establishment failures;
-post-dispatch TLS failures grant no replay, including failures before response
-headers arrive. Startup's SOCKS
-reachability prerequisite remains separate from per-operation attempts.
+### Transport failure classification
 
-Remote provider search uses `discovery/remote.rs` to retain one encompassing work
-owner while concurrently collecting each configured directory workflow. Child
-responses retain their own inactivity policy; sibling progress cannot renew it.
-A directory failure preserves sibling results, advisories and typed liabilities.
+Participating unsigned retry recovery (`1 + network.tor_isolation_retries`
+scopes in Tor mode, default 3; 1 attempt direct) applies to catalogs,
+Coinbase search, document reads, relay-service unsigned requests, Base reads,
+and unsigned API `GET`, `HEAD`, and eligible x402 `POST`:
+
+- **Eligible for a fresh Tor scope:** Transient SOCKS target errors, remote DNS
+  failures, connection resets, TLS failures (keeping certificate, hostname, and
+  protocol checks enabled), read and connect timeouts, and HTTP `400`, `403`,
+  `408`, `429`, `500`, `502`, `503`, and `504`. Valid `Retry-After` on `429`
+  and `503` delays before the next attempt or relay handoff (unrepresentably
+  long delays remain pending and cancellable rather than firing immediately).
+- **Terminal (never retried on another scope):** Proven local SOCKS connection
+  refusal (preserved across the vendored reqwest SOCKS boundary), SOCKS auth
+  rejection, HTTP parse, construction, and redirect errors, other `5xx` (such
+  as `501`, `505`, and `520`), local destination, size, and policy rejections,
+  and any signed request failure.
+- **Other API methods and manual-header writes:** Recover only from TLS
+  connection-establishment failures before dispatch; post-dispatch TLS failures
+  never authorize replay.
 
 ## Relay fallback
 
-Static catalog acquisition and Coinbase resource search share
-`network::acquisition`: one configured origin sequence, with complete-body
-transport failures classified separately from complete content validation. Direct
-mode attempts once; Tor uses the initial attempt plus
-`network.tor_isolation_retries`. Active-I/O permits are callback-local, so server
-delays reserve no request/download capacity. The terminal `Retry-After` is carried
-to the configured relay handoff once. No relay entry restarts origin acquisition.
-Static remote HTTP/JSON failures retain their broader fallback rules. Complete
-catalogs reject unsolicited `206`/`Content-Range`, and local policy, authority,
-proxy setup and byte-limit failures cannot purchase another response. Accepted
-empty/partial search-result metadata finishes without fallback.
+Static catalogs, Coinbase searches, runtime imports, help, usage documents,
+probes, and opt-in API calls share `network::acquisition` for origin attempts
+followed by ordered paid relay fallback (`[relay_fallback.relays]` `GET`,
+`HEAD`, and `POST` lists).
 
-`[relay_fallback.relays]` declares independent ordered `GET`, `HEAD` and `POST`
-provider-path lists; a missing/empty list is origin-only. Selection uses the original
-target method. Provider-owned `relay_format` identifies Curl, AGProxy, Horizon
-Pulse or readfetch translation, with no host/name inference. Bootstrap validates local pinned
-schemas, operations and filters without remote schema/help acquisition.
-See [configuration](configuration.md#relay-fallback) for paths and inspection.
-
-Runtime fallback uses the authenticated endpoint's existing payer and retained
-call owner. It adds no cache, readiness queue or provider breaker. Static metadata fallback uses deterministic
-source wallet bindings, shared result/failure state and existing readiness
-notifications. Each accepted static exchange retains its provider gate through
-decoding and publication after waiter cancellation. Shared state locking is brief:
-cache/gate-map access and publication. It spans no I/O or waiting,
-so cached results and independent providers remain available. Active capacity
-covers individual HTTP attempts and their bodies, releasing before retry delays
-or wallet traversal. Missing-payer waiting reserves no request capacity and allocates no wallet or funding. The initial
-origin handoff delay precedes accepted relay work/provider gates. Delays between
-providers retain the logical call owner while releasing provider gates. There is
-no new concurrency cap or global relay scheduler.
-
-Enable preferences follow trusted request purpose: built-in directory/Coinbase
-requests use `source_discovery` (default true); ordinary/generated/raw API calls
-use `api_requests` (default false); schemas, help, imports, usage documents and
-provider probes use `provider_metadata` (default true). These defaults require a
-configured relay section. Mixed workflows classify each acquisition separately;
-method, hostname and agent arguments do not select a category. A disabled category
-cannot dispatch or sign a relay request. All categories share one immutable adapter
-context and existing payer/owner machinery; relay-service calls never recurse.
-See [configuration](configuration.md#relay-fallback) for membership and static
-startup/warming authority.
-
-Each authored position permits at most one logical acquisition. Relay-service
-unsigned requests participate in the same Tor status/transport sequence (one
-attempt direct), with recursive fallback disabled. No separate static
-attempt counter or independent backoff exists. Relay-service HTTP/transport
-failures, including the service's own HTTP `402`, malformed envelopes and incomplete
-outer delivery can advance to the next provider after possible payment.
-Attributable target outcomes retain the consumer's advancement policy. Validated
-relay truncation is distinguishable
-from malformed envelopes and local size rejection. Known target status and
-headers remain available when a relay also reports failed delivery: target `402`,
-unsolicited catalog `304` and partial-document rejection remain terminal despite
-delivery-error or truncation metadata, and valid `Retry-After` still
-applies to an authorized continuation. Delivered target errors can already be
-billed; every authorization retains its possible liability. Local authority,
-destination and byte-limit rejections remain terminal. Static uncertainty stays
-with the accepted provider-position/request outcome: it prevents repurchasing
-that acquisition but does not disable unrelated targets or later providers.
-No signed pre-send or timeout exception permits replay of an authorization.
-
-Catalog fallback diagnostics identify relays by format and their one-based
-position in the original configured method list, without endpoint URLs or
-upstream response text. INFO explains when a failed catalog acquisition can
-continue through remaining relays, retaining its safe cause, known HTTP status
-and possible payment liability. The final WARN identifies the last failed or
-unavailable relay and distinguishes an exhausted list from a stopped fallback.
-`failure_location` distinguishes the relay-service request, target response
-reported by the relay, target delivery failure, relay response validation, local
-response policy. An HTTP
-status at the relay-service location is the outer service status; at the target
-response location it is the decoded target status. DEBUG records individual
-acquisitions and outcomes, including permitted advancement and successful
-responses. Catalog relay spans retain the source identity through accepted work,
-so concurrent catalogs can be distinguished. Diagnostics do not establish payment
-settlement or authorize another acquisition.
-
-A relay never supplies target challenge-signing authority. Relay results never
-promote an origin scope or supply origin validators.
-Static process outcomes share the first acquisition for the same wallet,
-catalog contract, authored provider position and target URL, including a
-terminal decoded-bound failure despite a later larger allowance. Successful cached
-responses still check the requesting bound; disk slots remain bound-specific. See
-[cache semantics](configuration.md#relay-fallback). Dynamic document bounds cover both outer and decoded responses; bundled sources
-preserve provider byte limits, while generic imports and usage-document reads use
-shared defaults. Provider transport permissions apply to the relay leg, with
-provider inactivity settings taking precedence over the network default.
-
-Every relay connection uses the factory, deployment network and bound payer;
-Tor has no direct fallback. The relay sees target URLs and supplies target status,
-headers and plaintext from its own network. Origin HTTP does not follow redirects,
-but configured relays may do so remotely. Requested/reported final URLs and all
-Curl-reported hops pass the caller's public-destination checks. AGProxy, Horizon
-Pulse and readFetch do not expose intermediate hops: their configured use accepts that limited
-visibility. Missing chain evidence does not exclude
-them. Remote redirect/public-destination policy and content integrity remain
-trusted to the relay; TLS to the relay cannot establish target TLS or plaintext
-authenticity. Unsupported required headers/body bytes skip an entry before
-payment; target payment signatures are never forwarded. Required business headers
-are forwarded by adapters that can preserve them, and nonempty manual raw header
-sets disable paid relays.
+- **Categories:** `source_discovery` (default `true`), `provider_metadata`
+  (default `true`), and `api_requests` (default `false`). Mixed workflows
+  classify each request by trusted purpose rather than method or hostname.
+- **Origin handoff:** Direct mode hands off after 1 origin attempt, Tor mode
+  hands off after exhausting its configured scopes on retryable failures, and
+  HTTP `501`, `505`, and `520` hand off immediately without fresh Tor retries.
+  Local policy, destination, and size errors, unsolicited `206` on complete
+  catalogs, and terminal `4xx` never pay a relay.
+- **Traversal and liability:** Each listed relay runs at most once using its
+  own `relay_format` (`curl`, `agproxy`, `horizonpulse`, `readfetch`) and
+  unsigned Tor retry count, with recursive fallback disabled. Adapters skip
+  requests whose headers or body they cannot preserve before paying. A relay
+  service error, relay `402`, or malformed envelope advances to the next
+  provider while preserving possible charges; a decoded **target** `402` is
+  terminal and never signed. Any prior signed target attempt suppresses API
+  relay fallback.
+- **Locking and concurrency:** Static relay requests serialize per relay
+  provider across wallets while holding shared cache and gate locks only
+  briefly (never across I/O or waits). Tor catalog and relay requests count
+  against `startup.catalog_concurrency` through response-body download and
+  release slots before retry delays or wallet waits.
+- **Diagnostics:** `INFO` logs safe advancement across remaining relays with
+  possible-payment context; `WARN` reports the final exhausted or stopped relay
+  using `failure_location` (distinguishing relay service, reported target
+  response, target delivery, validation, and local policy) without URLs or
+  upstream prose.
+- **Trust boundary:** All relay connections use `src/network.rs` (Tor never
+  falls back to direct). Relays see target URLs, forwarded headers, and
+  plaintext responses and may follow redirects remotely. Final URLs and Curl
+  hops are checked against the public-destination policy; AGProxy, Horizon
+  Pulse, and ReadFetch report only the final URL. Nonempty manual raw headers
+  disable paid relay fallback.
 
 ## Explicit direct discovery warming
 
-`catalog warm --config FILE --source ID --direct` is a separate, unsigned-only
-process using the direct network factory. It does not construct a serving
-`Deployment`, payer or treasury. It writes separately identified cache entries
-bound to the deployment's original network/isolation policy. A later Tor process
-may use those entries while fresh, with a direct-origin warning, but cannot
-revalidate their validators over Tor or automatically refresh them directly.
-Ordinary direct cache data remains separated from Tor. This operator-selected
-exception exposes discovery interests to direct egress; it grants no payment or
-funding authority. Qualification rejects warming and bypasses persisted entries.
-See [cache warming](configuration.md#warming-a-selected-source-including-directly-for-a-tor-deployment).
+`catalog warm --config FILE --source ID --direct` fetches selected remote
+catalogs and external pricing documents unsigned over direct networking without
+constructing a serving `Deployment`, payer, or treasury.
+
+Entries store separate direct-warm provenance bound to the deployment's
+original network policy. A later Tor `serve` reuses fresh entries (logging a
+warning) without sending directly fetched validators over Tor or refreshing
+directly after expiry. Live qualification rejects warming and bypasses disk
+caches. See
+[catalog warming](configuration.md#warming-a-selected-source-including-directly-for-a-tor-deployment).
 
 ## Timeout budgets and concurrency
 
-Omitting timeout settings selects defaults; it does not disable timeouts. Provider
-files inherited with `extends` can override the network read default, including
-for discovery. Each relay uses its own provider settings. Relay request
-failures report a fixed reason, available HTTP status, elapsed time, possible
-submission state, and its configured read/byte limits without upstream prose.
-Possible relay charges survive advancement to other providers; service failures
-do not disable unrelated static acquisitions through that provider.
+Omitting timeout settings selects defaults rather than disabling timeouts.
 
-All outbound HTTP uses `read_timeout_seconds`, defaulting to 60 seconds in both
-direct and Tor mode. Each successful response read renews the inactivity budget;
-there is no total HTTP response deadline. This covers catalogs, lazy help,
-imports, ordinary paid API responses and relay envelopes, including large
-binary bodies. Waiting for response headers is also subject to this budget.
-Byte limits remain enforced, and partial documents are never published. Optional
-speculative document origin probes report byte rejection at DEBUG with the resource,
-setting and limit; explicit requests retain WARN and all rejections stay visible
-to the consumer. See [rejection diagnostics](local-resource-limits.md#rejection-and-truncation).
-
-A provider/source `read_timeout_seconds` explicitly overrides the network default.
-Accepted curated dynamic sources preserve the saved provider value, falling back
-to the network default. That ordering applies to schema acquisition/refresh, API
-responses and lazy help. Generic imports and raw calls inherit the network default
-and use the shared specification, response and help byte limits. HTTP pools key on the effective idle
-budget alongside identity, transport and public-destination policy, preserving
-the exact configured duration, including fractional milliseconds. Cover owners
-use the same exact duration to keep distinct transport policies separate.
-
-Connection establishment remains separate: `connect_timeout_seconds` defaults
-to 15 seconds direct and 120 seconds Tor. Both settings are available in either
-mode. Connection values must be 1..300 seconds, and network read values must be
-1..86400 seconds; the read budget need not exceed the connection budget. Inspection
-reports the effective network values in both modes.
-
-The reviewed reqwest patch starts the HTTP/1 and HTTP/2 header timer only after
-that request acquires its connection, including DNS, SOCKS and TLS. No sibling
-request or keepalive can start or renew it. Stream-capacity waiting and request
-upload remain inside the post-connection header allowance (the same upload
-limitation documented for gRPC below); there is no whole-response deadline.
-Body inactivity renews only on nonempty DATA, and available buffered data is
-consumed before checking elapsed time after consumer backpressure. Reqwest's
-request retry policy and Hyper's separate recovery of unstarted pooled requests
-are both disabled for application HTTP clients. Application-owned retries,
-polling and financial recovery retain their own rules; see
-[retry ownership](#retry-ownership). Public destinations, remote DNS, TLS
-verification, identity-bound pooling and ordinary error classification remain
-unchanged.
-
-Use `read_timeout_seconds` in network and provider/source configuration, or
-`--read-timeout-seconds` for a standalone CLI override. Unknown or obsolete names
-are rejected by strict parsing. Authored Tor examples specify 60 seconds;
-operator-owned files are not rewritten automatically.
-
-Base read RPCs, complete chain views and receipt verification use connection and
-read-inactivity timeouts, with no separate total deadline in either network mode.
-Progressing reads can finish. Direct reads retain two same-client attempts for
-transport failures with 200 ms backoff. Tor reads instead use one selected scope
-plus `network.tor_isolation_retries` fresh scopes on HTTP
-`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504` or eligible typed
-transport failures (including TLS failures), exhausting one endpoint before considering the next. Valid
-`Retry-After` on `429`/`503` delays only a remaining attempt; exhaustion drops the
-unused body and returns without waiting. Caller/query ownership spans the logical
-read, while active RPC capacity covers only each request and its complete body
-collection; retry delays release that capacity for unrelated reads. Neither mode retries RPC errors, malformed
-results or oversized responses on that endpoint. Conditional promotion follows
-each method's observation boundary. Chain, block and contract reads validate
-their results. A null receipt remains pending and may promote connectivity. A
-receipt claiming a height beyond the observed tip needs only a parseable block
-height and matching requested transaction hash to promote; a missing or mismatched
-hash still returns pending but cannot promote. Null and future-height receipts
-trigger no additional proof reads. Receipts within the observed chain have their
-transfer and authorization fields validated, then require finalized canonical
-evidence before establishing a transfer proof.
-Canonical proof and configured whole-view fallback remain independent. Canonical
-Base proofs use the provider's finalized anchor without an additional local
-confirmation-depth requirement. Block-hash-pinned contract reads and canonical
-rechecks bind balances/nonces to that view; receipt inclusion obeys the same bound.
-Unsupported, missing or incoherent finalized evidence remains pending or uses a
-configured fresh-view fallback, never a depth-only downgrade. Scalar advisory
-latest reads retain their existing contract. Finality and canonical block rechecks
-determine whether evidence is usable. Base RPC response collection has a fixed 16 MiB byte bound to protect memory before JSON decoding, including
-chunked and lengthless bodies. Oversized responses produce a redacted typed failure
-without retrying that endpoint. Configured fallback discards the partial view and
-reacquires all evidence; it cannot reuse a balance from the rejected response.
-Managed payment admission has no overall elapsed-time deadline, including while
-waiting for its pool gate.
-
-Treasury gRPC uses the network connection and read-inactivity settings in both
-modes. The injected transport measures each response independently, below protobuf
-decoding: nonempty HTTP/2 DATA frames renew only that response's timer. Silent
-headers and stalled bodies fail with fixed `grpc_headers_inactivity` and
-`grpc_body_inactivity` diagnostics at DEBUG. The owning workflow reports retrying
-interruptions or terminal failures at its applicable severity. Other streams and
-keepalives cannot renew them.
-Accepted limitation: the header timer starts when the request body is first
-polled, so it includes request upload. The current transport has no per-request
-HTTP/2 upload-consumption hook; a slow, progressing upload can therefore exhaust
-`read_timeout_seconds` before response headers arrive. Upload progress does not
-renew this timer. A timeout does not prove that a transaction was not submitted
-and does not authorize replay. No additional library is vendored to change this.
-Waiting for channel-buffer/HTTP/2 stream capacity is separately bounded by the
-read-inactivity setting and reports `grpc_dispatch_inactivity`. Connector attempts
-retain their full establishment allowance before that readiness window expires;
-the readiness guard ends at dispatch.
-Cancelled/timed-out queued calls also cancel their request bodies, so a pending
-HTTP/2 stream cannot upload stale RPC bytes when capacity returns later.
-The reviewed Hyper/h2 patches additionally observe pending-open cancellation and
-discard unopened streams without transmitting HEADERS or RST_STREAM. This protects
-HTTP payment headers as well as gRPC bodies when peer capacity returns after a
-timeout or cancellation. Already transmitted requests retain unknown outcomes;
-no cancellation or reset releases financial exposure or grants retry authority.
-Message-size limits remain in force. Legacy library `grpc-timeout` metadata is
-removed at this transport boundary; application total-RPC wrappers and sync's
-complete-message timers are removed. No large substitute duration is used.
-Upstream constructors outside the injected application path keep their own policy.
-Quote and transaction expiry, confirmations, canonical coverage and
-qualification authority remain independent of network progress. Submission failure
-still retains unknown outcome and exact saved bytes; no retry authority is added.
-
-The sync session owns one independently polled Pepper engine task. Periodic
-checkpoints can wait for the wallet lock while recovery fetches continue; no
-startup acknowledgement or launch deadline is required. Runtime teardown cancels
-network tasks and joins blocking workers before the final snapshot. Loader and
-scan-worker retirement drains useful work with periodic stage/elapsed diagnostics
-instead of aborting after ten seconds or reporting an aborted worker as successful.
-The mempool's bounded drain policy is unchanged.
-
-Stateless MCP HTTP responses use SSE framing with keepalive comments every two
-seconds while awaiting the tool result. These keep the client response connection
-active, not the remote provider's progress timer or payment authority. Client
-whole-tool deadlines remain independent. Keepalives start when the SSE response
-opens; the pinned SDK's per-request protocol-negotiation path still waits for its
-first protocol message before opening the stream. The installed oMLX initialize
-path is covered by the slow-call interoperability experiment. The qualification
-reader bounds the complete wire body and extracts the terminal JSON response for saved evidence.
-
-The pinned rmcp service has a response drain of two seconds after cancellation or
-five seconds after transport closure. Its `timed out draining in-flight responses`
-warning is emitted during teardown, not as a deadline on an active stateless HTTP
-call. Accepted application work survives that drain, including directory calls.
-`mcp_response_cancelled` reports cancellation while work is outstanding;
-`mcp_work_finished_after_cancellation` reports its eventual completion without
-claiming successful response delivery. These warnings do not establish why the
-caller disconnected or authorize replay of uncertain paid work.
-
-An x402 challenge and its single signed attempt are separate requests, each
-subject to connection and read-inactivity limits. In Tor mode, participating
-API clients (`PaidClient::new`, `PaidClient::managed`, and `PaidClient::unsigned`,
-covering generated MCP tools, directory tools and `raw_call`) may try
-`1 + network.tor_isolation_retries` isolation scopes (default 3) on
-unsigned HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, and `504` while keeping the canonical payer
-pinned, honoring valid `Retry-After` headers on `429` and `503`, and conditionally
-promoting the winning candidate after valid `402` challenge validation or a
-completed valid unsigned output. Unsigned GET/HEAD and otherwise-authorized x402
-POST dispatch and successful-response body transport failures use the common
-classifier and the same finite sequence; body recovery never restarts payer
-selection. Local destination, authority and byte-bound failures are terminal.
-Other methods recover only from TLS connection-establishment failures and leave
-body acquisition to the final output consumer. Known terminal
-non-success statuses keep their status semantics even if their unused error body
-stalls or resets. Complete malformed content and output conversion failures never
-retry or buy another response. Eligible blocking statuses are classified from
-headers before collecting an unused body.
-
-When the trusted request category is enabled, exhausted eligible unsigned GET/HEAD/POST can
-traverse the original method's configured relay list once. Direct mode hands off
-after its single origin attempt; other 5xx such as 501/505/520 can hand off without
-fresh origin retries. Valid `Retry-After` applies before an authorized handoff;
-without a continuation no terminal delay is awaited. API ranges remain legitimate,
-unlike complete-document readers. A relay-supplied target `402` is terminal and
-never enters target signing. Once any target authorization was signed, including
-an earlier wallet in insufficient-funds traversal, generic failures cannot use a
-relay. The relay uses the same captured static payer or existing managed pool;
-its own payment client disables recursive fallback while retaining common Tor
-recovery. Qualification rechecks current authority immediately before every runtime unsigned
-API, relay, document or Coinbase search send, after server delays and capacity
-admission. A claim does not renew authority while a request waits; accepted work
-can still finish. Unavailable authority reports a fixed safe reason and grants no
-new request. Static catalog preparation retains its startup authority. Relay results do not promote origin transports. Relay fee evidence is
-separate from target-paid evidence and survives output conversion and subsequent
-directory processing. No new cache, breaker, wallet allocation or funding wait is
-introduced. Successful raw HEAD returns empty text; representation headers such
-as image Content-Type do not cause an empty HEAD body to be decoded as an image.
-Once an unsigned `402` challenge is accepted,
-signing and the single signed submission remain pinned to that exact winning
-`HttpTransport` record even if a concurrent caller replaces or evicts the cache
-slot. There is no whole-tool-call timeout imposed by payment admission.
-Quote/authorization expiry and funded-test authority remain independent of
-progress. Swap delay is a health warning; graceful shutdown has no automatic
-cutoff. A second signal explicitly exits the executable without joining blocking
-scan/proving workers; it does not release liabilities or run wallet cleanup.
-Library serving returns a typed `ForcedShutdown` error for its embedding process
-to handle. A signed-request timeout still leaves durable unresolved exposure.
-
-The serialized Store protects payer ownership and journal-before-disclosure.
-Advisory Base reads and signed HTTP submission run outside that Store worker. Balance publication never
-grants financial authority; slow seller responses do not serialize other calls.
-`Work` tracks accepted MCP and direct-client workflows, including nested managed,
-static, directory and relay work through output conversion and response construction.
-Disconnect does not release their ownership; shutdown drains retained work. There is
-no aggregate foreground count bound on retained tasks or response memory, and no
-replacement gate. Concrete I/O, document, storage and transport guards remain.
-Every signed authorization remains chargeable until its canonical outcome is known.
-A separate reconciliation owner keeps bounded advisory wallet reads moving
-independently and acquires canonical proofs only for an eligible retained
-retirement candidate and its original outstanding authorizations. Authorization
-pages carry no unrelated balance inventory. The retained wallet owner survives
-waiter cancellation through page acquisition and publication, without holding a
-group publication gate across remote I/O. Retirement uses the same identity-bound
-Base transport, public-destination and Tor/no-direct-fallback policies. Store-only
-serving requires no Zcash SDK or NEAR capability for this work. Qualification's
-full-pool traversal remains separately authorized.
-Changed historical anchors cause scoped reconstruction of derived checkpoints
-and original authorization resolutions through these same owners and transports.
-Old captures cannot publish after the atomic invalidation. Historical proofs are
-retained for inspection without requiring the orphaned anchor to become canonical
-again. Recovery adds no client, network lane, timeout or replay authority.
-Help coalesces requests for the same document without blocking other resources.
-Strict catalog loading requires complete selected results; its unsigned-serving
-loader can omit explicitly optional remote failures. Ordinary deployment serving
-publishes catalogs in the background after binding sockets. Each endpoint defaults
-to waiting for its own catalogs; `wait_for_catalogs = false` exposes available tools
-while discovery remains pending. See [catalog startup](configuration.md#catalog-loading-and-listener-startup)
-for endpoint failure isolation and optional sources. Deployment catalog acquisition
-limits active admitted Tor isolation scopes to 2 by default (configurable 1..64),
-including optional pricing, relay work, inspection and warming. Requests with the
-same effective SOCKS credentials share one slot and proceed in parallel even
-while distinct scopes wait; distinct transport/retry scopes count separately even
-on the same domain. The last full-body holder releases capacity before retry or
-handoff delays. Direct egress, including explicit direct warming, bypasses it.
-Cache hits, local files and relay serialization/readiness waits hold no slots;
-idle Tor circuits and pooled sockets do not count. Dynamic imports outside the
-deployment acquisition owner retain existing scheduling. Concurrent catalogs
-retain discovery-origin credentials; compatible same-origin paths share an identity.
-Compatible aliases coalesce downloads within the load. See
-[runtime architecture](architecture.md#catalog-configuration-and-execution) for
-independent loading and publication. Frozen catalogs avoid those startup
-dependencies in live qualification.
+- **HTTP read inactivity (`read_timeout_seconds`):** Defaults to `60` seconds
+  (range `1..=86400` at network level; providers may override with positive
+  floats up to `86400`, with a `1ms` floor in standalone mode; curated dynamic
+  imports keep provider values; generic imports and `raw_call` inherit network
+  default). Renews on every nonempty response DATA
+  read with no whole-download deadline. The vendored reqwest patch starts the
+  header timer only after DNS, SOCKS, and TLS connect complete (post-connect
+  header wait still includes stream-capacity waiting and request upload); no
+  sibling request or keepalive can renew it.
+- **Connection establishment (`connect_timeout_seconds`):** Defaults to `15`
+  seconds direct and `120` seconds Tor (range `1..=300`), independent of read
+  inactivity.
+- **Base RPC reads:** Use connection and read-inactivity timeouts with no total
+  view deadline. Direct mode allows 2 same-client transport attempts (200 ms
+  backoff); Tor mode uses `1 + tor_isolation_retries` scopes per endpoint
+  before failing over to the next configured endpoint (restarting the whole
+  read-only view, discarding partial evidence). Canonical proofs require the
+  provider's `finalized` anchor (no depth-only downgrade) and cap response
+  bodies at 16 MiB.
+- **Treasury gRPC:** Uses network connection and read-inactivity timeouts,
+  stripping legacy `grpc-timeout` metadata and measuring per-response
+  inactivity below protobuf decoding (`grpc_headers_inactivity`,
+  `grpc_body_inactivity`, and `grpc_dispatch_inactivity` for channel and stream
+  readiness at `DEBUG`). Cancelled or timed-out queued calls cancel their
+  request bodies, and the vendored Hyper and h2 patches discard unopened
+  streams without sending `HEADERS` or `RST_STREAM`.
+  - **Accepted limitation:** Because the gRPC transport has no per-request
+    HTTP/2 upload-progress hook, the header timer starts when the request body
+    is first polled and includes request upload. A slow upload can time out
+    before headers arrive; timeout never proves non-submission or authorizes
+    replay.
+- **External pricing enrichment:** Uses the same transport policy, Tor
+  `catalog_concurrency` slots, and metadata relay rules as its parent catalog,
+  runs asynchronously without delaying tool publication, and inherits the
+  parent catalog's expiry.
+- **MCP HTTP streaming:** Stateless SSE responses emit keepalive comments every
+  2 seconds to keep client connections alive without extending remote read
+  timeouts or payment authority. The pinned `rmcp` teardown drain (2s cancel
+  and 5s transport close) bounds only response delivery; accepted calls survive
+  in the application `Work` owner and log `mcp_response_cancelled` and
+  `mcp_work_finished_after_cancellation`.
+- **Foreground work and shutdown:** Signed HTTP and advisory Base reads run
+  outside the serialized Store worker. `Work` tracks accepted MCP, directory,
+  and relay calls through output conversion and drains without a fixed cutoff
+  on first `SIGINT` or `SIGTERM`; a second signal exits immediately while
+  keeping reservations and journals intact.
 
 ## Retry ownership
 
-For application HTTP clients built by `src/network.rs`, disabling automatic
-transport retries does not prohibit application-owned retries or recurring
-observations. The current layers are:
+Automatic transport retries are disabled on application HTTP clients: reqwest
+uses `retry(never())`, and the vendored reqwest patch disables Hyper's
+automatic retry of unstarted pooled requests (both to prevent hidden retries
+and to stop a replacement Tor connection from running inside an already-started
+header timer). Application owners decide every retry explicitly:
 
-- Reqwest request-policy retries are disabled with `retry(never())`.
-- The vendored Reqwest patch also disables Hyper's separate recovery of unstarted
-  requests, including a closed pool checkout or an unusable reused connection.
-  This applies to both unsigned and signed HTTP requests. An unstarted request is
-  one the transport can establish has not begun writing HTTP headers/body; a
-  missing response or generic connection error does not establish that fact.
-- Application callers decide whether to issue another request under their own
-  rules. Polling observes an existing operation again; financial recovery retains
-  that operation's journal, identities and authority. Neither activity inherently
-  authorizes another payment or funding deposit.
-
-| Request/activity | Current retry or observation owner |
+| Activity | Retry and observation owner |
 | --- | --- |
-| Catalog downloads, help and imports | The shared unsigned acquisition sequence owns catalog retries; their consumers own parsing/cache publication. Help/import workflows retain their current acquisition policy. Relay-service unsigned legs use the shared sequence while paid exposure stays with the payment owner. |
-| Unsigned x402 GET/POST | The payment caller owns permitted unsigned retries under the [x402 execution model](architecture.md#unsigned-x402-requests-and-post-retries). |
-| Signed-payment HTTP requests | The payment owner retains each authorization. Generic errors, timeouts and missing responses grant no chargeable repetition; structured insufficient-funds wallet traversal remains separately permitted. |
-| USDC balances, receipts and other Base read RPCs | The Base read layer owns request retries/fallback; the reconciliation owner schedules recurring observations. Reads do not submit transfers. |
-| NEAR Intents metadata, quotes and status | The NEAR/funding workflow owns quote handling and repeated exact-operation status observations, including unresolved archived requests after a fresh attempt. Existing lane concurrency and cadence apply independently to each request. Each actual retained unresolved-request lookup emits DEBUG with its original identity and why additional checks continue; ordinary current-swap polls and admission deferral stay DEBUG. Status polling does not authorize another deposit; [source safety](wallet-rotation.md#funding-and-source-safety) governs preparation and recovery. |
-| Zcash sync, transaction lookup, deposits and shielding submission | These use tonic/gRPC, outside the Reqwest retry switch. SDK read retries, treasury reconciliation and explicitly authorized rebroadcast retain their existing contracts. Uncertain submission preserves exact bytes and input ownership rather than authorizing a replacement transaction. |
-
-The Hyper recovery switch remains disabled even when a request is demonstrably
-unstarted. Enabling it would change behavior. It also interacts with connection
-and header timing: the patched header timer starts at the first connection
-capture. If that reused connection proved unusable before writing, a hidden
-replacement connection would run inside the already-started header allowance,
-including its DNS/SOCKS/TLS work. For example, a replacement Tor connection taking
-90 seconds could be interrupted by a 60-second header allowance despite fitting
-the 120-second connection allowance. This is why removing only the retry-disabling
-hunk would not preserve the current separation of those timers. Recovery of a
-closed checkout before the first connection capture would not have this timing
-interaction. No such automatic recovery is enabled by the current configuration.
+| Catalogs, help, and imports | Shared unsigned acquisition (`network::acquisition`) owns origin Tor retries and ordered relay handoff; consumers own validation and caching. |
+| Unsigned x402 `GET`, `HEAD`, and `POST` | `PaidClient` owns unsigned Tor scope retries and opt-in API relay under the [x402 retry contract](architecture.md#unsigned-x402-requests-and-post-retries). |
+| Signed x402 payments | Payment owner keeps each authorization. Generic errors and timeouts never retry; only recognized structured insufficient-funds `402` responses traverse remaining eligible wallets once. |
+| Base balance and receipt RPCs | `rotation/base.rs` owns per-endpoint transport retries and whole-view provider failover; reconciliation owns recurring schedules. |
+| NEAR metadata, quotes, and status | Funding and direct-swap owners run independent status polling (including archived requests, logged at `DEBUG` while unresolved); polling never authorizes another deposit. |
+| Zcash sync, lookup, and submission | Tonic gRPC (outside reqwest). Pepper owns read retries; treasury reconciliation and explicit `wallet reconcile --rebroadcast` own source work without replacing uncertain submissions. |
 
 ## Stable credential encoding
 
-The token is lowercase hex SHA-256 of `x402_treazury-tor-isolation-v1` followed by a
-zero byte, a four-byte big-endian namespace byte length, the namespace's UTF-8
-bytes, and the identity encoding. Each identity field begins with its four-byte
-big-endian byte length, including the kind field. Fields are:
+Tor SOCKS isolation tokens are lowercase hex SHA-256 of
+`x402_treazury-tor-isolation-v1`, a zero byte, 4-byte big-endian namespace
+length, UTF-8 namespace bytes, and 4-byte big-endian length-prefixed identity
+fields (including the kind field):
 
-- EVM: `evm`, `eip155:8453`, normalized 20-byte address.
-- Treasury: `treasury`, persisted treasury ID string bytes.
-- Discovery: `discovery`, canonical URL scheme, canonical URL host, two-byte
-  big-endian effective port. Path, userinfo and query are excluded.
-- Bootstrap: `bootstrap`, 16 random UUID bytes for that invocation.
-- Participating Tor scope: `tor-scope`, the complete length-prefixed canonical
-  owner encoding above, 16 random UUID bytes for that selected or candidate
-  transport record.
+- **EVM:** `evm`, `eip155:8453`, normalized 20-byte address.
+- **Treasury:** `treasury`, persisted treasury ID string bytes.
+- **Discovery:** `discovery`, canonical scheme, canonical host, 2-byte
+  big-endian effective port (no path, userinfo, or query).
+- **Bootstrap:** `bootstrap`, 16 random UUID bytes per invocation.
+- **Participating Tor scope:** `tor-scope`, the complete owner encoding above,
+  16 random UUID bytes per transport record.
 
-This byte format is pinned by `tests/network.rs`. It contains no signing or
-storage-encryption secret. Changing it requires a new versioned domain separator.
+Pinned by `tests/network.rs`. Contains no signing or encryption secrets; format
+changes require a new versioned domain separator.
 
 ## Dependency boundaries
 
-- The pinned x402 exact clients sign locally. The upto client is constructed with
-  provider type `()`, whose optional nonce/allowance lookups return no result without
-  opening connections. Do not attach an SDK-owned RPC provider.
-- LightClient is created/restored offline and stays offline during backend
-  calculation and direct Pepper synchronization. The application passes the
-  application `network::GrpcIndexer` to Pepper. Its nineteen public
-  `Indexer`/`TransparentIndexer` delegations wrap the generated gRPC client,
-  constructed only in `src/network.rs` over the existing progress transport.
-  Every clone retains that identity-bound channel. Generated request defaults,
-  streaming types and submission status/transaction-ID parsing are preserved;
-  the transport still removes total `grpc-timeout` metadata and owns response
-  inactivity below protobuf assembly. SDK online constructors, URI setters,
-  migration transmission and optional nym/price workers are not used.
-- The unchanged pinned SDK unconditionally downloads/caches and embeds Sapling
-  parameters at build time, with no disable feature. Application proving never
-  initializes or uses them: its required legacy prover adapter refuses operations.
-  This SDK-only exception and Ironwood selection are documented in the
-  [Ironwood-only policy](zingo-integration.md#ironwood-only-policy). Cargo/build
-  acquisition is outside runtime Tor routing.
-- reqwest uses `no_proxy`, explicit `socks5h` when enabled, no redirects, and no
-  automatic retries. Both reqwest and tonic SOCKS paths use hyper-util's authenticated
-  SOCKS5 connector with remote DNS. Authentication negotiation cannot downgrade to
-  unauthenticated SOCKS. HTTPS/gRPC retain ordinary TLS verification and original SNI.
-
-`tests/network_audit.rs` rejects direct network constructors outside the factory.
-The only application-source exception is the disposable consensus test harness,
-which administers its local Docker nodes independently of the wallet under test.
-This text scan is a tripwire, not proof about future dependencies; review this
-inventory whenever dependencies or network features change.
-
-Opt-in qualification installs a private HTTP scope observer before transport
-construction. It records canonical owner credentials, effective scope credentials
-and canonical origin before SOCKS disclosure, including failed candidates. Ordinary
-serving installs no observer and retains no scope history. Application records are
-bound to their existing qualification session; the read-only receipt subprocess
-returns the same private metadata through its owned result pipe. These observations
-never authorize requests, financial work or destinations. Audits derive owner and
-destination permissions independently, aggregate required observations across
-that owner's recorded scopes, and check circuit separation by actual credentials.
-Unknown or conflicting aliases and unrecorded scopes remain failures. Archived
-re-audits compare interval metadata against the registered session evidence;
-missing historical metadata cannot be reconstructed from Tor STREAM events.
-
-## Verification
-
-`tests/network.rs` and `tests/support/socks.rs` exercise authenticated SOCKS,
-remote hostnames, no-auth downgrade rejection, failure/timeout without direct
-fallback, pooling/isolation, cache eviction, stable tokens and policy inspection.
-`tests/managed.rs` runs real signing, Base reconciliation, rotation and uncertain
-payment recovery in a subprocess with Tor policy and hostile ambient proxy settings.
-`rotation::near::tests` verifies metadata/quote/status isolation and recovery from a
-serialized quote through the proxy. `tests/treasury_sync.rs` exercises the operator sync command over the proxy, including
-restart. Existing suites cover static replacement, quote validation, no paid replay,
-financial accounting, refunds and expiry recovery.
-
-Run the complete local regression suite:
-
-```sh
-make test CARGO_ARGS='--offline --all-targets' TEST_ARGS='--test-threads=1'
-python3 vendor/verify.py
-python3 vendor/verify_pepper.py
-make check-compat
-```
-
-Run the Ironwood consensus lifecycle through the fake SOCKS proxy, alone in its
-process because network policy is immutable (requires Docker, no real funds):
-
-```sh
-make test CARGO_ARGS='--offline --features zcash-regtest --lib treasury::regtest::tor_consensus_lifecycle' TEST_ARGS='--ignored --exact --nocapture'
-```
-
-For controlled real-Tor circuit observation and per-process egress qualification,
-use the opt-in runner in [tests/TOR.md](../tests/TOR.md). It uses an independently
-installed Tor binary; this repository does not bundle Tor. The macOS qualification
-passed with real circuit observations and positive/negative egress controls; see
-[the evidence and limits](testing.md#qualification-status).
-Local SOCKS tests and funded-swap tests remain separate evidence.
-
-For a deliberately enabled, read-only real-Tor HTTPS/gRPC smoke check:
-
-```sh
-TOR_SMOKE_SOCKS=127.0.0.1:9150 make test CARGO_ARGS='--offline --test network live_tor_unfunded_smoke' TEST_ARGS='--ignored --exact --nocapture'
-```
-
-This contacts zec.rocks, checks mainnet identity and Ironwood tree support, and
-creates no wallet or transaction. A SOCKS fixture proves credentials supplied by
-our clients; verification of actual circuit separation additionally requires a
-controlled Tor daemon with `IsolateSOCKSAuth` and observation via its control port.
-The application itself never uses a control port or sends NEWNYM.
-
-For enforcement beyond these application tests, run the executable under an OS
-firewall or container egress rule permitting only the configured SOCKS TCP endpoint or Unix socket path,
-while allowing the MCP listener's local inbound/reply traffic. Put Tor outside that
-restricted process/container boundary so its relay connections remain possible.
-Rules must cover IPv4 and IPv6 and reject destination DNS/UDP egress. Do not enable
-such rules globally on a user's machine as part of an application test.
+- **x402 clients:** Sign locally; the `upto` client uses provider type `()` so
+  it never opens SDK-owned RPC connections.
+- **Zingo and Pepper:** `LightClient` stays offline; `network::GrpcIndexer`
+  wraps the generated gRPC client over `src/network.rs` with no SDK online
+  constructors, URI setters, or nym and price workers. Build-time Sapling
+  parameter downloads remain an upstream `zingolib` build-script exception
+  outside runtime Tor routing; see
+  [Ironwood-only policy](zingo-integration.md#ironwood-only-policy).
+- **reqwest and tonic:** Use `no_proxy`, explicit `socks5h` in Tor mode (no
+  unauthenticated SOCKS downgrade), no redirects, and normal TLS and SNI
+  verification. `tests/network_audit.rs` rejects direct network constructors
+  outside `src/network.rs` (the sole exception is the Docker regtest harness).
+- **Qualification scope observer:** Opt-in live qualification installs a
+  private pre-SOCKS scope observer to audit circuit separation; normal serving
+  installs no observer and retains no scope history.
 
 ## Agent-selected destinations
 
-Runtime OpenAPI imports/refresh, lazy help, explicit usage documents and URL
-probes use the common complete-document reader. Its unsigned origin sequence uses
-`network.tor_isolation_retries` and retained server delays; configured
-`relay_fallback.provider_metadata` permits the ordered GET relay list after blocking
-HTTP/transport failures.
-There is no HEAD-then-GET probe, target challenge signing or linked traversal.
-Terminal `401`/`404`/`410`, other non-blocking responses, complete invalid content,
-unsolicited `206`/`Content-Range`, local byte bounds and destination rejection never
-purchase another read. Only consumer-validated complete content promotes an origin
-transport. Relay content cannot promote it.
+Dynamic imports, refreshes, lazy help, `documentation_url` reads, `base_url`
+probes (4 concurrent GETs), and `raw_call` all use the factory's `public_only`
+pool key:
 
-`provider_details_remote(documentation_url=...)` returns complete accepted usage text.
-Base/x402-list-ID discovery validates one GET per fixed, deduplicated candidate, keeping
-four candidates in flight. It uses the available endpoint documentation
-identity, pinned for a batch; absent identity leaves origin retrieval available
-under the URL's discovery identity. Imports and help use the URL discovery identity.
-Public destinations, spec/help byte bounds and response-read
-inactivity apply. Missing payment authority disables paid fallback without
-blocking origin retrieval. No document read allocates wallets, starts funding or
-waits for funding. Configured relays may follow redirects remotely under the
-[relay trust boundary](#relay-fallback); origin requests remain no-follow.
-
-Accepted help and source mutations retain fetching, validation and cache/registry
-publication after disconnect. Compatible cache aliases retain the exact payer and
-effective document policy. Possible charges survive later parsing, publication,
-qualification and cleanup errors. Proven unpaid help initialization failures can
-be retried explicitly; possible-paid failures are shared rather than re-purchased
-by joined initializers. Runtime relay traversal has no static provider breaker or
-new cache/readiness queue. Operator refresh prepares a representable relay request
-before opening only the saved owner's existing payer and closes that owner on all
-outcomes; it starts no SDK or funding scheduler.
-
-Dynamic imports, lazy help and paid API calls, including independently authorized
-`raw_call`, use the same factory with a `public_only` pool key. Dynamic help uses
-the help URL's discovery-origin identity and validates public destinations at
-execution, as well as during catalog validation. Generic help origins must match
-the API base; bundled providers retain their reviewed, authored help origin. HTTPS, no
-credentials/fragments, public literal addresses and public hostnames
-are required. In direct mode, a custom resolver rejects the entire result if any
-answer is non-public, and returns only that validated set to the connector. Cached
-connections already target validated addresses; each new DNS lookup repeats the check.
-Trusted TOML sources retain their existing local-fixture/private-provider behavior.
-
-Tor uses authenticated `socks5h` with the same discovery/payer identities and never
-resolves the destination locally. Hostname answers hidden behind Tor rely on Tor's
-`ClientRejectInternalAddresses` protection. Keep it enabled; a generic SOCKS server
-may not provide it. Raw calls use the endpoint's wallet and
-existing response/read limits; redirects are not followed. Nonempty
-[manual raw headers](agent-sources.md#manual-raw-headers) never reach paid relay
-preparation or payment, including explicit Authorization and arbitrary custom names. They pin the initial payer;
-same-payer GET/HEAD isolation retries retain their bytes. Manual state-changing
-calls recover only from TLS connection-establishment failures, with no unsigned
-status/body or post-dispatch TLS replay.
-Header-free raw calls retain configured relay and x402 POST retry behavior.
-Tests exercise the production resolver wrapper with injected DNS answers, including
-mixed/rebound rejection, plus actual direct-client rejection before connecting to
-private targets. A subprocess executes the production import and guarded x402
-client over HTTPS through fake SOCKS, checking exact discovery/payer identities.
-Private unit-test contexts can trust a dedicated fixture CA; public URL checks,
-certificate/hostname verification and proxy policy remain active. HTTP/gRPC TLS
-failures, proxy faults, redirects and interrupted reads have local regression tests.
-These fixtures do not establish real Tor circuit selection or OS trust-store
-compatibility. No alternative production HTTP constructor exists.
+- **Public HTTPS only:** Rejects non-HTTPS URLs, embedded credentials,
+  fragments, non-public literal IPs, non-public DNS answers (a custom direct
+  resolver rejects the whole lookup if any answer is non-public), and HTTP
+  redirects. Generic help URLs must match the API base origin; bundled
+  providers keep their reviewed help origin.
+- **Tor internal-address guard:** Tor mode uses `socks5h` remote DNS and relies
+  on Tor's `ClientRejectInternalAddresses` (keep it enabled).
+- **Manual raw headers:** Nonempty `raw_call` headers disable paid relays and
+  cross-payer handoff, pin the initial payer, and restrict write retries to
+  pre-dispatch TLS establishment failures. See
+  [manual raw headers](agent-sources.md#manual-raw-headers).
 
 ## Provider protocol policy
 
-Operators can add private-PKI certificates with `[network].trusted_ca_files`,
-a list of absolute paths to PEM files or bundles. `NetworkContext::new` reads and
-validates these certificates once before constructing transports; missing/invalid
-files fail without leaking certificate contents. Configuration inspection reports
-paths without reading certificates. Additional anchors extend the ordinary trust
-stores, including through Tor and explicit direct catalog warming.
-
-Embedders can add private-PKI trust anchors with
-`NetworkContext::with_trusted_roots` before installing the context through
-`network::install_context`. Trust is immutable after process installation; repeated
-context installation requires the same policy and roots. `network::install(policy)` without configured CA files preserves installed
-embedding trust for an equivalent policy. Explicit CA-file installation compares
-both policy and loaded certificate bytes. Added roots extend platform HTTP trust and gRPC web-PKI trust, with ordinary
-certificate and hostname verification. No CLI/environment override disables checks.
-Local MCP/control connections and infrastructure adapters retain their own URL
-policies. Relays remain trusted for remote target TLS and returned content, as
-explained above; local validation cannot prove a relay's remote TLS handshake.
-
-Provider HTTPS uses HTTP/2-only ALPN/client mode and a TLS 1.3 minimum by default.
-Provider/source `allow_http1` and `allow_tls12` independently permit older versions,
-without weakening trust, redirect, retry or proxy policy. Catalog, help
-and paid requests carry the same source policy. Accepted curated dynamic sources
-preserve their reviewed compatibility permissions through remote schema
-acquisition, explicit refresh, bound API execution and lazy help. Their
-provider-management public-destination policy still applies. Generic specification
-imports, their dynamic bindings and raw calls use strict defaults. No vendor
-transport bypass is introduced. Infrastructure adapters retain their existing
-policy. Provider catalogs, help, API requests and relay targets require HTTPS,
-including authored cross-origin operation URLs. Cleartext provider URLs fail
-before network disclosure, signing or relay fallback; local catalog files remain
-local. Every local TLS leg retains certificate-chain and hostname validation.
-See the
-[configuration guide](configuration.md#provider-http-and-tls-policy).
-
-Pool keys include protocol permissions as well as origin, isolation identity,
-timeout, runtime and public-destination policy. Catalog caches also
-separate differing protocol permissions. HTTP/2 streams within a connection share
-one SOCKS identity; they cannot cross wallet/discovery boundaries. DEBUG response
-logs record HTTP version and request stage, without URLs or credentials. TLS
-versions are enforced through minimum-version settings, not inferred from HTTP.
-
-`src/network_http_tests.rs` uses trusted fixture TLS through authenticated SOCKS.
-It holds four streams open on one connection, verifies another wallet and discovery
-use separate connections, and checks HTTP/1.1-only and TLS-1.2-only servers reject
-strict clients even after a compatible client has established a reusable connection.
-No production trust changes, real Tor, live provider calls or payments are involved.
+- **Strict defaults:** Provider HTTPS (catalogs, help, APIs, and cross-origin
+  operation URLs) requires HTTPS, HTTP/2-only ALPN, and TLS 1.3 minimum.
+  `allow_http1` and `allow_tls12` opt in per provider or source without
+  weakening certificate, hostname, redirect, or proxy rules. Generic dynamic
+  imports and `raw_call` always use the strict defaults; curated dynamic
+  imports preserve their bundled flags.
+- **Private trust anchors:** `[network].trusted_ca_files` (or embedder
+  `NetworkContext::with_trusted_roots`) extends both platform HTTP and gRPC
+  web-PKI trust stores immutably at startup, including through Tor and
+  `catalog warm --direct`. Missing or invalid PEM files fail startup without
+  printing certificate contents.
+- **Pool separation:** Pool keys and catalog cache keys include protocol flags,
+  so `allow_http1` and `allow_tls12` connections are never reused by strict
+  clients (`src/network_http_tests.rs`). `DEBUG` logs record negotiated
+  `http_version` and stage without URLs or credentials.
 
 ## Serving startup SOCKS prerequisite
 
-Ordinary serving startup can also make a connection-only probe to its configured
-SOCKS endpoint, resolving an IP literal or network name through the system
-resolver or connecting the configured Unix filesystem socket. This shared,
-cancellation-owned prerequisite check carries no credentials or destination and
-performs no SOCKS handshake.
-An unreachable endpoint emits an immediate ERROR naming the endpoint and
-safe I/O kind, then repeats it on the next failed probe at least 60 seconds after
-the preceding ERROR while the shared startup wait remains pending. No separate
-logging timer or probe is created. Retry cadence is five seconds after a failed connection attempt, using the
-existing network connection timeout. Pending startup catalog network
-misses and captured wallet discovery resume after the first reachable observation;
-an INFO after a failure reports endpoint reachability, never Tor bootstrap success.
-Fresh caches, listener binding, commands and independently demanded financial
-work do not wait. The check ends on success or cancellation, creates no permanent
-monitor and grants no HTTP replay, financial authority or direct fallback.
+In Tor mode, serving startup runs one shared connection-only probe to
+`socks_endpoint` (TCP or Unix socket; no credentials or SOCKS handshake) before
+starting pending catalog fetches and startup wallet discovery:
+
+- Retries every 5 seconds using `connect_timeout_seconds` per attempt.
+- Logs `ERROR` immediately on failure (with endpoint and safe I/O kind) and
+  repeats at most once every 60 seconds while waiting, then logs `INFO` once
+  reachable (reporting TCP or socket reachability, not Tor bootstrap
+  completion).
+- Listener binding, fresh disk caches, CLI commands, and explicit financial
+  commands do not wait on this probe. Stops on first reachability or shutdown.
 
 ## Integration supervisor boundary
 
-The opt-in Rust integration runner keeps local MCP and authenticated Tor-control
-connections outside the confined application. `network::local_control` accepts
-only literal loopback addresses with a bounded connection deadline. The owned-Tor
-runner remains TCP-only and rejects Unix SOCKS endpoints; Unix transport is covered
-by local HTTP/gRPC/startup fixtures rather than real-Tor qualification.
-`QualificationProbes` and `qualification_probe` implement positive/negative
-loopback TCP/UDP controls for IPv4 and IPv6; they are supervisor test facilities,
-not provider-configurable transports. External catalogs/help/API requests still
-use the production factory inside confined subprocesses. See
-[the integration runner](../tests/live/INTEGRATION_REFERENCE.md#owned-tor-qualification)
-for its installed-Tor ownership, private evidence and explicit outage scope.
+The opt-in live integration runner keeps local MCP and authenticated Tor
+control connections outside confined subprocesses via `network::local_control`
+(loopback literals only, TCP-only; Unix SOCKS is covered by local fixtures).
+`QualificationProbes` supplies positive and negative IPv4/IPv6 loopback egress
+controls. External API traffic inside confined subprocesses still uses
+`src/network.rs`. See
+[owned-Tor qualification](../tests/live/INTEGRATION_REFERENCE.md#owned-tor-qualification).
 
-Base clients retain canonical identity rather than a raw selected client. Each
-logical read reacquires the shared owner/origin/policy selection. Full configured
-URLs still distinguish provider evidence even when same-origin paths share a
-transport. Transport replacement never changes durable endpoint generations or
-financial authority. Strict view/receipt failover keeps its existing predicate
-(including no HTTP 400 fallback); advisory scalar reads may try the next configured
-endpoint after any error. Base never uses a paid relay.
+## Verification
+
+- **Local regression suite:**
+  ```sh
+  make test CARGO_ARGS='--offline --all-targets' TEST_ARGS='--test-threads=1'
+  python3 vendor/verify.py
+  python3 vendor/verify_pepper.py
+  make check-compat
+  ```
+- **Regtest Ironwood lifecycle over fake SOCKS (Docker, no funds):**
+  ```sh
+  make test CARGO_ARGS='--offline --features zcash-regtest --lib treasury::regtest::tor_consensus_lifecycle' TEST_ARGS='--ignored --exact --nocapture'
+  ```
+- **Read-only live Tor smoke check (contacts `zec.rocks`, creates no wallet):**
+  ```sh
+  TOR_SMOKE_SOCKS=127.0.0.1:9150 make test CARGO_ARGS='--offline --test network live_tor_unfunded_smoke' TEST_ARGS='--ignored --exact --nocapture'
+  ```
+- **Controlled live-Tor observation:** See [tests/TOR.md](../tests/TOR.md) and
+  [qualification status](testing.md#qualification-status). For OS-level egress
+  enforcement beyond application tests, confine the executable with a firewall
+  or container policy allowing only `socks_endpoint` and local MCP traffic while
+  blocking IPv4/IPv6 direct egress and UDP DNS (keeping Tor outside that
+  sandbox).
 
 ## Remaining timers and budgets
 
-These scopes are independent; progress renews only transport inactivity, never
-financial or qualification authority.
+These timers and protocol windows are independent: transport progress renews
+only read inactivity, never financial expiry or qualification authority. For
+memory, cache, and queue bounds, see
+[local resource limits](local-resource-limits.md).
 
-| Timer or bound | Purpose and behavior |
-| --- | --- |
-| API HTTP header representation | No additional local count quota. Generated/routed and manual raw headers use fallible insertion and share a check of the HTTP library's inherent map capacity, including space for concrete runtime headers, before inventory or network activity. An unrepresentable set returns an error and emits a value-free WARN. |
-| Search and browse pagination: default 25 | `tools/list` returns the complete advertised inventory without pagination; search/local browse accept positive explicit sizes. Remote provider search requests 1–20 results per selected directory, default 5; the ordinary x402 List provider retains its native browse maximum 100. Follow continuations for complete inventories. |
-| Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. gRPC factory failure WARNs immediately; HTTP terminal timeout WARNs at the retained application workflow; exhausted Base endpoints and Coinbase origins remain DEBUG while fallback is possible. |
-| Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
-| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Concurrent remote-provider directory workflows retain separate timers; sibling traffic and keepalives cannot renew one another. No whole-search deadline or automatic federation replay is added. Curated dynamic HTTP preserves the accepted provider value, then inherits the network default; generic imports and raw calls use the network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. Guard expiry emits DEBUG with a fixed dispatch/header/body stage; owning workflows report terminal failures after applicable retries. |
-| gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. Expiry emits DEBUG `grpc_dispatch_inactivity`; the owning operation reports terminal failures. |
-| Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
-| Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |
-| MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
-| MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
-| Treasury observation: 60 seconds after success; consecutive errors wait 90, 180, then 300 seconds | Available treasury startup and explicit sync request one pass. Current enabled unfilled funding demand, current managed FAILED/REFUNDED without confirmed refund-receiver receipt, or validated pending source/shielding work owns recurring scans; idle treasury performs none. Successful shared scans schedule the next scan 60 seconds after completion, without another tip query. Timing is measured from attempt completion, so long later command work cannot postpone an already-due scan. Busy/locked read-only demand acquisition uses a 60-second local reevaluation wake while commands and notifications remain usable; unknown demand never authorizes a scan or resets observation timing. Scheduled source observers reuse healthy current-owner persisted scans without intervening tip probes; actual new-action validation still checks exact canonical height/hash and snapshot revision. Publication and SDK reconstruction have independent 60-second retries and never justify another scan alone. Owned shutdown retains identical completed-result publication retries without another calculation or submission. Scheduling/reuse never renews the original observation time or financial authority. Successful needed scans reconcile accepted source bytes without allocating transparent-input shielding. Removed age/lag gates remain removed; expiry closure uses one completed canonical tip scan, the authenticated signed finite expiry and final unchanged Ready snapshot coverage, without a second corroborating scan or indexer-presence veto. Signed protocol expiry remains authoritative. Offline SDK reconstruction can close proven never-disclosed calculations locally without another observation; it repairs current spendability without reopening terminal source work; bound NEAR SUCCESS ends source observation while its existing destination-credit lane can continue. No historical source pass, idle watcher or new network lane is added. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
-| Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Caller/query ownership survives retry waits; active RPC permits cover individual requests/body collection and are released before backoff or `Retry-After`. Saturation rejects unsigned acquisition with WARN `base_query_busy` / `base_rpc_callers_busy`; active-I/O waiting emits DEBUG `base_active_rpcs_busy`. No whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
-| Deployment discovery Tor isolation: `startup.catalog_concurrency`, default 2, range 1–64 | Bounds active admitted Tor isolation scopes for deployment catalog acquisition, including optional pricing and relay attempts. Requests with the same effective SOCKS credentials share one slot and proceed in parallel; distinct transport/retry scopes count separately even on the same domain. Holders cover full response bodies; the last holder releases capacity before retry/handoff delays. Direct egress (including direct warming), cache hits, local files and relay serialization/readiness waits hold none. Idle circuits and pooled sockets do not count. Strict inspection completeness, best-effort warming completion and accepted ownership remain independent; runtime dynamic imports outside this owner retain existing scheduling. |
-| Endpoint catalog readiness: `servers.NAME.wait_for_catalogs`, default true | Waits without an overall deadline for the endpoint's own configured catalogs to publish before serving MCP HTTP. Sockets bind and funding/discovery run first. Required failure closes only affected waiting endpoints with ERROR; optional failure omits that source. False permits incremental availability. No additional network attempts, funding authority or transport timeout. See [catalog startup](configuration.md#catalog-loading-and-listener-startup). |
-| Foreground work ownership | Accepted workflows remain tracked through output and disconnect and drain on shutdown. Nested work retains ownership. No aggregate count bounds retained tasks or response memory; concrete operation-specific guards remain, with no replacement admission gate. |
-| Store/treasury command queues: 32 / 8 | Full-queue submission emits DEBUG `store_queue_full` / `treasury_queue_full` and waits with the original command; no new timeout, replay or authority. Accepted work retains its existing cancellation/shutdown contract. |
-| Advisory and retirement maintenance: four wallet acquisitions per group | One finite startup inventory pass, requested scalar refreshes and eligible retained-candidate retirement work. Shared per-wallet acquisitions retain the 60-second completion floor and independent error backoff up to 300 seconds; scalar success and retirement completion remain separate. Candidate authorization pages contain at most 64 rows each without a total-history cap. Store-lifetime eligibility/pending markers survive disposable result/cache eviction; latest above tolerance finishes demand even with a low saved minimum. Confirmed-high/latest-low, valid unused authorizations and transient failures retain scoped work. Ineligible candidates and unrecoverable original-record corruption stop locally; canonical-history changes retain scoped reconstruction work without a new lane or timer. Unrelated wakes do not recreate completed demand. Accepted acquisition/publication owners survive waiter cancellation. Local metadata pages discover relevant eligibility changes; the five-second scheduler cadence grants no faster network reads. Startup follows the SOCKS prerequisite; explicit sync makes one finite attempt. Actual capacity deferral logs DEBUG; ordinary cooldown does not warn. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
-| Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
-| Catalog/price retention: indefinite by default | `catalog_cache_ttl_seconds="indefinite"` controls catalog/observed-price sharing; positive seconds set expiry and zero disables disk caching. Advertised estimates share source acquisition expiry independently of persistence; disk opt-out keeps them bound to the loaded generation. Local authored prices follow their generation. Reads/restart/observations never renew expiry. Expiry, forced refresh, changed bytes/configuration or eviction discard observed hints. Configured external pricing is re-downloaded with catalog acquisition. SQLite writes remain disposable and generation-conditional. Heuristic runtime source refresh preserves existing tools/search/hints during acquisition and catalog failure under original expiry. Complete replacement definitions publish without waiting for optional pricing; generation-owned enrichment remains asynchronous. Success retires old API handles and invalidates their hints. New challenge observations remain preferred after advertisement arrival; optional pricing failure leaves operations without other hints unknown. Failure adds no retry timer; a later fresh unsigned target signal may retry. No independent price timer, capacity, probe or polling scheduler. See [local resource limits](local-resource-limits.md). |
-| NEAR sizing retries | No independent attempt cutoff. Each recognized USDC minimum must strictly raise the floor within the authorized nominal ceiling; every replacement draw persists before the next request. The original quote deadline is checked before each request and never renewed by retries. Existing response-inactivity guards and scheduler backoff remain independent. |
-| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to 30 minutes (1,800 seconds) and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund assessment is owned by [deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md). Broadcast acceptance is not settlement. |
-| x402 authorization validity | New static v1/v2 exact/upto and managed exact signatures expire at the shorter of the provider's requested lifetime or 300 seconds after signing. This bounds transfer authority, independently of HTTP progress. Original accepted offers, actual journaled expiries and existing signatures are preserved; expiry never grants replay. |
-| Payment challenge bodies | One collection under the provider's `max_response_bytes` (16 MiB default); direct low-level managed body-only challenges use the default. V1 body normalization adds no second cap or deadline. |
-| Funding observation owner | Per store: four credit reads, four status reads, four prerequisite-complete unsigned quotes, one serialized source step and one pending quote prerequisite. Each of the four traversal lanes (credit, status, source and quote prerequisite) retains at most 64 acquired rows; independent cursors have no inventory-count cutoff. These bounds protect acquired work, not funding capital. Saturated lane deferrals emit aggregate DEBUG events with static capacities and the active source operation, retaining all pending work. Candidates may not yet be due. Source-step start/finish emit DEBUG with the operation, wallet, starting phase, elapsed seconds and step success; these identify the holder, not its internal wait or swap outcome. |
-| Funding scheduling metadata: 256 records per observation kind | At most 1,024 runtime records retain exact operation/kind due times and failure streaks. Active work and unelapsed backoff cannot be evicted; due inactive records may be forgotten. Reopen reconstructs missing work from committed facts, preserving original financial ownership. Admission deferral and due-inactive metadata eviction log DEBUG with limit 256 per kind. |
-| Explicit wallet bootstrap observation | One-second captured-claim polling and 60-second progress reporting; no total-work deadline. Ordinary serving has no bootstrap readiness poll or funded-payer startup gate. |
-| Ordinary managed reserve opportunities | Independently draw uniform integer 30–120 seconds per eligible group (mean 75). Retain one volatile monotonic due instant per group and rearm due groups before vacancy work. Serving adds no eager fill, catch-up or emergency refill. Uncredited bootstrap participants remain dormant until durable first-use demand; demand or historical positive credit admits them to the same 30–120-second cadence from eligibility-read completion. Admission never redraws an armed instant. Discover only unarmed participants at startup, on demand/credit notices or after busy-read retries, stopping once all are armed. Contention retries start after read completion and cannot mask ordinary or already armed participant opportunities. Current enablement and financial authority remain checked at allocation commits. Restart redraws, and actual waits can exceed 120 seconds with downtime/load or unavailable funds. At most one used-ACTIVE early promotion per due group, then independent vacancy fills. Accepted jobs/recovery retain existing cadence. Explicit bootstrap/tick retain prompt allocation; disabled auto-funding grants no opportunity. See [early rotation](wallet-rotation.md#early-rotation-and-refill-opportunities). |
-| Funding polling/backoff and swap delay threshold | One shared earliest eligible inventory/retry/opportunity wait, plus completion/shutdown; independent per-kind backoff up to 300 seconds. Recurring Base initial-credit reads begin after durable source acceptance or validated bound provider SUCCESS, with the first read when the recipient is due and a 60-second floor from the previous acquisition completion to the next read start. Preparation, startup, requested refresh and credit checks share the Store/wallet acquisition and its authoritative due time; credit scheduling adds no second backoff or jitter. Cached reuse neither republishes the scalar estimate nor counts a cached failure as a new recurring observation. Actual preparation requests one exact-destination discovery read after the SDK supplies a valid spendable proposal. SDK capital shortages or invalid proposals issue no destination read. Fresh allocations and unsigned quotes do not create Base polling. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). Successful recurring source and provider-status observations use configured polling after completion, plus existing per-job jitter. Failed observations retain independent error backoff with a 60-second floor, bounded by 300 seconds before jitter. Source lookup acquisition/validation failures remain failures even with a healthy shared SDK scan; established SDK confirmation and expiry proofs precede optional lookup. Whole-second cadence anchors round outward after completion; financial timestamps and credit-owner `At` deadlines remain separate. Exhausted inventory still rereads on configured polling to discover committed work; redundant one-second idle wakes are removed. Configured polling also controls owner recovery; the health threshold reports delay without changing financial authority. Successful local quote→preparation→submission handoffs do not acquire a minute delay or clear earlier observation failures. These govern scheduling only; no whole-job timeout or replacement-send authority. A success in one observation kind cannot reset another kind's failure backoff or shorten the credit interval. A joined failed scheduler retries through its existing Store lease on the configured polling cadence; accepted source work retains that lease until it drains. Typed busy/locked inventory reads defer only their lane under the existing poll cadence, retaining its cursor and all active work; mutation/publication failures are not replayed by the inventory-read retry mechanism. Completed SDK results instead retain their existing owner, which retries identical local publication without recalculating or submitting. |
-| Direct payment source/provider observation | One owner per saved operation retains independent source and provider progress. Foreign provider reads use configured funding polling plus operation jitter; failure backoff has the existing 60-second floor and 300-second ceiling. Source preparation/submission uses the existing treasury journal and canonical recovery, with local handoffs continuing without a polling delay. Native sends make no NEAR request or provider deadline; native local observation uses the positive configured funding cadence or existing default when absent. SDK scans retain the shared 60-second completion-based cadence. Disclosed foreign invoices also request SDK scans until terminal provider outcome and, for success, one subsequent completed scan. Native invoices request shared SDK scans until confirmed receipt of the requested amount, without transparent-address RPCs. Foreground status reads saved facts and may refresh native receipts from a newer saved SDK snapshot. No whole-payment deadline or new concurrency cap. |
-| Import success retention 300 seconds / failure backoff one second | Applies after completion only; active coalesced fetches cannot age out. |
-| Catalog structural bounds and dynamic import ownership | Depth 64, 500,000 nodes and 64 MiB string/key traversal and copy work guard local/downloaded/cached/relay/direct-Value catalogs before recursive conversion or cache publication. Used media-name parsing (including invalid/unsupported declarations), wildcard synthesis, selected media output and candidate/range/parameter comparisons share the same node/byte accounting. Explicit candidate names and sort keys stay borrowed. Schema projection charges each actual pointer lookup once and checks increasing depth before every descent; opaque annotations and unused authored definitions are charged before copying without reference interpretation. Projection recursion and pending physical/import cursors remain bounded by depth. Structural-budget rejection emits WARN at the shared guard with fixed reason and numeric usage/bounds, including when another candidate remains or a caller catches the error. Dynamic import retains stricter references. No separate per-listener, global-import or active-cache admission quota; foreground ownership retains accepted work without an aggregate count bound. Active aliases coalesce without eviction. Completed retention alone is trimmed to four entries on lookup/completion; completed-entry pressure eviction logs DEBUG without rejecting active work. Sixteen mutation jobs; dynamic registration saturation WARNs and rejects, while static publication logs DEBUG with limit 16 and retains the same wait. No tool-count admission quota. Tool lists above 500 advertised definitions emit one advisory WARN whose message states the endpoint name and current tool count and suggests explicit `discover_on_demand = true`; each listing may repeat it. On-demand counts only wrappers. [Agent sources](agent-sources.md#limits-and-network-policy) lists remaining document/registry bounds and WARN diagnostics. |
-| Relay-service unsigned acquisition | One direct attempt, or `1 + network.tor_isolation_retries` Tor attempts per authored provider position. No separate relay attempt counter/backoff. Readiness without I/O consumes no attempt. Eligible service delivery failures and malformed/incomplete outer responses advance through the list even after possible payment, retaining prior liabilities without replaying an authorization. Decoded target outcomes retain their own advancement policy; local authority, destination and byte limits remain terminal. |
-| Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Normal expiry is ordinary freshness policy. HTTP disk cache limits are 128 MiB / 4,096 entries / 16 KiB metadata / 144 MiB database; pressure eviction logs DEBUG, while persistence/read failures WARN. Store Busy/Locked failures WARN before command reply; this grants no mutation retry. Cache persistence failure does not invalidate a complete response. |
-| Optional cover episode bounds | Bound optional unsigned work; cannot cut off the real paid call. Actual process-budget refusals WARN; owner-cache pressure eviction logs DEBUG; ordinary completed episode budgets/deadlines and cached refusals use DEBUG; fresh retained resource refusals and optional task/sampling failures use INFO. Local deadlines/preemption preserve successful qualification and return interrupted checks to unknown after cleanup, without renewing episode/process budgets. The three-second cleanup wait in `wait_experiment_idle` is a test-only fixture bound; production cleanup has no such cutoff. |
-| Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. Actual deadline expiry WARNs with a safe stage and numeric allowance. |
-| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
-| Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
-| Sync mempool drain window | Bounds initial mempool-stream settling before requesting its shutdown. Received work drains and workers join before sync returns; it is not a whole-sync deadline. |
-
-Completed tool output has no character slicing; removed `max_response_chars`
-settings reject visibly. Provider `max_description_chars` remains a separate
-description control. Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
-plus explicit MCP, NEAR JSON, protobuf, image and cache limits. They bound memory
-or stored data, not download duration. Rejections emit WARN at the owning application
-boundary: MCP 413, image/description bounds, API/document/Base/NEAR readers, and
-protobuf unary or production stream consumers before status remapping. Protobuf
-resource codes may also be peer-reported, so logs do not infer a local size violation
-from arbitrary status prose. The [local inventory](local-resource-limits.md) lists
-these byte/image values and their diagnostics. TLS/HTTP compatibility, authentication,
-canonical proofs, amount caps and signed-work no-replay rules remain enforced.
+| Timer or window | Default and range | Scope and behavior |
+| --- | --- | --- |
+| Connection establishment (`connect_timeout_seconds`) | 15s direct, 120s Tor (`1..=300s`) | Bounds TCP, Unix socket, SOCKS, and TLS setup. |
+| HTTP and gRPC read inactivity (`read_timeout_seconds`) | 60s (`1..=86400s`) | Renews per response on nonempty DATA; no whole-download deadline. Header wait includes request upload (accepted limitation). |
+| gRPC dispatch readiness | Matches `read_timeout_seconds` | Bounds waiting for channel and stream capacity before body dispatch (`grpc_dispatch_inactivity`); ends at dispatch. |
+| Participating Tor HTTP retries (`tor_isolation_retries`) | `1 + 2` attempts (default 3) | Fresh Tor scopes on eligible statuses and errors; honors `Retry-After` on `429` and `503` with no local cap. Never applies to signed requests. |
+| Startup SOCKS prerequisite | 5s retry, 60s `ERROR` reminder | Connection-only check while waiting for Tor; stops on first reachability or cancel. |
+| MCP SSE keepalives | 2s | Keeps stateless HTTP client connections open; never renews remote timeouts or payment authority. |
+| `rmcp` response teardown drain | 2s cancel and 5s close | Bounds response delivery only; accepted work drains in `Work` with no cutoff. |
+| Pepper sync checkpoints and drain logs | 30s checkpoints and 10s drain `INFO` | Persistence and progress reporting only; never an abort deadline. |
+| Sync mempool drain window | Bounded initial settle | Bounds initial mempool stream settling before shutting down that stream; not a sync deadline. |
+| Treasury ZEC scan cadence | 60s after success; 90s, 180s, and 300s error backoff | Runs only when enabled funding, pending source or refund work, or active direct receive needs it; idle treasury does not poll. |
+| Local SDK publication and reconstruction retry | 60s | Retries unacknowledged local publication or SDK reconstruction without triggering network scans. |
+| Base wallet observation and retirement floor | 60s completion floor; backoff up to 300s | Per-wallet cooldown for startup, requested refreshes, initial credit, and candidate retirement proofs. |
+| Managed reserve refill opportunities | Uniform 30-120s (mean 75s) per eligible group | Independent volatile timer for early rotation and vacancy fills; explicit `wallet bootstrap` allocates promptly. |
+| Funding and direct-swap status polling (`funding.poll_seconds`) | 5s (`1..=60s`) with jitter; 60-300s error backoff | Governs successful recurring source and NEAR status polls and local scheduler wakes. |
+| Swap delay health warning (`funding.swap_timeout_seconds`) | 1,800s from broadcast intent | Marks pool `funding_degraded` without abandoning work or authorizing replacement. |
+| NEAR quote deadline (`funding.quote_deadline_seconds`) | 1,800s (managed and send); 7,200s (foreign receive) | Requested quote window; returned provider deadline governs preparation and first send. |
+| Zcash consensus transaction expiry | 40 blocks pre-NU7, 120 blocks post-NU7 | Signed consensus height; inclusive at height N. |
+| x402 authorization validity | `min(provider_timeout, 300s)` | Bounds newly signed EIP-3009 and Permit2 transfer authority; expiry never permits replay. |
+| `wallet bootstrap` progress polling | 1s claim check and 60s progress `INFO` | Reports pending bootstrap jobs; no total-work deadline. |
+| Local Tor control and qualification probes | 10s (Tor control) and 2s (qualification probes) | Diagnostic and qualification control-port checks only; `WARN` on expiry. |
 
 ### Source contract and upload limits
 
-The 1Click [quote request contract](https://docs.near-intents.org/api-reference/oneclick/request-a-swap-quote)
-describes the requested `deadline` as the start of refund handling if the swap
-has not completed, allowing time for the deposit to be mined. The
-[returned Quote model](https://github.com/defuse-protocol/one-click-sdk-typescript/blob/main/src/models/Quote.ts)
-separately defines `quote.deadline` as address inactivity, after which funds may
-be lost; `timeWhenInactive` means the address becomes cold and processing slows.
-`timeEstimate` begins after deposit confirmation. The requested 1,800-second
-default is a preference, not a guarantee of sub-hour settlement, refund or
-abandonment. Preserve both deadlines and the exact accepted quote. Neither
-notification nor local broadcast acceptance proves timely arrival or settlement.
-
-Published [EXACT_OUTPUT behavior](https://docs.near-intents.org/integration/distribution-channels/1click-api/swap-types)
-processes a deposit above `amountIn` and returns the excess to `refundTo` after
-the swap. This supports considering one deliberate excess deposit for refund
-qualification; it does not establish that a second deposit after completion can
-reuse the quote. The returned `refundFee` is in origin-asset base units. No
-inspected public contract establishes the deployed `nep141:zec.omft.near`
-watcher's first-observation event, compared timestamp, confirmation requirement,
-late-arrival outcome or ZEC refund minimum. The
-[status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
-provides no terminal EXPIRED status or terminal disposition for an unused
-`PENDING_DEPOSIT` request. A local deadline, signed block expiry or observed refund
-cannot manufacture that missing provider outcome. Existing exact-operation
-source, credit and status owners continue independently under the
-[reconciliation policy](wallet-rotation.md#recovery-and-reconciliation-policy).
-
-Reference source evidence must remain distinct from deployment evidence:
-
-- Near-One `bridge-sdk-rs` at
-  [`ed0bf23fbcb50b93481803fa6369b799b7c44c67`](https://github.com/Near-One/bridge-sdk-rs/tree/ed0bf23fbcb50b93481803fa6369b799b7c44c67):
-  `omni_connector.rs::get_orchard_mode` selects shielded handling for an
-  Orchard-only UA, transparent for transparent-only, and configurable/default-transparent for
-  mixed receivers. `zcash.rs::build_refund_chain_specific_data` extracts the
-  Orchard receiver, pays the saved refund request's amount less its gas fee and
-  constructs no transparent change. Its shielded output pool follows the active
-  consensus branch; the UA receiver alone does not establish the actual pool.
-  This establishes source capability, not that
-  1Click's selected ZEC route uses that code or deployed receiver selection.
-- Near-One `omni-bridge` at `9738d61384e6d915d269eb90250f5d8294b3fca0`
-  and `omni-bridge-services` at `00ccb5d1dd893428024b6708f2ef1e21bed980dd`
-  are adjacent bridge references, not an attestation for the `zec.omft.near`
-  watcher. Do not transfer another bridge's deposit or refund rules to this route.
-- Zodl iOS at
-  [`bfce63e808f595f716db56d3e2c87cb4f002c259`](https://github.com/zodl-inc/zodl-ios/tree/bfce63e808f595f716db56d3e2c87cb4f002c259)
-  sends `privateUnifiedAddress` through `SwapAndPayStore`/`Near1Click`; Android at
-  [`2beecca837bed599623a167947f5ab96cd1025e7`](https://github.com/zodl-inc/zodl-android/tree/2beecca837bed599623a167947f5ab96cd1025e7)
-  requests a shielded UA in `RequestSwapQuoteUseCase`/`AccountDataSource` and passes
-  it through `NearSwapDataSource`. Both request two hours. Their address choices
-  and UI timing heuristics are precedent, not funded-refund qualification or
-  provider guarantees. SDK reference revisions are Swift
-  `1e632565b2d8ce1779453114b94a8a959894cda3` and Android
-  `c137875396efe1fdb58916827adc34f5f1c003cb`; these are separate from the
-  application's pinned Zingolib cohort.
-
-Dry quotes with public unfunded addresses establish only current input acceptance;
-the documented dry response omits the executable address/deadline. A mixed UA
-accepted by a quote does not establish a shielded refund. Actual receiver/pool,
-transaction and SDK spendability need the separately authorized
-[shielded-refund evidence recipe](../tests/live/INTEGRATION_REFERENCE.md#shielded-refund-evidence-and-qualification).
-Keep transparent source-deposit validation and existing refund bindings unchanged;
-no automatic transparent fallback or local expiry is justified by these limits.
-
-The gRPC response-header inactivity timer includes request upload because the
-transport exposes no supported per-request upload-consumption signal. A progressing
-upload may time out; sibling streams/keepalives cannot renew its timer. Uncertain
-source submission retains exact bytes and selected inputs, without a paid retry.
+- **1Click quote and status contracts:** The
+  [quote request contract](https://docs.near-intents.org/api-reference/oneclick/request-a-swap-quote)
+  defines the requested `deadline` as the start of refund handling; the
+  [Quote model](https://github.com/defuse-protocol/one-click-sdk-typescript/blob/main/src/models/Quote.ts)
+  defines `quote.deadline` as address inactivity and `timeWhenInactive` as
+  when the address becomes cold (slower processing). The
+  [status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
+  has no terminal `EXPIRED` status for unused `PENDING_DEPOSIT` quotes; local
+  deadlines and signed expiry never fabricate a provider outcome. See the
+  [deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md).
+- **Published `EXACT_OUTPUT` excess handling:** Per
+  [1Click swap types](https://docs.near-intents.org/integration/distribution-channels/1click-api/swap-types),
+  excess deposits return to `refundTo` less `refundFee` in origin base units.
+  Public docs do not specify the deployed `nep141:zec.omft.near` watcher's
+  confirmation count, late-arrival rules, or ZEC refund minimum.
+- **Reference implementations (not deployment guarantees):**
+  - Near-One `bridge-sdk-rs` (`ed0bf23fbcb50b93481803fa6369b799b7c44c67`):
+    `get_orchard_mode` uses shielded handling for Orchard-only UAs and defaults
+    mixed UAs to transparent; `build_refund_chain_specific_data` builds
+    shielded refunds following the active consensus branch.
+  - Near-One `omni-bridge` (`9738d613...`) and `omni-bridge-services`
+    (`00ccb5d1...`) are adjacent references, not attestations for
+    `zec.omft.near`.
+  - Zodl iOS (`bfce63e8...`, Swift SDK `1e632565...`) and Android
+    (`2beecca8...`, Android SDK `c1378753...`) send shielded UAs with a 2-hour
+    window.
+  - Dry unfunded quotes check format acceptance only; live refund verification
+    belongs to the
+    [shielded-refund evidence recipe](../tests/live/INTEGRATION_REFERENCE.md#shielded-refund-evidence-and-qualification).
+- **gRPC upload inactivity:** Because the tonic and h2 stack exposes no
+  per-request upload-progress hook, `read_timeout_seconds` covers both upload
+  and waiting for response headers. A timeout on source submission retains
+  exact bytes and input ownership without authorizing replay.

@@ -1,512 +1,250 @@
 # Zingo integration and Pepper patches
 
-The application and its SDK integration tests use ordinary upstream `zingolib` and
-`zingo-netutils` Git sources at revision
-`81d799775f11e882896e8710e8af12d6d4d29a41` (v8.0.0). Neither crate has a local
-snapshot or override. The same cohort's `pepper-sync/` remains patched; the shared
-workspace retains its path override. Pepper is excluded from workspace test
-selection; its merge regression runs through public traits in the application
-SDK integration target.
+The application and its SDK integration tests depend on upstream `zingolib` and
+`zingo-netutils` at Git revision `81d799775f11e882896e8710e8af12d6d4d29a41`
+(v8.0.0) with no local checkout or override. `pepper-sync` (0.7.0) from the
+same cohort remains patched in `vendor/pepper-sync/` via a workspace path
+override.
 
-`pepper-sync-sources.json` records the upstream source archive hash, every retained
-Pepper snapshot file, its ordered patches, original upstream file hashes and the
-copied-code license notice.
-`python3 vendor/verify_pepper.py` verifies those files and rejects unexpected Pepper
-files. It reverses all patches in a temporary copy and compares the complete
-restored tree with the pinned upstream Git source. Declared patches may create
-files, which must disappear during reversal before that comparison.
-`pepper-sync-progress.patch` covers Pepper's `client.rs`, `scan.rs`, `scan/task.rs`
-and private `scan/task_publication.rs`; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
-`sync.rs`, `wallet/traits.rs` and `witness.rs`. `pepper-sync-reorg.patch` keeps
-the upstream 1000-block rolling rollback/checkpoint/transparent-discovery horizon
-and repairs derived chain state when retained rollback boundaries are unavailable. The payload accepted by the public
-sync trait has a public re-export and `from_parts` constructor; the witness module
-and payload fields remain private. `pepper-sync-manifest.patch` records the
-standalone manifest adaptations necessary for the path dependency; upstream
-unit-test dependencies are retained
-but are not selected by application checks. Never edit Cargo caches or
-reference checkouts to implement a dependency patch. The
-[checkout ledger](../vendor/README.md#checkout-retirement-tracking) owns remaining blockers
-and candidate qualification.
+- **Pinned Zcash cohort:** `zcash_client_backend` 0.25.0, `zcash_primitives`
+  and `zcash_proofs` 0.31.0, `zcash_protocol` 0.11.0, `zcash_keys` 0.17.0,
+  `pepper-sync` 0.7.0, and `zingo-netutils` 7.0.0.
+- **Mainnet NU7 schedule:** Activates at height 3,543,405 with branch ID
+  `0x77190ad9` (verified on both sides of activation by `tests/sdk_compat.rs`).
+- **Patch verification:** `vendor/pepper-sync-sources.json` pins the upstream
+  archive hash, retained files, ordered patches, and license notice. Run
+  `python3 vendor/verify_pepper.py` to reverse all patches into a temporary
+  tree and confirm an exact match against the pinned upstream source. Never
+  edit Cargo caches or reference checkouts to patch dependencies. See
+  [checkout retirement tracking](../vendor/README.md#checkout-retirement-tracking)
+  for remaining blockers.
 
-The stable cohort uses `zcash_client_backend` 0.25.0, `zcash_primitives` and
-`zcash_proofs` 0.31.0, `zcash_protocol` 0.11.0 and `zcash_keys` 0.17.0,
-with Pepper 0.7.0 and netutils 7.0.0. Its mainnet schedule activates NU7 at
-height 3,543,405 and branch ID `0x77190ad9`. The ordinary `sdk_compat`
-mainnet regression checks the schedule, branch transition and SDK expiry on
-both sides of activation; synthetic activation overrides alone cannot establish
-mainnet readiness. SDK selection of those parameters does not qualify a deployed
-indexer, transaction submission, consensus execution or funded settlement.
-
-The v8 one-session online API does not change application ownership: the
-LightClient stays offline and the application supplies the identity-bound indexer
-to Pepper. The port retains upstream's previous-session-height reorg comparison,
-as well as local missing-boundary and conservative-clear recovery. A larger
-retention window cannot prove that shorter endpoints are divergent or replace
-recovery outside retained history.
+| Patch | Files covered | Purpose |
+| --- | --- | --- |
+| `pepper-sync-progress.patch` | `client.rs`, `scan.rs`, `scan/task.rs`, `scan/task_publication.rs` | Removes complete-message timers, preserves worker drain on shutdown, and publishes busy state before enqueueing. |
+| `pepper-sync-diagnostics.patch` | `client/fetch.rs`, `error.rs`, `sync.rs`, `wallet/traits.rs`, `witness.rs` | Retains typed pool and operation context on merge and rollback failures and keeps fetch spans at `DEBUG`. |
+| `pepper-sync-reorg.patch` | Reorg, checkpoint, and scan-floor handling | Keeps upstream's 1,000-block rolling horizon while repairing derived chain state when rollback boundaries are missing or chains diverge beyond the horizon. |
+| `pepper-sync-manifest.patch` | `Cargo.toml` | Minimal manifest adjustments for the workspace path dependency. |
 
 ## Adapted application code and attribution
 
-The network adapter retains an implementation adapted from the former v7 revision
-`bfb0a2156819ea7f75a9b09b1724abfd06c8925e`; the current v8 cohort is assessed
-against that retained adapter:
+`src/network/indexer.rs` retains a local adapter derived from `zingo-netutils`
+v7 revision `bfb0a2156819ea7f75a9b09b1724abfd06c8925e`, verified against the
+current v8 cohort:
 
-| Application code | Upstream origin | Purpose of the local adapter |
-| --- | --- | --- |
-| [`src/network/indexer.rs`](../src/network/indexer.rs) | `zingo-netutils/src/lib.rs`: `GrpcIndexer` and its `Indexer` implementation; `zingo-netutils/src/globally_public.rs`: its `TransparentIndexer` implementation | Thirteen indexer RPC delegations use the application's identity-bound SOCKS/progress transport. The six required transparent-indexer methods refuse locally without constructing a request. Upstream's private client uses tonic `Channel`; the application owns network construction, privacy authority and inactivity handling. |
-
-The network adapter retains upstream copyright and revision attribution in its
-source header. [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT) preserves the
-upstream copyright and permission notice for these adapted implementations.
-The notice matches the pinned upstream repository's root `LICENSE`. Its MIT terms
-require retaining that notice with copies or substantial portions of the code.
-These application implementations remain after removal of the Zingolib/netutils
-vendor checkouts, so the notice remains relevant independently of Pepper's
-checkout. Calls into ordinary upstream SDK dependencies are separate from these
-locally adapted implementations.
+- **Origin:** `GrpcIndexer` and `Indexer` (`zingo-netutils/src/lib.rs`) plus
+  `TransparentIndexer` (`zingo-netutils/src/globally_public.rs`).
+- **Behavior:** Delegates the 13 shielded `Indexer` RPC methods through
+  `src/network.rs`'s identity-bound SOCKS and progress transport, and fails
+  all 6 `TransparentIndexer` methods locally without opening a connection.
+- **Attribution:** `src/network/indexer.rs` carries the upstream copyright and
+  revision header, and [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT)
+  retains the upstream MIT notice independently of `vendor/pepper-sync/`.
 
 ## Ironwood-only policy
 
-Ironwood is the application's only supported Zcash shielded pool. New treasury
-inputs, native payments, change, receive requests and refunds use Ironwood. Reject
-Sapling and legacy Orchard transfers, pool fallback and historical-fund support;
-unsupported balances cannot become spendable capital or a reason to wait for new
-funding. This applies to ordinary funding, direct tools and wallet administration.
-There is no operator or agent pool selector that re-enables another pool.
+Ironwood is the only supported Zcash shielded pool for managed funding, direct
+swaps, and wallet administration.
 
-Ironwood uses the Orchard **receiver format**. New addresses are unified addresses
-containing only that receiver, without Sapling or transparent receivers. Its
-encoding does not authorize legacy Orchard-pool payments. The SDK proposal must
-select Ironwood before input ownership is accepted, and calculated transaction
-validation checks actual Ironwood outputs and fees. Use the public backend's
-Ironwood-only spending policy instead of LightClient's unrestricted selection.
-
-The only external transparent-output exception is the exact NEAR-issued deposit
-address bound to an accepted managed/direct swap quote, paid from Ironwood funds.
-It does not authorize arbitrary transparent destinations, treasury transparent
-receiving, transparent-input shielding or address-indexed RPC queries. All six
-required `TransparentIndexer` methods fail locally, and wallet discovery remains
-disabled across creation, import, reopen and reconstruction. Ordinary transaction
-lookup/broadcast and compact-block synchronization retain their separate roles.
-
-The application has no Sapling parameter parser, initialized prover, runtime
-parameter cache or parameter downloader. Backend transaction APIs unavoidably
-require Sapling prover traits: a parameter-free refusing adapter supplies those
-types, with an uninhabited proof result. Proposal restrictions prevent normal calls;
-any unexpected proof request fails closed rather than signing unsupported work.
-
-The pinned SDK still derives unused keys, decodes global chain/old wallet formats
-and can recognize unsupported outputs while scanning. Raw SDK snapshots and
-accepted transaction/input journals remain exact; decoding is not permission for
-fresh preparation, replacement or disclosure. Application balances and note
-inspection project Ironwood only. No application legacy-pool transfer or recovery
-implementation is retained for new work.
-
-One build-only exception is unavoidable with the unchanged pinned SDK: Zingolib
-`81d7997` calls `get_zcash_params` unconditionally in `build.rs`, and embeds Sapling
-parameter bytes in `lib.rs`. It exposes no feature to disable this. An uncached SDK
-build can therefore acquire them even though the application never initializes or
-uses them. Do not add a maintained dependency checkout/fork to conceal this fact;
-see [build-time parameters](#build-time-parameter-downloads) and the dependency
-policy for any separately proposed upstream remedy. Existing parameter-cache
-integrity and reproducibility checks remain necessary for the SDK build's inputs.
+- **Unsupported pools:** Sapling and legacy Orchard transfers, pool fallbacks,
+  transparent wallet receiving, transparent-input shielding, and
+  transparent-address RPC queries are rejected. Balances in unsupported pools
+  never count as spendable capital or delay funding.
+- **Address format:** New addresses are Unified Addresses containing only the
+  Orchard-format receiver used by Ironwood (no Sapling or transparent
+  receivers). Transaction proposals use the backend's Ironwood-only policy and
+  validate Ironwood outputs and fees before accepting input ownership.
+- **Sole transparent-output exception:** A NEAR-issued transparent deposit
+  address bound to an accepted swap quote, paid from Ironwood inputs. All six
+  `TransparentIndexer` methods fail locally, and wallet transparent discovery
+  is disabled across creation, import, reopen, and reconstruction.
+- **No runtime Sapling prover:** Backend transaction APIs require Sapling
+  prover trait types, so a parameter-free adapter supplies those types and
+  fails closed if ever called. The application has no runtime Sapling parameter
+  parser, cache, or downloader.
+- **SDK decoding boundary:** The pinned SDK still derives unused keys and can
+  decode older wallet formats or unsupported outputs while scanning. Raw
+  snapshots and accepted journals stay intact, while application balance
+  summaries and `wallet notes` project Ironwood only.
+- **Build-time exception:** Upstream `zingolib` `81d7997` unconditionally
+  invokes `get_zcash_params` in `build.rs` and embeds Sapling parameter bytes
+  in `lib.rs` with no Cargo feature to disable it. See
+  [build-time parameter downloads](#build-time-parameter-downloads).
 
 ## Application SDK boundaries
 
-LightClient is created/restored offline and stays offline. The application does
-not use SDK online constructors, URI setters, sync launching, migration
-transmitters, price fetchers or optional nym workers.
+`LightClient` is constructed and restored offline and stays offline throughout
+its lifetime. The application never calls SDK online constructors, URI setters,
+sync launchers, migration transmitters, price fetchers, or nym workers.
 
-`src/network.rs` alone constructs the generated gRPC client over the existing
-progress transport and returns `network::GrpcIndexer`. The thirteen `Indexer`
-methods in `src/network/indexer.rs` retain generated request defaults, concrete
-streams, clone ownership and request metadata. Its six required transparent-address
-methods return a fixed local unsupported error without transport activity. Pepper
-still calls deprecated aliases. Nonzero submission codes produce
-`Status::Unknown` with the original message; successful transaction IDs retain
-safe quote stripping. Submission validates the result against the durable exact
-transaction. The adapter ignores the traits' legacy total-timeout arguments. The transport
-removes any total `grpc-timeout` metadata and measures response inactivity below
-protobuf decoding. Identity, authenticated SOCKS remote
-DNS and no-direct-fallback rules remain in [network policy](network-egress.md).
-`ping-very-insecure` and nym capabilities are not enabled consumers.
+### Indexer transport (`src/network/indexer.rs`)
 
-`src/treasury/mod.rs` runs one public Pepper engine task inside the existing
-isolated session runtime, with local mode/progress state and finite
-`shutdown_on_completion=true` configuration for current saved snapshots.
-Pepper can hold the wallet write lock across asynchronous recovery fetches; the
-engine must remain independently polled while encrypted checkpointing waits for
-that lock. Cancellation destroys the runtime and joins blocking workers before
-the final snapshot. There is no SDK online handle, first-poll handshake or second
-controller to maintain. Successful scans call public `capture_migration_witnesses`
-before final tip validation. Both join boundaries discard panic payloads into a
-fixed diagnostic. `tests/treasury_sync.rs` covers the actual lock-held recovery
-interleaving, periodic/final snapshots, cancellation, teardown and reopen.
+- `src/network.rs` is the sole constructor of `network::GrpcIndexer`. Clones
+  share the identity-bound channel.
+- The 13 `Indexer` methods keep generated request defaults, streaming types,
+  and deprecated aliases called by Pepper; the 6 `TransparentIndexer` methods
+  return a fixed local error without network I/O.
+- Nonzero submission codes map to `Status::Unknown` with the original message;
+  successful txids strip surrounding quotes safely and validate against the
+  journaled transaction.
+- Legacy total-timeout arguments are ignored; the transport strips
+  `grpc-timeout` metadata and measures per-response inactivity below protobuf
+  decoding. See [network egress](network-egress.md).
 
-`src/treasury/send.rs` retains the exact public proposal through durable input
-acceptance and calls backend `create_proposed_transactions` by reference. It uses
-the SDK's original account key, system randomness, clock and sender OVK policy,
-with explicit `Some(wallet::expiry::tx_expiry_height(chain,
-proposal.min_target_height().into()))` for ordinary NU7-aware expiry. Leaving the
-high-level SDK calculation offline would instead choose epoch-end expiry.
-Public `clear_proposal` runs after releasing the wallet guard; no private proposal
-manager or parallel input ledger is needed. The actor reuses canonical validation
-without a redundant connection; direct preparation retains network validation.
-The application selects Ironwood inputs and change through the public backend API.
-An empty change memo replaces the SDK's private advisory full-UA serializer; exact
-accepted terms and actual note receivers own financial attribution. No additional
-memo dependency or parallel proposal manager is needed. The required Sapling prover
-adapter refuses operations without loading parameter bytes.
-Financial authority, retained bytes, publication and recovery remain in [wallet ownership](wallet-rotation.md) and
-[lifecycle coverage](../tests/LIFECYCLE.md).
+### Sync engine (`src/treasury/mod.rs`)
+
+- Runs one public Pepper engine task inside an isolated Tokio runtime with
+  `shutdown_on_completion = true`.
+- Because Pepper can hold the wallet write lock across asynchronous recovery
+  fetches, the engine stays independently polled while periodic encrypted
+  checkpoints wait for that lock.
+- Successful scans call `capture_migration_witnesses` before final tip
+  validation. Cancellation destroys the sync runtime and joins blocking workers
+  before saving the final snapshot. Both join boundaries replace panic payloads
+  with a fixed diagnostic (`tests/treasury_sync.rs`).
+
+### Offline transaction calculation (`src/treasury/send.rs`)
+
+- Validates the public Ironwood-only proposal, journals accepted inputs, and
+  calls `create_proposed_transactions` by reference inside one dedicated
+  blocking owner that survives caller drop and normal runtime teardown.
+- Supplies explicit NU7-aware consensus expiry
+  (`wallet::expiry::tx_expiry_height(chain, proposal.min_target_height().into())`:
+  40 blocks before NU7, 120 blocks afterward) rather than the offline
+  high-level API's epoch-end expiry.
+- Uses an empty change memo rather than the SDK's advisory full-UA serializer,
+  and calls `clear_proposal` after releasing the wallet guard.
+- Retries only local Store publication on transient failure (never recalculating
+  or disclosing without a committed outgoing journal). After a crash, exclusive
+  offline reconstruction can close an unpublished calculation only when both
+  outgoing and factual transaction journals are absent, marking the reset in
+  `funding_quote_refreshes`.
 
 ## Remaining Pepper responsibilities
 
-The progress patch removes complete-message timers on sync streams and retains
-loader/worker ownership while draining, with periodic stage diagnostics instead
-of forced timeout success. Both dispatch paths publish busy before enqueueing:
-a fast consumer cannot finish and then have its idle state overwritten by the
-dispatcher. Deterministic regressions compile the exact private publication
-primitive into `tests/sdk_compat.rs`.
+### Progress, worker drain, and diagnostics
 
-Upstream confirms this race in
-[`3bc86bec`](https://github.com/zingolabs/zingolib/commit/3bc86bec73db704e5fba242dc6221497da73e429).
-Its subsequent [scanner-owned activity protocol](https://github.com/zingolabs/zingolib/commit/4f411a573c792925aa4a58ad9fca166e72e7a379)
-is a candidate for a coherent SDK upgrade. The maintained patch is a narrow local
-publication-order correction, not a cherry-pick of that broader protocol.
-Header/body inactivity remains in the application
-transport. Resource-related gRPC codes (`OutOfRange` and `ResourceExhausted`)
-emit safe WARNs at the existing stream-consumption points before recovery can
-replace the original status. The application adapter reports the same codes for
-unary, stream-opening and mempool retry failures.
-These statuses may originate at the peer or the local decoder:
-logs contain fixed stages and numeric codes, never upstream prose or metadata.
-Read retries, protobuf size bounds and mempool drain contracts remain unchanged. Remove these hunks only with equivalent progressing/stalled response,
-cancellation/restart and worker-drain evidence through the full sync chain.
+- **Publication order:** Both dispatch paths publish busy before enqueueing so
+  a fast worker cannot have its idle state overwritten (matching upstream fix
+  [`3bc86bec`](https://github.com/zingolabs/zingolib/commit/3bc86bec73db704e5fba242dc6221497da73e429);
+  upstream's broader scanner protocol
+  [`4f411a57`](https://github.com/zingolabs/zingolib/commit/4f411a573c792925aa4a58ad9fca166e72e7a379)
+  is a future upgrade candidate).
+- **Drain and resource codes:** Loader and scan workers drain on shutdown with
+  periodic stage diagnostics rather than aborting on a timeout. `OutOfRange`
+  and `ResourceExhausted` log `WARN` with fixed stage and numeric status codes
+  before recovery can replace the error.
+- **Typed failure context:** Merge and rollback errors keep pool (`sapling`,
+  `orchard`, `ironwood`) and operation (`scan_merge`, `reorg_rollback`,
+  `pool_recovery_rollback`) labels without exposing tree positions, hashes, or
+  upstream prose. Rollback, pool reset, and mempool retries stay at `DEBUG`.
+  Run the merge-conflict regression via:
 
-The diagnostic patch retains typed shielded-pool and operation context for actual
-scan merge, reorg rollback and pool-recovery rollback failures. Recovery
-recommendations are unchanged. The application extracts fixed labels and discards
-underlying errors before logs/status; no tree positions, hashes or upstream prose
-are exposed. Fetch spans are debug-only; mempool events contain fixed labels and
-numeric status codes. Rollback, automatic pool reset and mempool retry diagnostics
-stay at DEBUG while recovery remains available; the owner reports the final
-capability outcome. Replace these changes only with equivalent safe context and
-instrumentation. The three-pool merge-conflict fixture remains executable in the
-application SDK integration target without a separate SDK unit-test build:
+  ```sh
+  make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_conflict_preserves_pool_context --exact'
+  ```
 
-```sh
-make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_conflict_preserves_pool_context --exact'
-```
+### Reorgs, rollback horizons, and transaction identity
 
-See [workspace verification](development.md#combined-workspace-verification).
-Upstream owns same-height/deeper reorg truncation and synthetic branch hashes.
-Recovery depth uses the previous session's chain height; the application removes
-obsolete mutable verification-start accumulation from that path.
-The upstream 1000-block rolling horizon is a cache-retention policy, not consensus
-finality. A node's larger rollback window does not require matching local retention. A demonstrated divergent chain outside the retained horizon clears derived SDK
-chain state and resumes from the effective scan floor. A shorter height alone
-cannot establish divergence. The SDK protects retained block metadata,
-scanned-priority ranges (including outstanding nullifier retrieval) and confirmed
-transactions; an old unsigned scan target is not a protected observation. If
-protected facts do not exceed the endpoint tip, the unscanned scheduled tail
-is shortened without lowering the floor, and cached shard-completion ranges beyond
-that tip are removed. Those scheduling projections cannot require a current note to
-wait for future blocks. Actual tree leaves, cached roots and checkpoint witnesses
-remain intact. The same normalization follows root ingestion, whose response can
-advance beyond the cycle's observed tip; it also repairs saved equal-tip state
-before later network failures can leave local SDK selection blocked. If protected
-facts exceed the tip, the SDK compares a retained block at a height served by the
-endpoint. The response must bind that exact height to a complete block identity using the
-SDK's existing projection: a valid full header owns its computed hash; otherwise
-the compact hash must contain exactly 32 bytes. A missing or conflicting compact
-hash projection cannot override a valid header.
-Mismatch permits existing recovery; matching or absent overlap preserves wallet
-observations and reports a recoverable sync failure. Failed or malformed reads
-also preserve them. These endpoint-history checks are not consensus validation.
-The wait is inherently ambiguous: birthday100/tip50 has no overlap; an anchor100
-can match a tip150 fork beginning120. A later healthy endpoint or a retained
-comparison that actually differs enables progress, without a timer, quorum,
-watermark ledger or expanded retention horizon. Missing older shard checkpoints use upstream's existing
-clear-and-rescan fallback; older snapshots need not contain additional checkpoints.
-The same fallback handles a pruned checkpoint or required wallet-block boundary
-that rollback can no longer reconstruct locally. Startup also repairs persisted
-scanned ranges with missing boundary blocks, including interrupted older rollbacks.
-New-chain metadata is not attached to an unverified old scanned prefix.
-A full clear without a proven common ancestor starts at supported Sapling
-activation, even when the replacement tip is above the declared birthday. Clamping
-to the replacement tip or old birthday could miss replacement credits already
-mined below both. A fresh birthday hint beyond the observed tip uses the same conservative rescan
-only when no retained block, scanned range or confirmed transaction would be
-destroyed. An interrupted scheduled target alone does not establish history. Existing persisted scan ranges retain the earlier effective
-floor through clearing, interruption and reopen; the declared birthday, keys and
-original operation journals remain unchanged. A chain below supported activation
-still reports a diagnostic rather than inventing usable history. This uses the
-existing scan owner and ranges, with no additional recovery ledger or deadline.
-The treasury retains keys, address derivation, accepted input claims, original
-signed bytes and financial journals through either rescan. Sync readiness and
-reuse are rebuilt by the existing scan owner; clearing chain state grants no
-submission, release or new deposit authority. Application lifecycle tests cover
-rollback beyond the rolling window
-while retaining exact pending work. The patched SDK fixture
-`future_birthday_rescans_supported_history_and_keeps_floor_across_clear` also
-checks the activation-floor fallback with unchanged declared metadata before
-the first resumed block is scanned. Mutable input/inclusion/confirmation
-observations wait for canonical progress; malformed immutable transaction
-identities require scoped inspection. Reorgs can move a Sapling note and change
-its current position-derived nullifier. The SDK reconstructs those current inputs;
-the application does not compare them with historical inputs to authorize expiry.
-Confirmed source work continues the existing swap
-observation rather than requesting manual review. A completed SDK observation of
-the transaction's computed identity at configured depth proves confirmation without
-a second indexer report. [ZIP 244](https://zips.z.cash/zip-0244) separates v5
-transaction effects from authorization data: a valid authorization-data variant
-can have the same transaction ID while its serialized bytes differ. Canonical SDK
-matching therefore uses computed transaction identity/effects, while original
-journaled bytes, transaction ID, expiry and input bindings remain strict. Legacy
-v4 IDs commit to the whole transaction encoding. This comparison never replaces
-the original disclosed bytes or grants replay authority.
-Local broadcast counters are not part of this immutable transaction identity.
-Malformed counters or unknown source-status labels conservatively retain possible
-disclosure while canonical observation continues; they neither authorize another
-submission nor veto an otherwise established confirmation or finite expiry.
-For unfinished source expiry, the application validates the authenticated original
-transaction and signed finite expiry, then uses a completed canonical SDK tip at
-the configured depth. It does not reconstruct old SDK inputs or require current
-unspent/alternative-spender proofs. Pepper already expires pending originals and
-clears only their own spend links across all supported pools; confirmed competing
-spenders remain spent. Actual SDK spendability, bridge terminal outcome and new
-funding authority remain separate. Verified finite expiry can release an attempt
-under current authority without waiting for a negative bridge outcome; the old
-accepted request retains exact-operation status observation, and its later SUCCESS
-prevents an undisclosed replacement. Application wallet serialization coverage
-uses current SDK format 45. The existing `sdk_compat` offline roundtrip inserts a
-public scan target, checks that it changes serialized sync state, saves and reopens
-that exact state, and preserves addresses and next-address derivation. The
-`treasury` encrypted roundtrip separately preserves wallet addresses and pool keys
-through application storage. Near refund tests use one public unified address with
-Orchard and Sapling receivers, independent of wallet snapshot serialization.
-Dependency-owned historical codecs remain upstream implementation; application
-fixture coverage does not require dependency patches. See
-[wallet administration](wallet-cli.md) for independent storage/output versions and
-backup obligations. Server protocol 0.5.0 capability requirements are distinct from
-the Rust protocol crate version.
-
-SDK calculation is offline and runs in one started blocking owner with the actual
-LightClient, accepted proposal and same Store queue. That owner accepts inputs,
-calculates once, extracts exact bytes and retries only local publication. It survives
-caller/Treasury drop and normal runtime teardown; no async publisher or nested
-runtime is needed. LightWallet's public synchronous clear/mark_dirty/save produce
-the existing snapshot codec. A surviving Treasury joins without removing the handle,
-installs client/revision while unhealthy and then calls the public async client
-clear to release its private pause guard. Entire-owner drop releases the real client
-after publication. Calculation/save never use its temporary scratch wallet path.
-Only an atomically committed outgoing journal can supply submission authority. Successful exclusive offline reconstruction, with no
-live calculation or completed result awaiting publication, closes a funding calculation whose outgoing
-and factual transaction journals are both absent. Existing recovery archival
-preserves its encrypted accepted inputs; the next calculation needs a fresh
-operation and current authority. The persisted `funding_quote_refreshes` table also
-marks these proven never-disclosed resets for source and bridge ownership. Its
-existing name and quote-refresh rows remain unchanged. Raw pending originals and
-committed results with lost acknowledgments retain their owner. A durable commit
-acknowledgment is separate from loading a pending submission view: verified bound
-fulfillment may intentionally leave no pending view, and decoding failure cannot
-make a known commit uncommitted. The former finishes preparation without a source
-handoff; the latter leaves the SDK unhealthy for reconstruction. Neither repeats
-calculation, discards original bytes or grants disclosure. Invalid calculation
-facts still fail after publication. Background view-repair diagnostics remain
-DEBUG; only a genuine unacknowledged publication retains the local retry cadence.
-Calculation metadata alone does not create a global source-work fence. Full SDK clear can
-discard pending transaction records and their spend links; the application
-therefore retains the fence for actual unfinished signed originals until closure.
-The synthetic `sdk_reorg_rescan_preserves_original_signed_work` regression covers
-this gap without requiring lifetime tracking of completed source transactions.
-
-The synthetic `indexer_recovery` owner tests separately keep an actually disclosed
-original through stale-prefix failure, a pre-canceled scan request and reopen, then
-finish it only after healthy canonical confirmation without another submission.
-A proven deep replacement reconstructs a new owned credit below declared birthday
-while the orphaned original input, accepted snapshot and signed bytes remain in
-the pending Store journal. Recovered SDK capital is not permission to release
-that liability or create another deposit; an unburied original still waits regardless of available capital. These local fixtures establish no consensus
-or live bridge qualification. Existing in-flight sync cancellation tests cover
-the sync-session owner; the pre-canceled request alone does not prove active-I/O
-drain.
-
-The application does not mirror SDK reorg history into completed swap workflows.
-NEAR owns the outcome of a bound swap; a validated SUCCESS closes source work
-without requiring a local CONFIRMED label. Current SDK state independently owns
-spendability. Actual unfinished sources retain their exact journals and existing
-observation/finite-expiry recovery owner. Production deposits use the SDK's finite
-expiry (40 blocks before NU7, 120 afterward). No production zero-expiry constructor requires a parallel recovery
-framework.
-
-Application owner opens and read-only inspection accept database schema 23 only.
-Unsupported old or future schemas fail before changing source state; SDK codec
-compatibility does not authorize database conversion. Current fresh stores include
-source-disposition and payment-resolution histories; an interrupted schema-23
-initialization can finish their empty structures idempotently under exclusive
-ownership. Existing dispositions, original bytes and snapshot references remain
-preserved. Historical rows do not reopen terminal work or authorize automatic
-disclosure; the exact-ID history guard prevents previously closed originals from
-being sent automatically. Actual pending originals continue through their existing
-owner. Database schema 23 is independent of SDK wallet format 45 and public or
-encrypted record formats; see [versioned output](wallet-cli.md#versioned-capacity-output).
-No reader removal grants another deposit or permits rollback past accepted
-financial work.
+- **Rolling 1,000-block horizon:** Upstream's 1,000-block window is a cache
+  policy, not consensus finality. Recovery depth uses the previous session's
+  chain height.
+- **Shortened endpoints and divergence checks:** If an endpoint reports a tip
+  below protected wallet facts (retained blocks, scanned ranges, or confirmed
+  transactions), Pepper compares a retained block served by the endpoint (using
+  the computed header hash when a valid full header is present, else an exact
+  32-byte compact hash). A mismatch triggers recovery; matching or non-overlapping
+  heights preserve wallet observations and report a recoverable sync failure.
+  Unscanned scheduled tails beyond the tip are trimmed without lowering the
+  scan floor or touching tree leaves, roots, or witnesses.
+- **Full clear and activation floor:** When a chain diverges outside the
+  retained horizon or a required checkpoint or boundary block is missing, full
+  clear resets the effective scan floor to supported Sapling activation (even
+  if the new tip is above the declared birthday) so credits mined below the
+  birthday are still found. Keys, declared birthday, accepted input claims,
+  signed bytes, and operation journals survive the rescan unchanged.
+- **Transaction identity and ZIP 244:** Under
+  [ZIP 244](https://zips.z.cash/zip-0244), valid v5 authorization-data variants
+  share a txid while their serialized bytes can differ. Canonical confirmation
+  matches computed transaction effects and txid at configured depth, while
+  journaled bytes, expiry, and input bindings remain immutable.
+- **Unfinished source expiry:** Validates the authenticated original
+  transaction and signed finite expiry against one completed canonical SDK tip
+  scan at configured depth. Pepper expires pending originals and releases only
+  their own spend links; full clear can drop SDK pending records, so the
+  application retains its own pending-source fence until closure. Bound NEAR
+  `SUCCESS` closes swap source work without requiring local confirmation or
+  reopening after later reorgs.
+- **Wallet and database formats:** Application storage requires database schema
+  23 and SDK wallet format 45 (independent of JSON output versions; see
+  [versioned output](wallet-cli.md#versioned-capacity-output)). Server
+  lightwallet protocol >= 0.5.0 is independent of the Rust
+  `lightwallet-protocol` crate version.
 
 ## Build-time parameter downloads
 
-The upstream SDK build script obtains and embeds standard parameter-cache files
-through `SAPLING_SPEND_PARAMS` and `SAPLING_OUTPUT_PARAMS`; it does not copy them
-into its source checkout. Pre-populate the standard cache for an offline first
-build. The application never parses or uses these legacy parameters and has no
-runtime parameter cache or downloader; its required prover adapter refuses Sapling
-requests. These files remain an unavoidable input of the pinned SDK build. Legacy v6 `vendor/zingolib/zcash-params/*.params`
-copies remain ignored, unused and preserved. Build-time acquisition is outside
-runtime Tor routing.
+Upstream `zingolib`'s `build.rs` obtains and embeds `SAPLING_SPEND_PARAMS` and
+`SAPLING_OUTPUT_PARAMS` via `zcash_proofs` 0.31.0 (`download-params`, which
+uses `minreq` 2 and legacy `rustls` 0.21).
 
-The enabled registry `zcash_proofs` 0.31.0 `download-params` build dependency
-uses upstream minreq 2 and its legacy rustls 0.21 / rustls-webpki 0.101 /
-webpki-roots 0.25 cohort. On an uncached ordinary build this downloader is genuinely
-reachable. It downloads public proving parameters without runtime client secrets,
-outside runtime Tor routing. It neither supplies a production runtime network
-constructor nor changes the embedded parameter bytes.
-
-The upstream downloader checks trusted BLAKE2b-512 digests, bounds acquisition by
-the fixed parameter length and checks cached file sizes. These protect accepted
-parameter integrity; they do not fix TLS verification vulnerabilities, hide build
-network metadata or ensure availability. The known advisory exposure is explicitly
-accepted in the [dependency disposition](development.md#locked-graph-advisory-disposition)
-in preference to maintaining a downloader fork. Keep its raw audit findings
-visible and reassess when inputs, consumers or the upstream dependency cohort
-change. The [release runner](reproducible-builds.md#prepare-inputs) separately
-verifies prefetched parameters and denies network access during qualification;
-that stronger build boundary does not make ordinary uncached builds offline.
+- Pre-populate the standard parameter cache for offline builds. Build-time
+  downloads run outside runtime Tor routing and carry no runtime client
+  secrets. Legacy `vendor/zingolib/zcash-params/*.params` files remain ignored
+  and unused.
+- The downloader verifies BLAKE2b-512 digests and fixed file sizes; the known
+  `rustls` build-time advisory is tracked and accepted in
+  [dependency disposition](development.md#locked-graph-advisory-disposition)
+  rather than maintaining a downloader fork. The
+  [release runner](reproducible-builds.md#prepare-inputs) prefetches parameters
+  and blocks network access during qualification builds.
 
 ## Refund receivers and seed recovery
 
-All generated and mnemonic-imported application wallets persist
-`TransparentAddressDiscovery::disabled()`. Runtime owner open and SDK reconstruction
-apply the same policy even when the saved seed snapshot enabled discovery; the
-next ordinary save persists it. Read-only inspection retains the original facts.
-This disables known-address RPCs and address-gap recovery without a legacy recovery
-mode. Shielded trial decryption and already accepted transaction ownership remain.
-The SDK still derives unused transparent keys separately from its initial
-Orchard-receiver-only UA. Every application-issued UA uses that same Ironwood
-receiver format without Sapling or transparent components.
-Current storage accepts schema23 only; the SDK owns historical snapshot decoding,
-which is separate from an application pre-seed migration path.
+### Query suppression and refund derivation
 
-The privacy contract is suppression of address-based correlation between the
-refund receiver disclosed to NEAR and transparent-address requests to the Zcash
-indexer. New refunds contain no transparent receiver, and disabled discovery
-prevents both known-address lookups and gap recovery for generated, imported,
-reopened and reconstructed wallets. The real-SDK
-[refund/discovery regressions](../src/treasury/lifecycle_tests/refund_addresses.rs)
-assert an empty transparent-request log and unconsumed failure sentinels for all
-six RPC methods across the transaction-history, balance and UTXO families, including
-stream/deprecated aliases. Keep those forbidden-side-effect assertions when
-updating the SDK or reconstructing wallets; successful shielded discovery alone
-does not prove that no transparent query occurred.
+- Every generated, imported, reopened, and reconstructed wallet enforces
+  `TransparentAddressDiscovery::disabled()`, preventing known-address RPCs and
+  gap scans so a refund address disclosed to NEAR cannot be correlated via
+  transparent-address queries to the Zcash indexer.
+- New refund addresses use
+  `generate_unified_address(ReceiverSelection::orchard_only(), AccountId::ZERO)`
+  (Ironwood's Orchard-format receiver only, no Sapling or transparent
+  components) and commit with the SDK snapshot and job binding before quoting.
+  Saved historical transparent or mixed refund bindings remain preserved audit
+  records and are rejected for new quotes.
+- SDK regressions in
+  [`src/treasury/lifecycle_tests/refund_addresses.rs`](../src/treasury/lifecycle_tests/refund_addresses.rs)
+  assert zero transparent RPC calls across all six transaction-history,
+  balance, and UTXO methods and verify seed-only recovery of distant shielded
+  refunds via account viewing keys (no address list or gap scan required).
+  Preserve these negative controls on SDK upgrades.
+- Public bridge references (`bridge-sdk-rs`
+  `d1361ac1c68fa579ed1a498d30f2124bc16e09cc`, `zcash.rs` L612 and
+  `get_orchard_raw_with_memo`) and Zodl's shielded-UA usage show format support
+  for Orchard-only UAs on refunds and shielded withdrawals, though dry quotes
+  alone do not qualify live funded settlement. See
+  [refund policy](wallet-rotation.md#refunds-state-and-recovery).
 
-Complete SDK transparent removal is not required for this contract.
-`LightWallet::new` still derives a local transparent key/address, and shielded-
-relevant compact/full/pending scanning can recognize already-owned transparent
-outputs. Raw SDK snapshots preserve those identities and accepted work; they
-never authorize new wallet transparent-input work. Do not clear keys or maps to
-simulate retirement. Bridge-owned transparent outbound deposits retain their
-separate destination/output validation. This contract does not establish blanket
-network unlinkability or live-funded refund qualification; see
-[network correlation](network-egress.md) and
-[refund policy](wallet-rotation.md#refunds-state-and-recovery).
+### Direct sends, previews, and receives
 
-The requested NEAR quote window defaults to 1,800 seconds. Returned quote deadlines
-and consensus-derived signed block expiry remain independent, including across NU7;
-existing accepted deadlines and bytes survive restart unchanged.
-
-New refund derivation calls the pinned SDK's existing
-`generate_unified_address(ReceiverSelection::orchard_only(), AccountId::ZERO)`.
-The result contains only the Orchard-format receiver used by Ironwood, without
-Sapling or transparent fallback.
-The application persists the SDK snapshot and exact job/address binding together
-before quote disclosure. Saved transparent/mixed refund bindings remain exact
-evidence but fail new refund selection; they do not enable discovery or shielding.
-
-Compact-block trial decryption uses account viewing keys, so shielded receipt
-discovery does not depend on a sequential transparent-address gap scan.
-`treasury::lifecycle_tests::refund_addresses::distant_shielded_refund_is_spendable_after_seed_only_restore`
-receives at a later generated address, then recovers the actual note and spendable
-value into a fresh wallet using only the public test mnemonic and early birthday.
-It imports no original address list, jobs or snapshot. This synthetic-chain test
-does not validate consensus or live bridge delivery. See the maintained
-[refund contract](wallet-rotation.md#refunds-state-and-recovery) for exact saved
-bindings and financial-authority boundaries.
-
-The [NEAR native bridge implementation](https://github.com/Near-One/bridge-sdk-rs/blob/d1361ac1c68fa579ed1a498d30f2124bc16e09cc/bridge-sdk/connectors/omni-connector/src/zcash.rs#L612)
-constructs shielded refunds using an Orchard receiver. Zodl also supplies shielded
-UAs to 1Click. Public unfunded dry quotes accept Orchard-only and Sapling+Orchard
-refund UAs on our native-ZEC/Base-USDC route. These establish format compatibility,
-not funded settlement. Refund receiver validation is separate from the
-transparent-only source-deposit contract; mixed UAs may select a transparent path.
-
-Native direct sends accept shielded-only recipients and use the existing SDK
-proposal, accepted-input ownership, calculation and publication path. The direct
-recipient proof checks exactly one positive OVK-recovered Ironwood payment against
-the accepted receiver and amount, and rejects legacy-pool bundles. The pinned backend's
-`OvkPolicy::Sender` uses an external OVK for payments and no OVK encryption for
-implicit change in all three pools; Pepper's outgoing inventory therefore excludes
-that change, including same-receiver self-payment change. Incoming note ownership
-does not authorize extra outgoing payments. The direct
-operation's optional total-debit authority checks principal plus the SDK's actual
-network fee at proposal and calculated-byte publication; it does not estimate the
-fee by subtracting the requested amount from an advisory balance. There is no
-application network-fee ceiling or derived input cap. Direct previews reuse the
-application's Ironwood-only `source_proposal` and SDK `total_fee` through the
-serialized actor; the SDK's unrestricted preview wrapper is unsuitable. The same
-wallet guard reads the SDK Ironwood spendable balance. This observation and the
-proposal are advisory; no separate reservation subtraction or balance ledger is added. The
-unsigned proposal is discarded, never stored or calculated. Passing `lock_inputs =
-None` avoids SDK input locks; no snapshot, address derivation or cached-proposal
-replacement occurs. The SDK's note selector ignores its generic lock filter, so
-this is advisory and actual preparation still checks accepted-input ownership.
-The pinned balance API can return zero when scan/anchor data is missing. When the
-proposal reports `ScanRequired`, preview exposes unknown spendability rather than
-that fallback zero. A scanned empty wallet still reports known zero; unrelated
-fee failures do not erase a known balance.
-Native estimates use the validated receiver. Foreign dry quotes lack a deposit
-address, so a private standard transparent-output shape estimates the fee; neither
-that placeholder nor proposal may escape into accepted terms or signing. Foreign
-previews use an existing shielded receiver; executable foreign sends persist their
-own shielded refund binding before source preparation. Missing funds or scan data
-return typed unavailable estimates, not an invented fee.
-
-Native direct receiving uses the same persisted shielded derivation, with a fresh
-UA per new request ID and no NEAR transport. Native receipt inspection matches
-actual note receiver components before projection and reuses the SDK's saved
-confirmations, spent links and selection evidence. Historical received funds and
-snapshot spendability are separate facts; no local balance replica or transparent
-address discovery is introduced. Shielded compact-block scanning remains the only
-incoming-address discovery path.
-
-Direct receive invoices use the same all-shielded derivation and encrypted snapshot
-boundary, with their own persisted operation bindings. A public unfunded reverse
-Base-USDC-to-ZEC dry quote accepted the shielded-only UA on 2026-11-07. The pinned
-native bridge's `get_orchard_raw_with_memo` implements shielded withdrawals (and
-selects Ironwood after activation), separately from shielded refunds. This supports
-the implemented address contract despite the general chain guide's transparent-only
-statement; neither code nor dry quotes qualify funded delivery. Direct receiving
-keeps transparent discovery disabled and never falls back to a transparent receiver.
+- **Native sends:** Accept shielded-only recipients and verify one positive
+  OVK-recovered Ironwood output against the recipient and amount (`OvkPolicy::Sender`
+  excludes implicit change from outgoing inventory). Optional `max_send_zec`
+  checks principal plus SDK network fee at proposal and publication.
+- **Previews:** Reuse the Ironwood-only proposal and SDK `total_fee` with
+  `lock_inputs = None`, then discard the proposal without saving snapshots or
+  reserving inputs. When the proposal reports `ScanRequired`, preview reports
+  unknown spendability instead of the SDK's fallback zero. Foreign previews
+  estimate fees against an internal transparent-output shape and an existing
+  shielded refund receiver without creating persistent bindings.
+- **Native receives:** Derive one fresh shielded-only UA per new request ID
+  with no NEAR traffic or transparent discovery, matching incoming Ironwood
+  note receivers against SDK confirmations and spent links.
 
 ## Release descriptor inputs
 
-The upstream Git build derives its embedded descriptor from checkout revision,
-matching tags and dirty status. A source revision alone does not pin all those
-inputs. The release runner records the resolved SDK package/source, observed Git
-revision, matching tags and `diff-index` result under each isolated build
-environment, then records the actual generated `git_description.txt`. It does not
-predict the descriptor or modify cached sources/tags to force one. A repository-free
-archive falls back to the crate version; with Git installed, the failed dirty
-check can add `_dirty`. Shared-cache, same-host comparison does not qualify
-reproducibility across independently populated caches. Parameter staging, integrity
-checks and OS network denial remain separate release requirements.
+The upstream SDK build script computes `git_description.txt` from the checkout
+revision, matching tags, and Git dirty state (falling back to crate version or
+`_dirty` when Git metadata is absent). The release runner records the resolved
+SDK source, revision, tags, `diff-index`, and generated `git_description.txt`
+for each isolated build rather than mutating caches to force a match.
