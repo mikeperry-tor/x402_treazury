@@ -35,7 +35,7 @@ distribution; [catalog architecture](../architecture.md#catalog-configuration-an
 [provider metadata](../../providers/README.md#bundled-provider-metadata);
 [development](../development.md#dependency-vendoring); and
 [testing](../testing.md). Follow the independent-review and complexity requirements
-in [AGENTS.md](../../AGENTS.md#independent-subagent-workflows).
+in [AGENTS.md](../../AGENTS.md#independent-subagent-review).
 
 ## Proposed endpoint controls
 
