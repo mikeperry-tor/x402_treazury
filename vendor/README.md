@@ -1,184 +1,131 @@
 # Vendored dependency patches
 
-The application and its SDK/payment integration tests use the root workspace's
-patches and committed lockfile. That lockfile selects their shared build graph;
-vendored upstream lockfiles remain provenance inputs.
+The application and its SDK and payment integration tests use the root
+workspace's patches and committed `Cargo.lock`. Vendored upstream lockfiles are
+provenance inputs only.
 
 ## Current reasons and removal evidence
 
-| Patch | Current reason / consumer | Evidence needed before removal |
+| Patch | Purpose and consumer | Evidence required before removal |
 | --- | --- | --- |
-| `reqwest-transport.patch` | `src/network.rs` needs per-request post-connect header inactivity, nonempty body progress, disabled recovery of unstarted pooled requests, retained local SOCKS connection causes and SOCKS-over-Unix proxy transport. | Equivalent unpatched behavior through the production factory in `src/network/http_timeout_tests.rs` and `src/network/http_queue_tests.rs`, including retry policy review; SOCKS setup regressions must distinguish local refusal from target/handshake failures without changing Tor routing, and Unix HTTP/gRPC/startup fixtures must pass. |
-| `hyper-transport.patch`, `h2-transport.patch` | HTTP and gRPC queued cancellation must discard unopened streams before peer capacity returns; this includes signed payment HEADERS. | Queued timeout/cancellation regressions in `src/network/http_queue_tests.rs` and `tests/network.rs` pass with equivalent unpatched behavior. |
-| `pepper-sync-progress.patch` | Direct Pepper synchronization retains progressing stream responses and loader/worker drain ownership, publishes busy before dispatch to prevent lost completion, and supplies safe resource-status diagnostics before stream errors can be remapped. RPC adaptation lives in the application. | Equivalent response inactivity, progress/stall, cancellation/restart, task publication and truthful drain behavior through the full sync chain. See [Zingo details](../docs/zingo-integration.md). |
-| `pepper-sync-reorg.patch` | Repair missing/pruned rollback boundaries and rescan beyond upstream rolling retention after demonstrated divergence; shorter unsigned tips preserve observations and unsigned target-only tails can shrink. Repair future shard-completion metadata without pruning actual tree data. Treasury keeps original accepted work. | Equivalent shorter-tip/deep-reorg recovery, including saved interrupted scans with missing boundaries and current note spendability despite future root caches, while preserving accepted inputs and signed bytes. |
-| `pepper-sync-manifest.patch` | Makes the upstream workspace manifest standalone with the same pinned Zingo cohort and dependency features. | The patch is incidental to retaining this checkout; retire it with Pepper. |
-| `pepper-sync-diagnostics.patch` | `src/treasury/diagnostics.rs` consumes typed pool/operation context without exposing raw upstream prose. | Equivalent sanitized diagnostics and tests; this is observability, not spendability or funding authority. |
+| `reqwest-transport.patch` | Post-connect header inactivity, nonempty body progress, disabled recovery of unstarted pooled requests, retained local SOCKS connection causes, and SOCKS-over-Unix transport for `src/network.rs`. | Equivalent unpatched behavior passing `src/network/http_timeout_tests.rs`, `src/network/http_queue_tests.rs`, local vs. target SOCKS classification tests, and Unix HTTP, gRPC, and startup fixtures. |
+| `hyper-transport.patch` and `h2-transport.patch` | Discard unopened queued HTTP and gRPC streams (including signed payment `HEADERS`) on cancellation before peer capacity returns. | Equivalent unpatched behavior passing queued timeout and cancellation regressions in `src/network/http_queue_tests.rs` and `tests/network.rs`. |
+| `pepper-sync-progress.patch` | Preserve progressing sync streams, loader and worker drain on shutdown, busy-before-dispatch publication, and safe resource-status diagnostics. | Equivalent response inactivity, drain, cancellation, restart, and task-publication behavior through the full sync chain; see [Zingo integration](../docs/zingo-integration.md). |
+| `pepper-sync-reorg.patch` | Repair pruned rollback boundaries, rescan beyond the 1,000-block window after proven divergence, keep shorter unsigned tips safe, and repair future shard metadata while preserving accepted inputs and signed bytes. | Equivalent shorter-tip, deep-reorg, and interrupted-scan recovery while preserving accepted work and note spendability. |
+| `pepper-sync-diagnostics.patch` | Preserve typed pool and operation context for `src/treasury/diagnostics.rs` without exposing upstream prose. | Equivalent sanitized diagnostics and regression tests. |
+| `pepper-sync-manifest.patch` | Standalone workspace manifest matching the pinned Zingo cohort. | Incidental to retaining the checkout; retire alongside Pepper. |
 
-The [wallet rules](../docs/wallet-rotation.md#best-effort-wallet-rules) make
-balances advisory and the SDK authoritative for current ZEC spendability. None of
-these patches implements a historical source/refund accounting gate, daily budget
-or returned-principal credit. That simplification does not remove transport,
-chain-reconciliation or dependency compatibility requirements. This inventory
-explains the checked-in pins; it does not establish whether a newer upstream
-release already supplies equivalent behavior.
-
-Runtime contracts remain in [network policy](../docs/network-egress.md) and
-[wallet ownership](../docs/wallet-rotation.md). When changing a pin or removing a
-patch, review its complete consumers and retained regression coverage in the application and focused SDK/payment
-tests, then update this inventory and the owning guide.
+None of these patches implements local funding budgets or historical refund
+accounting; they enforce transport timing, cancellation, chain reconciliation,
+and sanitized diagnostics. When changing a pin or retiring a patch, review all
+consumers and regression tests and update this ledger alongside
+[network egress](../docs/network-egress.md) and
+[wallet rotation](../docs/wallet-rotation.md).
 
 ## Checkout retirement tracking
 
-Prioritize removal of complete locally maintained crate directories over reducing
-patch lines. Review the complete blocker set before investing in an upstream
-submission or local behavior change. A smaller patch can be a useful prerequisite,
-but does not count as a retired checkout. Moving the same fork into another
-repository does not retire its maintenance responsibility.
+Prioritize removing entire maintained crate directories over trimming patch
+lines. Review the full blocker set before investing in upstream PRs or local
+changes; moving a fork to another repository does not retire maintenance.
 
-Four patched crate directories remain: `hyper`, `h2`, `reqwest` and
-`pepper-sync`. The x402 EIP-155 SDK, Alloy primitives and `zcash_proofs` use
-unpatched registry sources; their known advisory exposure is accepted under the
-[dependency disposition](../docs/development.md#locked-graph-advisory-disposition),
-with raw findings retained. `zingolib` and `zingo-netutils` use the coherent pinned
-upstream Git cohort, and `lightwallet-protocol` 0.4.0 supplies Ironwood fields
-without a Git override.
-Pepper retains its path override; its public-trait merge regression runs in the
-application SDK integration target. Vendored crates are excluded from workspace
-test selection.
-The [unfinished assessment plan](../docs/plans/vendor_retirement.md) preserves
-remaining assessment requirements; this ledger owns current blockers, next actions
-and upstream follow-up.
+Four patched directories remain: `hyper`, `h2`, `reqwest`, and `pepper-sync`
+(excluded from workspace test selection). `x402-chain-eip155`, Alloy
+primitives, and `zcash_proofs` use unpatched registry sources under the
+[advisory disposition](../docs/development.md#locked-graph-advisory-disposition).
+`zingolib` and `zingo-netutils` use the pinned upstream Git cohort, and
+`lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override.
+See [vendor retirement plan](../docs/plans/vendor_retirement.md) for open
+assessment items.
 
-| Checkout | Complete local blocker set | Next action | Upstream reference and candidate |
+| Checkout | Blocker set | Next action | Upstream status |
 | --- | --- | --- | --- |
-| `hyper` | Pending-open cancellation in `hyper-transport.patch`. | Retain the patch on 1.12.0 until unpatched pending-open cancellation passes through the production factory; assess independently with patched h2 retained. | Published [1.12.0 client task](https://github.com/hyperium/hyper/blob/v1.12.0/src/proto/h2/client.rs) still waits for h2 readiness before handling retained pending-open context. [#4042](https://github.com/hyperium/hyper/pull/4042) fixes dispatched body-task cancellation, and 1.12's HTTP/1 changes do not replace this HTTP/2 behavior. No retirement candidate qualified. |
-| `h2` | Pending-open queue cleanup and scheduler wakeups in `h2-transport.patch`. | Qualify zero-capacity cleanup and explicit/implicit cancellation independently of Hyper; recheck [#962](https://github.com/hyperium/h2/pull/962) against all gaps. | Published [0.4.20 prioritization](https://github.com/hyperium/h2/blob/v0.4.20/src/proto/streams/prioritize.rs) remains capacity-gated; [reset paths](https://github.com/hyperium/h2/blob/v0.4.20/src/proto/streams/send.rs) still need unopened-HEADERS cleanup and scheduler wakeups. Existing patches rebase without fuzz; this is an update, not checkout retirement. |
-| `reqwest` | Post-connect header timing, body inactivity/backpressure, disabled unstarted-request recovery, retained local SOCKS connection causes and SOCKS-over-Unix proxy transport. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Hyper-util 0.1.21 hides its SOCKS underlying connector cause; removal also requires equivalent stage/cause evidence for local refusal versus target failure. Retain current retry behavior. | No retirement candidate qualified. |
-| `pepper-sync` | Stream-message/drain and task-publication corrections, typed/sanitized diagnostics and automatic rollback/rescan recovery; standalone manifest adaptations and a constructible public sync payload for the application merge regression. | Establish a complete upstream route for transport, diagnostics and rollback/rescan recovery before choosing contribution order; preserve lifecycle/merge regression evidence and the public payload construction API. | Pepper 0.7.0 at Zingolib v8 revision `81d799775f11e882896e8710e8af12d6d4d29a41` still needs these contracts. Upstream's [task-publication repair](https://github.com/zingolabs/zingolib/commit/3bc86bec73db704e5fba242dc6221497da73e429) and scanner-owned activity protocol address the race; the complete cohort remains unqualified for retirement. Its larger rolling window and sparse checkpoints do not replace the local conservative recovery or progress/drain behavior. |
+| `hyper` (1.12.0) | Pending-open cancellation (`hyper-transport.patch`). | Retain until unpatched pending-open cancellation passes through `src/network.rs` alongside patched `h2`. | [1.12.0 client task](https://github.com/hyperium/hyper/blob/v1.12.0/src/proto/h2/client.rs) still waits for `h2` readiness before handling pending-open cancellation ([#4042](https://github.com/hyperium/hyper/pull/4042) covers dispatched body tasks only). |
+| `h2` (0.4.20) | Pending-open queue cleanup and scheduler wakeups (`h2-transport.patch`). | Qualify zero-capacity cleanup and explicit and implicit cancellation independently of Hyper; recheck [#962](https://github.com/hyperium/h2/pull/962). | [0.4.20 prioritization](https://github.com/hyperium/h2/blob/v0.4.20/src/proto/streams/prioritize.rs) stays capacity-gated; [reset paths](https://github.com/hyperium/h2/blob/v0.4.20/src/proto/streams/send.rs) still need unopened-`HEADERS` cleanup and wakeups. |
+| `reqwest` (0.13.5) | Post-connect header timing, body inactivity, disabled unstarted-request recovery, retained local SOCKS causes, and SOCKS-over-Unix transport. | Identify upstream hooks or a local adapter covering every hunk (including exposing `hyper-util` 0.1.21's hidden SOCKS connector cause). | No retirement candidate qualified. |
+| `pepper-sync` (0.7.0) | Stream drain, task publication, typed diagnostics, rollback and rescan recovery, standalone manifest, and constructible sync payload for `tests/sdk_compat.rs`. | Establish a complete upstream path covering transport, diagnostics, and recovery while preserving lifecycle and merge regressions. | Zingolib v8 (`81d799775f11e882896e8710e8af12d6d4d29a41`) still needs these contracts; upstream [task-publication fix](https://github.com/zingolabs/zingolib/commit/3bc86bec73db704e5fba242dc6221497da73e429) addresses only the race. |
 
-The application owns nineteen public-trait RPC delegations and a narrow lazy
-prover adapter instead of SDK/netutils source snapshots and manifest/patch
-synchronization. Handwritten behavior has not disappeared: retain copied-code
-attribution, complete factory/financial consumer coverage and actual SDK Git/
-descriptor release inputs. Direct Pepper execution keeps the existing runtime,
-checkpoint and cancellation owner; do not reintroduce a second controller or
-inline polling that deadlocks a wallet-lock checkpoint. Current contracts live in
-[Zingo integration](../docs/zingo-integration.md), network policy and wallet ownership.
+Note that `src/network/indexer.rs` owns the 19 `Indexer` and
+`TransparentIndexer` trait methods (with transparent queries disabled under the
+Ironwood-only policy), and `src/treasury/prover.rs` owns the fail-closed
+`UnsupportedSapling` prover stubs; keep copied-code attribution in
+`src/network/indexer.rs`, consumer tests, and SDK Git descriptor release inputs
+intact.
 
-Update each affected row during dependency work and when a relevant upstream
-response, accepted change or compatible release becomes known. Record actual
-issue/PR links, merge revision, candidate release or Git SHA, remaining blockers
-and the next action or concrete condition for reopening. An accepted PR is not a
-qualified replacement. Failed candidates retain their specific blocking reason;
-keep detailed build logs and comparisons under ignored `target/`, not in this
-ledger. Do not invent an upstream status from a similar feature name.
-
-A retirement is complete when the workspace manifest and lockfile use the qualified
-unpatched source, the local crate directory and obsolete patch/provenance entries
-are removed, consumers and build/release tools work, and required regressions
-remain effective. Retain verification of every remaining vendored source. When
-all local blockers are gone, use ordinary upstream Git or registry sources rather
-than retaining an unchanged local snapshot without a separate concrete reason.
-No new monitoring service or scheduled task is needed: recheck the ledger during
-relevant dependency updates and use upstream notifications when explicitly set up.
+Update rows whenever dependency work or upstream releases change status,
+recording exact issue or PR URLs, revisions, blockers, and next actions (keep
+detailed build logs under ignored `target/`). A checkout is retired only when
+`Cargo.toml` and `Cargo.lock` use the qualified unpatched source, the local
+directory and patch entries are deleted, and all regressions pass.
 
 ## Combined dependency compatibility
 
-The shared workspace uses registry Alloy core 1.7.3 and the pinned Zingolib v8 cohort.
-Alloy's `sha3 0.11.0` and Zingo's `bip32 0.6.0 → hmac 0.13.0` accept stable
-`digest 0.11.3`; no local hashing manifest override is needed. Independent
-Keccak/EIP-712 vectors, payment signing and the compatibility suite remain the
-acceptance evidence for this combination. A compatible dependency graph is not a
-wallet security audit.
+The root workspace combines registry Alloy core 1.7.3 (`sha3` 0.11.0 ->
+`digest` 0.11.3) with the pinned Zingolib v8 cohort (`bip32` 0.6.0 -> `hmac`
+0.13.0 -> `digest` 0.11.3) with no hashing manifest override. Independent Keccak
+and EIP-712 vectors, payment signing, and `make check-compat` verify this
+combination.
 
 ## HTTP transport patches
 
-`hyper` 1.12.0 and `h2` 0.4.20 are the exact published crates.io archives
-with the narrow patches in `hyper-transport.patch` and `h2-transport.patch`. Pending-open HTTP/2 requests now observe response-waiter
-cancellation and reset their stream before capacity returns, removing queued
-HEADERS as well as preventing body transmission. Previously the cancellation
-callback was not polled until after stream capacity returned. h2 also retained
-HEADERS ahead of an explicit reset; its scheduler now discards cancelled unopened
-streams without emitting an illegal RST_STREAM on an idle stream. This applies to
-explicit and implicit cancellation and reclaims cancelled head entries even with
-zero peer capacity.
+### `hyper` 1.12.0 and `h2` 0.4.20
 
-`transport-sources.json` records the archive SHA-256, every original file hash,
-and the reviewed patch hash. `python3 vendor/verify.py` also reverses the patches
-and checks every file against its upstream hash. The application and its integration
-tests select the same root patch. No protocol downgrade, retry or
-change to financial authority is introduced. Application real TLS/SOCKS tests
-check raw HEADERS absence, GET/POST cancellation and timeout, and reuse of the
-healthy multiplexed connection. Remove the patch only after equivalent upstream
-behavior passes those regressions.
+Exact published crates.io archives patched by `hyper-transport.patch` and
+`h2-transport.patch`:
 
-`reqwest` 0.13.5 is also preserved from its published archive, with
-`reqwest-transport.patch`. HTTP/1 and HTTP/2 header inactivity begins at the
-per-request Hyper connection capture (after DNS/SOCKS/TLS), body inactivity
-ignores empty DATA, and backpressured consumers can read available bytes before
-timeout rejection. The patch disables Hyper's separate automatic recovery of
-unstarted pooled requests, in addition to the Reqwest request-policy retries
-disabled by `src/network.rs`. Both signed and unsigned HTTP requests use this
-configuration; application retries, polling and financial recovery remain at
-their owning layers. See [retry ownership](../docs/network-egress.md#retry-ownership)
-for request categories and the connection/header timing interaction that prevents
-removing only this disabling hunk without changing behavior. Zcash tonic/gRPC
-submission does not use the Reqwest switch. The unenabled HTTP/3 implementation
-is unchanged. Real direct/Tor DNS, SOCKS, TLS, stream contention,
-sibling response progress, body stalls and consumer backpressure are tested via
-the production factory. No large replacement timeout or connection-wide progress
-clock is used.
+- Pending-open HTTP/2 requests observe response-waiter cancellation and reset
+  the stream before peer capacity returns, discarding queued `HEADERS` and
+  preventing body transmission.
+- `h2`'s scheduler discards cancelled unopened streams (both explicit and
+  implicit cancellation, including head entries at zero peer capacity) without
+  emitting an illegal `RST_STREAM` on an idle stream.
+- Verified by `src/network/http_queue_tests.rs` and `tests/network.rs` over
+  local TLS and SOCKS fixtures.
 
-The Reqwest SOCKS service boundary also retains the original underlying connector
-error when connecting to the configured proxy fails. Hyper-util 0.1.21's private
-SOCKS error wrapper does not expose that source. A small wrapper around the existing
-connector captures its error only, without adding I/O, replacing the connector or
-changing timeouts. The fixed local marker `SOCKS local proxy connection failed`
-identifies this stage, and its source preserves the original error chain. Other
-SOCKS failures retain their existing wrapper, so target refusal is not labeled as
-local proxy refusal. Handshake I/O remains subject to the shared transport policy;
-authentication and protocol/configuration errors remain terminal. Production
-factory tests exercise local refusal and transient target/handshake failures.
+### `reqwest` 0.13.5
 
-The patch also adds `socks_proxy_unix_socket` for Tor filesystem SOCKS endpoints.
-It connects the configured Unix stream to hyper-util's SOCKS5 connector while
-keeping destination DNS remote and reusing the same authentication, timeout and
-local-failure classification. The application gRPC path uses the equivalent
-hyper-util connector directly; no new dependency or fork is introduced. Unix
-startup probes and real HTTP/gRPC SOCKS fixtures cover this transport.
+Exact published archive patched by `reqwest-transport.patch`:
+
+- **Inactivity timing:** HTTP/1 and HTTP/2 header inactivity begins at
+  per-request Hyper connection capture (after DNS, SOCKS, and TLS connect);
+  body inactivity ignores empty `DATA` frames and lets backpressured readers
+  drain available bytes before timeout rejection.
+- **No hidden pooled retries:** Disables Hyper's automatic retry of unstarted
+  pooled requests alongside `src/network.rs`'s `retry(never())` so retry
+  ownership stays in application layers and replacement connections cannot run
+  inside an already-started header timer. See
+  [retry ownership](../docs/network-egress.md#retry-ownership). (Zcash tonic
+  gRPC does not use reqwest; HTTP/3 is unused.)
+- **Local SOCKS cause preservation:** Wraps `hyper-util` 0.1.21's SOCKS
+  connector to mark local proxy connection failures with
+  `SOCKS local proxy connection failed` while preserving the underlying error
+  chain, keeping local proxy refusal distinct from transient target or
+  handshake errors.
+- **Unix socket SOCKS (`socks_proxy_unix_socket`):** Connects Unix-socket Tor
+  endpoints through `hyper-util`'s SOCKS5 connector with remote DNS,
+  authentication, timeouts, and local-failure classification matching TCP
+  SOCKS.
 
 ## Source verification boundaries
 
-Run the relevant verifier when maintained vendor sources, patches, upstream
-snapshots, provenance manifests or verifier code change, or when dependency/build
-resolution changes which vendored sources are used. Reuse prior successful evidence
-while those inputs remain unchanged; unrelated application, configuration or prose
-changes do not require another source reconstruction. Record the original evidence
-and relevant input scope rather than claiming a new verification.
-
-Release qualification and explicitly requested full checks or named stages retain
-their requirements: `make check-static` runs both verifiers and `make check-compat`
-runs the Pepper verifier. Ordinary `make build` does not invoke them. Source
-verification is separate from compilation, embedded build identity and
-[reproducible release qualification](../docs/reproducible-builds.md).
-
-Run from the repository root:
+Run the verifier whenever maintained vendor sources, patches, provenance
+manifests, verifier scripts, or lockfile resolution of vendored crates change;
+reuse prior evidence while those inputs are unchanged. `make check-static` runs
+both verifiers and `make check-compat` runs `verify_pepper.py` (`make build`
+does not run them).
 
 ```sh
 python3 vendor/verify.py
 python3 vendor/verify_pepper.py
 ```
 
-`verify.py` uses `verify_transport.py` for the transport provenance manifest. It verifies
-patch hashes, reverses each recorded patch in temporary copies and checks
-all restored files against the recorded published-source hashes.
-`verify_pepper.py` checks the retained Pepper snapshot, patches and copied-code
-notice against `pepper-sync-sources.json`, rejecting every unexpected Pepper file. It
-then reverses all declared patches in a temporary copy and checks the complete
-file inventory and every byte against hashes from the pinned upstream Git tree.
-All patched crate trees must match upstream exactly after reversing their patches;
-manifest adaptations belong in explicit patches too.
-These are source-integrity checks, not behavior tests or evidence that upstream
-still needs a patch. Build/test commands and qualification boundaries are in
-[development](../docs/development.md#combined-workspace-verification).
+- `vendor/verify.py` (via `verify_transport.py`) checks `transport-sources.json`
+  patch hashes, reverses each patch in temporary copies, and matches every file
+  against published crates.io archive hashes.
+- `vendor/verify_pepper.py` checks `pepper-sync-sources.json`, rejects
+  unexpected files in `vendor/pepper-sync/`, reverses all patches (including
+  manifest patches), and compares every byte against the pinned upstream Git
+  tree.
+
+These checks verify source provenance and patch reversibility; behavioral
+verification belongs to
+[combined workspace verification](../docs/development.md#combined-workspace-verification).
