@@ -1,61 +1,62 @@
 # Advanced deployments
 
-This guide covers the multi-listener deployments. Start with the
+This guide walks through the multi-listener deployments. Start with the
 [README quickstart](README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools)
-to learn the model, or use the
-[research desk](examples/deployments/research_desk.toml) directly if you want the
-full task-oriented selection.
+to learn the single-listener model, or jump straight into the
+[research desk](examples/deployments/research_desk.toml) for a multi-domain
+setup.
 
 | Example | Listeners | Wallet groups | Network | Treasury state |
 | --- | --- | --- | --- | --- |
-| [research_desk.toml](examples/deployments/research_desk.toml) | 12 | general, personal, health, financial | Tor | `state/research_desk` |
-| [comprehensive.toml](examples/deployments/comprehensive.toml) | 4 | web, company | Tor | `state/privacy` |
+| [research_desk.toml](examples/deployments/research_desk.toml) | 12 | `general`, `personal`, `health`, `financial` | Tor | `state/research_desk` |
+| [comprehensive.toml](examples/deployments/comprehensive.toml) | 4 | `web`, `company` | Tor | `state/privacy` |
 
-The research desk is the broad selection. The comprehensive example is a smaller
-multi-listener showcase with the same bootstrap, relay and shared-payer model.
+The research desk is the full multi-domain setup. The comprehensive example is a
+smaller four-listener deployment that uses the same bootstrap, relay, and
+shared-payer model.
 
 ## Prerequisites
 
-Run these commands from the repository checkout. `make build` verifies the pinned
-Rust/Cargo toolchain and supplies protoc. Make requires GNU Make 3.81+ and a POSIX
-shell. Supported runtime validation covers Linux and macOS; Windows runtime work is
-deferred. See [portability](docs/development.md#portability).
+Run commands from the repository root. `make build` checks the pinned Rust and
+Cargo toolchain and supplies `protoc`. GNU Make 3.81+ and a POSIX shell are
+required. Runtime support covers Linux and macOS; Windows runtime support is
+deferred (see [portability](docs/development.md#portability)).
 
-The Zcash treasury is unconditional in the application build; static-wallet
-deployments simply omit treasury configuration. Only synthetic proving and local
-consensus tests use opt-in Cargo features. Cargo downloads and Zcash proving
-parameters are fetched outside Tor routing by default.
+Zcash support is always compiled in; static-wallet deployments simply omit
+`[treasury]`. Only synthetic proving and local consensus tests use opt-in Cargo
+features. Cargo downloads and Zcash proving parameters fetch directly rather
+than through Tor.
 
-Both advanced examples use Tor. Start Tor Browser with its SOCKS listener at
-`127.0.0.1:9150`, or use an installed Tor daemon. Tor is not bundled or started by
-the application. The examples use SOCKS username/password isolation, so their
-circuits do not match your web browsing traffic. For a dedicated daemon, use a
-listener such as `SocksPort 127.0.0.1:9050 IsolateSOCKSAuth` and change
-`network.socks_endpoint` in the local deployment. The endpoint accepts an IP
-literal, a network name such as `tor:9050`, or a Unix path (`unix:/absolute/path`).
-Keep Tor running throughout.
+Both advanced examples require a running Tor SOCKS listener, because
+`x402_treazury` does not bundle or start Tor. Start Tor Browser (which listens
+on `127.0.0.1:9150`) or run a dedicated Tor daemon with
+`SocksPort 127.0.0.1:9050 IsolateSOCKSAuth` and update `network.socks_endpoint`
+in your local deployment file.
+
+`socks_endpoint` accepts an IP and port, a hostname and port such as
+`tor:9050`, or a Unix socket path (`unix:/absolute/path`). Keep Tor running for
+the full session. Because `x402_treazury` isolates circuits with SOCKS
+credentials, its traffic does not share circuits with Tor Browser tabs.
 
 ## Research desk walkthrough
 
-### 1. Build, copy and start Tor
+### 1. Build, copy, and start Tor
 
 ```sh
 make build
 cp examples/deployments/research_desk.toml examples/deployments/research_desk.local.toml
 ```
 
-Start Tor Browser or your daemon at the configured SOCKS endpoint. If you prefer
-not to embed network settings, pass the shared policy for one invocation:
+Start Tor Browser or your Tor daemon at the configured SOCKS endpoint. The
+research desk already embeds Tor and relay settings; pass `--network-config`
+only when you want to override `[network]` (and `[relay_fallback]` when present)
+for one command:
 
 ```sh
 target/release/x402_treazury serve \
   --config examples/deployments/research_desk.local.toml \
   --network-config examples/network/tor.toml
 ```
-
-`--network-config` replaces the complete `[network]` policy and, when present,
-`[relay_fallback]` for that invocation. The research desk already embeds Tor and
-relay settings, so the option is needed only when you want a different policy.
 
 ### 2. Create the treasury
 
@@ -64,11 +65,11 @@ export X402_TREAZURY_CONFIG="examples/deployments/research_desk.local.toml"
 target/release/x402_treazury wallet init
 ```
 
-Initialization creates the configured `state/research_desk` directory, generates a
-seed and discovers its birthday through Tor. It prints the treasury's shielded ZEC
-receive address. The default encryption key is `wallet.key` inside that directory,
-with no password or OS-keychain protection; anyone obtaining the directory obtains
-both state and decryption material.
+`wallet init` creates `state/research_desk`, generates a seed, discovers the
+wallet birthday over Tor, and prints the shielded ZEC receive address. By
+default, the decryption key is stored at `state/research_desk/wallet.key` with
+no password or OS-keychain wrapper, so anyone who can read that directory has
+both the wallet state and its decryption key.
 
 ### 3. Start the server
 
@@ -77,15 +78,19 @@ export X402_TREAZURY_MCP_TOKEN="replace_with_a_secret_bearer_token"
 target/release/x402_treazury serve
 ```
 
-`serve` synchronizes the treasury, discovers API catalogs and funds managed USDC
-wallets in the background after every listener binds. The research desk prepares
-the general group first. Personal, health and financial activate only after a
-validated API invocation in one of their endpoints, including a free response or
-cache hit; calls never wait for swaps. Previously credited groups route directly on
-restart, and depletion never returns them to general.
+`serve` binds all listeners first, then syncs the treasury, loads catalogs, and
+funds USDC wallets in the background. The research desk funds `general` first;
+`personal`, `health`, and `financial` begin funding only after a validated API
+call hits one of their endpoints (including a free call or cache hit). API calls
+never wait for swaps: until a deferred group receives its first credit, its
+endpoints pay from `general`. Once a group has been credited, it uses its own
+wallet permanently across restarts even if its balance later runs low.
 
-Run one `serve` process per treasury directory. `wallet status` is safe alongside
-serving; other exclusive wallet administration requires stopping it.
+Run only one `serve` process per treasury directory. Read-only wallet commands
+(`wallet status`, `wallet addresses`, `wallet notes`, and `wallet preview`)
+work while `serve` is running; exclusive commands (such as `wallet sync`,
+`wallet backup`, `wallet rename`, and `wallet bootstrap`) require stopping
+`serve` first.
 
 ### 4. Fund the treasury and connect
 
@@ -94,25 +99,24 @@ export X402_TREAZURY_CONFIG="examples/deployments/research_desk.local.toml"
 target/release/x402_treazury wallet status
 ```
 
-Send ZEC to the shielded receive address. Initial setup is general's one $2-3
-nominal allocation plus fees and bridge costs. The eventual four-group initial
-inventory is $8-12 nominal, before fees, relays and later replacements. A light
-trial can start with about $5 of ZEC; continued staggered use is better covered by
-roughly $20, including headroom. These are capital estimates, not guaranteed
-spendable balances or lifetime costs.
+Send ZEC to the shielded receive address. Initial setup needs one $2-3 nominal
+allocation for `general` plus network and bridge fees; funding all four groups
+eventually needs $8-12 nominal before fees, relays, and replacements. Start with
+about $5 of ZEC for a light trial, or around $20 for sustained use across all
+groups.
 
 | Group | Endpoints | Payment cap |
 | --- | --- | --- |
-| general | toolbox, web, science, shopping, world | $1.00 |
-| personal | social, property, travel | $1.00 |
-| health | health | $0.50 |
-| financial | business, finance, security | $1.00 |
+| `general` | `toolbox`, `web`, `science`, `shopping`, `world` | $1.00 |
+| `personal` | `social`, `property`, `travel` | $1.00 |
+| `health` | `health` | $0.50 |
+| `financial` | `business`, `finance`, `security` | $1.00 |
 
-Ports and endpoint scopes are listed in [examples/README.md](examples/README.md).
-Connect each MCP client to its endpoint with
+See [examples/README.md](examples/README.md) for ports and source selections.
+Connect each MCP client with
 `Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
 
-The example enables:
+The research desk uses this bootstrap table:
 
 ```toml
 [wallet_bootstrap]
@@ -120,45 +124,43 @@ bootstrap_group = "general"
 deferred_groups = ["personal", "health", "financial"]
 ```
 
-Paid metadata and directory relay fees stay on general across API cutover and do
-not activate a group. Relay fallback covers catalog and help reads by default;
-actual API fallback remains disabled unless `api_requests = true`. Relay fees
-depend on the provider and request. With bootstrap policy enabled,
-`relay_fallback.wallet` is overridden for metadata and discovery.
+Paid catalog and directory relay fees stay on `general` even after deferred
+groups switch to their own wallets, and relay fees never trigger deferred-group
+funding. Relay fallback covers catalogs and help documents by default; API
+request relay remains off unless `api_requests = true`. When `[wallet_bootstrap]`
+is set, `general` overrides `relay_fallback.wallet` for metadata and discovery.
 
-Comment out the entire bootstrap table to fund all declared groups normally and
-use separate payers from the beginning. Existing funds and earlier links are not
-moved or erased. Removing a listener alone does not disable its declared managed
-group.
+To fund all four groups separately from the start, comment out the entire
+`[wallet_bootstrap]` table. Removing a listener alone does not stop its declared
+wallet group from being funded.
 
-Separate initial addresses avoid direct payer reuse, but closely spaced swaps
-still provide a funding-time correlation signal. First-use activation and
-randomized later opportunities can weaken it. Bootstrap payments use a visibly
-common payer; timing, amounts, providers, request content and settlement can still
-correlate activity. Delayed funding does not erase earlier links or provide an
-unlinkability guarantee.
+> **Privacy note:** Separate addresses prevent direct payer reuse, though
+> closely spaced initial swaps can still correlate by funding time. First-use
+> activation and randomized funding timers weaken that signal without
+> guaranteeing unlinkability. Calls made during bootstrap share `general`'s
+> wallet, and timing, amounts, providers, and request contents can still link
+> activity.
 
 ### 5. Stop
 
-Press Ctrl-C once and allow the announced transaction-safety drain to finish.
-Do not start a second serving process while work is draining.
+Press Ctrl-C once and wait for the announced transaction-safety drain to finish.
+Do not start another `serve` process while work is draining.
 
 ## Comprehensive example walkthrough
 
-The [comprehensive deployment](examples/deployments/comprehensive.toml) provides
-four MCP endpoints and two intended wallet groups:
+The [comprehensive deployment](examples/deployments/comprehensive.toml) exposes
+four MCP endpoints backed by two wallet groups:
 
-| Endpoint | Port | Initial group and cap | Selected scope |
+| Endpoint | Port | Group and cap | Scope |
 | --- | --- | --- | --- |
-| web | 6337 | web, $0.10 | Exa, Google Trends and web sources |
-| social | 6338 | company (initially web), $0.10 until first company credit, then $0.50 | People and social platform research |
-| company | 6339 | company (initially web), $0.10 until first company credit, then $0.50 | Company, public-record, security and phone intelligence |
-| toolbox | 6340 | company (initially web), $0.10 until first company credit, then $0.50 | API discovery, direct calls and persistent agent-added tools |
+| `web` | 6337 | `web`, $0.10 | Exa, Google Trends, and web sources |
+| `social` | 6338 | `company` (starts on `web`: $0.10 until first `company` credit, then $0.50) | People and social platform research |
+| `company` | 6339 | `company` (starts on `web`: $0.10 until first `company` credit, then $0.50) | Company, public-record, security, and phone intelligence |
+| `toolbox` | 6340 | `company` (starts on `web`: $0.10 until first `company` credit, then $0.50) | API discovery, raw URL calls, and persistent agent-added tools |
 
-All endpoints initially use web's payer and cap. After company's first positive
-credit, social, company and toolbox use company's separate payer and $0.50 cap;
-web keeps its own group. Previously credited company groups route directly on
-restart, and later depletion never returns them to web.
+All four endpoints start on `web` with a $0.10 per-payment cap. After `company`
+receives its first credit, `social`, `company`, and `toolbox` switch permanently
+to `company`'s wallet and $0.50 cap while `web` keeps its own wallet.
 
 ```sh
 make build
@@ -169,95 +171,98 @@ export X402_TREAZURY_MCP_TOKEN="replace_with_a_secret_bearer_token"
 target/release/x402_treazury serve
 ```
 
-Initial setup is web's one $2-3 nominal small allocation. Both groups' eventual
-initial inventory totals $4-6 nominal. Separately, preparing one group's first small
-wallet and its later replacement spans two allocations: $4-6 nominal, averaging
-approximately $5 before bridge-floor adjustments and fees. That one-group estimate
-is not the same as both groups' combined initial inventory. Allow randomization
-headroom to $6. A nominal bridge minimum above the $3 ceiling can refuse a route
-rather than silently increasing the bound.
+Initial setup funds one $2-3 nominal small wallet for `web`. Funding both
+`web` and `company` takes $4-6 nominal total before fees, and a single group's
+first wallet plus its first replacement also spans $4-6 nominal (around $5 on
+average; allow up to $6 for randomization and fees). If a bridge minimum
+exceeds the $3 ceiling, `x402_treazury` refuses the route rather than silently
+raising the ceiling.
 
-The example enables `bootstrap_group = "web"` and `deferred_groups = ["company"]`.
-If the treasury is already funded, you can run `wallet bootstrap` before `serve` to
-prepare only web's enabled reserves, without catalogs or listeners. Stop serving
-before running this exclusive command; it does not prepare company or activate
-participant demand.
+Because `[wallet_bootstrap]` sets `bootstrap_group = "web"` and
+`deferred_groups = ["company"]`, you can optionally run `wallet bootstrap` after
+funding the treasury (with `serve` stopped) to pre-fund `web` without starting
+listeners or loading catalogs. `wallet bootstrap` leaves `company` deferred.
 
-The company endpoint adds selected RelayShield and NetIntel security tools. Their
-advertised prices can exceed web's initial $0.10 cap and some can be refused while
-company prepares; their $0.05-$0.40 prices fit the later $0.50 cap, though larger
-company or grant batches may still exceed it. NetIntel phone intelligence
-complements RelayShield reputation but does not establish scam history or live
-reachability. See [provider caveats](providers/CAVEATS.md) for current limits.
+The `company` endpoint includes RelayShield and NetIntel security tools whose
+prices ($0.05-$0.40) can exceed `web`'s initial $0.10 cap until `company` is
+funded; large company or grant batches can also exceed the $0.50 cap. See
+[provider caveats](providers/CAVEATS.md) for current provider limits.
 
 ## Expensive APIs and large reserves
 
-A per-payment cap authorizes one challenge, not a job budget. Increase
-`max_api_payment_usdc` on the relevant wallet group for larger individual
-payments; the live challenge determines the actual amount. For APIs costing more
-than $0.50 per call, consider a large reserve:
+`max_api_payment_usdc` caps one payment challenge, not a multi-call workflow.
+Raise it on a wallet group to allow larger individual calls; the live x402
+challenge determines the actual charge. For APIs costing more than $0.50 per
+call, add a large reserve alongside the small reserve:
 
 ```toml
-# Add to a local comprehensive deployment.
+# Add to a local deployment file.
 [wallets.company.reserves.large]
 # Default randomized nominal funding: $10-25.
 ```
 
-A separate large wallet is preferred over enlarging the small slot because both
-wallets then rotate after fewer calls, reducing usage tracking and linkability.
-Size large to at least twice the largest expected payment, preferably four times
-when prices vary. For a $2.50 maximum payment, $10 is the lower end of the default
-large range. Ensuring payments stay below 25% of the wallet target reduces
-fragmentation; retained balances can still serve smaller calls. See
+Adding a large reserve is better than enlarging the small reserve because cheap
+calls continue rotating on small wallets while expensive calls draw from the
+large wallet. Size the large reserve to at least 2x your largest expected
+payment, and preferably 4x when prices vary (keeping payments under 25% of the
+wallet target reduces unusable remainders, though leftover balances can still
+cover smaller calls). For example, $10 is a sensible floor for a $2.50 maximum
+payment. See
 [reserve sizing](docs/configuration.md#reserve-sizing-and-fragmentation).
 
-## Adding API Providers
+## Adding API providers
 
 The [provider catalog](providers/README.md) contains reusable TOML definitions,
-including curated catalogs for APIs that need adaptation. Providers carry specific
-reliability tags for observed issues, including Tor-related failures; startup prints
-corresponding warnings. Tags describe known observations, not current availability
-or proof that Tor caused a failure.
+including curated catalogs for APIs that need schema adaptation. Providers may
+carry reliability tags (including Tor-related tags) that trigger startup
+warnings; tags record past observations rather than live status.
 
-For a compatible OpenAPI provider, a source can start with just its specification URL:
+A compatible OpenAPI provider can start with just its specification URL:
 
 ```toml
 [sources.my_api]
 spec = "https://api.example.com/openapi.json"
 ```
 
-Add `my_api` to a server's `sources`. Some providers also need a `base_url`, tool
-filters, schema overrides or payment compatibility settings. Reuse bundled settings
-with `extends = "../providers/exa.toml"`; add a `help_url` for a single usage guide.
-Use `catalog tags` and `catalog tools` to choose a useful subset instead of exposing an
-entire large catalog to the agent.
+Add `my_api` to a listener's `sources` list. Some providers also need
+`base_url`, tool filters, schema overrides, or payment compatibility flags.
+Extend a bundled definition with `extends = "../../providers/exa.toml"` (paths
+resolve relative to the deployment file), and add `help_url` for a single usage
+guide. Run `catalog tags` and `catalog tools` to pick a focused subset rather
+than exposing a huge catalog.
 
-For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to provide the agent with search+call wrapper tools instead of every API schema. Agents retrieve full
-descriptions and schemas as needed via the `x402_treazury_tools_search()` tool, and can
-make calls to discovered tools via the `x402_treazury_tool_call()` tool.
-See [on-demand discovery](docs/agent-sources.md).
+For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to
+advertise `x402_treazury_tools_search` and `x402_treazury_tool_call` instead of
+every tool schema. See [on-demand discovery](docs/agent-sources.md).
 
-Provider management lets agents find bundled providers or APIs through
-[x402 List](https://x402-list.com) and Coinbase resource search, then add tools to an
-MCP endpoint themselves. The feature is disabled by default; enable local
-management, remote management and raw URL calls independently on an endpoint with
-an explicit existing `wallet`. Optional `source_registry_file` enables persistence.
-Agent tools cannot change configured API sources, wallet settings or spending
-limits. See [configuration and authority](docs/agent-sources.md#configuration-and-authority)
+Provider management lets agents search bundled providers,
+[x402 List](https://x402-list.com), and Coinbase's resource directory, then
+register APIs on their endpoint. It is off by default; enable local management,
+remote management, and raw URL calls independently on any endpoint that names a
+`wallet`, and set `source_registry_file` if registrations should survive
+restarts. Agent tools cannot modify configured sources, wallet settings, or
+spending limits. See
+[configuration and permissions](docs/agent-sources.md#configuration-and-authority)
 and the [agent tool table](docs/agent-sources.md#agent-tools).
 
 ## Packaged stack
 
 [Private Hermes](https://github.com/mikeperry-tor/private-hermes-agent) packages
-Hermes Agent, Tor-routed egress, confidential inference, a code executor and this
-project with Docker Compose. It ships its own copy of `research_desk.toml` and its
-own version pins. See the [README deployment choices](README.md#choose-a-deployment)
-for its requirements and support boundary.
+Hermes Agent, Tor-routed egress, confidential inference, a code executor, and
+`x402_treazury` for Docker Engine 28+ or rootless Podman 5.4+ on Linux with
+Compose 2.36+. It builds from a pinned `x402_treazury` revision and renders
+upstream `examples/deployments/research_desk.toml` into local operator config,
+adjusting only `socks_endpoint`, `state_dir`, and `allowed_hosts`. See
+[README deployment choices](README.md#choose-a-deployment) for requirements and
+issue boundaries.
 
 ## Further references
 
-- [Wallet administration](docs/wallet-cli.md): bootstrap, funding failures, refunds, backup restoration and RPC configuration.
-- [Wallet rotation](docs/wallet-rotation.md): admission, reserve claims, retained capacity and recovery.
-- [Configuration](docs/configuration.md): TOML composition, listeners, source distribution, relay and direct swap control.
+- [Wallet administration](docs/wallet-cli.md): bootstrap, funding failures,
+  refunds, backups, and RPC settings.
+- [Wallet rotation](docs/wallet-rotation.md): payment selection, funding,
+  rotation, and recovery.
+- [Configuration](docs/configuration.md): TOML composition, listeners, source
+  distribution, relay fallback, and direct swap control.
 - [Provider caveats](providers/CAVEATS.md): current provider support boundaries.
 - [Live integration runbook](tests/live/INTEGRATION.md): bounded paid test runs.

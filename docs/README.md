@@ -1,104 +1,88 @@
 # Documentation
 
-The [project README](../README.md) is the entry point for setup.
-[Advanced deployments](../README_ADVANCED.md) cover the multi-listener examples,
-and the [usage guides](usage/configuration.md) explain configuration and commands
-in operator terms.
-Maintained implementation and operational references live here:
+Start with the [project README](../README.md) for initial setup,
+[advanced deployments](../README_ADVANCED.md) for multi-listener setups, and the
+[usage guides](usage/configuration.md) for operator-focused configuration and
+CLI walkthroughs.
+
+## Operator guides
 
 | Guide | Subject |
 | --- | --- |
-| [Configuration guide](usage/configuration.md) | Operator choices for listeners, sources, wallets, Tor and relay fallback |
-| [Command-line guide](usage/cli.md) | Setup, treasury management, inspection and recovery workflows |
-| [Advanced deployments](../README_ADVANCED.md) | Research desk and comprehensive walkthroughs, Tor and wallet bootstrap |
-| [Deployment examples](../examples/README.md) | Example choices, wallet groups, ports and source selections |
-| [Provider updates](provider-updates.md) | Public evidence and pricing capture, comparison and reviewed provider maintenance |
-| [Framework integration](framework-integration.md) | Catalog warming exit status/JSON, degraded serving and framework preparation/activation |
-| [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
-| [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
-| [Development](development.md) | Local checks, coverage and complexity tooling |
-| [Planning workflow](planning-workflow.md) | Active plans, independent review evidence, handoffs and completion with preserved Git history |
-| [Zingo integration](zingo-integration.md) | SDK boundaries, Pepper patches and adapted-code attribution |
-| [Architecture](architecture.md) | Catalog generation, [MCP output](architecture.md#mcp-and-output-boundaries), execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
-| [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, [automatic retirement](wallet-rotation.md#automatic-retirement), funding and recovery |
-| [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
-| [Local resource limits](local-resource-limits.md) | Existing failure thresholds, cache lifetimes and maintenance cadence for troubleshooting |
-| [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling and evidence |
-| [Agent sources](agent-sources.md) | Endpoint-local APIs, [manual raw headers](agent-sources.md#manual-raw-headers), wallet selection, dynamic tools and persistence |
-| [Testing](testing.md) | Offline checks, GitHub CI/octocov, coverage, consensus, Tor and funded qualification boundaries |
-| [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
-| [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
+| [Configuration guide](usage/configuration.md) | Operator choices for listeners, sources, wallets, Tor, and relay fallback |
+| [Command-line guide](usage/cli.md) | Setup, treasury management, inspection, and recovery workflows |
+| [Advanced deployments](../README_ADVANCED.md) | Research desk and comprehensive walkthroughs, Tor, and wallet bootstrap |
+| [Deployment examples](../examples/README.md) | Example choices, wallet groups, ports, and source selections |
+| [Public swap demo](public-swap-demo.md) | Bounded single-call qualification for treasury or static-wallet demos |
 
-[Direct swap control](configuration.md#direct-swap-control) describes opt-in first-party
-financial tools and listener ownership. The [Ironwood-only policy](zingo-integration.md#ironwood-only-policy)
-owns allowed Zcash pools, the narrow NEAR deposit exception and unavoidable SDK activity.
+## Technical references
 
-[Plans](plans/) describe unfinished work, including artifact storage,
+| Guide | Subject |
+| --- | --- |
+| [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, [direct swap control](configuration.md#direct-swap-control), provider compatibility, and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
+| [Architecture](architecture.md) | Catalog generation, [MCP output](architecture.md#mcp-and-output-boundaries), execution, ownership, and [wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation) |
+| [Agent sources](agent-sources.md) | Endpoint-local APIs, [manual raw headers](agent-sources.md#manual-raw-headers), wallet selection, dynamic tools, and persistence |
+| [Framework integration](framework-integration.md) | Catalog warming JSON, degraded coverage, and endpoint readiness |
+| [Wallet rotation](wallet-rotation.md) | [Best-effort rules](wallet-rotation.md#best-effort-wallet-rules), [observation](wallet-rotation.md#wallet-observation-policy), [funding safety](wallet-rotation.md#funding-and-source-safety), and [reconciliation](wallet-rotation.md#recovery-and-reconciliation-policy) |
+| [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration, and recovery |
+| [Zingo integration](zingo-integration.md) | [Ironwood-only policy](zingo-integration.md#ironwood-only-policy), [SDK boundaries](zingo-integration.md#application-sdk-boundaries), [refund receivers](zingo-integration.md#refund-receivers-and-seed-recovery), Pepper patches, and attribution |
+| [Network egress](network-egress.md) | Direct and Tor client factories, isolation identities, HTTP caching, timeouts, and SDK boundaries |
+| [Local resource limits](local-resource-limits.md) | Failure thresholds, cache lifetimes, and maintenance cadence |
+| [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling, and compatibility |
+
+## Maintenance, testing, and builds
+
+| Guide | Subject |
+| --- | --- |
+| [Provider updates](provider-updates.md) | Evidence and pricing capture, comparison, and provider maintenance |
+| [Provider policy and caveats](../providers/README.md) | Bundled provider policy and [support boundaries](../providers/CAVEATS.md) |
+| [Development](development.md) | Local checks, [portability](development.md#portability), logging, coverage, and complexity tooling |
+| [Testing](testing.md) | Offline checks, GitHub CI, coverage, consensus, Tor, and [qualification status](testing.md#qualification-status) |
+| [Live integration runbook](../tests/live/INTEGRATION.md) | Funded provider walkthrough and [technical reference](../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority) |
+| [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins, and vendored patch ownership |
+| [Vendor checkout tracking](../vendor/README.md#checkout-retirement-tracking) | Vendored patch provenance and checkout retirement blockers |
+| [Planning workflow](planning-workflow.md) | Active plans, independent review evidence, handoffs, and completion |
+
+## Plans and documentation policy
+
+[Active plans](plans/) track unfinished work that spans multiple stages or
+requires explicit design decisions, including
+[artifact storage](plans/artifact_storage.md),
 [custom pricing adapters](plans/custom-pricing-adapters.md),
-[discovery keywords and recommended tools](plans/discovery_improvements.md),
-[OpenAPI authentication](plans/openapi_authentication.md) and the
-[remaining vendor retirement assessments](plans/vendor_retirement.md).
-[Deferred swap timing assessment](plans/deferred/near_swap_timing_tightening.md)
-owns optional service-contract and recovery-duration questions. The achieved
-refund-address query-suppression contract and its regression coverage live in the
-[SDK guide](zingo-integration.md#refund-receivers-and-seed-recovery).
-[deferred release follow-ups](plans/deferred/release_followups.md) own Windows,
-Linux CI and the remaining focused review assessments.
-The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
-discovery, retained financial obligations and the choice between root recovery and
-discarding retired keys.
-Funding/source authority and indexer recovery are maintained in the
-[funding/source contract](wallet-rotation.md#funding-and-source-safety) and
-[SDK recovery guide](zingo-integration.md). Catalog construction and faithful
-request contracts live in [architecture](architecture.md#catalog-configuration-and-execution),
-[OpenAPI inputs](configuration.md#openapi-inputs-and-request-bodies) and
-[provider maintenance](provider-updates.md). Calculation ownership and lazy public
-proving parameters live in the [SDK boundary](zingo-integration.md#application-sdk-boundaries)
-and [wallet guide](wallet-rotation.md#funding-limits-and-fees).
-Dynamic registry build reuse, publication and read contracts live in
-[registration guidance](agent-sources.md#registration-and-tool-invocation) and
-[runtime architecture](architecture.md#catalog-configuration-and-execution).
-HTTP cache ownership is maintained in [network policy](network-egress.md), and
-qualification budgets and complete lifecycle snapshots in the
-[technical reference](../tests/live/INTEGRATION_REFERENCE.md#ownership-and-authority).
-The [storage assessment](plans/portability_fixes.md) retains the separate Unix
-namespace-authority question; implemented ACL privacy contracts belong in
-[development](development.md#portability) and [wallet administration](wallet-cli.md). Windows runtime work remains deferred by user decision.
-The maintained
-[checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
-removal blockers and upstream/candidate follow-up.
-The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
-describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
-funds, accepted-work recovery and Ironwood-only treasury authority. The
-[reconciliation policy](wallet-rotation.md#recovery-and-reconciliation-policy)
-requires repair from established facts and forbids redundant consistency gates
-that obstruct otherwise authorized progress. The
-[wallet observation policy](wallet-rotation.md#wallet-observation-policy) owns
-USDC/ZEC discovery triggers, recurring cadence, stop rules and accepted-work
-exceptions.
-The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
-[testing](testing.md#qualification-status) states qualification limits.
-[Deferred plans](plans/deferred/) cover polling,
-mutation testing, cover shaping, broader lifecycle/cover acceptance, managed
-wallet extensions, [optional Zcash Tor read recovery](plans/deferred/zcash_tor_read_recovery.md)
-and [Coinbase bundle access](plans/deferred/coinbase_bundles.md).
-Plans grant no execution or spending authority.
+[discovery improvements](plans/discovery_improvements.md),
+[OpenAPI authentication](plans/openapi_authentication.md),
+[portability assessments](plans/portability_fixes.md),
+[seed-based wallet recovery](plans/seed_based_wallet_recovery.md),
+[vendor retirement](plans/vendor_retirement.md), and
+[wallet merge sweeping](plans/wallet_merge_sweeping.md).
 
-When implemented, move useful explanations into maintained guides, retain concrete
-unfinished work in a focused plan, fix links and remove the completed plan. Do not
-keep an implemented-plan archive. Preserve plans in Git history through integration;
-the [planning workflow](planning-workflow.md) describes their lifecycle and review.
-Generated reports, audit inventories and metrics
-belong in ignored local or private external storage. Commit durable findings rather
-than dated logs, balances, handoffs or report copies. Financial ledgers remain private
-and unchanged regardless of documentation cleanup.
+[Deferred plans](plans/deferred/) hold postponed work:
+[polling tools](plans/deferred/polling_tool_support.md),
+[mutation testing](plans/deferred/mutation_testing.md),
+[HTTP/2 cover traffic shaping](plans/deferred/http2_cover_traffic.md),
+[broader live acceptance](plans/deferred/live_integration_acceptance.md),
+[managed wallet follow-ups](plans/deferred/managed_wallet_followups.md),
+[swap timing tightening](plans/deferred/near_swap_timing_tightening.md),
+[optional Zcash Tor read recovery](plans/deferred/zcash_tor_read_recovery.md),
+[Coinbase bundle access](plans/deferred/coinbase_bundles.md),
+[stateless MCP subscriptions](plans/deferred/stateless-mcp-subscriptions.md), and
+[release follow-ups](plans/deferred/release_followups.md) (including deferred
+Windows runtime work).
 
-Accepted-valid unfinished review findings belong in focused active or deferred
-plans with a concrete next action and acceptance evidence, not lingering backlog
-paragraphs in maintained guides. Guides retain truthful current behavior and
-limitations with concise links until those findings are resolved. A rejected
-proposal needs durable rationale rather than a perpetual future-fix note. Moving
-work to a plan does not fix it, waive its release conditions or erase evidence.
-Plans describe work we intend to perform, including bounded assessments with a
-required decision. A hypothetical promise to revisit behavior only if a future bug
-appears is ordinary maintenance, not planned work.
+Follow these rules when updating documentation:
+
+- **Move completed work into maintained guides:** When a plan finishes, move
+  lasting explanations into the owning guide, keep any remaining concrete work
+  in a focused plan, update inbound links, and delete the completed plan file.
+  Git history preserves completed plans; do not keep an archive directory. See
+  [planning workflow](planning-workflow.md).
+- **Keep generated reports out of Git:** Store generated reports, audit
+  inventories, metrics, and private financial ledgers in ignored local paths or
+  private external storage. Commit durable findings as tests, configuration, or
+  maintained prose rather than dated logs or report copies. Documentation
+  cleanup never alters or deletes private financial ledgers.
+- **Keep guides current, not backlogs:** Track accepted unfinished findings in
+  an active or deferred plan with a concrete next step and acceptance criteria.
+  Maintained guides state current behavior and limitations, linking to a
+  plan only when work is genuinely scheduled. Document why a rejected proposal
+  was declined instead of adding perpetual revisit notes.

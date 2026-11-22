@@ -1,25 +1,26 @@
 # Bounded public-swap qualification
 
-The offline application and isolated consensus tests are the prerequisite; see
-[the lifecycle matrix](../tests/LIFECYCLE.md). Mainnet execution is a separate,
-explicitly funded test. Neither example starts funding by default.
+Run the offline application and isolated consensus tests first; see the
+[lifecycle matrix](../tests/LIFECYCLE.md). Mainnet execution is a separate,
+operator-funded test, and neither demo deployment enables auto-funding by
+default.
 
-For the broader two-pool provider qualification, use the
-[qualification scope](testing.md#qualification-status) and
-[funded integration runner](../tests/live/INTEGRATION.md). Its durable registry and budgets
-are separate from this single-call demonstration.
+For the broader multi-provider qualification runner, see
+[qualification status](testing.md#qualification-status) and the
+[live integration runbook](../tests/live/INTEGRATION.md), which use a separate
+registry and budget file.
 
 ## Choose the qualification scope
 
-| Funds supplied | What the test establishes |
+| Funds supplied | What the test verifies |
 | --- | --- |
-| A test EVM key holding USDC on Base | Real seller acceptance of the Rust x402 handshake. It does not exercise Zcash, NEAR or managed rotation. |
-| ZEC sent to the treasury's shielded receive address | Public NEAR ZEC → Base USDC funding of its configured small slot, then a real x402 payment. Promotion/refill can be qualified separately after approving additional paid calls. |
+| A test EVM key holding USDC on Base | Live seller acceptance of the Rust x402 handshake (does not exercise Zcash, NEAR, or managed rotation). |
+| ZEC sent to the treasury's shielded receive address | Public NEAR ZEC-to-Base-USDC funding of the small reserve slot, followed by one live x402 payment. Promotion and refill can be tested separately with additional approved paid calls. |
 
-Put keys, bearer tokens and credential-bearing RPC URLs in the launching process's
-environment. Do not paste a spending key or mnemonic into chat, TOML, logs or CLI
-arguments. Treasury funding needs only its shielded receive address; no seed or
-EVM private key needs to be shared.
+Pass keys, bearer tokens, and credential-bearing RPC URLs through environment
+variables in the launching process. Never paste spending keys or mnemonics into
+chat, TOML files, logs, or CLI arguments. Treasury funding needs only the
+printed shielded receive address.
 
 ## No-spend preparation
 
@@ -35,34 +36,31 @@ target/debug/x402_treazury catalog tools \
   --config tests/live/deployments/public-swap-demo.toml
 ```
 
-The example uses a committed request schema and exposes
-only `socialfetch_twitter_profiles_handle`. Inspection loads no wallet secrets and
-makes no vendor requests. These are configuration checks, not a promise that the
-live seller's current schema or price still matches the fixture.
+This deployment uses a committed request schema exposing only
+`socialfetch_twitter_profiles_handle`. These checks read no wallet keys and
+make no vendor requests.
 
-Optionally inspect a current public route without credentials or funds:
+To inspect a live public NEAR route without credentials or funds, run:
 
 ```sh
 make run CARGO_ARGS='--offline --example quote_near'
 ```
 
-Cargo's `--offline` only disables dependency fetching. This example makes a real
-**dry** NEAR quote request using public test addresses; it does not allocate a
-deposit or send funds. No application commission is configured. NEAR platform and
-route fees are reported as provider metadata; no local USD-overhead or commission
-metadata gate is applied.
+Cargo's `--offline` skips dependency downloads; the example still sends a live
+dry NEAR quote request using public test addresses without allocating a deposit
+or moving funds. NEAR platform and route fees appear in provider metadata, and
+no application commission or local USD overhead gate is applied.
 
 **Stop here until the operator supplies funds and approves live execution.**
-No funded mainnet swap or paid seller call is covered by the offline qualification.
 
 ## Treasury-funded test
 
-1. Supply `PUBLIC_DEMO_MCP_TOKEN` through the environment. `BASE_RPC_URL` is
-   optional; omitted values use the default RPC failover list. Zcash indexer and
-   submission endpoints default to `https://zec.rocks:443`, with optional overrides
-   in `[treasury]`. No Zcash environment variables are required.
-2. Copy the deployment before creating the treasury, so initialization and serving
-   use the same paths and network policy:
+1. **Set environment variables:** Export `PUBLIC_DEMO_MCP_TOKEN`.
+   `BASE_RPC_URL` is optional (omitting it uses the default Base RPC failover
+   list). Zcash endpoints default to `https://zec.rocks:443` and can be
+   overridden in `[treasury]`.
+
+2. **Copy the deployment and initialize the treasury:**
 
    ```sh
    cp tests/live/deployments/public-swap-demo.toml \
@@ -73,25 +71,26 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
      --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
-   Initialization discovers the mainnet tip and rewinds 100 blocks for the birthday.
-   It creates `state/public-demo/wallet.key` inside the owner-only wallet directory.
-   The treasury ID is discovered from state; there is no UUID to copy into TOML.
-   Anyone obtaining the complete directory obtains both wallet state and its key.
-   An external `treasury.key_file` remains available when separate storage is needed.
+   `wallet init` looks up the mainnet tip, rewinds 100 blocks for the wallet
+   birthday, and creates `state/public-demo/wallet.key` inside the owner-only
+   state directory (set `treasury.key_file` to store the key outside that
+   directory). The treasury ID is stored in state and discovered automatically.
+   Anyone who can read the state directory has both state and key.
 
-   If this treasury already exists, skip `init` and use `addresses`; initialization
-   never overwrites it. An explicit `--birthday HEIGHT` keeps new initialization
-   offline. Seed imports require `--mnemonic-file FILE --birthday HEIGHT`, using a
-   height at or before the original wallet's first use. Lookup failure creates no
-   wallet state. Local copies are gitignored. Keep `auto_fund = false` and the
-   reviewed retirement tolerance at zero. Pausing new funding does not disable
-   independently eligible automatic retirement; zero tolerance requires exact
-   confirmed and latest zero balances plus cleared financial obligations.
+   - If the treasury already exists, skip `wallet init` and run
+     `wallet addresses` (`wallet init` never overwrites an existing treasury).
+   - Pass `--birthday HEIGHT` to initialize offline, or
+     `--mnemonic-file FILE --birthday HEIGHT` to import a seed (using a height
+     at or before the wallet's first use). A failed lookup creates no state.
+   - Keep `auto_fund = false` until step 6, and keep
+     `max_retirement_remainder_usdc` at zero (pausing auto-funding does not
+     disable automatic retirement of zero-balance wallets with cleared
+     obligations).
+   - To route through Tor instead of direct networking, copy the `[network]`
+     table from `examples/network/tor.toml` into the local deployment before
+     initializing or syncing, and start Tor first.
 
-   This demo defaults to direct networking. For Tor, add the `[network]` table from
-   `examples/network/tor.toml` to the local deployment before initialization or sync,
-   and start Tor on its configured SOCKS port.
-3. Back up the newly initialized state and key before funding:
+3. **Back up the treasury before funding:**
 
    ```sh
    mkdir -p secrets
@@ -101,19 +100,17 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
      --destination secrets/public-demo-backup
    ```
 
-   The backup directory must not exist. Store it securely; it contains spending
-   material. Never run the original and restored copy concurrently.
-4. Provide the printed **shielded** receive address to the operator. Agree on the
-   ZEC amount using a fresh quote for one $2-$3 nominal USDC deposit, including
-   source fees and any later replacement permitted by the run authority.
-   There is no separate per-transfer ZEC spending budget. Actual spendable treasury
-   funds and the SDK-calculated transaction fee govern the transfer. No shielding,
-   application fee ceiling or USD conversion-overhead gate is used. A preview is
-   advisory and does not promise that a route will remain available. The separate reviewed qualification
-   manifest/registry limits new funding jobs and API payment authorizations, not
-   ZEC spending. `total_test_budget_usdc` counts API authorizations only; retain
-   `auto_fund=false` unless the explicit run authorization permits funding.
-5. After the operator transfers ZEC, sync and inspect the treasury:
+   The destination directory must not exist. Protect the backup as spending
+   material, and never run the original and restored copies concurrently.
+
+4. **Fund the shielded receive address:** Give the operator the printed
+   shielded receive address and agree on a ZEC amount from a fresh quote for
+   one $2-3 nominal USDC deposit, plus Zcash network fees and any planned
+   replacement. Spendable treasury ZEC and SDK-calculated transaction fees
+   govern the transfer; there is no separate per-transfer ZEC budget or
+   USD overhead gate.
+
+5. **Sync and verify spendable ZEC:**
 
    ```sh
    target/debug/x402_treazury wallet sync \
@@ -122,65 +119,64 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
      --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
-   Require a fresh ready sync and enough confirmed shielded spendable balance for
-   bootstrap. Pending deposits/change do not qualify. Close administration commands
-   before serving; the treasury has one exclusive owner.
-6. Only after reviewing the resolved configuration and spend caps, set
-   `funding.auto_fund = true` in the local copy and serve:
+   Confirm a fresh sync with enough confirmed shielded spendable balance
+   (pending deposits and unconfirmed change are not spendable). Close wallet
+   CLI commands before starting `serve`.
+
+6. **Enable funding and start serving:** After reviewing the resolved config
+   and spend caps, set `funding.auto_fund = true` in the local deployment copy
+   and start `serve`:
 
    ```sh
    target/debug/x402_treazury serve \
      --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
-   Start with no MCP clients issuing tool calls. Observe the configured small-slot
-   funding job, source confirmations and independent Base credit through
-   `wallet status`. For this demo, wait for complete configured inventory: one
-   READY wallet with a first positive USDC credit after its selected $2-$3 nominal
-   size. Readiness does not require the nominal amount or a particular midpoint.
-   Ordinary serving can begin with one eligible funded payer; that does not satisfy
-   this stronger demo inventory gate. NEAR SUCCESS alone is insufficient.
-7. Connect an MCP client to `http://127.0.0.1:8000/mcp` using the bearer token.
-   Initialize and list tools first. Make **one** approved profile lookup with
-   `socialfetch_twitter_profiles_handle` and a `handle` argument. The per-payment
-   cap is **$0.05**. Record seller acceptance and verify the payment authorization
-   later reconciles against Base. A tool response alone is not a settlement proof.
-8. Stop with SIGINT/SIGTERM, inspect status, and make a new backup. Keep the test
-   within its separately reviewed run authority; UTC rollover grants no new authority.
-   Do not leave automated clients or unattended funding running after the test.
+   Start without MCP clients connected. Watch `wallet status` for the small-slot
+   funding job, source confirmations, and Base USDC credit. Wait for one `READY`
+   wallet with a positive Base USDC balance (`NEAR SUCCESS` alone is not enough,
+   and readiness does not require the exact nominal target).
 
-The first test funds the configured small slot and proves one paid call. It does
-not deliberately spend the active wallet's selected nominal amount to demonstrate
-rotation. The offline lifecycle test
-covers promotion and refill. To qualify that on mainnet, separately agree on useful
-paid calls and their aggregate cost; observe confirmed depletion, promotion to the
-existing READY address, and exactly one new replacement address/funding job. Never
-edit balances, force readiness, export managed keys or fabricate chain evidence to
-trigger a demonstration.
+7. **Run one approved paid call:** Connect an MCP client to
+   `http://127.0.0.1:8000/mcp` with `PUBLIC_DEMO_MCP_TOKEN`, call `initialize`
+   and `tools/list`, then make **one** lookup with
+   `socialfetch_twitter_profiles_handle` and a `handle` argument. The
+   per-payment cap is **$0.05**. Record seller acceptance and verify that the
+   payment reconciles on Base afterward.
+
+8. **Stop and back up again:** Stop with `SIGINT` or `SIGTERM`, inspect
+   `wallet status`, and create a fresh backup. Do not leave automated clients
+   or unattended funding running after the test.
+
+This single-call test verifies funding and one paid call; it does not spend
+down the wallet to trigger rotation (offline lifecycle tests cover promotion
+and refill). To test rotation on mainnet, separately approve useful paid calls
+and their total cost, then observe depletion, promotion to the `READY` wallet,
+and one replacement funding job. Never edit balances, force readiness, export
+managed keys, or fabricate chain state.
 
 ## Funded EVM-key alternative
 
-Use `tests/live/deployments/public-payment-demo.toml` with `PUBLIC_DEMO_EVM_PRIVATE_KEY` and
-`PUBLIC_DEMO_MCP_TOKEN` in the environment. The key must hold USDC on Base; this
-exact EIP-3009 test does not require Permit2 approval. Inspect with `config show`
-and `catalog tools`, then start serving and perform only the single approved call
-as described above. The $0.05 cap applies per payment. Stop immediately afterward.
-This qualification cannot substitute for the treasury-funded test.
+Use `tests/live/deployments/public-payment-demo.toml` with
+`PUBLIC_DEMO_EVM_PRIVATE_KEY` and `PUBLIC_DEMO_MCP_TOKEN` exported. The key
+must hold Base USDC (this exact EIP-3009 call does not need Permit2 approval).
+Run `config show` and `catalog tools`, start `serve`, make the single approved
+call (capped at $0.05), and stop immediately. This test verifies only the x402
+handshake, not treasury funding.
 
 ## Failure and recovery
 
 | Observation | Action |
 | --- | --- |
-| Quote rejected, route unavailable or rate limited | Inspect the sanitized job error. Bounded retries/backoff are automatic; do not silently relax caps or select a confidential mode. |
-| Insufficient spendable shielded balance | Keep the active EVM wallet usable; fund/sync under the reviewed run authority. No signed operation is created by this wait. |
-| Swap timeout | The local health threshold marks pool status degraded; reconciliation continues at its existing cadence with the same operation. This does not establish a provider timeout. Do not issue another deposit. |
-| Ambiguous source submission | Stop serving before `wallet reconcile --config FILE --operation-id UUID`. `--rebroadcast` explicitly permits only the same bytes while still valid. |
-| Expired source transaction | Use `wallet recover-expired`; it requires canonical synced unspent-input evidence. Refused recovery keeps the reservation. Never delete its journal. |
-| Failed/refunded swap | NEAR `FAILED` does not prove no receipt; `REFUNDED` is a provider claim, not an on-chain return. The SDK discovers owned return outputs and determines spendability. Only actual Ironwood returns are supported capital. Transparent-input shielding is unsupported; never issue a new shielding operation or replacement deposit for a provider refund report. A refund does not authorize another deposit. |
-| Interrupted preparation with no signed bytes | `wallet recover-unprepared` archives old bindings and creates a fresh operation identity. It refuses every operation with signed bytes. |
-| Reorg of accounted source spend/refund/expiry evidence | Treasury readiness fails closed; retain state and investigate. Do not reset consumed accounting or run a restored copy alongside the original. |
+| Quote rejected, route unavailable, or rate limited | Inspect the sanitized job error. Bounded retries with backoff run automatically; do not relax caps or switch confidentiality modes. |
+| Insufficient spendable shielded balance | Active EVM wallets stay usable. Fund and sync under operator approval; waiting creates no signed transaction. |
+| Swap timeout | The health threshold marks pool status degraded while reconciliation keeps polling the same operation. Do not issue a second deposit. |
+| Ambiguous source submission | Stop `serve` and run `wallet reconcile --config FILE --operation-id UUID`. Pass `--rebroadcast` only to resubmit the same signed bytes before expiry. |
+| Expired source transaction | Run `wallet recover-expired`, which requires synced unspent-input evidence. If recovery refuses, keep the reservation and never delete its journal. |
+| Failed or refunded swap | `FAILED` and `REFUNDED` are provider statuses, not on-chain proof; wait for the SDK to observe any Ironwood return output and determine spendability. Never shield transparent inputs or issue a replacement deposit based solely on provider status. |
+| Interrupted preparation without signed bytes | Run `wallet recover-unprepared` to archive old bindings and open a fresh operation ID. It refuses any operation that already has signed bytes. |
+| Reorg affecting recorded spend, refund, or expiry | Treasury readiness fails closed. Keep state intact and investigate; never reset accounting or run a restored backup alongside the original. |
 
-Keep private diagnostics and backups local. Public-swap confidentiality, funded
-routing, seller acceptance and spend limits must be described as actually observed;
-do not claim confidential unlinkability or successful mainnet settlement from
-fixtures or a dry quote.
+Keep private diagnostics and backups local, and report confidentiality,
+routing, seller acceptance, and spend results based only on what the run
+observed.

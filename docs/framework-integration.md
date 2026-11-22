@@ -1,60 +1,65 @@
 # Framework integration
 
-Treat catalog preparation, financial bootstrap, MCP availability and successful API
-execution as separate results. Catalog preparation can finish with reduced coverage;
-a running process or a successful MCP handshake does not establish complete coverage,
-available funds or a working paid API.
+Frameworks that wrap `x402_treazury` should treat catalog preparation,
+financial bootstrap, MCP listener availability, and API call success as
+independent states. Catalog preparation can complete with partial coverage, and
+a healthy MCP handshake means the listener is reachable rather than that all
+catalogs loaded or wallets are funded.
 
 ## Catalog preparation
 
-Run `catalog warm --config FILE` under the deployment's existing network and payment
-authority. See [warming configuration](configuration.md#warming-a-selected-source-including-directly-for-a-tor-deployment)
-for source selection, cache behavior and the explicit unsigned `--direct` option.
-Configured relay warming may pay; warming never starts listeners or funding workers.
+Run `catalog warm --config FILE` under the deployment's network and payment
+configuration. See
+[catalog warming](configuration.md#warming-a-selected-source-including-directly-for-a-tor-deployment)
+for source selection, caching, and `--direct`. Warming never starts listeners
+or funding workers, though relay fallback may make paid calls when configured.
 
-A valid warming command consumes every independent selected source result. Exhausted
-remote acquisition failures, rejected remote documents, unsupported operations and
-remote inventory changes are reported without dropping healthy sibling work. A
-compatible partial catalog may be accepted; wholly unsupported or invalid replacement
-documents cannot replace or renew previously accepted cache state or learned prices.
-Optional pricing failure leaves usable API definitions available with unknown prices.
+Each selected source runs independently: remote fetch failures, invalid remote
+documents, unsupported operations, and upstream inventory changes are reported
+per source without aborting healthy siblings. A compatible partial catalog can
+be accepted, whereas an invalid or wholly unsupported replacement cannot
+overwrite an existing cached snapshot or learned prices. If optional external
+pricing fails, valid API tools remain available with unknown prices.
 
-| Result | Exit status | Completed JSON |
+| Result | Exit status | Stdout JSON |
 | --- | --- | --- |
-| Every selected source is usable without reported degradation | 0 | `outcome: "ok"` |
-| Attempts finish with unavailable sources, omissions, missing selections, unavailable pricing or incomplete cache storage | 0 | `outcome: "degraded"` |
-| Invalid local configuration, required initialization failure, cancellation, internal worker failure or failure to write the final JSON | Nonzero | No completed-success summary |
+| Every selected source is ready with no degradation | `0` | `outcome: "ok"` |
+| Attempts finished with unavailable sources, omitted operations, unmatched selectors, missing pricing, or incomplete cache writes | `0` | `outcome: "degraded"` |
+| Invalid local config, failed required initialization, cancellation, internal worker failure, or JSON write failure | Nonzero | None |
 
-All selected remote sources may be unavailable and still produce a completed,
-degraded zero exit. Zero means the requested attempts finished; it does not guarantee
-cache persistence, complete tool coverage or future availability. Strict inspection
-and qualification retain their completeness requirements.
+A run where every remote source is unreachable still exits `0` with
+`outcome: "degraded"`, because exit `0` means the requested warming pass
+completed. Strict inspection (`catalog tools`, `config check`) and
+qualification keep their completeness checks and fail on missing tools.
 
-Preflight rejects malformed configuration/selectors, unknown selected source IDs,
-selected cache opt-outs, invalid network settings and missing required state or
-wallet authority. Unsupported-operation omissions are coverage results for local
-and remote catalogs; local read, malformed document, structural-safety and
-configuration failures remain fatal even when found
-during execution; sibling work already started is drained before returning the
-failure. Shutdown stops unsigned acquisition and drains accepted paid work before
-closing its financial owner. No new retry, direct fallback or whole-work deadline
-is implied by a degraded result.
+### Preflight and error handling
 
-Ordinary serving and warming accept empty selections for local and remote catalogs.
-Missing names, missing tags, contradictory name filters and empty opted-in advice
-select no additional tools; they report reduced coverage instead of failing
-preparation or endpoint selection. Selector syntax and field types remain validated.
-Strict inspection and qualification retain inventory and completeness checks.
+Preflight rejects malformed configuration or selectors, unknown source IDs,
+cache opt-outs on selected sources, invalid network settings, and missing
+required state or wallet configuration. During execution:
+
+- **Unsupported operations** are recorded as per-source omissions for both
+  local and remote catalogs.
+- **Local fatal errors** (unreadable local files, malformed local documents,
+  structural-safety violations, and invalid config) fail the command after
+  draining any sibling work already in flight.
+- **Shutdown** cancels unsigned fetches and drains in-flight paid relay calls
+  before closing the wallet owner.
+
+Both `serve` and `catalog warm` accept empty tool selections for local and
+remote catalogs: missing tool names, missing tags, contradictory name filters,
+and empty opted-in `recommended_tools` report reduced coverage without
+broadening filters. Selector syntax and field types are still validated.
 
 ## Warming JSON
 
-Stdout contains one JSON document; diagnostics go to stderr. `direct` is a boolean,
-`outcome` is `ok` or `degraded`, and `sources` contains exactly one result for each
-selected authored source ID, sorted by ID.
-The default INFO logs report warming start, per-source results and completion.
-Completion includes an `ok` or `degraded` outcome after accepted relay work drains
-and wallet cleanup succeeds. `RUST_LOG` overrides the default filter; fetch and
-cache details remain DEBUG.
+Stdout emits one JSON document and stderr carries logs. The top-level fields
+are `direct` (boolean), `outcome` (`"ok"` or `"degraded"`), and `sources` (one
+entry per selected source ID, sorted by ID).
+
+Default `INFO` logs report warming start, per-source outcomes, and completion
+(after paid relay calls drain and wallet cleanup finishes). `RUST_LOG`
+overrides the default filter; fetch and cache details log at `DEBUG`.
 
 ```json
 {
@@ -80,127 +85,162 @@ cache details remain DEBUG.
 }
 ```
 
-Each source has `source` and `status`. Other fields are present when applicable;
-empty omission and selection-notice arrays are omitted.
+### Source entry fields
+
+Every source entry includes `source` and `status`. Optional fields appear only
+when populated (empty `omissions` and `selection_notices` arrays are omitted):
 
 | Field | Meaning |
 | --- | --- |
-| `status: "ready"` | Usable source without omitted operations or missing selections. Pricing/cache degradation may still make the overall outcome degraded. |
-| `status: "partial"` | Usable tools remain alongside `omissions` or `selection_notices`. |
-| `status: "unavailable"` | Acquisition failed or selection leaves no tools. A rejected acquisition has `failure` and omits `catalog_cache` and `pricing`. |
-| `catalog_cache` | State of accepted storage after the attempt: `fresh`, `fresh_via_relay`, `requires_revalidation`, `not_stored` or `local_file`. An unavailable source can retain an earlier accepted snapshot; this field does not certify the new candidate. |
-| `omissions` | Objects containing `method`, `path` and a fixed `reason` for each unsupported selected operation. Unavailable sources can also report omissions without accepting an unusable replacement. |
-| `selection_notices` | Objects containing the authored `setting` and missing `selector`; no unrestricted tool fallback is authorized. |
-| `failure` | Safe acquisition failure metadata described below. |
-| `pricing` | Optional pricing result with `status` and, on failure, `failure`. |
+| `status: "ready"` | Source is ready with no omitted operations or unmatched selectors. Pricing or cache issues can still make the overall `outcome` degraded. |
+| `status: "partial"` | Source has callable tools alongside `omissions` or `selection_notices`. |
+| `status: "unavailable"` | Fetch failed or filtering left zero tools. Failed fetches include `failure` and omit `catalog_cache` and `pricing`. |
+| `catalog_cache` | Storage state after the pass: `fresh`, `fresh_via_relay`, `requires_revalidation`, `not_stored`, or `local_file`. An unavailable source may still have an older cached snapshot on disk. |
+| `omissions` | Objects with `method`, `path`, and `reason` for each unsupported operation that matched selection. Unavailable sources can also report omissions when rejecting an invalid replacement. |
+| `selection_notices` | Objects with `setting` and unmatched `selector`. |
+| `failure` | Sanitized fetch or processing failure object. |
+| `pricing` | Pricing result with `status` and optional `failure` or `catalog_cache`. |
 
-`requires_revalidation` and `not_stored` degrade the summary without making usable
-definitions unavailable. A stored document is not evidence that its API works.
-`fresh_via_relay` describes catalog storage provenance, not a promise about future
-relay availability. Cache lifetimes and acceptance are owned by
-[configuration](configuration.md#automatic-discovery-disk-cache).
+`requires_revalidation` and `not_stored` mark the overall `outcome` as
+`degraded` while keeping valid tool definitions available. Cache lifetimes and
+validation rules live in
+[automatic discovery disk cache](configuration.md#automatic-discovery-disk-cache).
 
-Pricing statuses are `not_configured`, `catalog` (advertisements embedded in the
-accepted catalog), `ready` (external metadata processed successfully) and
-`unavailable`, plus `not_attempted` when the source has no eligible API tools.
-External pricing with `ready` also reports its independent `catalog_cache` using
-the same storage vocabulary as catalogs. `not_stored` or `requires_revalidation`
-degrades the summary even when pricing metadata was valid. `ready` does not mean
-every tool has an advertised price. Matching
-ambiguities and absent records leave prices unknown; runtime challenges determine
-actual payment requests. Pricing failure never changes a usable source to
-`unavailable`.
+### Pricing statuses
 
-Omission `reason` values are `cookie_parameter`, `parameter_serialization`,
-`request_media`, `input_reference`, `input_schema`, `schema_reference_siblings`,
+`pricing.status` is one of:
+
+- `not_configured`: no pricing source configured.
+- `catalog`: price hints embedded in the accepted catalog.
+- `ready`: external pricing metadata processed (also includes its own
+  `catalog_cache` field; `not_stored` or `requires_revalidation` degrades the
+  overall outcome). Matching gaps simply leave individual tool prices unknown;
+  runtime x402 challenges determine charges.
+- `unavailable`: optional pricing fetch or parse failed (never makes a working
+  source `unavailable`).
+- `not_attempted`: the source produced no eligible API tools.
+
+### Omission reasons and selection notices
+
+Omission `reason` codes describe compatibility issues without upstream error
+text: `cookie_parameter`, `parameter_serialization`, `request_media`,
+`input_reference`, `input_schema`, `schema_reference_siblings`,
 `header_contract`, `header_name`, `header_reserved`, `header_missing_name`,
-`header_duplicate`, `header_serialization`, `idempotency_key_schema` and
-`header_argument`. They describe compatibility, without upstream error prose.
-Selection notices identify provider/distribution settings such as `include_tools`,
-`recommended_tools`, `operation_filters` and `send_tools`. `tool_filters` with
-selector `*` reports an empty filtered inventory without a specific missing
-positive selector. The selector remains an
-identity, not evidence that an unrestricted tool was selected.
+`header_duplicate`, `header_serialization`, `idempotency_key_schema`, and
+`header_argument`.
 
-A failure contains `stage`, stable machine-readable `reason`, authored display
-`message` and optional numeric `http_status`. Branch on codes/statuses, not message
-text. Catalog stages are `headers`, `body`, `local_read`, `parse`, `configuration`,
-`generation`, `selection` and `publication`; remote relay failures without a more
-specific document stage use `acquisition`. Optional pricing also uses `pricing`
-when acquisition supplied no more specific stage. Local fatal errors do not become
-completed source failures merely because this vocabulary can describe them.
+`selection_notices` identify settings such as `include_tools`,
+`recommended_tools`, `operation_filters`, and `send_tools`. A `tool_filters`
+notice with selector `*` indicates that filters produced an empty inventory
+with no single missing positive selector.
 
-The shared failure codes are `http_status`, `download_limit`,
-`unsupported_operations`, `incomplete_document`, `connection_timeout`,
-`response_inactivity`, `connection_failed`, `request_failed`, `local_read_failed`,
-`invalid_json`, `configuration_failed`, `generation_failed`, `selection_failed`,
-`publication_failed`, `body_failed` and `acquisition_failed`. Optional pricing can
-also report `pricing_document_invalid` or `pricing_inventory_unavailable`.
-Authored reference-validation codes, where applicable, are
-`external_reference_unsupported`, `unresolved_reference` and
-`cyclic_reference_unsupported`. Relay acquisition preserves existing safe reason codes: `tls_failure`,
-`read_inactivity`, `connection`, `body`, `decode`, `request_construction`,
-`transport`, `partial_response`, `incomplete_delivery`, `response_rejected`,
-`invalid_relay_envelope`, `catalog_complexity`, `catalog_parse`, `origin_request`,
-`target_payment_required`, `unsolicited_not_modified`, `unsupported_response`,
-`no_representable_relay`, `provider_unavailable`, `qualification_authority`,
-`funding_denied`, `payer_changed`, `unsupported_payment`, `price_limit`,
-`payment_pending`, `wallet_not_ready`, `funding_unavailable`,
-`payment_outcome_unknown`, `chain_recovery_required` and `payment_or_response`,
-as well as shared HTTP/timeout/limit codes. A source-specific relay payment
-refusal remains an acquisition result under existing authority; it grants no replay
-or increased payment allowance. Required wallet/authority initialization failures
-remain fatal before acquisition. Consumers should display unfamiliar codes safely
-alongside their message rather than reject an otherwise valid summary.
+### Failure stages and reason codes
+
+Each `failure` object contains `stage`, machine-readable `reason`, display
+`message`, and optional numeric `http_status`. Branch on `stage`, `reason`, and
+`http_status`, not on `message`. Display unrecognized reason codes safely
+alongside their `message` rather than rejecting the JSON summary.
+
+- **Stages:** `headers`, `body`, `local_read`, `parse`, `configuration`,
+  `generation`, `selection`, `publication`, `acquisition` (relay failures
+  without a finer document stage), and `pricing` (external pricing failures
+  without a finer stage). Local fatal errors fail the command rather than
+  appearing as completed source failures.
+- **Shared reason codes:** `http_status`, `download_limit`,
+  `unsupported_operations`, `incomplete_document`, `connection_timeout`,
+  `response_inactivity`, `connection_failed`, `request_failed`,
+  `local_read_failed`, `invalid_json`, `configuration_failed`,
+  `generation_failed`, `selection_failed`, `publication_failed`, `body_failed`,
+  and `acquisition_failed`.
+- **Pricing and reference codes:** `pricing_document_invalid`,
+  `pricing_inventory_unavailable`, `external_reference_unsupported`,
+  `unresolved_reference`, and `cyclic_reference_unsupported`.
+- **Relay reason codes:** `tls_failure`, `read_inactivity`, `connection`,
+  `body`, `decode`, `request_construction`, `transport`, `partial_response`,
+  `incomplete_delivery`, `response_rejected`, `invalid_relay_envelope`,
+  `catalog_complexity`, `catalog_parse`, `origin_request`,
+  `target_payment_required`, `unsolicited_not_modified`,
+  `unsupported_response`, `no_representable_relay`, `provider_unavailable`,
+  `qualification_authority`, `funding_denied`, `payer_changed`,
+  `unsupported_payment`, `price_limit`, `payment_pending`, `wallet_not_ready`,
+  `funding_unavailable`, `payment_outcome_unknown`, `chain_recovery_required`,
+  and `payment_or_response` (plus the shared HTTP, timeout, and limit codes). A
+  relay payment refusal stays a source failure; missing required wallet
+  initialization fails before acquisition.
 
 ## Framework preparation and activation
 
-Accept a zero exit with valid `ok` or `degraded` JSON as completed catalog
-preparation. Display unavailable sources, omissions, pricing and cache limitations;
-do not require a minimum source/tool count, all-ready statuses or fresh stored
-entries. Invalid JSON is a protocol failure. ERROR diagnostics identify source
-capability loss and do not independently imply process or endpoint failure.
+Follow these rules when orchestrating `x402_treazury` from an outer framework:
 
-Keep financial bootstrap separate. Catalog degradation does not erase a completed
-bootstrap, change wallet identity, reopen funding claims or invalidate accepted
-financial work. Preparation records describe historical completion, not current
-health.
+- **Accept degraded warming:** Treat exit `0` with valid `ok` or `degraded` JSON
+  as completed catalog preparation. Surface unavailable sources, omissions, and
+  pricing or cache warnings to the user instead of requiring 100% ready sources
+  or a minimum tool count. Treat invalid JSON as a protocol failure.
+- **Keep financial bootstrap separate:** Catalog degradation never resets
+  completed bootstrap state, changes wallet identities, reopens funding claims,
+  or invalidates pending financial work.
+- **Configure tolerant remote sources:** Set `allow_catalog_failure = true` on
+  remote sources that should not block endpoint startup during outages, while
+  keeping `wait_for_catalogs = true` so endpoints publish settled inventories.
+  An endpoint whose remote sources all fail can still serve `initialize` and
+  `tools/list` while explaining unavailable coverage in its MCP instructions.
+  Standalone `--provider` serving remains strict.
+- **Understand permissive selection in `serve`:** Both synchronous and deferred
+  catalog loads accept empty or partially filtered inventories without needing
+  `allow_catalog_failure` (which governs fetch and admission failures).
+  Filters and routing order stay intact, tool-name collisions still omit
+  conflicting bindings, empty-inventory notices stay visible in MCP
+  initialization instructions even when `instructions_text` is set, and
+  unmatched positive selectors or empty inventories emit `ERROR` diagnostics
+  after catalogs settle and when a replacement catalog publishes.
+  See [catalog startup](configuration.md#catalog-loading-and-listener-startup).
+- **Probe endpoints safely:** After starting `serve`, run authenticated MCP
+  `initialize` and `tools/list` probes on each endpoint; never use paid API
+  calls as health checks. Auth, listener, and protocol errors fail that
+  endpoint's activation, while unrelated MCP servers and the outer framework
+  stay available. Rely on CLI exit codes, JSON summaries, and MCP responses
+  rather than treating every `ERROR` log line as a fatal endpoint crash.
+- **Recognize terminal endpoint-failure logs:** Because `serve` stays alive
+  when one endpoint fails catalog startup or publishes invalid tool selections,
+  process exit status alone does not report single-endpoint failures. Non-fatal
+  `ERROR` logs (such as permissive-selection notices or transient Tor SOCKS
+  waits) keep serving, whereas these two `ERROR` messages identify terminal
+  endpoint unavailability requiring configuration repair and a restart:
+  - `MCP endpoint unavailable; catalog startup failed; correct the reported cause and restart`
+  - `MCP endpoint tools are unavailable because its tool selection is invalid; correct the configuration and restart`
+- **Never auto-retry financial or network changes on failure:** On an
+  interrupted or failed step, do not automatically rerun `wallet bootstrap` or
+  potentially paid `catalog warm`, switch from Tor to direct mode, rotate
+  wallets, delete state or caches, or raise spend caps. Preserve financial
+  state and let `x402_treazury`'s own draining and recovery handle in-flight
+  work.
 
-For deployments that should retain remaining tools through remote outages, opt
-remote sources into `allow_catalog_failure = true`. Retain `wait_for_catalogs = true`
-when endpoints should publish their settled available inventory. Required sources
-retain their stricter readiness choice. An otherwise valid endpoint emptied by
-remote loss can initialize and list tools, while explaining unavailable coverage.
-Standalone single-provider serving retains its separate strict startup boundary.
-Ordinary deployment serving applies the same permissive selection policy to
-synchronous and deferred loads, local and remote catalogs. The source flag controls
-acquisition/admission failures; accepted catalogs publish their available selection,
-even when empty or wholly unsupported, without requiring the flag. It does not hide API call errors
-or authorize retries.
+## Offline inspection and container runtime
 
-Missing endpoint inclusion and distribution names, missing operation tags and
-empty intersections retain their authored filters and routing order. No namespace
-ownership inference or typo detection gates ordinary serving or warming. Shared
-or nested prefixes do not make an absent name fatal; actual tool-name collisions
-still omit every conflicting binding. An empty static inventory is visible in
-initialization instructions even with custom instructions. Unmatched positive
-selections and empty endpoint inventories emit ERROR diagnostics after their
-catalogs settle or a replacement is published; these describe reduced coverage,
-not endpoint failure. No inventory history is required to distinguish a typo from
-provider drift. Inspection and qualification remain strict.
-See [catalog startup](configuration.md#catalog-loading-and-listener-startup)
-for endpoint readiness settings.
+Frameworks commonly inspect state before starting `serve` using
+`X402_TREAZURY_CONFIG` (or `--config FILE`):
 
-After starting serving, probe authenticated MCP initialize/list on every configured
-endpoint. Authentication, listener and protocol failures still fail the affected
-activation. Do not call paid APIs as readiness probes. Preserve unrelated MCP
-registrations and keep the framework available when its treasury integration is
-unavailable. Use native command results and actual endpoint responses; do not treat
-every ERROR log line as a terminal endpoint event.
+- `config show` emits JSON by default (exposing resolved `network`, `treasury`,
+  `servers`, `wallets`, `wallet_bootstrap`, and `base_rpc_policy`).
+- `build-info` emits JSON by default (`source_revision`, `source_dirty`, and
+  build metadata).
+- `wallet status --json` reads public SQLite metadata without opening
+  `key_file` or decrypting the Zcash snapshot. Follow it with `wallet addresses`
+  (JSON by default) when you also want to verify encrypted snapshot readability.
+- `wallet preview --json` emits `schema_version: 1` and exits nonzero if
+  `startup_conflicts` is nonempty.
 
-A failed, interrupted or missing result grants no replay authority. Do not
-implicitly rerun bootstrap or potentially paid warming, switch to direct egress,
-rotate wallets, delete state/caches or loosen payment limits. Retain the same
-financial state and native accepted-work draining/recovery. Integrations must build
-and package a treasury revision implementing this contract; preparation records
-alone cannot establish the behavior of a different executable.
+When packaging `x402_treazury` in a container:
+
+- **Writable `/tmp`:** Provide writable temporary space so offline wallet
+  inspection can reconstruct encrypted snapshots safely.
+- **`flock` and SQLite WAL support:** Mount `state_dir` on a filesystem that
+  supports `flock` advisory locks and SQLite WAL writer exclusion.
+- **Extended `SIGTERM` grace period:** Configure an extended or unbounded
+  container stop grace period so `SIGINT` and `SIGTERM` draining can finish
+  accepted Zcash transactions instead of being killed after a short default
+  timeout.
+- **Tor Unix sockets:** When connecting over a Tor Unix domain socket
+  (`socks_endpoint = "unix:/path"`), configure Tor's `SocksPort` with
+  `IsolateSOCKSAuth` (and `GroupWritable` and `RelaxDirModeCheck` as needed for
+  container user permissions).
