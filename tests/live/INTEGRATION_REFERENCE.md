@@ -1,67 +1,56 @@
 # Live integration reference
 
-Start with the [provider walkthrough](INTEGRATION.md). This reference describes
-case assertions, evidence interpretation and advanced execution safeguards.
+Start with the [provider walkthrough](INTEGRATION.md). This reference specifies
+case selection, content and cache assertions, fee and lifecycle evidence,
+child supervision, owned Tor confinement, and offline re-auditing.
 
-[Scenario presets](integration/SCENARIO_PRESETS.md) provide matching deployments
-for single-wallet smoke, shared/separate-wallet concurrency, rotation/refill,
-two-round lifecycle, treasury-only bootstrap, unsigned discovery and cross-day
-reliability. All calls and budgets are explicit and placeholders block execution.
-
-The [reviewed provider preset](integration/PROVIDER_PRESETS.md) supplies 63 explicit
-cases covering the established 23-provider baseline: paid requests, unsigned help
-fetch/hit pairs and a keyless directory call. Its placeholders prohibit execution
-until deployment, treasury, authority and windows are reviewed. It retains known
-body-quality failures and the AgentUtility manual-review gap.
+- [Scenario presets](integration/SCENARIO_PRESETS.md): single-wallet smoke,
+  shared and separate-wallet concurrency, rotation and refill, two-round
+  lifecycle, treasury-only bootstrap, unsigned discovery, and reliability.
+- [Provider preset](integration/PROVIDER_PRESETS.md): 63 explicit cases for the
+  23-provider baseline (22 paid requests, 40 unsigned help fetch and hit calls
+  across 20 help tools, and 1 unsigned directory call).
 
 ## Preset arguments and reviewed request bodies
 
-Preset arguments follow the exposed MCP tool schema. Arkham balance calls use
-`body = { address = "..." }` because the declared JSON body retains typed extra
-properties; AgentFund's yield-curve case uses `body = { days = 1 }` so an optional
-body remains distinct from no body. These wrappers preserve the original HTTP
-JSON payloads. The original 22-request review fixture remains unchanged, and
-offline tests compare the migrated calls' actual routed method, URL and body
-against it. Case identities, wallet scopes, allocations, rounds, API reservations
-and execution-blocking placeholders are unchanged. This migration grants no new
-funding, payment, replay or live-qualification authority.
+Preset arguments match the exposed MCP tool schemas (for example, Arkham uses
+`body = { address = "..." }` for open extra properties, and AgentFund uses
+`body = { days = 1 }` so an optional body stays distinct from no body). Offline
+tests compare routed methods, URLs, and JSON bodies against
+`tests/live/fixtures/provider_requests.json`.
 
 ## Case selection
 
-`select-cases` writes a new manifest from an already reviewed provider-sweep,
-unsigned or reliability manifest, without catalogs, wallet keys, registry access
-or requests. It resolves local TOML composition and validates both plans. Use a
-new run ID and an existing owner-only output directory:
+`select-cases` produces a narrower manifest from a reviewed provider-sweep,
+unsigned, or reliability manifest offline (no catalogs, wallet keys, registry
+access, or network calls). Use a new run ID and an existing owner-only output
+directory:
 
 ```sh
-cargo run --locked --example live_integration -- select-cases \
+target/release/examples/live_integration select-cases \
   --manifest private/reviewed.toml --run-id selected_providers \
   --source socialfetch --source brazilayer --exclude-flagged \
   --output private/selected.toml
 ```
 
-`--source` and `--case` include their union; with neither, all reviewed cases are
-candidates. `--exclude-source`, `--exclude-case`, `--exclude-reliability-tag` and
-`--exclude-flagged` then exclude matches. Names are exact, case-sensitive source
-IDs/case IDs/configured tags, never inferred from tool prefixes; typos fail. Tag
-names must occur on at least one source represented in the input manifest.
-The JSON output lists every omitted case and reason, removed empty phases, hashes
-and the selected reservation total. Preserve it with your review evidence.
-
-Selection preserves requests, assertions, case order, windows, all wallet/pool
-bindings, funding limits and registry authority. Empty output, removed dependencies,
-invalid reliability groups, and lifecycle/concurrency inputs fail. The output uses
-resolved absolute paths so moving the file does not silently change deployment
-inputs. It never overwrites files or resets registry reservations. Review `plan`
-and prepare/authorize the new run through the ordinary flow before execution.
-This filters **calls only**: unselected sources still load, and all declared
-managed pools retain their configuration. To exclude a
-provider from startup, author and review a separate deployment explicitly.
+- `--source` and `--case` form an inclusive union (omitting both starts from
+  all cases); `--exclude-source`, `--exclude-case`, `--exclude-reliability-tag`,
+  and `--exclude-flagged` remove matches. Names are exact, case-sensitive IDs
+  and tags (unknown names fail; excluded tags must appear on at least one input
+  source).
+- Rejects empty output, broken dependencies, and lifecycle or concurrency
+  manifests. Writes resolved absolute paths without overwriting files or
+  resetting registry reservations, and prints a JSON summary of omitted cases,
+  hashes, and selected reservation total.
+- Filters **cases only**: unselected sources still load at startup and all
+  declared wallet pools keep their configuration. To omit a startup source,
+  author a separate deployment removing both the source and its listener
+  references, then run `plan`.
 
 ## Provider content assertions
 
-Provider content is assessed separately from MCP delivery and payment settlement.
-Declare reviewed checks on each case when data semantics matter:
+Content checks evaluate provider semantics separately from MCP transport and
+Base settlement:
 
 ```toml
 [[cases.checks]]
@@ -74,72 +63,45 @@ pointer = "/degraded"
 value = false
 ```
 
-`text_contains` with a nonempty `text` is also supported, for example for a help
-document. JSON checks use one unambiguous JSON body from structured content or
-parsed MCP text blocks; identical copies are deduplicated. They do not parse
-arbitrary strings nested inside JSON as new documents. Multiple different JSON
-bodies or unsupported content yield `manual_review_required` for JSON checks.
-An object containing boolean `isError: true` anywhere in parsed JSON is an
-observed semantic failure, even if the outer MCP result succeeded. An ordinary
-`error` property has no automatic failure meaning. Use reviewed checks for
-provider-specific degradation indicators.
-
-Provider-sweep and reliability cases require declared content assertions to pass
-their semantic gate. Other scenarios retain their MCP/payment assertion scope
-when no provider checks are declared; detected nested errors still fail. Missing
-required content checks are incomplete, not successful. Failed/manual required
-checks block dependent phases, while independent phases continue. Reports evaluate
-the retained, hash-checked response without rewriting its original MCP result or
-payment state, including for older runs. Validated unused rotation suffixes remain
-not executed. Interpretation does not purchase a replacement call.
-
-Checks are bounded to 32 per case and 4096 serialized bytes each. Content scanning
-is bounded to 1000 MCP blocks, 100000 JSON nodes and 64 levels; a reached bound is
-explicitly reported as unassessed with the limit category, never silently clipped
-or treated as successful. Markdown shows safe categories without provider prose.
+- Also supports `text_contains` with nonempty `text`. JSON checks require one
+  unambiguous JSON body (deduplicating identical copies across structured
+  content and text blocks); multiple distinct JSON bodies or unsupported
+  content yield `manual_review_required`.
+- Any JSON object containing boolean `isError: true` anywhere in the parsed
+  tree is a semantic failure even when outer MCP succeeded (`error` fields have
+  no automatic failure rule).
+- Provider-sweep and reliability cases require declared content checks; failed
+  or manual required checks block dependent phases while independent phases
+  continue.
+- Bounds: at most 32 checks per case (4,096 serialized bytes each), 1,000 MCP
+  blocks, 100,000 JSON nodes, and 64 nesting levels. Exceeding a bound marks
+  the case unassessed with the limit category rather than clipping.
 
 ## Offers and fees
 
-Single-run reports include `fee_observations`: observed challenge offers, sampled
-admitted Base USDC amounts and independently verified canonical debits, with
-separate strict `> 10000` atomic ($0.01) flags. Challenge observations precede
-selection and therefore include rejected or unselected offers; they grant no
-payment authority. Historical admission events describe validation before financial admission commits or disclosure.
-Version 2 admission evidence uses `signed_admission_pending`: local signing and
-validation occurred, but the separate financial transaction may not have committed.
-Neither event proves submission or spending; missing correlation or canonical
-proof remains incomplete. Case charges survive a failed or uncertain financial
-commit and never authorize replay.
-Missing observations remain null; invalid application correlation withholds offer
-and admission amounts. These samples neither establish provider-wide maxima nor
-prescribe a minimum wallet size. Markdown uses anonymous case numbers.
+Single-run reports emit `fee_observations` recording challenge offers, admitted
+Base USDC amounts, and verified canonical debits, each with a strict `> 10000`
+atomic ($0.01) flag:
 
-Challenge capture records at most two observations per case (the initial challenge
-and a permitted unsigned payer-change retry), at most 65536 encoded header bytes
-and 128 offers per observation. Reaching a bound emits a warning and explicit
-report evidence, never a partial offer list. Duplicate/malformed headers and absent
-headers are separate outcomes. Headerless legacy body offers remain unobserved.
-Only amounts, fixed scheme/asset classifications and a header hash are retained;
-provider prose, extensions and payee addresses are omitted. Case/session/order
-checks bind observations to application claims before admission/completion. This
-instrumentation cannot select an offer, sign, retry payment or change reservations.
+- Challenge capture records up to 2 observations per case (initial challenge
+  plus an allowed unsigned payer-change retry), up to 65,536 encoded header
+  bytes and 128 offers per observation. Reaching a bound logs a warning and
+  records explicit report evidence rather than a partial list.
+- Retains only amounts, fixed scheme and asset classes, and a header hash (no
+  prose, extensions, or payee addresses). Headerless legacy v1 body offers
+  stay unobserved.
+- Version 2 admission evidence uses `signed_admission_pending` (local signing
+  and validation happened before the separate financial transaction committed);
+  case charges survive failed or uncertain commits without authorizing replay.
 
 ## Help cache assertions
 
-Unsigned help cases may set `help_cache = "fetch"`, `"hit"` or `"shared"`.
-Preparation verifies that the selected tool is actually a help tool. `fetch` means
-this call ran the initializer, `hit` means the cache was ready at invocation, and
-`shared` means an initially empty cache was populated by another call. A successful
-response with the wrong cache path fails the assertion. Missing completion or
-invalid correlation remains incomplete and blocks dependent phases. These checks
-are independent of optional content `checks` and never authorize another request.
-Instrumentation observes the production OnceCell initializer and actual payment
-challenges; it must not add probes or signed retries beyond the managed payment policy.
-Observe concurrent initialization directly rather than inferring a cache hit from
-successful output. Failed help initialization remains uncached.
-
-For example, add these reviewed cases and an unsigned phase to an existing
-manifest with a `main` window and a selected SocialFetch help tool:
+Unsigned help cases may declare `help_cache = "fetch"`, `"hit"`, or `"shared"`,
+observing the production `OnceCell` initializer directly (`fetch` ran the
+initializer, `hit` found a ready cache, `shared` waited on another caller).
+Failed downloads remain uncached; restarting the application starts a fresh
+cache. Reports record retrieval status, HTTP code, cache path, and byte count
+without URLs or document text.
 
 ```toml
 [[cases]]
@@ -174,1004 +136,292 @@ required = true
 kind = "unsigned"
 ```
 
-Sequential calls in this phase use the same process cache. Application restart
-or a new reviewed run starts a new cache; do not expect an old process's hit to survive.
-Concurrent `shared` behavior must be observed, not assumed from parallel dispatch.
-A failed download is not cached and a later separately reviewed case may fetch it;
-the driver does not replay the failed case. Reports retain retrieval status,
-HTTP failure code when available, cache path and output byte count without the
-document or URL. An interrupted lookup retains a start without a fabricated result.
-Help cache observations do not establish Tor isolation or connection reuse.
-
 ## Pricing and retained observations
 
-Catalog preparation, startup and warming do not query API endpoints for prices.
-Authored prices and credit conversion remain advisory; actual reviewed API calls
-supply challenge observations and validated runtime wallet-selection hints. No
-pricing manifest checks or startup pricing stage is required or generated.
-
-Reports retain historical `application_pricing` events as private raw evidence.
-Only the observation reader ignores the retired `pricing_checks` field in saved
-manifests; current manifest loading and execution reject it. Saved JSON, pins and
-financial events are not rewritten, and historical observations grant no replay.
+Catalog preparation, startup, and warming make no endpoint pricing probes.
+Current manifests reject the retired `pricing_checks` field (the observation
+reader still tolerates it in archived manifests alongside historical
+`application_pricing` events without rewriting saved evidence).
 
 ## Report output
 
-For a shareable offline summary of a single retained run:
-
 ```sh
-target/debug/examples/live_integration report --state-dir /private/state \
+target/release/examples/live_integration report --state-dir /private/state \
   --run RUN_ID --format markdown --output /private/new-report.md
 ```
 
-JSON remains the default and contains private evidence. Both formats use the same
-registry report, including validated canonical API debit amounts by case. Markdown
-uses numbered cases/assertions in JSON order and omits identifiers, addresses,
-transaction references, paths, credentials and provider content. It distinguishes
-selected-run charged reservations, registry-wide reservations and verified debit
-totals. Missing proofs are not zero-cost claims; invalid proofs suppress totals.
-Files publish atomically and cannot overwrite earlier evidence. Unknown statuses
-are visibly unclassified, and size/row bounds refuse the report without truncation.
-Tor/cover qualification and actual treasury fees/balances still require their own
-evidence; this projection does not assert overall suite success.
-
-Current plan JSON, report JSON and its nested `summary` use version 2. The report
-exposes the running API authorization budget and removes obsolete ZEC budget
-projections. Single-run JSON includes a `summary` built from the same validated facts
-used by the detailed report. Its provider rows keep catalog, help, execution, MCP
-success, provider semantics and canonical payment separate. Missing proof amounts
-are null, never zero. Empty or unavailable observations stay explicitly
-not-attempted, unobserved or incomplete.
-
-Markdown leads with the corresponding numbered provider-stage table and then the
-detailed accounting. Private identifiers and provider prose remain omitted. Older
-archives without full source inventories are labelled incomplete and show known
-case sources only. Source accounting is a saved observation; funding-job reservations
-bind allocation identity and count, not monetary exposure or fees. Lifecycle evaluation accepts the current schema-2 reserve model.
-The network field states direct, external proxy-only or owned-control-audit-required;
-use `audit-tor` for authenticated control evidence. Tor-only failures cannot establish
-Tor causation. Reporting makes no requests and grants no execution authority.
+- Plan JSON, report JSON, and nested `summary` use version 2, reporting the
+  running API authorization budget (no obsolete ZEC budget projections).
+- JSON (default) contains private evidence; Markdown uses numbered cases and
+  assertions in JSON order, leads with a numbered provider-stage table, and
+  omits IDs, addresses, transaction hashes, paths, credentials, and provider
+  prose.
+- Reports distinguish selected-run reservations, registry-wide reservations,
+  and verified Base debits; missing amounts stay `null`, invalid proofs
+  suppress totals, oversized reports fail without truncation, and existing
+  output files are never overwritten.
+- The network field classifies runs as direct, external proxy-only, or
+  owned-control-audit-required (use `audit-tor` for authenticated Tor control
+  evidence).
 
 ## Execution and existing-pool adoption
 
-`tests/live/live_integration.rs` provides offline planning and a durable registry.
-It prepares frozen catalogs and supervises registry-reviewed MCP cases through
-a pinned executable. Static deployments are strictly unsigned. Managed public-swap
-deployments may use existing funded wallets with zero new funding authority, or
-bootstrap from the treasury with explicit positive authority and `run --allow-funding`;
-the child installs registry checks before pool setup and records payment admission
-before financial admission commits or disclosure. MCP results alone leave settlement PENDING. The runner observes
-durable canonical authorization outcomes (USED or EXPIRED_UNUSED) after batches
-and shutdown. A generic historical RESOLVED row is insufficient. NOT_SIGNED
-requires application completion and drained store ownership, so in-flight
-journaling cannot be mistaken for an unsigned result. These observations do not
-establish seller receipt validity or the exact transferred fee. Managed signed
-responses also journal a bounded seller receipt classification and transaction
-reference, correlated to the admitted case. Missing, duplicate, oversized,
-malformed, rejected and successful receipts remain distinct from transport
-uncertainty. Successful claims must name Base and any supplied payer must match
-the admitted wallet. Signatures and vendor error prose are never retained; a
-header hash supports private correlation. These are unverified seller claims,
-not transaction-log verification.
+`tests/live/live_integration.rs` plans offline, freezes complete catalogs
+(128 MiB capture cap; 16 MiB evidence cap), and supervises the pinned
+`x402_treazury` executable.
 
-`report --run RUN_ID --eligibility` inspects case windows and the unstarted-run gate without execution. A started or reserved run can never be
-launched again, even when some cases remain untouched. `report` and `audit-tor`
-can inspect historical continuations; those records grant no execution authority.
-
-To run untouched work after a stopped session:
-
-1. Inspect its report and canonical payment/source accounting. Never copy reserved,
-   dispatching, uncertain or completed cases into a retry manifest.
-2. Make a new reviewed manifest with a new run ID and case IDs, retaining the same
-   treasury, registry and all configured pools. Use `start.mode = "funded_pools"`
-   and zero new funding-job authority unless separately reviewing new funding.
-3. Select only genuinely untouched requests, with fresh explicit windows. Prepare
-   and run it normally. Old API charges and source permits remain charged to their
-   original run. New-run IDs do not restore budget or transfer funding authority.
-
-Production startup rejects unresolved payments, unknown jobs, lost baseline
-history and pending source work owned by another run. A known unprepared refill
-may remain paused during a zero-funding run or outside the new run's selected
-pools; its original permit is not adopted. A registry-only first proposal does
-not establish accepted source work. Current Store preparation and safe
-never-disclosed closure facts distinguish these cases: actual current or archived
-accepted work retains its original-run boundary, while a positively closed
-unpublished intent can remain paused. Legacy snapshots without current preparation
-evidence retain their conservative original-run boundary.
-Otherwise reconcile existing work through production/read-only utilities before
-starting a new run. This is explicit use of existing pools, not crash recovery.
+- **Settlement observation:** MCP results leave settlement `PENDING`. The
+  runner observes canonical Base `USED` or `EXPIRED_UNUSED` outcomes after
+  batches and shutdown; `NOT_SIGNED` requires completed application execution
+  and drained Store ownership. Managed signed responses also journal bounded
+  seller receipt classifications (requiring Base and matching payer) without
+  storing signatures or vendor error prose.
+- **No run reuse:** A started or reserved run can never launch again (`report
+  --run RUN_ID --eligibility` inspects windows without launching). To execute
+  untouched cases after a stopped run:
+  1. Inspect the report and canonical accounting; never copy reserved,
+     dispatching, uncertain, or completed cases.
+  2. Author a fresh manifest with new run and case IDs on the same treasury,
+     registry, and configured pools (`start.mode = "funded_pools"`, zero new
+     funding jobs unless separately reviewed).
+  3. Prepare and run normally (prior charges remain on the original run).
+- **Startup safety:** Rejects unresolved payments, unknown jobs, lost baseline
+  history, and pending source work owned by another run. Known unprepared
+  `ALLOCATED` or `QUOTED` refills (and positively closed unpublished intents)
+  may remain paused under their original run permit during a zero-funding run
+  or outside selected pools in a positive-funding run without transferring
+  their permit.
 
 ## Reliability windows
 
-The `reliability` scenario compares at least two identical cases across reviewed
-absolute windows. Each observation has its own case ID and reservation; server,
-source, tool, arguments, unsigned mode and content assertions must match. Reports
-check dispatch-intent timestamps against windows, minimum spacing and any required
-later UTC day. Missing observations or unresolved accounting remain incomplete;
-completed failures remain failures. These are end-to-end observations, not automatic
-provider-versus-Tor fault attribution or predictions of future reliability.
-
-Overall `run_seconds` may be 1–604800 seconds (seven days); call, phase and cleanup
-limits remain capped at one day. No daemon schedules future windows or automatically
-continues paid runs. For later-day reliability observations use separately reviewed
-runs and compare their dated results; historical multi-window reports stay readable.
+The `reliability` scenario pairs identical cases across reviewed absolute UTC
+windows (separate case IDs and reservations), verifying dispatch timestamps,
+minimum spacing, and later-day boundaries. Overall `run_seconds` allows `1` to
+`604800` seconds (7 days); call, phase, and cleanup bounds cap at 1 day. No
+daemon schedules future windows automatically; for cross-day sampling, run
+separate manifests against the same cumulative registry.
 
 ## Funding and pool adoption
 
-A fresh `funded_pools` run with zero new-job authority can keep using active
-wallets after an earlier refill paused before preparation. A ready standby is
-not required for this mode. Only known ALLOCATED/QUOTED jobs with their original
-registry permits and pool/wallet bindings are retained; unreleased source
-preparation reservations, prepared/pending transactions and unresolved payments
-still refuse startup. Earlier permits remain charged and cannot be used by the
-new run. This supports service after treasury insufficiency without implicitly
-repairing the pool or transferring funding authority. A positive-funding run
-may also retain such an unprepared job outside its selected pool scope. Its
-selected pools still require their active and ready wallets at fresh startup;
-new allocation authority applies only to those selected pools. The unselected
-job stays paused under its original permit and cannot be prepared by this run.
+- `funded_pools` with zero new-job authority can serve from existing `ACTIVE`
+  wallets even without a `READY` standby when an earlier refill paused before
+  preparation (still rejecting prepared or pending transactions and unresolved
+  payments).
+- Positive-funding runs require `funding.auto_fund = true`, registry job
+  authority, and `--allow-funding`; selected pools require ready active and
+  standby wallets at fresh startup (or bootstrap in `treasury_only` mode).
+  Zero-job authority installs `--qualification-no-new-funding` regardless of
+  `--allow-funding`.
 
 ## Canonical payment evidence
 
-The Base RPC adapter's `verify_transfer` check independently verifies a successful
-confirmed receipt against the admitted payer, payee, amount and nonce, requiring
-both USDC Transfer and [AuthorizationUsed](https://eips.ethereum.org/EIPS/eip-3009#event)
-logs. It rechecks canonical block hashes, uses payer isolation and only configured
-read-only fallbacks, and leaves absent/unconfirmed receipts pending. Automated
-verification runs outside the payer lock during managed background reconciliation.
-Each pass checks one queued receipt per pool; pending receipts rotate to the back
-and backlog size is logged. Proofs persist against the exact case and attempt.
-Reports reject mismatched or duplicate attribution. A consumed authorization
-without a debit proof cannot qualify a run or unlock dependent phases; a
-successful paid case that never pays likewise cannot qualify a funded test. Startup validation reserves the missing enabled reserve-slot jobs in one registry transaction before allocation; a rejected batch leaves no partial reservations.
-Funding-enabled launches additionally require `auto_fund=true`. Treasury-only
-starts wait for production bootstrap before dispatch, with progress logs and the
-phase/run deadline. An adopted bootstrapped pool may have a partly spent active
-wallet; the runner does not refill it artificially. Positive funding remains
-bounded by the registry, actual spendable treasury funds and SDK transaction
-validity on preparation. Reserve ranges are nominal; a provider
-bridge minimum above the configured upper bound stops unsigned acquisition
-without a deposit. Funding is not charged to the API authorization budget. Zero job authority retains the
-deny-all restriction even when the flag is supplied. Single-rotation/refill-service and two-round lifecycle dispatch are available;
-funded acceptance remains an explicit live qualification step.
-The owned-Tor backend selected by `run` supports unsigned discovery and registry-bound
-managed payments, combining confinement, Tor identity/destination evidence and the
-same canonical debit requirements. Positive funding requires its `--allow-funding`
-flag as well as registry authority. `prepare` explicitly permits catalog inspection;
-it verifies build metadata, selected tools and arguments, then reloads the frozen
-configuration to verify an unchanged inventory. Preparation does not certify balances
-or runtime/Tor safety. Full catalog snapshots and their private capture artifacts
-have a separate 128 MiB bound, shared by the executable and runner. Response
-documentation is preserved, including large catalogs such as SocialFetch; frozen
-reload must still reproduce the inventory exactly. The ordinary 16 MiB evidence
-bound and each manifest's smaller API result limit remain unchanged. Oversized
-catalog evidence fails explicitly; split the deployment into smaller reviewed runs
-rather than truncate a spec. Keep historical private financial ledgers unchanged.
+`BaseRpc::verify_transfer` in `src/rotation/base/receipt.rs` independently
+verifies confirmed receipts against the admitted payer, payee, amount, and
+nonce, requiring both USDC `Transfer` and
+[AuthorizationUsed](https://eips.ethereum.org/EIPS/eip-3009#event) logs with
+canonical block-hash rechecks (checking one queued receipt per pool per
+reconciliation pass outside the payer lock). Consumed authorizations without
+debit proof and paid cases that never pay cannot qualify a run.
 
 ```sh
 make build CARGO_ARGS='--example live_integration'
 target/release/examples/live_integration plan --manifest /private/path/run.toml
-make test CARGO_ARGS='--example live_integration'
+make test CARGO_ARGS='--test integration_preparation'
 ```
 
 ## Planning and concurrency assertions
 
-Planning resolves the normal deployment TOML with `Deployment::show_config`, so
-it does not fetch catalogs, inspect wallet state, read signing secrets, execute
-the supplied binary or contact Tor. JSON output contains exact expanded cases,
-resolved wallet assignments, declared case-reservation sum and running USDC test budget, bootstrap/refill slots,
-network policy and explicit unverified prerequisites. It never grants execution
-authority. Catalog selection/schema/argument validation belongs to preparation;
-current balance, swap-minimum and fee feasibility require subsequent live evidence.
-
-Use `integration/{short,standard,extended}.example.toml` as starting points. They
-have invalid placeholder treasury IDs and zero execution windows deliberately.
-Each case occurs once in one phase. Reliability repetitions need distinct case IDs
-and absolute windows. Concurrency batches cover their phase cases exactly once.
-Concurrency reports require overlapping MCP and application intervals from one
-application session. Paid batches also require the reviewed wallet bindings,
-distinct payer/nonces, canonical debit proofs, admission-time balance accounting,
-and valid admission-to-response and signed-request timing. Accounting records the
-confirmed chain block/balance and unresolved exposure before and after the current
-reservation. The remaining spendable amount must equal balance minus total
-exposure, without underflow or overflow. This is captured inside the same
-store-worker command as admission, while the pool gate is held; later balance
-deltas cannot substitute for it. Reports distinguish overlap at each level and total the
-verified fees by wallet. Signed-request future intervals include connection setup
-and final headers; they are not socket-byte or signature-computation measurements.
-Missing legacy timing leaves a batch incomplete; sequential execution fails the
-overlap assertion. Existing paid cases are never replayed to obtain new timing.
+`plan` uses `Deployment::show_config` offline (no catalogs, keys, wallet state,
+or Tor). Concurrency assertions require overlapping MCP and application
+intervals in one session, plus reviewed wallet bindings, distinct payers or
+nonces, canonical debit proofs, admission-time ownership and balance evidence
+(captured in the same Store command as admission while the pool gate is held:
+ownership version 1 with payer role and reserve claim plus advisory balance
+schema 3 `estimate_atomic`, while retaining `remaining == balance - exposure`
+validation for legacy schema-2 records), and admission-to-response and
+signed-request timing (reporting each overlap level separately).
 
 ## Rotation and lifecycle assertions
 
-Managed admission and receipt events include public lifecycle observations for
-rotation/refill assertions. Lifecycle schema 2 is independent of status JSON 6 and
-database schema 23; nested `treasury_status` in qualification snapshots uses the
-status contract. Bootstrap summaries remain version 3. Schema 2 includes the stable
-group generation, independent reserve-slot generations, ACTIVE/READY/RETAINED/RETIRED
-roles, funding-job identities/phases and source-operation submission states, without keys, signed
-bytes, quote bodies or upstream error prose. Lifecycle retains complete pool,
-funding-job and source-operation collections in their existing order; it does not
-filter history to selected or pending work. Source identities include SHA256 of the
-exact encrypted outgoing record, with required missing records reported as failure.
-Each observation reads one financial SQL snapshot. Admission sees its existing
-uncommitted journal/reserve changes; later response observations are fresh, and
-runtime observations preserve this owner's compatible certificate evidence rather
-than substituting a saved estimate. Narrow lifecycle omits only unused Status and
-scheduling diagnostics; full Status and full qualification exports retain their
-own complete fields, strictness and guards. Required pool/phase/facts/health failures
-cannot become healthy or empty evidence. Response observation failure retains
-the seller receipt with an explicit unavailable marker and warning. Pending-state
-bracketing measures the signed-request future through final headers, not the full
-MCP response-body interval. Rotation and lifecycle execution use these observations;
-lifecycle additionally verifies one graceful application restart during its first refill.
-Managed bootstrap consumes the current enabled group's `inventory_ready` and
-`serving_ready` observations. Funded READY reserve inventory can satisfy them
-before an ACTIVE wallet exists; source-only completion does not substitute for
-recorded destination credit. Current database inspection accepts only schema 23:
-unsupported older or future stores fail without conversion or journal mutation.
-Original payment/source obligations and private evidence remain owned; rejection
-never refunds reservations or grants replay authority.
-Current admission events carry `ownership_evidence_version=1`: READY requires the original small/large slot and claim generation; ACTIVE/RETAINED requires no reserve claim. Validation uses the immutable journal-time values. Unmarked historical evidence is unsupported and cannot qualify work; saved files and charged reservations remain intact.
-The phase order is topological: dependencies must name earlier phases. Scenario
-fields live in `[phases.scenario]` and inappropriate fields are rejected.
-Rotation and refill-service scenarios require one `[[phases.scenario.rounds]]`;
-lifecycle requires two rounds for the same pool. Each round names `pool`,
-`expected_price_usdc`, `depletion_cases` and `service_cases`. The concatenated
-depletion/service lists, in round order, must exactly match the phase's cases.
-Depletion cases repeat the same reviewed request through the selected pool;
-the first separate service case must use that pool, while later service cases may
-use other selected pools to observe independent progress. Every case is paid and
-has its own single-use ID and reservation. The expected price is a positive planning
-estimate, not a payment override or proof that depletion is feasible. All declared
-deployment pools remain visible. Single-rotation scenarios obtain fresh balances,
-reject infeasible depletion, stop at promotion and dispatch the separate service
-calls before waiting for confirmed refill readiness. Depletion calls settle
-canonically before the next depletion call; after promotion the service calls run
-immediately without waiting for refill or the triggering receipt. Uncertain calls stop further
-paid dispatch. A partially dispatched rotation is observation-only; the runner
-cannot restart it to replay or manufacture missing evidence.
+Managed admission and receipt events record lifecycle schema 2 (independent of
+status JSON 6, bootstrap JSON 3, and DB schema 23): stable group generation,
+independent reserve-slot generations, `ACTIVE`, `READY`, `RETAINED`, and
+`RETIRED` roles, complete funding-job and source-operation lists in original
+order, and SHA-256 digests of exact encrypted prepared records (no keys, signed
+bytes, quotes, or upstream prose).
 
-The registry's consumption boundary atomically records validated before/after inventory and the exact consumed reserve claim, then marks the unused depletion suffix
-`SKIPPED_TARGET_REACHED`. Only never-reserved cases qualify. Attempted calls retain
-their charges, including failed or uncertain calls. Reports keep the declared
-`reservation_atomic` and separately show `charged_reservation_atomic`; skipped
-cases are `NOT_EXECUTED`, cannot be replayed, and are never counted as paid successes.
-Consuming READY advances that slot generation and vacates its claim; it does not allocate a replacement or advance the group generation. A replacement job may be absent at this boundary. Reviewed service can proceed, while later observations separately correlate the replacement wallet and job.
-Reports revalidate the boundary, exact slot-generation sequence and absence of reservation or
-application evidence for skipped cases. This durable mechanism alone does not
-qualify restart or exhaustion. Single-rotation reports additionally require exact
-payer and admission-time role/claim bindings and canonical paid service, pending-refill overlap for
-each service wallet, a READY replacement with exact recorded destination support, and exactly one
-confirmed source submission. Fast refill leaves `not_observed` overlap and an
-incomplete run. Dependent phases require these assertions before dispatch.
-Provider failures remain visible as failed cases and an overall failed result,
-while `rotation_status` separately retains verified promotion, service and refill
-assertions. A failed response is never counted as a successful service sample.
-Later lifecycle rounds require these rotation assertions and resolved accounting;
-failed depletion responses cannot manufacture payment or overlap evidence.
-
-For `lifecycle`, `restart = "queued_refill"` requires observing `ALLOCATED` before
-preparation, while `restart = "submitted_deposit"` requires `DEPOSIT_PENDING` with
-one acknowledged source submission. The runner observes the checkpoint after its
-separate service calls. If funding has already advanced past it, the checkpoint
-is explicitly unobserved and execution stops; the runner never stalls funding to
-manufacture a window. It drains the owned application through its parent pipe,
-retains the same Tor process, records complete process/cover output, verifies
-funding continuity, rechecks pins and starts a new registered application session.
-The new session retains the same configuration, registry, funding limits and
-absolute expiry. Reopened MCP inventories must match before continuing. Each
-application session needs complete cover evidence; one session cannot hide another's
-missing samples. Cancellation preserves any in-progress drain and its original
-cleanup deadline. A partial lifecycle cannot automatically resume paid dispatch.
-Funded rotation, restart and exhaustion acceptance remain outstanding.
-
-Fresh pool observations use an explicit registry request and the application's
-normal background reconciliation. The application captures the request before
-reading RPC state and records the verified view's wallet balances/block identity,
-unresolved exposure and lifecycle snapshot while still holding the pool gate.
-Only one response is accepted per request and session; a new request is required
-for a new observation. Failures warn and leave the request unanswered, while
-ordinary reconciliation continues. Existing wallet-isolated RPC and Tor policy
-remain in force. The depletion estimator requires current lifecycle version 2
-and exact balance version 2 evidence, including at least one funded READY wallet
-with an enabled current reserve claim that covers the reviewed price. ACTIVE
-inventory is optional; its available capacity is zero when absent. The fresh view
-must include the relevant ACTIVE, READY and RETAINED balances, with no unresolved
-authorizations. The reviewed list must cover
-`floor(active_available / price) + sum(floor(retained_available / price)) + 1`.
-The final term budgets a paid READY-consumption trigger; selection may reach that
-boundary earlier, leaving only a structurally verified untouched suffix skippable.
-Unsupported historical evidence is rejected. Estimates do not authorize new calls
-or override caps, and the controller must authenticate and consume observations
-promptly.
-
-Amounts are decimal strings (USDC six decimal places, ZEC eight), with checked
-integer sums. Zero new-job authority means no funding. A paid case must reserve
-at least its effective wallet cap. No hidden retry/depletion iterations or automatic
-repair allocations exist. The extended example declares twelve depletion attempts
-and two service calls per round, with an independent wallet participating in
-service. Actual balance/price observations must still establish feasibility;
-larger route minima require more explicitly reviewed cases before preparation.
-
-See [qualification limits](../../docs/testing.md#qualification-status). Full automated lifecycle/restart
-and combined cover/payment qualification remain in the
-[deferred acceptance plan](../../docs/plans/deferred/live_integration_acceptance.md).
-
-## Wallet setup and readiness
-
-Use the production CLI for wallet administration. Default builds include Zcash;
-these operations need no runner, registry or matching source checkout.
-
-```sh
-target/debug/x402_treazury wallet init \
-  --state-dir state/new-integration-wallet \
-  --key-file secrets/new-integration-wallet.key \
-  --network-config examples/network/tor.toml
-target/debug/x402_treazury wallet addresses \
-  --state-dir state/new-integration-wallet \
-  --key-file secrets/new-integration-wallet.key
-# Set treasury references and network policy in deployment.toml, then synchronize:
-target/debug/x402_treazury wallet sync --config deployment.toml
-# With serving stopped, save an owner-only backup including its key:
-target/debug/x402_treazury wallet backup \
-  --state-dir state/new-integration-wallet \
-  --key-file secrets/new-integration-wallet.key \
-  --treasury-id TREASURY_UUID --destination /private/new-backup-directory
-```
-
-New wallets discover their birthday through the configured indexer; imports require
-an explicit historical birthday. Use saved unified receive addresses for funding.
-Tor's SOCKS listener must already be running for these standalone commands. A
-successful sync reports confirmed funds; a failed sync exits nonzero and must not
-be interpreted as a zero balance. Setup and backup grant no spending authority.
-
-Review the number of allocations and nominal reserve sizing before funding.
-Actual treasury spendability and SDK-calculated transaction fees govern
-funding; there is no separate ZEC allocation budget or fixed ZEC estimate. During
-a treasury-only run, the existing production application synchronizes and funds
-pools under explicit authority; the runner waits for bootstrap within its original
-run/phase deadline. It logs progress and recorded funding errors, refuses dispatch
-on cancellation or missing readiness, and never manufactures balances or retries
-API payments. Production wallet supervision still checkpoints sync on parent loss.
-
-## Shielded-refund evidence and qualification
-
-This recipe scopes native ZEC to Base USDC refund evidence. It is a reviewable
-sequence, not an executable runner scenario or spending authority. The provider
-runner does not implement the controlled excess-deposit path below. Offline
-per-note inspection is available through `wallet notes`. Do not substitute invented CLI commands, a second financial ledger,
-an ad hoc signer or changes to ordinary recovery. Follow the
-[bridge contract limits](../../docs/network-egress.md#source-contract-and-upload-limits)
-and [refund/reconciliation policy](../../docs/wallet-rotation.md#refunds-state-and-recovery).
-
-### Bind the inspection before accessing private state
-
-The operator must select the actual treasury and provide its treasury UUID,
-deployment/configuration path, state directory, key reference, retained evidence
-paths and intended inspection destination. An EVM wallet or group label such as
-`research_desk` does not identify a ZEC treasury. Pin the application/runner binary
-copies, build hashes, source SHA and complete SDK cohort, schema versions and
-network policy. Independently review the exact paths, permitted reads and
-inspection method before obtaining separate authority to access production
-state or keys. This document supplies neither that authority nor those missing
-operator choices. Never print secrets or put private evidence in Git.
-
-### Inspect retained artifacts first
-
-With inspection authority, inspect only the named saved artifacts before opening
-a wallet or making network requests. Prefer an existing refund, including a
-previous duplicate-deposit experiment, when its provenance is sufficient. Preserve
-original artifacts and correlate their immutable identities; missing evidence
-remains missing. Retain privately:
-
-| Evidence | Required binding |
-| --- | --- |
-| Execution identity | Treasury UUID, exact state/snapshot revision and backup provenance, application/runner hashes, SDK revisions, route/asset IDs, network and observation scope |
-| Quote | Complete exact request and response, response signature/correlation identity, swap type, deposit address/memo, original refund UA and decoded receiver set, USDC recipient, requested and returned deadlines, cold-address time, atomic amounts, slippage and returned network/refund fees |
-| Source work | Every job/operation identity and source transaction, its selected inputs, exact signed bytes and txid, principal/fee, accepted deadline and consensus expiry, disclosure and confirmation evidence; preserve each intentionally distinct deposit |
-| Provider/destination | Bound status responses and times, reported deposited/swapped/refunded amounts, origin/destination/NEAR transaction identities, actual Base USDC result, pending or conflicting outcomes |
-| Refund receipt | Refund transaction identity/raw transaction where available, decrypted owned note identity, actual pool/receiver, amount, confirmation height/hash and count, SDK spent/reserved state and spendability at the inspected snapshot |
-
-The public UA string, quote acceptance, aggregate shielded balance or provider
-`REFUNDED` label alone does not establish refund receipt. A mixed UA can receive
-transparently. Correlate the returned transaction/note to the exact bound refund
-receiver and source experiment without treating advisory provider totals as a
-spendability gate. Spending recovered funds later does not erase historical
-receipt evidence; current spendability must be reported separately.
-
-### Qualify discovery on an isolated copy
-
-After the separate path/key inspection authority above, use the implemented
-read-only command against the selected treasury or a consistent owner-produced
-backup/copy:
-
-```sh
-x402_treazury wallet notes --config REVIEWED_CONFIG
-x402_treazury wallet notes --config REVIEWED_CONFIG --txid REFUND_TRANSACTION_ID
-```
-
-Retain its JSON privately with the binary/source identity and original backup
-provenance. It binds one authenticated committed snapshot revision and reports all
-retained account-zero shielded notes, including spent notes, with actual
-pool/receiver, confirmation/spender facts and SDK snapshot-selection membership.
-Receiver-only UAs reconstruct the actual decrypted receiver and do not replace
-the quote's complete original refund UA. Confirmations and optional retained
-block hashes describe saved SDK evidence, not a fresh canonical-chain proof.
-A missing note means absent from this retained snapshot; missing selection data
-remains `null` with a fixed reason. The SDK's `AllFunds(MaxSpendable)` query can
-include migration-reserved notes, ignores live lock filters, and cannot restore
-process-local locks, so this report does not establish live unreserved funds or
-spending authority. It excludes keys, seeds, memos, raw transactions and unrelated
-financial history. See [command details](../../docs/wallet-cli.md#offline-note-inspection).
-
-`wallet status` has aggregate balances and is insufficient for note attribution.
-`wallet sync` can perform recovery and is not a read-only substitute. Preserve
-originals, SQLite sidecars and accepted work; do not run a copied funded owner
-concurrently with production serving. Creating this inspection command grants no
-production-key, scan, submission or funded-experiment authority.
-
-If offline artifacts do not prove selected-SDK discovery/recovery, separately
-review and authorize an isolated copy scan. Disable transparent discovery, retain
-the configured identity-bound indexer/Tor policy and prevent all submission,
-funding and calculation execution. Wallet transparent-input shielding is already
-unsupported under the Ironwood-only policy. No such inspection mode
-is currently supplied by this recipe. Its implementation must enforce those
-boundaries before use; disabling `auto_fund` alone does not prevent every accepted
-operation from being observed or submitted by an ordinary owner.
-
-Acceptance needs the actual refund note's pool and receiver, chain confirmation
-and selected-SDK recognition/spendability, then reopen/restart recovery of the
-same receipt. Record negative RPC evidence showing no transparent known-address
-queries or gap probing, and no new transparent receive/refund address publication.
-For seed recovery, use an isolated separately authorized recovery state with the
-correct birthday and compare the same receipt against the retained snapshot;
-seed-only recovery does not reconstruct undisclosed issuance frontiers or
-off-chain liabilities. A snapshot and seed recovery are distinct evidence. Report
-unsupported recovery/settings or unavailable negative-RPC instrumentation as gaps,
-not shielded-only acceptance. None of this authorizes a spend to prove spendability.
-
-### Only if retained evidence is insufficient, prepare a controlled refund
-
-The published EXACT_OUTPUT excess rule is the simpler candidate: one deliberately
-authorized deposit above returned `amountIn`, with the excess directed to the
-quote's shielded-only refund UA after the swap. It avoids relying on reuse after
-SUCCESS. This is a candidate, not a guarantee for the deployed ZEC route; resolve
-route-specific refund fees/minimums and actual receiver behavior before choosing
-the amount. A second deposit to a completed quote remains an unqualified
-experiment and needs its own authority rather than an automatic retry.
-
-Prepare a concrete proposal with the selected treasury, one quote, exact output,
-principal/excess and source/refund fee allowances, recipient, decoded shielded-only
-UA and intended deposit count of one. Ordinary funding binds source principal
-exactly to `quote.input`; preserve that check and existing job/operation ownership.
-A focused production treasury-owner harness capable of representing the separately
-authorized excess and its exact quote binding must be designed, implemented and
-independently reviewed before execution. The current runner/CLI is not presumed
-to provide it. Use the existing durable owner and journal-before-disclosure path;
-do not rewrite quote amounts, signed bytes or original identities.
-
-Only after that path and concrete proposal are reviewed may separate operator
-spending authority permit quote allocation/key loading/submission. Retain all
-fields above, including the forward USDC result and excess-refund transaction/note;
-a successful swap can still require separate refund evidence. Unknown, pending,
-failed or uneconomic refund outcomes leave qualification incomplete and preserve
-accepted liabilities. They never authorize another deposit, a replacement quote
-or spending recovered funds. Near-deadline/late-arrival tests are separate reviewed
-experiments: neither the 30-minute requested preference nor any local timer
-proves sub-hour refund completion or abandonment of `PENDING_DEPOSIT` work.
-
-The next actions are therefore review and validation of the implemented offline
-per-note inspector, operator/state/evidence selection and separate inspection
-authority, then any separately authorized scan capability. Only a demonstrated
-remaining funded-evidence gap justifies implementing and authorizing the controlled
-excess-deposit path. No private inspection or funded qualification is claimed by
-this runbook.
+- **Natural `READY` consumption:** Stops depletion when a payment journal
+  consumes the captured `READY` reserve slot (recording exact slot and
+  generation), marking unused suffix cases `SKIPPED_TARGET_REACHED`.
+- **Two-round lifecycle and restart:** Round 1 depletes `test_pool` ->
+  consumes `READY` -> observes queued refill -> gracefully restarts
+  `x402_treazury` while keeping Tor running (verifying exact
+  `prepared_record_sha256` continuity across pre-restart, drained, and
+  post-restart snapshots) -> dispatches service calls from both pools while
+  refill is pending -> verifies independent Base credit and Zcash confirmation.
+  Round 2 repeats without restarting.
+- **Refill observation window:** Bounded by the manifest's remaining phase,
+  run, and window deadlines (never lowering balances, forcing promotion, or
+  artificially delaying funding).
 
 ## Registry authorization and preparation
 
-Use the command sequence in [the walkthrough](INTEGRATION.md). Authorization and
-reporting are offline; `prepare` can fetch catalogs using the configured network
-policy. `plan` reads only configuration, without executing the supplied binary,
-loading wallet state or fetching catalogs.
+```sh
+target/release/examples/live_integration authorize-registry \
+  --state-dir /private/treasury/state --authorization /private/auth.toml
+```
 
-### Ownership and authority
+- Stores the authorization ledger in `<state-dir>/live-integration/registry.sqlite`
+  (owner-only, WAL mode), recording exact baseline jobs, wallets, pools,
+  `cumulative_test_budget_usdc`, `cumulative_new_jobs` (paired with each
+  manifest's `limits.new_funding_jobs`), and run ceilings offline.
+- `prepare` pins binary build identity and SHA-256, fetches and hashes full
+  catalogs (up to 128 MiB), validates tools and arguments, reloads the frozen
+  catalogs to verify exact parity, and writes an immutable `prepared` record.
+  Failed preparations never overwrite prior records.
 
-`total_test_budget_usdc` is a running sum of API payment authorizations for the run;
-`cumulative_test_budget_usdc` authorizes their combined total across registry runs.
-Both use exact micro-USDC units. Each potentially payable authorization is charged
-atomically before financial admission commits or disclosure; missing responses, retries and concurrent cases cannot
-reuse its budget. Admission validates complete payment JSON once under the
-existing IMMEDIATE transaction and derives exact case/run/registry totals without
-a durable aggregate. Every event amount keeps its original u64 string parse;
-same-case history additionally keeps its original U256 string parse. These parser
-domains differ: do not normalize prefixes, underscores or plus signs through an
-integer conversion. Missing/non-string/out-of-range amounts and malformed required
-history refuse new work rather than reset totals. All payment rows remain charged,
-including unknown stages, failed outcomes and absent receipts. Run-scoped usage
-inspection retains its existing row scope; global admission/authority accounting
-still validates the complete payment history. Per-case `reserve_usdc` still bounds one case's authorizations.
-The total budget need not cover every declared case reservation in advance; an
-actual authorization that exceeds it fails visibly without financial admission or disclosure. Funding does
-not consume this budget and has no `source_exposure_zec` setting.
+## Wallet setup and readiness
 
-Exact cumulative budget validation and complete evidence exports still include
-`O(history)` scans; removing redundant passes does not make them constant-time.
-Keyed payment admission has no 10,000-row guard. Full `qualification_state` exports
-retain separate existing 10,000-row guards for payment attempts, source operations,
-source preparation bindings and wallet observations, used by baseline, permit,
-preparation and restart consumers. These export guards remain separate from ordinary
-serving and keyed admission; they do not erase charges or grant replay authority.
+Use production wallet commands (`wallet init`, `wallet addresses`,
+`wallet sync`, `wallet backup`, `wallet status`) before authorization.
 
-New registries use schema 2. Schema-1 ZEC-budget registries remain read-only;
-`report` shows their historical authorization units and counts without interpreting
-ZEC as USDC or enabling execution. Preserve the original private registry for its
-detailed evidence. New execution needs separately reviewed USDC-budget authority;
-never delete historical evidence or reuse it as permission to replay work.
-Registry source-input amounts retain the first proposal observation for historical
-reporting. A failed treasury Store commit can leave that observation without an
-accepted calculation; a proven unstarted retry may have a different actual fee.
-Operation/job ownership and retirement tombstones remain binding. Exact accepted
-costs and inputs come from the Store's immutable preparation and transaction facts,
-and reports derive actual principal and fees from those facts. Registry proposal
-totals do not establish accepted costs, spending, liabilities or authority.
-With serving and all qualification processes stopped, retain the complete old
-`<state>/live-integration` directory under a distinct private directory inside
-that same state directory before authorizing the new registry at its fixed path.
-The new baseline captures and hashes that retained evidence alongside existing
-wallets, transactions and liabilities. New authority does not authorize replay of
-previously attempted cases or replace reconciliation of accepted work.
+- **Starting modes:** `start.mode` supports `funded_pools` (verifies existing
+  pools have ready `ACTIVE` wallets and, for positive-funding selected pools,
+  `READY` wallets with no unresolved payments or conflicting source work) and
+  `treasury_only` (starts from empty pools and waits for production bootstrap
+  jobs). Unsigned runs use `start.mode = "funded_pools"` with `pools = []`,
+  `total_test_budget_usdc = "0"`, and `unsigned = true` on every case,
+  launching under `--qualification-unsigned` without funded EVM wallets.
+- **Preflight checks:** Verifies DB schema 23, treasury UUID, wallet key
+  readability (when funded), and clean baseline correspondence in one
+  read-only pass.
 
-`authorize-registry` requires an existing stopped treasury and exclusive ownership.
-It captures public pools, jobs, operations, payment/source liabilities and hashes of
-historical SQLite/JSON/TOML evidence, locking legacy ledgers during capture. It does
-not decrypt the wallet or mutate those ledgers. Review cumulative USDC test-budget and new-job
-ceilings in `integration/authorization.example.toml`. Zero grants no authority;
-new authorization IDs retain consumed reservations and the original baseline.
+## Ownership and authority
 
-The owner-only `<state>/live-integration/registry.sqlite` stores manifests, plans,
-absolute windows, immutable pins, batch reservations, separate execution/semantic/
-settlement states and events. A supervisor lock excludes competing writers and is
-required even for read-only reports. Symlinks, hard links, permissive paths and
-unsafe SQLite sidecars are refused. Stop the active supervisor before reporting.
-
-All members of a batch reserve atomically before dispatch. Failures, lost responses,
-process exits and expired windows retain charges. Changed binaries/configuration/
-catalogs need a new reviewed run ID under the same cumulative authority; they
-cannot overwrite pins, reset budgets or replay a reserved case. Historical records
-remain readable without enabling execution.
-
-Funding permits bind stable allocation intent, pool and job IDs before bootstrap
-and preparation. They limit job counts, without a per-job or run-wide ZEC budget.
-Unlinked allocations remain counted. Actual input and fee authority remains bound
-to each accepted operation, independently of qualification budgeting. The
-guard rechecks session authority, pins, windows and selected pools at each operation.
-It validates the baseline, retained identities, source reservations and correlated
-liabilities under treasury ownership. All configured pools remain declared. Known
-current-run funding can recover during a lifecycle restart without new permits;
-unknown liabilities refuse startup. Positive funding needs `--allow-funding`,
-registry authority and production auto-funding. Zero authority installs the
-no-new-funding restriction on every reopen.
-
-### Catalogs and build provenance
-
-`prepare` creates a fresh owner-only evidence subdirectory and refuses duplicate
-run IDs. Failed evidence remains available and is never overwritten. Preparation
-supports unsigned static or exclusively managed public-swap deployments; source
-management is refused. Listeners use fixed literal loopback addresses/ports.
-Build the executable and runner together, with matching features.
-
-`x402_treazury build-info` embeds application/runner/vendor/manifest/lockfile/toolchain
-hashes, compiler, target and feature set. Preparation checks these against current
-inputs and pins the executable bytes. This detects stale trusted local builds;
-it is not attestation of an arbitrary binary. Full frozen catalogs must reproduce
-exact tool inventories and preserve source policy, request schemas and documentation.
-Catalog preparation is unsigned and probe-free, not payment or Tor qualification.
-Owned Tor preparation retains its own control/confinement evidence separately from
-execution; external SOCKS alone cannot establish isolation.
-
-Arguments use a strict offline JSON Schema subset. Unknown assertions fail even in
-unused branches. Numeric validation is limited to ±(2^53−1), nesting to 64 levels
-and validation to 100,000 nodes/operations, with explicit errors. Never remove
-constraints or normalize submitted values to make preparation pass.
-
-Catalog/capture streams have a shared 128 MiB bound; ordinary evidence uses 16 MiB
-and API results use the manifest limit. Overflow, collector loss, timeout and forced
-cleanup invalidate inspection. Minimal-environment children have finite deadlines
-and are reaped by owned handles. Source observations record completed/failed/cancelled/
-not-started states, typed failure stages and numeric HTTP status, capped at 10,000.
-Initial inputs and frozen reloads are separate; local files and coalesced aliases
-do not establish independent remote availability. Missing old observations stay unknown.
-
-Qualification inspection continues independent loads within the rolling bound;
-aliases share failures without retries. Ordinary serving fails fast. Failed snapshot
-commands retain a failure envelope and exit nonzero, never a partial executable
-inventory. Execution still requires complete validated preparation. Inventory
-checks compare the frozen authored descriptions; preparation and startup never
-query endpoints to augment their prices.
-
-### Dispatch and supervised lifetime
-
-The child receives fresh bearer tokens, minimal configured network environment
-references and a private `--qualification-binding`. Ambient keys, dotenv and proxy
-settings are not inherited. Before provider I/O, the handler verifies the registered
-session, pins, treasury, current authority/window, exact listener/tool/arguments
-and durable DISPATCHING state. A unique SQLite claim commits once per run/case.
-Case IDs stay on the authenticated MCP side, never in provider/payment material.
-Managed admission correlates to the case before financial admission commits or disclosure and independently checks
-its cap. Unsigned cases refuse every 402 before financial admission commits or disclosure, even a zero-price offer.
-
-Completion after expiry/revocation only records previously accepted work; it cannot
-start another call. Cancelled waiters do not undo accepted blocking journal work.
-Missing application completion remains incomplete. Independent provider failures
-may allow other eligible cases to proceed; ambiguous payments are never replayed.
-The parent pipe drives deliberate bounded drain on EOF/SIGINT/SIGTERM. Preserve an
-in-progress drain across cancelled waiters, with its original deadline and owned
-child process handle; never recover it through a PID-based kill/restart. Forced kill
-or missing output remains explicit incomplete evidence. Per-session private output,
-process records and results supplement the durable registry.
-
-`run` exits 0 for qualified success, 2 for completed failures, 3 for incomplete work
-and 4 for safety/configuration/process-evidence errors. `report --eligibility` exits
-0 for a generated report even when execution is refused. A started/reserved run
-cannot launch again. Planning, preparation, process exit or reporting success alone
-never establishes payment, content, Tor or scenario qualification.
-
-### Saved accounting and report bounds
-
-After clean managed shutdown, exclusive treasury ownership permits a private
-snapshot correlated to that registered session. Current snapshots retain exact
-accepted preparation/transaction identities and facts, unresolved payment attempts
-and advisory wallet estimates. Removed monetary reservation/refund projections
-are unavailable, not invented zero. Accounting evaluation accepts current format 2;
-unsupported historical inputs are refused without rewriting saved evidence or
-releasing execution reservations. Refund shielding consumes its fee only. Retired
-funds are not active capacity. Current unavailable estimates are null. Saved observations
-are not fresh chain queries or costs attributable exclusively to the selected run.
-Missing/crashed sessions have no final snapshot.
-
-Separately authorized canonical qualification pool observations use
-`schema_version=2` and a `wallets` map.
-Each wallet records exact `confirmed_balance_atomic` and `latest_balance_atomic`
-with their separate block heights/hashes, plus `conservative_balance_atomic`
-(the minimum) for qualification analysis, never current signing permission.
-New admission `balance_evidence` uses `schema_version=3` and advisory
-`estimate_atomic`, which may be null. Current ownership, amount authority and the
-original authorization journal govern admission; saved balances and reserved-before
-arithmetic do not prove solvency. Saved exact admission evidence uses version 2
-with its original exact support and arithmetic. Unversioned balance inputs and
-saved admissions lacking required exact support cannot qualify work. Presentation
-refusal leaves accepted journals and raw attempt/resolution export intact, does
-not block ordinary reconciliation and grants no replay authority. Admission intent
-marker 2 and ownership marker 1 retain the original eligible role; READY ownership
-also records the exact slot and claim generation.
-
-SQLite event details mix plain text and JSON. Guard extraction inside the
-expression (for example, `CASE WHEN json_valid(detail) THEN json_extract(detail,
-'$.amount') END`), not merely in a WHERE clause. Malformed relevant financial
-events must fail explicitly rather than disappear from accounting.
-
-Run attribution uses immutable operation-permit bindings captured with the snapshot,
-never later mutable releases. Registry ceilings express separately reviewed
-qualification authority; current source costs come from original accepted
-calculations and SDK transaction facts. Missing facts do not prove zero cost.
-Compare against the hash-verified authorization baseline, which can span runs;
-advisory estimate differences do not prove debits. Contradictory calculation
-digests, transaction facts or wallet/pool ownership fail comparison. Historical
-private evidence stays intact, including its original charged reservations.
-Every resolved payment from a previous run requires its exact original per-attempt
-canonical observation, even when the case contained only one attempt. Aggregate
-case settlement cannot replace that observation.
-
-Structured records/reports are limited to 16 MiB, accounting snapshots to 10,000 per
-run, report cases/pin revisions to 10,000 and runtime events to 50,000. Baseline
-traversal is limited to depth eight and 256 files, each hashed file to 2 GiB.
-Select an individual run when aggregate reporting exceeds a bound. Publish files
-atomically without overwrite; bounds produce explicit errors, never partial success
-or financial cancellation.
-
-## Production restriction for supervised existing-wallet runs
-
-The production executable accepts the internal serving-only option
-`--qualification-no-new-funding` with `--config`. It uses the same
-`Deployment::bind_restricted` path available to fixtures and installs the
-restriction before managed pool configuration/allocation, independently of
-`funding.auto_fund`. A missing managed pool fails startup without creating its
-wallets or funding jobs. All declared managed pools receive the restriction.
-
-The store rejects new initial/replacement allocations, source reservations and new transaction preparation, including preparation using an inherited reservation. It also prevents automatic retirement during this restricted observation scope. Existing ACTIVE, RETAINED and eligible READY inventory remains usable under ordinary ownership and amount-authority checks. Consuming an existing READY claim is a payment transition, independent of later replacement allocation; a denied refill cannot undo its committed payment. Trusted Base reconciliation remains available. Funding denials retain `qualification_funding_denied` without manufacturing a PREPARING transition or source proof. Group declaration alone neither allocates nor grants funding authority.
-
-The restriction lasts for the store owner's lifetime and cannot be relaxed on that
-owner. Every supervised launch/restart must supply it again. Ordinary serving has
-no such restriction. Existing prepared transaction bytes and liabilities remain;
-normal reconciliation, confirmation and explicitly permitted saved-byte submission
-are still possible under their existing guards. The option is therefore not a
-promise that earlier accepted work cannot settle.
-
-This primitive does not bind a child to registry authority, prevent API signing,
-or grant permission to launch it. The runner still cannot execute paid cases. Complete
-supervisor qualification and registry binding before enabling execution; positive
-funding requires separate allocation permits.
-
-## Keyless child and parent lifetime
-
-The executable's internal `--qualification-unsigned` option requires
-`--qualification-parent-stdin` and `--config`. It serves the normal authenticated
-MCP inventory with keyless clients: configured static key references are not read,
-treasury state is not opened, and any declared managed wallet, `auto_fund=true` or
-source-management configuration is refused. It also rejects `--env-file`; the
-supervisor must provide only the explicit environment needed for the child.
-
-Free API calls and lazy help retain ordinary routing and response bounds. Every
-HTTP 402 produces an agent-visible `qualification_payment_denied` error and warning
-before parsing the challenge, irrespective of amount or protocol version. No signer
-exists and no paid retry occurs. Requests use the normal network factory and
-origin-scoped discovery identity, preserving strict TLS/HTTP policy, Tor remote
-DNS and refusal of direct fallback. This is unsigned discovery traffic, not evidence
-of EVM-address isolation or settlement. Read-only review is still necessary: unsigned
-HTTP requests can have provider-side effects.
-
-The supervisor keeps a piped stdin write end open for the child's lifetime and
-closes it to request shutdown. Stdin is a control pipe, not an MCP transport;
-unexpected bytes cause a visible protocol error and deliberate shutdown. A null
-stdin, regular file or terminal is refused. EOF during catalog loading/binding
-cancels startup. During serving it invokes the existing ten-second drain and logs
-why it is waiting. Parent process death also closes the pipe; the supervisor must
-not share its write end with other processes. SIGINT/SIGTERM still work with the
-pipe open. The watcher uses a nonblocking Unix pipe so there is no uncancellable
-stdin reader thread preventing exit. Other platforms reject this mode explicitly.
-
-Local executable tests cover authentication, free/paid calls, in-flight drain,
-startup cancellation, malformed control input, abrupt parent exit, SIGTERM,
-forbidden configuration and SOCKS identity/refusal. These are process/transport
-fixtures, not real-Tor qualification. The runner wires these controls to prepared
-binary/catalog/schema pins, registry-bound cases, bounded output, deadlines/reaping
-and result correlation. Managed `run` uses funding restrictions and canonical
-payment checks; unsigned `run` has no signer. Internal flags and successful fixture
-tests alone do not confer execution authority.
-
-A planned Tor outage currently requires a separate keyless deployment with no
-declared managed wallets and automatic funding disabled. Selecting only unsigned
-cases inside a managed deployment does not remove its treasury/funding workers.
-The runner refuses that combination before execution and again before stopping
-Tor. Outage qualification is an independent keyless test; do not stop Tor under
-a funded child. Use `x402_treazury wallet backup` for ordinary financial backups.
-
-## Offline Tor re-audit
-
-`reconcile-receipts --state-dir STATE --run RUN_ID --evidence-dir NEW_PRIVATE_DIR`
-recovers canonical debit evidence for recorded successful seller receipts after
-the serving process has stopped. It holds registry and treasury ownership, checks
-the original frozen catalogs and payment journal, then starts dedicated Tor and a
-confined, keyless RPC observer. Supply the original RPC environment references;
-it uses the frozen network policy and configured RPC fallback order. No provider
-requests, signing, funding, case dispatch or reservation release occur. The new
-observer binary is recorded separately from the original execution pins.
-
-The observer has a 900-second total deadline and the production per-RPC deadlines.
-Output is bounded at 16 MiB; overflow or incomplete process/control evidence
-prevents import. Each observed payer identity must pass authenticated Tor stream
-checks before proofs are atomically added with the original case/session/attempt
-correlation. Existing proofs are skipped. Exit 3 means a receipt remains pending
-or unavailable; repeat observation with a new evidence directory, never replay a
-paid case. This qualifies the new read-only observation session only; it cannot
-repair missing isolation evidence from an earlier payment session.
-
-`audit-tor --state-dir STATE --run RUN_ID --output NEW_PRIVATE_FILE` reinterprets
-retained Tor events without launching processes, opening keys, making network
-requests, replaying cases or changing reservations. Supply the original configured
-endpoint environment variables; reconstructed discovery/treasury targets must match
-the initial identity export. The treasury must be stopped. The command validates
-pinned catalog artifacts and inventory, but intentionally does not authorize a new
-executable to resume a paid run. It writes a separate result and preserves the
-original qualification record.
-
-A clean owned-Tor stop publishes `control-completion.json` with the event count
-and log hash after the authenticated reader finishes. Re-audit requires this marker
-for a whole-stream completeness claim. Older records without it can pass observed
-stream checks but return exit 3 with `observed_streams_only`; a missing marker is
-never reconstructed from human log prose. A present mismatched marker is an error.
-Even a complete stream audit alone does not qualify payment settlement, scenario
-completion or complete unlinkability.
+- **Registry owns qualification authority:** The runner never bypasses
+  application caps, creates replacement payments, or modifies treasury state
+  directly. Every supervised `x402_treazury` process receives an explicit
+  qualification hook enforcing per-case, per-run, and cumulative registry
+  budgets atomically before payment admission commits.
+- **Child supervision and teardown:** First `SIGINT` or `SIGTERM` cancels
+  runner waits while letting the supervised `x402_treazury` process drain
+  accepted work before closing. Forced exit preserves reservations and
+  journals.
+- **Accounting boundaries:** Every API authorization charges
+  `total_test_budget_usdc` and `cumulative_test_budget_usdc` before disclosure.
+  Wallet funding is governed separately by reviewed job counts, reserve sizes,
+  spendable Ironwood ZEC, and SDK fees. Under the Ironwood-only policy,
+  transparent refund shielding is unsupported (any legacy shielding entries in
+  archived snapshots remain read-only historical records).
 
 ## Owned-Tor qualification
 
-`prepare --state-dir STATE --manifest MANIFEST` and `run --state-dir STATE --run RUN_ID`
-select owned Tor from the manifest. Preparation owns Tor for catalog inspection;
-execution owns a fresh Tor process using the same persistent state and frozen
-catalogs. Each confines its child with macOS `sandbox-exec` and has separate
-control evidence. Preparation alone makes no full-session isolation claim.
-It requires `tor_mode = "owned"`, `confinement = "macos_sandbox"` and
-`require_isolation_evidence = true`. It does not use Tor Browser's data directory
-or stop an externally owned Tor. Dedicated data persists at
-`STATE/live-integration/tor-state`; each run has new private control/cookie/event
-artifacts. Create the manifest's evidence root with owner-only permissions before
-launch; each run creates its own new subdirectory. CLI-relative Tor binary/state
-paths are resolved before changing the child working directory. Bootstrap has one
-300-second budget, without exit cycling or retries.
+Configure owned Tor inside the manifest's `[network]` table with
+`tor_mode = "owned"`, `confinement = "macos_sandbox"`, and
+`require_isolation_evidence = true`:
 
-Unsigned owned-Tor qualification may omit outage testing. It still requires the
-normal confinement, identity/destination evidence, complete child/Tor cleanup and
-successful requested case assertions. Reports label the outage `not_requested` and
-make no stopped-Tor cache claim. Managed outage is unsupported; use a separate keyless deployment. When requested in a keyless deployment, the final
-outage phase declares its cache boundary explicitly:
+- Preparation and execution each launch a dedicated `tor` process with
+  dedicated persistent state (owner-only data directory, cookie-authenticated
+  loopback control port, `IsolateSOCKSAuth`), subscribing to stream and circuit
+  events before spawning `x402_treazury`.
+- On macOS, `x402_treazury` runs inside a temporary `sandbox-exec` profile
+  permitting only loopback MCP inbound listeners and outbound connections to
+  the dedicated Tor SOCKS port, verified with unconfined positive and confined
+  negative IPv4/IPv6 TCP and UDP DNS `EgressProbe` checks before and after Tor
+  shutdown. Run standalone confinement verification with:
 
-```toml
-[[phases]]
-id = "outage"
-window = "now"
-cases = ["cached", "uncached"]
-pools = []
-required = true
-depends_on = ["connected"]
-[phases.scenario]
-kind = "tor_outage"
-warm_case = "warm"
-cached_case = "cached"
-uncached_case = "uncached"
-```
+  ```sh
+  target/release/examples/live_integration qualify-confinement \
+    --evidence-dir /private/new-confinement-dir \
+    --socks-port SOCKS_PORT --mcp-port MCP_PORT
+  ```
 
-All three are separately reviewed, unsigned cases. The warm case belongs to the
-earlier dependency; warm and cached cases address the exact same listener/source/
-help tool and arguments. The uncached case must use a distinct help URL that no
-other case invokes. Preparation checks these bindings against the actual catalog.
-After Tor stops, its SOCKS listener must explicitly refuse connections. The same
-MCP process must still list its complete inventory and return identical cached
-help. The uncached result must report an error accompanied by a typed application
-`http_connect` event; an arbitrary provider error, driver timeout or malformed
-response cannot qualify the outage. SOCKS libraries may hide the underlying OS
-error, so the closed-port proof comes from the independent supervisor check.
-Its raw semantic result remains `FAILED`, while the separate outage assertion
-records the expected failure. This does not qualify a stalled in-flight request.
-
-Before launching Tor and again after the planned outage, the runner exercises
-unconfined positive and confined negative TCP/UDP controls on IPv4 and IPv6.
-Only the SOCKS endpoint is permitted for outbound application connections; MCP
-ports are inbound exceptions. No proxy-only downgrade is permitted. Control
-loss/output overflow stops application progression and leaves incomplete evidence.
-Raw Tor credentials and targets stay in private evidence, while the qualification
-summary reports per-identity observations and circuit separation without them. Participating HTTP
-scopes are random per cache miss/candidate, so a deterministic owner export alone
-cannot identify them. The child records `application_network_scope` events in its
-private session registry before SOCKS disclosure. The runner retains the selected
-interval's observations in `http-scopes.json`; the standalone read-only receipt
-observer returns the same metadata through its private result pipe. The audit
-resolves aliases only against independently derived canonical owner/destination
-permissions. Required owner observations may span scopes; distinct actual SOCKS
-credentials must retain circuit separation, including scopes of the same owner.
-Unknown, conflicting or missing mappings fail qualification. Re-audit compares
-archived mappings with the registered interval, and never infers missing owner
-metadata from observed streams. These records grant no financial/replay authority.
-Offline Tor re-audit verifies the original pinned archive bytes before interpreting
-its deployment. Only that observation discards the retired `discovery_relay` section from an
-in-memory copy; wallet bindings, transport identities, stored artifacts and pins
-remain unchanged. Read-only receipt recovery likewise verifies the original archive,
-then decodes only its typed network and funding policy; unrelated retired metadata
-does not prevent observing recorded receipts. Current preparation, execution and
-identity export retain strict configuration parsing. These observations grant no
-relay permission, payment authority or replay.
-Local migration tests do not requalify the changed recovery paths on real Tor.
-
-Unsigned execution proves discovery identity behavior only. Managed execution
-exports initial and final identity maps; the latter includes replacement addresses
-created during the run. Treasury traffic is confined to configured indexer/submission
-hosts. Declared pool identities may reach funding/RPC hosts and the API origins
-assigned to that pool; undeclared pool identities remain unpermitted. Each admitted
-payer must have a successful stream to its reviewed provider origin, so RPC-only
-traffic cannot pass a paid-wallet check. The audit retains the original remote DNS
-hostname even when later Tor events report a resolved IP. It verifies separation
-and permitted destinations, not complete unlinkability or individual HTTP/2
-requests on a reused SOCKS stream. Payment correlation and canonical debit evidence
-are independent requirements.
-
-A reproducible free test fixture fetches Exa's public OpenAPI catalog and uses
-Cloudflare's trace document and the Tor Project homepage (explicitly allowing HTTP/1 for that site's ALPN behavior). It creates an empty **synthetic treasury, never a wallet to
-fund**, with zero API-budget/new-job authority. The fixture writer is explicitly
-ignored in normal test runs and itself performs no network requests:
-
-```sh
-make build-dev CARGO_ARGS='--bin x402_treazury --example live_integration'
-TREAZURY_M4_FIXTURE_DIR=/private/tmp/treazury-m4-new \
-  make test CARGO_ARGS='--test integration_preparation prepare_real_tor_qualification_fixture' TEST_ARGS='--ignored --exact --nocapture'
-# Review run.toml/deployment.toml; adjust the installed Tor path if necessary.
-target/debug/examples/live_integration prepare \
-  --state-dir /private/tmp/treazury-m4-new/state \
-  --manifest /private/tmp/treazury-m4-new/run.toml
-# Use the run_id saved in run.toml:
-target/debug/examples/live_integration run --state-dir /private/tmp/treazury-m4-new/state --run RUN_ID
-```
-
-The directory must not already exist. Default fixture ports are SOCKS 19950 and
-MCP 19877; adjust the deployment before preparation if occupied. Live requests
-occur only in the final command. Both executable and runner must be rebuilt from
-the same source/features, and source changes during the test invalidate preparation.
-Keep private evidence under the fixture directory; do not publish raw responses,
-SOCKS credentials, cookie files or control transcripts.
-
-The loopback-only confinement gate can also be run independently:
-
-```sh
-target/debug/examples/live_integration qualify-confinement \
-  --evidence-dir /private/tmp/treazury-confinement-new \
-  --socks-port 19950 --mcp-port 19877
-```
-
-That command qualifies denied egress only. Successful confined MCP startup and
-exchanges in owned-Tor `run` separately establish inbound operation.
+- **Keyless outage phase:** Configure a standalone keyless run
+  (`--qualification-unsigned`) with a `tor_outage` phase (`kind = "tor_outage"`
+  naming `warm_case`, `cached_case`, and `uncached_case`). The runner stops the
+  dedicated Tor process after `warm_case` and verifies `cached_case` serves
+  from cache while `uncached_case` fails within timeouts without direct
+  fallback and negative probes stay denied. Never hand off a funded process
+  into a keyless outage run. Generate a local macOS live-Tor fixture by running
+  the ignored `prepare_real_tor_qualification_fixture` test in
+  `tests/integration_preparation.rs` with `TREAZURY_M4_FIXTURE_DIR` set to a
+  new absolute directory.
 
 ## Unsigned cover experiment
 
-Cover configuration and limitations are in [the cover guide](../../docs/cover-traffic.md).
-The local opt-in matrix drives real MCP calls through a TLS-over-SOCKS fixture,
-without Tor, live providers or funds:
+Optional keyless cover experiments run in an independent unsigned process
+against a verified same-origin range resource, recording `TREAZURY_COVER_REPORT`
+statistics (`episodes`, range counts, body bytes, padding bytes, peak streams)
+without spending funds or mixing with funded provider qualification:
 
 ```sh
-make test CARGO_ARGS='--lib cover::matrix_tests::cover_distribution_matrix' TEST_ARGS='--ignored --exact'
+target/release/examples/live_integration cover-fixture \
+  --directory /private/cover-dir --binary /private/x402_treazury \
+  --tor-binary /path/to/tor --resource httpbin --profile ranges \
+  --distribution log-normal --concurrency 1 --samples 4 \
+  --socks-port SOCKS_PORT --mcp-port MCP_PORT
 ```
 
-It writes `target/cover/matrix.json`: no cover/ranges/padding/combined × five
-samplers × concurrency 1/2/3 × two repetitions, with fixed fixture response sizes
-and delays, test-only seeds, API latency and aggregate cover counts. This compares
-correctness and overhead, not privacy or Internet performance. Separate raw h2
-fixtures verify physical reuse, never-indexed HPACK, faults and stream priority.
+- Supported options include `--resource httpbin` or `rfc`, `--profile none`,
+  `ranges`, `padding`, or `combined`, `--distribution uniform`, `exponential`,
+  `weibull`, `log-normal` (default), or `weighted-discrete`,
+  `--concurrency 1..3`, `--samples 1..16`, and manifest `post_batch_wait_ms`.
+- Run offline distribution matrix coverage locally with:
 
-Generate a private real-Tor fixture with no network traffic:
+  ```sh
+  make test CARGO_ARGS='--lib cover::matrix_tests::cover_distribution_matrix' TEST_ARGS='--ignored --exact'
+  ```
+
+See [cover traffic](../../docs/cover-traffic.md) for the cover policy.
+
+## Offline Tor re-audit
+
+Re-audit retained Tor control logs offline without starting Tor or authorizing
+paid calls:
 
 ```sh
-make build-dev CARGO_ARGS='--bin x402_treazury --example live_integration'
-target/debug/examples/live_integration cover-fixture \
-  --directory /private/tmp/treazury-cover-qualification \
-  --binary "$PWD/target/debug/x402_treazury" \
-  --tor-binary '/Applications/Tor Browser.app/Contents/MacOS/Tor/tor' \
-  --profile ranges --distribution log-normal --concurrency 2 --samples 3
+target/release/examples/live_integration audit-tor \
+  --state-dir /private/treasury/state --run RUN_ID \
+  --output /private/new-audit.json
 ```
 
-The output contains a synthetic registry, a **never-fund** synthetic key/state,
-local specs, reviewed zero-spend manifest and deployment. This does not create a
-fundable Zcash wallet. The executable and runner must be built from the same
-current inputs/features; rebuilding after modifying sources is required. The
-fixture defaults to nghttp2.org/httpbin: `/httpbin/json` is the unsigned API
-resource and `/httpbin/range/16384` provides bounded same-origin ranges.
-`--resource rfc` selects RFC Editor; a server that ignores Range and returns 200
-fails cover qualification. Help-cache/outage controls use
-Cloudflare's public trace document. Review
-these destinations and the generated files before the explicit live command:
+- `audit-tor` re-checks stream and circuit separation, remote hostnames,
+  expected SOCKS credentials, confinement probe results, and required target
+  coverage from retained control logs, printing sanitized verification output
+  without mutating financial evidence.
+- Requires `control-completion.json` for a complete audit; missing completion
+  markers leave the audit as `observed_streams_only` and exit `3`.
+
+### Owned-Tor receipt recovery
+
+To recover missing Base debit proofs for pending authorizations after a run,
+invoke `reconcile-receipts` (which launches a dedicated owned Tor process and a
+confined keyless read-only RPC observer; 900-second deadline, 16 MiB output
+cap, exiting `3` if receipts stay pending, never signing or replaying any
+payment):
 
 ```sh
-target/debug/examples/live_integration prepare \
-  --state-dir /private/tmp/treazury-cover-qualification/state \
-  --manifest /private/tmp/treazury-cover-qualification/run.toml
-target/debug/examples/live_integration run --state-dir /private/tmp/treazury-cover-qualification/state --run RUN_ID
+target/release/examples/live_integration reconcile-receipts \
+  --state-dir /private/treasury/state --run RUN_ID \
+  --evidence-dir /private/new-receipt-dir
 ```
 
-The installed Tor binary gets dedicated persistent data under the synthetic state;
-Browser data/circuits are not used. The run has 600 seconds, 300-second phases,
-240-second calls, one real call at a time, 20-second cleanup and 1 MiB result bounds.
-The explicit `post_batch_wait_ms = 10000` interval lets bounded cover tails finish
-before another call preempts them or the outage phase stops Tor. It applies after
-connected batches (including the last), consumes the existing phase/run/window
-budgets, responds to cancellation and is logged and retained as evidence. Ordinary
-manifests default to zero; values above 60000 or the phase budget are rejected.
-MCP latency intervals exclude this settling time. Default three API samples request at most 16 KiB cover per episode, eight range
-requests and ten seconds per episode, additionally bounded by global limits.
-Existing confinement, control evidence and outage assertions remain mandatory.
-Use a new fixture/run for additional samples; never replay a reserved case.
+## Shielded-refund evidence and qualification
 
-Profiles `none`, `ranges`, `padding`, `combined`, five `--distribution` choices,
-`--concurrency 1..3`, and `--samples 1..16` support reviewed comparisons. Ranges are
-the live default. Public range support is not authorization for arbitrary ignored
-headers: enable live padding only for a compatible, explicitly reviewed resource.
-Local tests qualify its mechanics independently. Fresh Tor circuit-learning state
-is adequate for a bounded correctness check, not a performance comparison.
+Before authorizing any live Zcash scan or controlled refund experiment:
 
-The runner requires one complete `TREAZURY_COVER_REPORT` stderr summary when cover
-is enabled, records `cover_observed`, and includes `cover_evidence` in session
-`results.json`. Missing/duplicate summaries, truncated process output, inconsistent
-counts or unclean streams invalidate evidence. `at_least_one_range_qualified=false`
-is explicitly unqualified range coverage even if the real calls succeeded.
-Requested modes with no successful samples make qualification incomplete; the
-ordinary API results and refusal evidence are still retained. Keep
-outcome reasons, consumed counts and degraded samples. Counters measure reader
-body bytes and uncompressed padding values; actual wire bytes and production
-connection affinity are unobserved. Neither this fixture nor more traffic variance
-establishes privacy, live EVM isolation, paid receipts or rotation correctness.
+1. Inspect retained private run reports, `wallet status --json`, and offline
+   `wallet notes --config FILE` to establish existing Ironwood notes, pending
+   source work, and historical swap bindings.
+2. Verify any target refund receiver is an Orchard-receiver-only Unified
+   Address derived under `TransparentAddressDiscovery::disabled()`.
+3. Confirm dry quote format acceptance separately with
+   `make run CARGO_ARGS='--offline --example quote_near -- --diagnose --refund-address ADDRESS'`
+   (add `--network-config /path/network.toml` to route over Tor) using a public
+   test address; dry quotes check format only, never live refund delivery.
+4. Any live funded refund test requires separate operator approval, bounded
+   funding job count, explicit registry authorization, and post-refund
+   verification via confirmed Ironwood SDK receipt at the exact saved refund
+   receiver (never relying on NEAR `REFUNDED` status alone and never using
+   transparent shielding). See
+   [refund policy](../../docs/wallet-rotation.md#refunds-state-and-recovery).

@@ -1,1333 +1,326 @@
 # Testing and qualification
 
-Use offline regressions to establish behavior; use optional consensus and live
-runs for the integration boundaries they actually exercise. A coverage percentage
-or successful HTTP response does not substitute for financial, permission or
+Use offline regressions to verify application behavior and reserve optional
+consensus and live runs for the integration boundaries they exercise. Coverage
+percentages and HTTP `200` responses do not replace financial, permission, and
 network-isolation assertions.
 
-When changing tests, preserve full schema/description contracts and meaningful
-assertions; do not trim documentation or loosen expectations to obtain a pass.
-Discovery tests inject public-URL documents and localhost fixtures only under
-`cfg(test)`. Never add a production loopback bypass for fixture convenience.
+When updating tests, keep complete schema, description, and assertion contracts
+intact; never trim documentation or loosen checks to pass. Discovery tests
+inject public-URL documents and localhost fixtures only under `cfg(test)`,
+never through a production loopback bypass.
 
-## Portable connectivity controls and platform scope
+## Platform scope and portable controls
 
-Focused `network::qualification_probe_tests` classify permission denials using
-production reporting and native OS-code mappings, including exact refusal
-classification, then exercise real loopback TCP/UDP positive controls, a held
-non-listening TCP endpoint (native refusal or timeout), received-request reply
-timeout and destination preflight. These unfunded controls require no firewall
-changes and do not establish actual OS confinement. The runner EgressProbe command
-consumes this classifier; legacy standalone live-Tor socket controls are a separate
-implementation and do not validate it. Unix-only builder mutation remains scoped
-to Unix without changing other platform behavior.
+Engineering and runtime scope covers Linux and macOS (Windows runtime and
+native acceptance remain deferred in
+[release follow-ups](plans/deferred/release_followups.md)).
 
-The engineering scope is Linux and macOS. Windows implementation/native acceptance
-is owned by the [deferred release plan](plans/deferred/release_followups.md), with
-no Windows support claim or rerun requirement for the selected cleanup. Preserve
-historical Git/private evidence; partial native builds or API results do not
-qualify privacy, recovery or power-loss behavior.
-
-The shared Linux/macOS private-storage boundary has native fixtures for atomic
-creation under inherited ACLs, descriptor reopen rejection, SQLite sidecars and
-private preflight cleanup. A held journal descriptor is unlinked before sidecar
-inspection validation to reproduce concurrent SQLite removal deterministically;
-ordinary file validation still rejects it, and sidecar inspection retains
-symlink, hardlink, mode and macOS ACL rejection. Source review alone does not
-qualify these native contracts: execute the host-specific controls, including a
-denied-read control.
-The [storage assessment](plans/portability_fixes.md) retains the separate Unix
-namespace-authority question. Normal Unix financial, lifecycle and compiler checks
-remain required. Record exact source/executable/features, commands, diagnostics and
-nonzero test counts; retain valid evidence and revalidate affected consumers.
-No live-funded, consensus or Tor qualification follows from these controls.
-
-HTTP cache race fixtures run in exact isolated children because the optional
-private scope observer is installed once per process. Two synchronous constructors
-enter the same Tokio runtime and are held by that actual pre-I/O observer; the
-coordinator checks the mutex before starting a competitor, releases callbacks and
-joins workers before assertions. Constructor errors/panics also notify completion.
-Tests preserve one canonical winner, truthful unused-scope observations, failure
-propagation despite a concurrent winner, zero pre-dispatch SOCKS requests and the
-winning scope's actual fixture disclosure. Existing promotion/key/eviction tests
-retain their separate ownership contracts; these fixtures add no production
-coalescing, timeout or scope-history framework.
-
-SOCKS wire-identity fixtures capture credentials at HTTP handler entry, before
-waiting on gates or delays. Correlation selects the newest matching proxy peer,
-destination host and port; the observation retains those credentials rather than
-looking up a historical socket address afterward. Source ports can be reused,
-including across destinations. The proxy publishes completed connection records
-before acknowledging CONNECT, without a later mutable-index update; failed
-attempts remain recorded before error completion. Configured SOCKS observation requires a matching
-record; direct fixtures explicitly omit it. Stale-history and later-reuse controls
-preserve exact scope, signer, promotion and no-replay assertions without relying
-on libtest thread scheduling.
-
-Catalog acceptance fixtures exercise ordinary inspection, serving and deferred
-startup with fresh acquisition owners: semantically rejected JSON is not cached,
-restart can reach a recovered origin, and rejected downloads or HTTP 304 content
-cannot replace or renew the previous snapshot. Optional pricing format rejection
-also retains the accepted cache. Concurrent alias refresh fixtures hold actual
-acquisitions and publish each source separately, preserving admission while the
-last accepted shared cache generation wins and obsolete hints remain retired.
-Deferred-constraint commit failures cover family replacement, unchanged metadata
-renewal, revision deletion and oversized-entry deletion: rollback retains durable
-rows, live observation identity and the original expiry.
-Pricing retirement fixtures hold an actual blocking writer before its final commit
-guard, retire the source, and verify both cache bytes and current observations
-survive. A delayed retired acquisition also cannot restore old metadata across
-restart. Prepared enrichment retains tool ownership before publication and does
-not poll its loader if publication is discarded.
-Dynamic refresh fixtures retain proposed tools across removal, revision replacement,
-snapshot rejection and persistence refusal; none starts optional pricing I/O.
-Successful replacement publishes before optional pricing completes.
-Registration snapshot/save refusal and restore-conflict fixtures retain proposed
-tools while verifying zero optional pricing requests. Successful restore publishes
-before enrichment and retains the saved acquisition expiry.
-
-Catalog refresh publication regressions observe the final visibility boundary for
-static publishers with and without a dynamic registry, and for registered-source
-refresh. Failed validation preserves old admission; successful replacement retires
-old handles before exposure while an already submitted signed response can finish.
-The two-endpoint managed fixture holds a bootstrap-signed response during coalesced
-catalog refresh, injects credit into preallocated destination reserves, and exercises
-destination handoff and READY-member promotion. Exact requests, payer/nonce journals
-and unchanged funding-job/address inventories establish no replay or refresh-induced
-allocation. Synthetic credit does not qualify treasury funding or live settlement.
-Fixture cleanup releases catalog snapshots before joining the Store worker.
+- **Connectivity controls (`network::qualification_probe_tests`):** Classify
+  permission denials via Rust `ErrorKind` and native OS mappings, exercising
+  loopback TCP and UDP positive controls, a held non-listening TCP port,
+  reply timeouts, and destination preflight without firewall changes. Used by
+  the runner's `EgressProbe` command (separate from `scripts/qualify_tor.py`).
+- **Private storage (`src/rotation/store/` and `src/http_cache.rs`):** Native
+  Linux and macOS controls cover atomic creation under inherited macOS ACLs,
+  descriptor reopen rejection, unlinked SQLite sidecar validation (symlink,
+  hardlink, mode, and macOS ACL checks), denied-read controls, and private
+  preflight cleanup. See [portability assessments](plans/portability_fixes.md).
+- **Crash and SQLite I/O fault fixtures (Unix-only):** `SIGKILL` tests kill an
+  owned signing child at signature, journal-acknowledgement, and signed-dispatch
+  boundaries and assert atomic reopen with zero replay; a custom SQLite test
+  VFS fails WAL and checkpoint writes, fsyncs, and `SQLITE_FULL` page limits.
 
 ## Provider regressions
 
-Shared provider-update capture/comparison/candidate regressions live in the
-`provider_updates` development example and use synthetic inputs. Run
-`make test CARGO_ARGS='--example provider_updates'`; see the
-[maintenance runbook](provider-updates.md). They establish offline evidence mechanics, not live vendor
-completeness, billing interpretation or paid compatibility. Sweep outputs remain
-ignored under `target/provider-updates/`, separate from request fixtures and full
-pinned runtime catalogs.
+Shared capture, comparison, and candidate regressions live in
+`provider_updates` using synthetic inputs (`make test CARGO_ARGS='--example
+provider_updates'`; see [provider maintenance](provider-updates.md)). Sweep
+outputs stay ignored under `target/provider-updates/`.
 
-
-Provider-specific regression storage should reproduce a named quirk, historical
-failure or authored catalog transformation. Use the smallest faithful input and
-assert the affected request schema, routing, filtering or output behavior. Generic
-parsing, composition and selection belong in shared synthetic tests. Cheap offline
-TOML validation should cover every bundled definition without freezing all settings
-or the current vendor inventory. Ordinary vendor prose does not need a snapshot.
-
-Generated tool/settings snapshots are not required for provider additions.
-The ignored startup benchmark uses synthetic workloads independently of provider
-fixtures. Inspect every consumer before pruning inputs,
-including production local catalogs, discovery, media, payments and qualification.
-Preserve financial evidence. Provider existence neither requires paid qualification
-nor establishes support or current upstream health. Qualification must explicitly
-identify its selected requests, caps, authority and unobserved outcomes.
-`total_test_budget_usdc` bounds the running sum of potentially chargeable API
-authorizations, not prefunded case reservations or wallet funding. Concurrent
-admissions check and record that total atomically before disclosure, including
-concurrent admissions from distinct runs sharing a registry. Reopening retains
-accepted charges and rolls back refused admissions; uncertain and failed attempts
-remain charged across restart. Per-case limits bound each case,
-and cumulative registry authority spans runs. Admission derives all three totals
-from one complete strict JSON history pass inside its existing write transaction;
-each original payment amount retains its u64 budget parse, and same-case history
-also retains its original U256 parse. Converting or normalizing numeric text must
-not widen accepted evidence. Scoped usage reads retain their own SQL scope rather
-than acquiring unrelated-run validation requirements. Budget refusal emits WARN and a
-clear test error. A PaidClient regression covers run and registry budget refusals
-before signed dispatch: payment journals and admission evidence remain absent,
-balance estimates and reserve ownership remain unchanged, and sufficient authority
-allows the same case to proceed. Funding has no ZEC spending budget; reviewed
-allocation counts, reserve sizes, actual treasury spendability and SDK transaction
-validity apply.
-
-Catalog media regressions preserve precedence, parameter case and first-duplicate
-lookup semantics, plus usable wildcard fallback and exact selected Content-Type.
-Repeated shared-body names, including invalid/unsupported media, wildcard
-synthesis, candidate/range and nested parameter amplification must exhaust the existing
-conversion budget deterministically while the physical document still fits;
-wall-clock thresholds and a separate media quota are unnecessary. A long flat
-reference chain must reach the depth bound before growing the projection stack;
-small exact-budget tests charge repeated pointer lookups once each and reject
-excess work before copying or allocating it.
-Seeded-budget tests also cover repeated OpenAPI path/metadata copies, duplicated
-pricing fields, parameter issue metadata and fallback description copies without
-large fixtures or charging moved schema contents twice. An isolated diagnostic
-regression catches depth/node/byte rejections and arithmetic overflow errors and
-requires a sanitized WARN for each, even when the caller handles the error.
-Used dynamic/recursive schema references are covered in body, nested property,
-parameter/header and referenced-target positions. Partial builders retain healthy
-siblings; strict builders reject omissions. Opaque examples/defaults/unused
-definitions and OpenAPI3.0 ignored reference siblings retain their own semantics.
-Scalar parameter compatibility tests cover direct non-scalar array-item/null-only
-omissions, representable scalar/tuple alternatives, ignored protocol declarations
-and managed Idempotency-Key diagnostics. Static checks stay limited to explicit
-type domains; runtime codecs retain their actual-value guards.
+- Store provider-specific fixtures only for a named quirk, failure, or custom
+  transformation, using the smallest faithful input and asserting the target
+  schema, routing, filter, or output behavior. Put generic parsing and
+  selection in shared synthetic tests; validate all bundled TOMLs offline
+  without freezing whole settings maps or inventories.
+- Catalog structural-budget tests cover media-type precedence, wildcard
+  fallback, long flat `$ref` chains, repeated pointer lookup charging,
+  duplicated path, pricing, and metadata copies, depth, node, and byte limits,
+  overflow errors, sanitized `WARN` diagnostics, dynamic and recursive `$ref`s,
+  scalar and union parameters, and `Idempotency-Key` rules.
+- Qualification budget tests verify atomic `total_test_budget_usdc`, per-case,
+  and `cumulative_test_budget_usdc` enforcement across concurrent runs before
+  signed dispatch (preserving `u64` budget parses and `U256` per-case totals
+  and keeping refused admissions free of journals or balance changes).
 
 ## Framework degradation
 
-[The framework integration contract](framework-integration.md) distinguishes
-completed warming from catalog coverage and authenticated MCP availability.
-Focused warming/selection/readiness fixtures are mapped in
-[startup tests](../tests/STARTUP.md#best-effort-framework-startup). Consumer checks
-must use their actual pinned treasury implementation; a host executable alone does
-not validate a packaged image. Synthetic outage and catalog-removal results do not
-qualify current provider availability, live paid APIs or real Tor circuits.
+The [framework integration contract](framework-integration.md) separates
+completed warming from catalog coverage and MCP listener availability. Focused
+warming, selection, and readiness fixtures are mapped in
+[best-effort framework startup](../tests/STARTUP.md#best-effort-framework-startup).
 
 ## Dynamic registry publication
 
-Registry efficiency fixtures observe actual import builds under isolated child
-execution, verify reuse across unrelated additions/static replacement, and rebuild
-only invalidated candidate/document/name inputs. Small synthetic schemas retain
-POST preference, listener tag/name filtering, C2 omission reasons, compatible help
-ownership and instruction replacement; no provider inventory snapshots are needed.
-
-Publication fixtures hold an actual accepted commit at a deterministic test-only
-boundary, remove its completed optional fetch-cache entry, and start a duplicate
-add at the actual missing-registration recheck. Known registration and source-filtered
-search readers must continue on the prior complete snapshot while the duplicate
-waits before acquisition. Releasing the commit must produce identical results
-without a second document request. Tests release held callbacks and join owned
-workers before reporting failure. Existing cancellation, persistence refusal and
-crash/restart controls remain necessary; a fixture watchdog establishes no runtime
-deadline, freshness or spending authority. Snapshot source metadata, tools,
-instructions, omission diagnostics and cursor generation must switch together.
+Registry fixtures run in isolated child processes to observe import builds,
+confirm reuse across unrelated additions and static refreshes, and rebuild only
+invalidated inputs. Publication fixtures hold a commit at a deterministic
+test-only boundary so concurrent readers keep serving the prior complete
+snapshot while duplicate registrations wait and finish without a second fetch
+(switching metadata, tools, instructions, omissions, and search cursors
+together).
 
 ## Testing efficiency
 
-Keep ordinary validation on the pinned production compiler and maintained named
-stages. Do not build a cross product of compilers, feature combinations, profiles
-or coverage modes. A future matrix expansion needs an independently demonstrated
-contract and explicit user authorization. A condition comparison uses one isolated
-analysis toolchain and test profile, with a default baseline/final pair and only
-focused financial supplements. Run it for a stated coverage comparison, separately
-from ordinary validation and per-commit reviews. Nightly analysis is outside
-`make test` and `make check`; it never changes production pins.
-
-Reuse passed evidence while its source, feature, profile and relevant inputs remain
-valid; resume unfinished stages after focused fixes. Reruns need changed inputs,
-an observed failure/flakiness investigation, or an explicit measurement/coverage
-goal. Do not add success caches or skip explicitly requested standalone commands.
-
-Consolidate expensive setup when scenarios share contract ownership. Prefer small
-immutable synthetic inputs and shared fixture builders. Keep fresh mutable stores,
-keys and authority for isolated cases; shared mutable financial state and global
-serialization are not shortcuts. Each separate heavyweight wallet, chain, server
-or subprocess fixture needs a named distinct boundary. Review what each scenario
-uniquely proves and whether existing setup can carry its assertions.
-
-Assert functionality first: results, exact requests, persisted transitions, counts
-and forbidden side effects. Preserve narrow privacy, severity, wire-output and
-user-guidance contracts, without full prose inventories or duplicate end-to-end
-logging scenarios. Put pure decisions and parser variants in cheap unit/contract
-tests; retain representative CLI/network/SDK boundaries and the recovery,
-concurrency and no-replay cases that need integration.
-
-Use paused/mock time for owned timer logic and barriers/notifications for ordering.
-Choose completion signals at the boundary an assertion depends on: startup
-inventory capture and its active work, client-side publication, or final resource
-owner destruction. Task entry, server request receipt, a completed response and
-listener shutdown can precede those boundaries. Restart fixtures must release all
-service-held owners before reopening exclusive state; a retained-owner negative
-control should prove that teardown cannot acknowledge release early.
-When cooldown timing is outside a fixture's contract, request fresh work after
-the event under test instead of advancing an unrelated cooldown. Cooldown tests
-must join the enclosing maintenance work before moving their owned clock.
-When a flaky failure exposes a missing boundary, audit nearby fixtures that use
-the same helper or lifecycle. Reuse a small completion helper for demonstrated
-matches; intentionally blocked work and unrelated protocol phases require their
-own signals. Additional successful smoke runs do not replace those controls or
-establish repository-wide freedom from flakes.
-Do not wait real seconds merely to let background work probably run. A real wait
-needs a named process, transport or external-clock invariant that mocked time cannot
-prove, with the smallest representative integration case. Tokio time does not
-control other processes, OS IO or independent clocks. Never change production
-cadence or add timeouts to accelerate tests. Document exceptions beside the owning
-test/helper and in review evidence. Use focused orchestration tests for selection
-and ordinary review for semantic duplication, rather than source-text bans,
-arbitrary duration caps or a new policy framework.
-
-Optimized arithmetic changes require relevant payment/treasury tests with
-`make test CARGO_ARGS='--release --test payments'` and focused release library
-coverage. Normal debug tests do not exercise the release profile. Release enables
-overflow checks for application and dependencies without changing explicit
-checked/wrapping/saturating arithmetic or panic ownership.
+- **Pinned single toolchain:** Run normal validation on the pinned production
+  compiler and named Make stages without building compiler, feature, profile,
+  or coverage matrices. Nightly condition analysis (`make coverage-condition`)
+  runs only for explicit coverage comparisons, outside `make test` and
+  `make check`.
+- **Reuse valid evidence:** Keep passed stage results while source, features,
+  profiles, and inputs are unchanged, and resume unfinished stages after
+  localized fixes. Never add automatic skip caches to Make stages.
+- **Consolidate setup, isolate state:** Share immutable synthetic inputs and
+  helpers while keeping fresh mutable Stores, keys, and authorities per test.
+- **Assert functionality and forbidden side effects:** Check results, exact
+  requests, persisted transitions, counts, and absent side effects (no
+  signature on refusal, no publication on denial, no send before persistence,
+  no bypass of `src/network.rs`). Put pure parser and policy checks in fast
+  unit tests and keep representative integration boundaries.
+- **Deterministic synchronization:** Use paused Tokio time for owned timers and
+  barriers or notifications at the exact boundary under test (inventory
+  capture, client publication, or final owner drop). Avoid wall-clock sleeps
+  unless a cross-process or OS I/O invariant requires one, and never alter
+  production cadences or add arbitrary deadlines to speed up tests.
+- **Optimized arithmetic:** Validate arithmetic changes under the release
+  profile (`make test CARGO_ARGS='--release --test payments'` plus focused
+  release library tests), which enables integer overflow checks throughout the
+  dependency graph.
 
 ## Selecting validation by change
 
-Choose checks from the affected behavior and its consumers before starting Cargo.
-Use the smallest selection that establishes the changed contract, plus any checks
-explicitly requested by the user or required by an applicable qualification.
-Independent review still applies; it does not require a full build for every edit.
+Pick the smallest check set that covers the changed behavior and its consumers,
+plus any user-requested checks:
 
-| Change | Applicable validation |
+| Change | Validation |
 | --- | --- |
-| Prose or ordinary comments only | Review accuracy, links and diff formatting; no Cargo build, Clippy or runtime suites. Executable examples, doctests and compiler-consumed directives follow their affected contracts. |
-| Configuration, provider TOML or schema data | Parse the edited inputs and check affected catalog, routing or request contracts. Use an existing executable only when the command reads the edited files. Bundled providers are embedded: tests or inspection of embedded content require a matching compilation, even without a new deliverable. No blanket production compiler/all-target Clippy gate for data-only changes. |
-| Tests or fixtures only | Compile and run the affected test targets and consumers; lint changed Rust test targets. Broaden only when shared helpers or contracts affect other suites. |
-| Runtime Rust | Run the production compiler/all-target Clippy warning gate (`make check-clippy`) and focused behavior/consumer tests. Select compatibility and broader runtime stages for affected boundaries. |
-| Dependencies, toolchain, build rules or broad refactors | Check affected source resolution, production/test compilation and compatibility; select broader stages according to the affected call chains. Run relevant source verifiers under the [vendor verification policy](../vendor/README.md#source-verification-boundaries). |
-| Financial authority, payment/recovery, network isolation, protocol or concurrency behavior | Include the relevant boundary, failure, recovery and forbidden-side-effect tests regardless of the changed file extension. |
+| Prose or comments only | Review accuracy, local links, heading anchors, and `git diff --check`; skip Cargo builds and tests (executable examples and doc-embedded assets still verify their consumers). |
+| Configuration, provider TOML, or schema data | Parse edited inputs and run matching catalog, routing, or request tests. Recompile when testing embedded bundled providers (`src/providers/assets.rs`). |
+| Tests or fixtures only | Compile, lint, and run matching test targets and consumers; broaden when shared helpers change. |
+| Runtime Rust | Run `make check-clippy` and focused behavior and consumer tests; add compatibility and runtime stages for touched boundaries. |
+| Dependencies, toolchain, build rules, or broad refactors | Check resolution, compilation, compatibility, and complete call chains; run vendor verifiers under [source verification boundaries](../vendor/README.md#source-verification-boundaries). |
+| Financial authority, payment or recovery, network isolation, protocol, or concurrency | Always include boundary, failure, recovery, and forbidden-side-effect tests regardless of file type. |
 
-Rows can overlap. A configuration change that alters payment authority needs its
-financial contract checks; a spelling correction does not need a runtime suite.
-Use existing focused coverage where sufficient, rather than adding tests that
-merely restate a flag or document. Filtered tests must execute the intended cases,
-not pass with zero tests. Name the scope and limits of the resulting evidence.
-
-Full `make check` and explicitly requested named stages retain their fixed
-selections. Do not narrow their recipes or add automatic skip caches to implement
-this policy. Select focused commands instead of a broad stage when only a subset
-is needed. In particular, `check-static` includes both vendor verifiers and
-`check-compat` includes the Pepper verifier; requesting either still runs them.
-
-Dependency source verification is not a per-build requirement. Carry forward
-unchanged-input evidence under the vendor policy; ordinary application, data or
-documentation edits do not by themselves require reconstructing vendored sources.
-[Reproducibility qualification](reproducible-builds.md) is separate: run its two
-clean builds for release qualification, changes to the reproducible-build contract,
-or an explicit request. Ordinary development does not require it, including when
-`make build` uses the release optimization profile. Neither `make build` nor
-`make check` invokes that qualification runner. Keep ordinary toolchain/lockfile
-checks and embedded build identity intact.
-
-Batch compatible test targets in one invocation and keep feature/profile choices
-stable. Freeze the implementation snapshot, and commit it before expensive
-validation when practical. Git metadata is a build-identity input, so commits
-between checks can trigger compilation even when behavior is unchanged. Reuse
-valid evidence across prose-only commits with the original source and executable
-revision recorded; never describe an older binary as embedding the newer commit.
-Do not rebuild solely to relabel evidence. Different compiler, Clippy, test and
-feature/profile selections can still require distinct Cargo artifacts.
-
-Build an updated executable when needed for use or to validate embedded inputs;
-do not append a release build to every validation run. Prefer the incremental
-`make build-dev` for iterative executable development unless the release profile
-is required by the affected contract or the requested artifact.
+Verify filtered test runs execute nonzero tests. Run
+[reproducible release builds](reproducible-builds.md) only for release
+candidates, reproducibility changes, or explicit requests (neither `make build`
+nor `make check` runs it). Prefer `make build-dev` for iterative binary builds
+unless release optimization is required.
 
 ## Default development checks
 
-The application always includes Zcash. The [Makefile](../Makefile) verifies pinned Cargo
-and supplies Cargo-managed protoc; do not append a second `--locked` flag.
-See the [entrypoint reference](../scripts/README.md) for focused test arguments.
+The application always compiles Zcash support. Run checks through the root
+[Makefile](../Makefile) so pinned Cargo and Cargo-managed `protoc` are used
+(do not pass a second `--locked`). See [scripts/README.md](../scripts/README.md).
 
-`make check` runs the fixed stages below in order, using `check-default-remaining`
-after compatibility, and stops at the first failing stage, including with `make -k`.
-Every stage can also run independently; it does not implicitly rerun earlier
-stages. `CARGO_ARGS` and `TEST_ARGS` customize
-`make test` / `make clippy`, but never narrow a `check-*` stage.
+`make check` runs these stages in order (stopping on the first failure even
+under `make -k`), using `check-default-remaining` after `check-compat`:
 
 | Stage | Selection |
 | --- | --- |
-| `check-static` | Formatting, tooling regressions, analyzer tests and CogC/CycC report, vendor provenance |
-| `check-clippy` | Production library/binary compiler check, then all-target Clippy with `zcash-regtest`; emitted compiler warnings from both application and dependencies fail the stage |
-| `check-compat` | SDK wallet, payment, MCP and cryptographic integration tests using the application lockfile |
-| `check-default-remaining` | All other eligible default root targets, derived from Cargo metadata; the four compatibility integrations already ran |
-| `check-default` (standalone) | Complete `--all-targets` selection, including compatibility integrations and examples; not repeated inside `make check` |
-| `check-proving` | `zcash-testutils` treasury proving tests |
-| `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle |
-| `check-codec` | `zcash-testutils` address-codec isolation regression |
+| `check-static` | Formatting, tooling regressions, analyzer tests and CogC and CycC report, vendor provenance |
+| `check-clippy` | Production library and binary compiler check, then all-target Clippy with `zcash-regtest` (fails on emitted application, dependency, and cached warnings) |
+| `check-compat` | Pepper verification plus `sdk_compat`, `payments`, `server`, and `crypto_vectors` |
+| `check-default-remaining` | All remaining default root targets derived from Cargo metadata after valid `check-compat` |
+| `check-default` (standalone) | Complete `--all-targets` default suite (not repeated inside `make check`) |
+| `check-proving` | `zcash-testutils` treasury proving tests (1 thread) |
+| `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle (8 threads, `--nocapture`) |
+| `check-codec` | `zcash-testutils` address-codec isolation regression (1 thread) |
 
-Default application harnesses use eight libtest threads. `TEST_THREADS=1` selects
-serial execution for `make test`, `make check-default` and
-`make check-default-remaining`; other positive counts can be measured the same
-way. `TEST_ARGS` still replaces the whole harness argument
-list for focused `make test` runs, while `check-default` retains its complete target
-selection. The lifecycle stage uses eight threads; proving and codec stages keep
-one thread. Lifecycle uses `--nocapture` so panic details appear when a test fails,
-rather than waiting for the entire library harness to finish. Deliberate panic
-controls can also print panic-hook output while passing; the test result remains
-authoritative. Feature builds remain sequential.
-
-The combined compatibility/remainder partition uses the same root lockfile,
-default features, test profile and runner. Cargo metadata supplies current targets
-and resolved features; root test/bench declarations supply the bench flag omitted
-by metadata. Library, binary and example selection remains with Cargo; eligible
-integrations and benches are selected by name. A changed workspace default-member
-selection or inconsistent compatibility targets fails explicitly. Standalone
-`check-default` always requests the complete suite; separately requesting it after
-`check-compat` intentionally repeats those integrations. No stage caches success.
-
-`tests/integration_preparation.rs` owns the shared live-runner unit tests and its
-real-executable integration cases. The `live_integration` example has an empty
-test harness under `--all-targets`; its ordinary implementation remains covered
-by all-target Clippy and explicit runner builds. Shared tests are not repeated in
-the example harness.
-
-Compare concurrency on an unchanged executable with the same test counts and
-assertions, then validate the complete default suite. Keep timing contracts intact;
-increasing their deadlines would hide contention or isolation failures rather than
-establish a faster test configuration. A measured default is not an optimum for
-every host, so use `TEST_THREADS` when local measurements justify another count.
-
-Diagnostic fixtures whose callsites are also reached by subscriberless siblings
-use the [log-capture guard](../tests/support/log_capture.rs) to run in an exact child
-process. A sibling's first use can otherwise cache disabled tracing interest
-without the fixture's scoped subscriber. This also applies to synchronous
-`tracing::subscriber::with_default` captures. All severity, count, privacy and financial
-assertions stay in that child; the parent verifies successful execution of one
-test. Other fixtures remain parallel; this is not a reason to serialize an entire
-harness.
-
-Production subprocess fixtures cover CLI JSON rendering, remote HTTPS catalog-size
-limits and command-line overrides, using explicit fixture CA configuration and real
-TLS requests. Local specification files are not downloads and do not acquire the
-remote `max_spec_bytes` contract. These fixtures add no production trust environment
-variable and modify no OS trust store.
-
-Exercise ordinary CLI rendering once per distinct output contract. Use direct
-configuration/catalog APIs for advisory metadata and parser combinations; retain
-actual serving-source selection for warning scope. Functional cache lifetime and
-cover capability checks need no prose capture. Narrow diagnostic fixtures still
-verify severity, privacy, failure scope and user guidance alongside real results,
-requests and durable state. Do not replace removed message inventories with full
-field inventories.
-
-Test children that clear their environment preserve only the inherited
-`LLVM_PROFILE_FILE` when present, so isolated condition analysis can observe their
-work. This does not broaden operator-controlled live child environments or permit
-copying ambient credentials and proxies. Keep exact child-test execution checks.
+- Default harnesses use 8 threads (`TEST_THREADS=1` runs serially for
+  `make test`, `check-compat`, `check-default`, and `check-default-remaining`).
+  `CARGO_ARGS` customizes `make build`, `make build-dev`, `make test`,
+  `make cargo-check`, `make run`, and `make clippy`, and `TEST_ARGS` customizes
+  `make test` only; neither affects `check-*` stages.
+- `tests/integration_preparation.rs` runs shared `live_integration` unit tests
+  once alongside compiled-executable integration tests (`live_integration`'s
+  own test harness is empty under `--all-targets`).
+- Diagnostic tests whose callsites are also hit by subscriberless siblings use
+  [log_capture.rs](../tests/support/log_capture.rs) in an isolated child
+  process so cached disabled tracing interest never drops events.
+- Cleared child environments forward only `LLVM_PROFILE_FILE` when set (never
+  ambient credentials or proxy variables).
 
 ### Compiler diagnostics and review
 
-`check-clippy` first checks the production library and binaries without test
-features or development targets, then runs Clippy over all targets with
-`zcash-regtest`, including binary test targets. These selections are separate:
-test/example feature unification can hide unused production code. Both commands
-stream Cargo JSON through `scripts/check_warnings.py`, which displays compiler
-diagnostics and fails on emitted warnings, including local dependency warnings
-and diagnostics replayed from cached builds. Cargo failures retain their nonzero
-status. Unexpected non-JSON stdout is displayed and fails the diagnostic check.
+`make check-clippy` runs a production-only check (library and binaries without
+test features) followed by all-target `zcash-regtest` Clippy, piping Cargo JSON
+through `scripts/check_warnings.py` so emitted dependency warnings and cached
+warnings fail the stage (plain `make clippy` uses `-D warnings` on selected
+application targets only).
 
-Clippy's `-- -D warnings` remains enabled for selected application targets; it
-does not enforce dependency warning cleanliness. Registry dependencies can have
-their lints suppressed by Cargo, so this check covers emitted diagnostics rather
-than every possible upstream lint. Vendoring a dependency can expose warnings
-without changing its version. Ordinary `make build`, `make test`, `make clippy`
-and compatibility tests retain their normal warning/exit behavior; use the fixed
-`check-clippy` stage for this stronger warning check.
-
-Reviewers must inspect diagnostics as well as exit status before accepting
-validation evidence. Resolve compiler warnings in affected application or vendored
-code, and record the disposition of any remaining diagnostics from other checks;
-a successful command alone does not establish a warning-free run. For dependency
-or build-rule changes, verify the actual production and test feature selections,
-warning enforcement scope and source provenance. Keep compiler warnings separate
-from advisory complexity scores and runtime fixture logs: those need review under
-their owning policies, rather than blanket warning-text rejection. Do not silence
-lints or enable unused features merely to obtain a clean check.
-
-Large macOS debug library-test binaries can emit the system linker's
-`__eh_frame section too large` diagnostic. Compact-unwind DWARF hints have a
-24-bit offset field; [Apple libunwind](https://github.com/apple-oss-distributions/libunwind/blob/main/libunwind/src/UnwindCursor.hpp)
-can fall back to searching the retained full DWARF section. Record the actual
-target, warning and retained unwind information, then complete affected panic,
-cancellation/restart and optimized checks. The diagnostic reports a possible
-unwind-search performance cost, without itself demonstrating a correctness failure.
-Keep it visible; do not remove unwind data or change panic strategy, profile or
-toolchain pins to silence it. This does not waive the production/Clippy warning gate.
+- Inspect compiler diagnostics alongside exit status; resolve warnings in
+  touched application and vendored code and disposition any remaining warnings.
+- Large macOS debug test binaries can trigger the linker's
+  `__eh_frame section too large` diagnostic (Apple `libunwind` falls back to
+  full DWARF search). Keep unwind data, panic strategy, and toolchain pins
+  unchanged and verify panic and restart coverage.
 
 ### Validation order and continuation
 
-Apply [validation selection](#selecting-validation-by-change) first; the sequence
-below orders selected stages and full application checks, not every edit. Start
-with applicable design review and cheap static/contract checks. Complete applicable
-independent [complexity review](../tests/COMPLEXITY.md#review-discipline), including disposition
-of findings that could require refactoring, before broad runtime suites. Generating
-a report does not complete that review; `make check` runs automatically without a
-human review pause. Reuse a verified source-matched report when its inputs have not
-changed.
+1. Apply [selecting validation by change](#selecting-validation-by-change),
+   complete independent design review, and run cheap static checks and
+   [complexity review](../tests/COMPLEXITY.md#review-discipline) before broad
+   runtime suites.
+2. When selected, run `make check-clippy check-compat` and focused contract
+   tests before long suites.
+3. For a full check once sources stabilize, finish remaining stages:
 
-When selected, run `make check-clippy check-compat` before long runtime suites to
-expose lint, shared-test compilation and dependency compatibility failures early. Run focused
-tests for the changed behavior and affected inexpensive configuration, authored
-example, schema or diagnostic contracts before their broader suites. Choose these
-from real consumers; a blanket compile-only pass cannot detect stale runtime
-assertions. For a full application check, once sources are stable, finish the
-remaining stages:
+   ```sh
+   make check-default-remaining check-proving check-lifecycle check-codec
+   ```
 
-```sh
-make check-default-remaining check-proving check-lifecycle check-codec
-```
-
-`check-default-remaining` requires still-valid earlier compatibility evidence when
-used for continuation. Use `check-default` for an independently requested complete
-default suite.
-
-After a failure, inspect its cause, fix it, and rerun the affected tests or stage.
-Continue with the unfinished named stages. Repeat a passed stage when changed code,
-fixtures, dependencies, features, profiles or build inputs invalidate its evidence;
-assess relevant consumers rather than treating every edit as a full restart.
-A fixture correction or test-module relocation can often use focused revalidation;
-a payment ownership or network-policy change may affect wider suites. Resolve
-material findings before building on the affected decision.
-
-Retain commands, source revision and relevant input changes, feature/profile
-selection, exit status and nonzero test counts in ignored `target/` logs or private
-external evidence. For results carried across a fix, record why the earlier
-selection remains applicable and what was revalidated. Account for every required
-stage before reporting the full check complete. Describe assembled stage results
-as a completed check with focused continuations, rather than claiming one
-successful `make check` invocation. Named targets always execute when requested;
-there is no persisted result cache or automatic skip decision.
-
-Keep sources fixed for the validation run and executables fixed while their tests
-execute. Run feature configurations sequentially: subprocess tests share the built
-executable path. Coordinate separate Make/Cargo invocations and editor-triggered
-Cargo checks before starting validation;
-`.NOTPARALLEL` serializes one Make invocation, not other processes. Keep profiles
-consistent when reusing evidence, and let active builds finish or arrange an
-explicit handoff. See the [entrypoint reference](../scripts/README.md) for arguments.
-
-Building dependencies/proving parameters can require network access; normal runtime
-fixtures use localhost and deterministic unfunded keys, never a developer's `.env`
-or mainnet wallet. Ignored child-process helpers invoked by their parent tests
-differ from ignored optional live tests.
-
-Base fixture modules `rotation::base::tor_tests` and
-`rotation::base::tor_ownership_tests` and `rotation::base::tor_inactivity_tests`
-exercise actual read consumers through fake
-SOCKS/TLS/HTTP2: endpoint-first scope ordering, validated promotion, pending receipts,
-fresh whole-view fallback, retained owners, cancellation and absent financial side
-effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
-`network::tls_retry_tests` verifies TLS recovery and exhaustion in catalog,
-unsigned API and Base while retaining certificate checks and signed no-replay.
-Its body-read probe releases corrupt bytes only after the client accepts response
-headers; a semaphore establishes that transport phase without real-time waits.
-The fixture retains partial-header progress before releasing that semaphore.
-Corrupted-byte acceptance and observed delivery counts share a synchronous
-publication lock. Socket-free writer controls verify pending, failed and partial
-writes without counting attempted mutations as delivered corruption.
-Consumer cases retain retry ownership with corruption after server-written headers,
-which can surface during dispatch or body collection.
-Manual POST/PUT/PATCH/DELETE and ordinary PUT cases distinguish failed-handshake
-recovery from an executed write whose first response TLS record is corrupted:
-the latter must fail after exactly one execution, without signing or replay.
-These prove routing and credential boundaries, not live Tor circuits or settlement.
+4. After a localized failure, fix it, revalidate dependent consumers and
+   invalidated stages, and resume unfinished stages, recording commands,
+   revision, features, profiles, and nonzero test counts (describe assembled
+   stage runs as continuations rather than one `make check` run).
+5. Keep sources and executables frozen during validation and run feature builds
+   sequentially because CLI fixtures share `target/debug/x402_treazury`.
+   Coordinate external Cargo and editor checks manually.
 
 ### Test executable startup
 
-On macOS, Make's Rust test commands automatically run private copied-and-ad-hoc-
-signed harnesses through the [shared launcher](../scripts/test-runner.sh). This
-works around pre-main `_dyld_start` stalls like
-[OpenAI Codex issue #23802](https://github.com/openai/codex/issues/23802).
-The symptom can also occur in ordinary terminal windows; the precise macOS cause
-is unconfirmed. Other platforms retain direct execution. See the
-[entrypoint reference](../scripts/README.md) for runner precedence and scope.
-
-Copies preserve arguments, working directory, environment, stdio and process
-exit/signal status. They remain available for child helpers. Copy or signing
-failures fail the test command instead of falling back to a potentially stalled
-original. CLI subprocesses launched through compiled `CARGO_BIN_EXE_*` paths still
-use the original application executable.
-
-Ad-hoc signing changes executable bytes. Record copied execution in development
-evidence and do not substitute copied binaries for hash-pinned live qualification
-or reproducible-release evidence. Sources and original build artifacts must still
-remain fixed during tests. This workaround changes no production transport,
-wallet or transaction authority.
+On macOS, Make test targets run through
+[scripts/test-runner.sh](../scripts/test-runner.sh), which copies each test
+binary without extended attributes into a private temp directory, ad-hoc signs
+it, and runs the copy to work around pre-main `_dyld_start` hangs
+([OpenAI Codex #23802](https://github.com/openai/codex/issues/23802)). Linux
+runs binaries directly. Copy or signing errors fail closed rather than falling
+back; `CARGO_BIN_EXE_*` child paths still invoke the original binary, and
+ad-hoc-signed copies are never used for hash-pinned live or release evidence.
 
 ### Verified TLS fixtures
 
-Local provider fixtures use verified TLS with the public fixture CA in
-`tests/fixtures/tls/ca.pem`. Independent MCP clients and caller-supplied low-level
-payment clients must explicitly trust that CA; process trust does not flow into
-separately constructed clients. Install a fixture's direct or Tor policy once,
-before constructing its harness, and retain the same policy through all calls.
-Tests that need different immutable policies run in separate child processes;
-their parents verify successful execution and a nonzero child test count.
-Executable fixtures pass the public CA through `trusted_ca_files` in their network
-configuration. A SOCKS connection alone does not prove a verified origin request;
-serving fixtures must observe the HTTP handler as well as proxy selection.
-Negative TLS controls use an independent context without the fixture CA and an
-intentionally untrusted certificate matching its fixture key. Keep that pair in
-sync when renewing fixture material. Assert captured HTTPS path/query and
-authority separately, preserving exact body, signature and isolation checks.
-Directory fixtures explicitly distinguish local TLS from public-route testing;
-changing a fixture URL's scheme must not change its destination authority.
-Registry restart fixtures gracefully stop their HTTP server and await connection
-and service release before dropping the registry owner and reopening. An aborted
-accept task, delay or ignored lock error does not prove ownership has drained.
-Provider help, paid API and remote catalog fixtures use TLS even when their router
-also serves an infrastructure RPC. Separate infrastructure HTTP fixtures continue
-to cover cleartext infrastructure support. Deferred-request barriers must also
-observe an early client failure, so a rejected request cannot leave the test
-waiting for an origin event that will never occur.
+Local provider fixtures use verified TLS with the public test CA in
+`tests/fixtures/tls/ca.pem` (see [tls/README.md](../tests/fixtures/tls/README.md)):
+
+- Independent MCP and payment clients must opt in to that CA; subprocess
+  fixtures pass it via `[network].trusted_ca_files`. Negative controls use an
+  independent context and `untrusted.der`.
+- Tests needing distinct immutable network policies run in isolated child
+  processes asserting nonzero child test counts.
+- Serving fixtures verify origin handler receipt as well as SOCKS selection,
+  drain HTTP servers before reopening registries, and surface early client
+  errors on deferred barriers.
 
 ### Sandbox permissions
 
-Choose execution permissions for the selected tests before starting them. Offline
-fixtures can still create real localhost sockets. When the current sandbox is
-known to block those sockets, request socket-capable execution through the runner
-up front; a failed attempt is not a prerequisite. An environment that already
-permits the required operations needs no extra approval.
+Request socket-capable execution up front when the current sandbox blocks
+localhost sockets rather than provoking a failure first:
 
-| Selection | Runtime requirements |
+| Target selection | Runtime requirements |
 | --- | --- |
-| `crypto_vectors`, `headers`, `provider_catalogs`, `managed_config`, `network_audit`, `cli_layout` | Currently socket-free complete test targets: local computation/files and, for CLI inspection, child processes. Run in the ordinary sandbox. |
-| `network`, `startup`, `cli_contracts`, `config` | Representative targets containing localhost fixtures. Use socket-capable execution for the complete target. |
-| `make test`, `make check` | Include socket fixtures and require localhost socket access. |
+| `crypto_vectors`, `headers`, `provider_catalogs`, `managed_config`, `network_audit`, `cli_layout` | Socket-free targets (local computation, files, and CLI child processes); run in the normal sandbox. |
+| `network`, `startup`, `cli_contracts`, `config` | Include localhost socket fixtures; run with localhost socket access. |
+| `make test`, `make check` | Full suites requiring localhost socket access. |
 
-Names above are Cargo test targets (`--test NAME`). For filtered tests, follow
-helper and child-process calls: `config` and `cli_contracts` mix socket-free
-inspection with real servers. A filename or search for direct bind calls alone
-cannot establish requirements. Inspect unclassified selections before choosing
-permissions, and reassess these examples when fixtures or helpers change.
-
-These are runtime capabilities, not a guarantee that Cargo can build inside a
-particular sandbox. Dependency/proving-parameter downloads and cache writes have
-separate network/filesystem requirements; see [build tooling](../scripts/README.md).
-Keep real wire, SOCKS, gRPC and lifecycle coverage intact rather than replacing or
-skipping it to avoid a permission request.
-
-Manual raw-header regressions live in `discovery::raw::tests`, discovery endpoint
-fixtures and payment header/handoff/best-effort/hint/relay tests. They exercise sensitive
-values, strict validation, exact key delivery, private relay exclusion, initial-payer
-continuity and absence of new replay authority. A barrier-controlled payment regression overlaps two
-manual calls before challenge delivery and checks their distinct credentials,
-quotes and keys in unsigned and signed dispatch, verifying values never cross
-calls. The isolated directory fixture
-exercises real MCP stdio/HTTP calls, malformed frames, invalid inputs, body-reader
-errors and upstream credential echoes. It captures application targets at TRACE
-and checks that their diagnostics omit manual values; it also observes SDK
-activity without asserting SDK privacy. The accepted upstream logging/error
-limitation is documented under [manual raw headers](agent-sources.md#manual-raw-headers).
-Initialization errors have a socket-free executable unit test.
-`payment::header_capacity_tests` checks shared routed/manual overflow handling,
-JSON and runtime-header headroom, and real HTTP/2 challenge/signing exchanges near
-the map capacity. Cover padding skips those oversized header lists under its
-existing byte policy; normal-sized exchanges verify actual padding delivery.
-Direct managed-payment admission tests also fill a caller-built request's header
-map and verify rejection without a journal entry, balance change or signed dispatch.
-These are synthetic local contracts;
-they establish neither vendor deduplication nor live payment/authentication qualification.
-
-Managed payload validation uses one local SDK signature to check refusal of changed
-payment identities, amount, accepted terms and validity before journal acceptance.
-The Search relay contract uses a synthetic response validator and three authored
-providers to check status/body rejection, retained possible charges and cached reuse
-without replay. Pure URL and cover configuration tests cover password-only userinfo
-and reserved padding-header namespaces without creating network transports.
+`config` and `cli_contracts` mix socket-free and socket-backed tests; inspect
+filtered cases before choosing permissions. Never skip wire, SOCKS, gRPC, or
+lifecycle coverage to avoid a permission prompt.
 
 ## Test boundaries
 
-| Area | Principal tests / contract |
+| Area | Principal coverage |
 | --- | --- |
-| Catalog/config/providers | Generated schemas, selected operations, routing, pricing descriptions, composition and pinned local catalogs. |
-| MCP/deployment/discovery | Independent local/remote/raw authority, directory subsets and native grouped responses, failure-before-I/O checks, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and accepted paid-child ownership. |
-| Payments/managed rotation | Real local signing, cap/asset validation, journal-before-disclosure, captured-wallet traversal only after typed insufficient funds, retained chargeable attempts, concurrent admission, exact reserve promotion, independent initial funding, and separately requested canonical resolution. |
-| Treasury/store/funding | Encrypted persistence, legacy-state rejection/preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
-| Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, participating Tor discovery/API/Base retries, `Retry-After` handling, conditional promotion, proxy failure, TLS, redirects and public-destination enforcement. |
-| Output/resource limits | Exact/over-bound behavior, visible errors and logs, no partial cache success, no retry of paid oversized responses, typed inline image/mapping behavior. |
+| Catalog, config, and providers | Schema projection, structural budgets, `prefer_post`, `send_tools`, `response_mappings`, pricing descriptions, cache acceptance, alias refresh, pricing retirement, and pinned local catalogs (`src/catalog.rs`, `tests/provider_catalogs.rs`, `tests/config.rs`, `tests/catalog_selection.rs`). |
+| MCP, deployment, and discovery | Listener auth and Host validation, local, remote, and raw authority, manual raw headers (`discovery::raw::tests`, `TRACE` redaction, header-capacity overflow), directory subsets, immutable invocation snapshots, concurrent registration, deferred startup, foreground drain (`tests/foreground_capacity.rs`, `tests/shutdown.rs`, `tests/supervision.rs`). |
+| Payments and managed rotation | Local EIP-3009 and Permit2 signing, cap and asset checks, journal-before-disclosure, narrow structured insufficient-funds traversal, advisory selection, passive hints, atomic `READY` promotion, early rotation, and automatic retirement (`tests/payments.rs`, `tests/managed.rs`, `tests/base.rs`). |
+| Treasury, Store, and funding | Encrypted persistence, schema-23 preflight, Ironwood-only proposals, offline calculation ownership, publication retries, synthetic proving, deep reorgs, managed refund replacement, and backups (`tests/funding.rs`, `tests/treasury_sync.rs`, `tests/rotation.rs`, [LIFECYCLE.md](../tests/LIFECYCLE.md)). |
+| Network and Tor isolation | Authenticated fake SOCKS, wire-credential correlation, pre-I/O cache race isolation, TLS retry and post-header corruption (`network::tls_retry_tests`), `Retry-After` waits, HTTP and gRPC inactivity, zero-stream-capacity cancellation, relay fallback, and `tests/network_audit.rs` (`tests/network.rs`, `rotation::base::tor_*`). |
+| Output and resource limits | Exact byte bounds, visible rejections and logs, no partial cache writes, no paid retry on oversized bodies, inline image extraction (`tests/download_limits.rs`, `tests/media.rs`, `tests/confidential_errors.rs`). |
+| Live runner offline tests | Registry reservations, budget atomicity, lifecycle schema-2 projection, content assertions, report composition, Tor audit interpretation, and preset parity (`tests/integration_preparation.rs`, `tests/live/runner/`). |
 
-Tests should establish the absence of forbidden side effects as well as the
-expected result: no signature for a rejected payment, no publication for a denied
-registration, no source send before persistence, no connection outside the network
-factory. Fixed-chain RPC fixtures capture block timestamps when the chain snapshot is
-created; rereading wall time for each request can fabricate contradictory
-latest/finalized/confirmed headers across a second boundary. Deliberate chain-time
-changes belong in the fixture's explicit chain state.
-Use barriers and controlled clocks to expose concurrency boundaries;
-sleeps alone do not prove ordering. Retain positive fixture controls so a broken
-fixture cannot make every negative test pass.
+See [COVERAGE.md](../tests/COVERAGE.md) for the full boundary map and
+condition-analysis workflow. Key testing invariants:
 
-CLI contract fixtures count catalog/API requests and assert inspection output,
-credential/error order and the absence of unsolicited pricing requests. Authored
-prices and credit conversions retain focused rendering coverage. SocialFetch
-credit inheritance uses synthetic source/endpoint subsets, so curated deployment
-provider selections do not own that regression. Actual-call
-challenge tests cover passive hint validation and wallet selection. Stdio and
-shutdown suites exercise accepted-call ownership.
-
-Tests of real deployment profiles retain independent literal expectations for
-their documented financial and offline-inspection contracts. When changing a
-default or profile, update its contract assertions and owning guide together;
-deriving expectations from the input would hide unintended changes. Keep generic
-behavior tests on small synthetic inputs when curated example selections are not
-the contract. Run affected root integration targets explicitly: `--lib` does not
-execute them. Use the existing default-test stage when validating the combined
-default suite, or its remainder when compatibility evidence remains valid.
-
-Capacity lifecycle fixtures call `consumed_reserve` with claim, retained-wallet,
-retirement, vacant-replacement and allocated-replacement matrices. They pin exact
-funding correlations, readiness support and first-error order, including existing
-schema permissiveness. These structural validators certify recorded evidence;
-passing their synthetic fixtures does not qualify live settlement.
-
-Ordinary retirement changes require fixtures through the serving or finite-sync
-producer and canonical publication path, rather than only direct mutation tests.
-Cover independent per-group defaults/overrides, inclusive integer thresholds and
-both directions of confirmed/latest disagreement. Candidate authorization paging
-must cross 64 records, preserve still-valid unused signatures, use confirmed chain
-time for expiry and avoid unrelated history reads or payment replay. Preserve
-never-credited predecessors while original delivery remains possible, late usable
-credit, current/archived source blockers, reserve generations and exact atomic
-evidence through races and reopen. A completed never-credited job can close its
-destination guard only when every original operation has proven expiry or never
-accepted calculation/submission; test both safe closure and contrary source facts.
-Malformed optional historical balance support must not become a manual-repair
-gate: retain disputed history and acquire fresh proof. Contrast this with malformed
-original authorization identities or missing accepted bytes, whose scoped failure
-must remain visible. Exercise malformed history at the current canonical block,
-including an earlier malformed row followed by a valid same-block contradiction;
-ignoring optional corruption must neither require a new block nor hide that conflict.
-Replaced checkpoints and authorization resolutions must
-rebuild through cancellation/restart without replay or discarded original liability.
-
-Scheduling evidence must count RPCs across idle wakes and disposable cache eviction:
-latest-high completes even with a low saved minimum, whereas confirmed-high/latest-low
-retains progress. Exercise independent backoff, demand during acquisition, cancelled
-waiters, owner replacement, restart and unrelated concurrent work. Include finite
-sync with unresolved work, paused auto-funding, Store-only serving, disabled groups,
-qualification mutation denial and the startup SOCKS prerequisite with no direct
-fallback. Isolated diagnostics must show committed zero/dust retirement at INFO,
-safe blocker visibility and no repeated reminder on each poll. These unfunded
-local fixtures establish ownership and scheduling contracts, not live settlement,
-Tor privacy or the permanent absence of future external credit.
-
-Catalog input matrices compare complete schemas, routes, body-name mappings and
-body presence. They preserve duplicate-parameter behavior, collision error order,
-required alternatives and recursive sanitization; public routing fixtures check
-that exposed arguments reach the original wire fields.
-
-Provider-semantics matrices pin full outcomes, assertion indices and error order,
-including ambiguous JSON, nested error flags and scan exhaustion. Registry
-dependency tests verify that classification affects admission without rewriting
-payment evidence. Synthetic Tor audit sequences pin credential inheritance,
-permissions, normalized destinations, circuit ownership, success counting and
-required-target completeness. Complete sanitized outputs and rejection order are
-checked; these fixtures establish evidence interpretation, not live isolation.
-
-`tests/foreground_capacity.rs` holds seller headers and bodies with more than 128
-retained owners across authenticated MCP listeners. Disconnects retain work
-through signing, body collection and drain while cheap and paid direct calls
-progress. The managed counterpart checks unique journaled signatures and absence
-of extra funding. Qualification context is captured when work is polled, including
-when its future was constructed outside the active case. These fixtures use
-deterministic release points and establish no throughput or aggregate memory bound.
-
-The [coverage map](../tests/COVERAGE.md) identifies regression boundaries and
-optional qualification methods.
-
-Progress-policy regressions use fragmented unary and streaming gRPC responses
-lasting over twenty seconds, alongside silent headers, stalled bodies and sibling
-stream traffic. Reconnect fixtures delay SOCKS establishment beyond read inactivity
-but within the connection allowance, then verify silent headers still fail.
-Zero-stream-capacity fixtures cover stalled dispatch in direct and Tor modes.
-Saturated-stream fixtures verify sibling traffic cannot renew readiness and
-cancelled calls cannot dispatch when capacity returns. A subprocess test exercises explicit force with a live blocking
-worker, independently of the static-wallet HTTP shutdown fixtures. Wallet and
-bootstrap drain subprocesses exercise the shared first-signal cancellation and
-second-signal force path. A Unix handoff fixture holds drain before its first
-force-receive poll: an independent signal witness confirms the second SIGTERM was
-broadcast before the parent releases the barrier. The retained receiver must
-still force exit, with the existing five-second fixture assertions unchanged.
-Deployment fixtures keep listeners and Base reconciliation
-available after a funding stop; optional remote catalog fixtures isolate missing
-or invalid inferred base URLs while keeping authored URL errors fatal.
-Real-process shutdown fixtures exercise responses beyond the old
-ten-second cutoff, explicit force, HTTP disconnect, stdio EOF and a signal with
-the parent input pipe still open. Treasury fixtures cover incremental scanning without local age/lag gates,
-read-only proposal checks and retained unknown sends; managed
-fixtures exercise advisory selection and post-failure balance refresh. A blocked
-or failed balance read does not prevent signing or delay another wallet attempt.
-New failures during active reads require follow-up; cancelled waiters retain the
-reconciliation owner, and low-balance status survives restart. Submission
-fixtures reject failed preflight without intent and tolerate an unsigned tip outage
-after successful preflight without adding another read before sending. Concrete
-funding-backend tests distinguish quote expiry before command dispatch from
-uncertain preparation. Optional catalogs never suppress authored selector errors.
-Optional-outage fixtures also check inherited prefixes and ambiguous listener
-selectors. Birthday fixtures advance the tip between observations. Nonce-outage
-fixtures retain original authorizations and explicit canonical reporting proofs;
-nonce outages are not payment admission gates.
-Calculation-owner fixtures hold the real accepted blocking task with a per-owner
-test barrier; its Drop releases the task on assertion failure. Publication fixtures
-replace only the existing minute wait with an explicit test retry-release channel,
-then use the same worker, exact snapshot and idempotent SQL boundary. They do not
-qualify elapsed cadence. Actual MCP progress coverage starts the authenticated application HTTP server on
-the same current-thread runtime as preparation. An external controller issues a
-real cached unsigned help tools/call only after the actual accepted SDK hold;
-its existing fixture watchdog remains runnable if that serving runtime blocks.
-It releases and joins held work before assertions, including failed HTTP or a
-pre-handoff preparation failure. This is functional progress, not a latency claim.
-Normal-runtime-drop coverage holds no external Store
-sender and observes a real async task's abort before releasing accepted CPU work.
-
-Treasury sync transition regressions use the existing observation failure state:
-a real refused offline scan announces INFO once, repeated failure preserves
-backoff, successful completion permits a later transition, and shutdown remains
-quiet. The startup SOCKS owner fixture verifies command-first failure followed
-by periodic retry shares that transition without creating financial work.
-
-Synthetic proving checks actual-fee affordability and exact saved bytes through
-failed publication, lost acknowledgement, cancellation and reopen. Actual Ironwood
-proofs verify recipient, principal, fee and expiry under the same SDK proposal.
-Negative tests reject legacy-pool selection and unsupported wallet shielding
-before inputs, bytes or network side effects. The required Sapling prover adapter
-has no parameter initialization; actual Ironwood calculations run through it
-without invoking an unsupported proof. SDK build-time parameter acquisition is a
-separate unavoidable pinned-dependency input, not runtime transfer support.
-The optional synthetic-chain lifecycle exercises managed and direct recipients
-through the real treasury actor, scan reuse, confirmation depth, restart,
-cancellation after submission intent and funded same-height reorgs. These tests
-do not establish proving latency, consensus validation or live settlement.
-The production funding worker also runs against local bridge/Base fixtures through
-range-aware nominal selection, saved-choice reuse, provider-floor redraw before the
-next request, executable EXACT_INPUT route-minimum errors without a USDC redraw,
-concurrent quote acquisition,
-refund derivation, bootstrap completion and signed payment-triggered replacement
-funding, with scan-reuse and no-replay assertions.
-Reopened insufficient-funds diagnostics cannot block bootstrap or serving before
-the current worker rechecks them. A synthetic deposit regression verifies that
-readiness accepts a previously saved low estimate without a balance gate. Actual
-actor preparation then scans a newly confirmed deposit and calculates with SDK
-inputs without broadcasting.
-Default fixtures cover concurrent
-replacement allocation/credit with retained old payment liabilities and paged,
-scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).
-These are unfunded/local tests, not evidence of live
-1Click delivery or a resolution of its Zcash quote-deadline contract.
-
-Managed-payment fixtures exercise advisory selection, one saturating estimate
-decrement per authorization, structured insufficient-funds traversal beyond a page,
-cloneable POST bodies, exhaustion and multiple retained authorizations. Refresh is
-independent and coalesced; failed reads preserve hints and low markers. In Tor mode,
-payment, managed and discovery fixtures also cover participating unsigned status
-retries (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`), conditional winner promotion, retained
-challenge-to-signed scope across competing promotion and cache eviction, combined
-insufficient-funds handoff with per-wallet unsigned circuit retry and qualification
-accounting, and
-`SelectionPolicy::Legacy` preservation for internal discovery relay calls.
-`payment::tor_wait_tests` covers actual Retry-After waits, independent progress,
-retained disconnected waiters (including winner retention after response, text
-and configured-output waiters disconnect), explicit owner termination and authority
-expiry during the wait. `payment::tor_cover_tests` exercises API promotion and competing
-recoveries with actual HTTP/2 streams, separate SOCKS pools, scope-matched cover,
-and eviction/reinsertion. Body-failure fixtures reject partial, oversized and
-inactive outputs without promotion or generic paid replay. Exhaustion fixtures
-preserve each eligible status despite stalled or oversized final error bodies,
-with no signature, promotion or final Retry-After wait. Unfollowed 302/307 catalog
-fixtures preserve complete JSON validation and existing relay fallback without
-extra origin attempts. Unrepresentable Retry-After fixtures exercise catalog,
-pricing, relay continuation and API ownership: no early dispatch, unrelated
-progress and explicit cancellation. These local fixtures
-do not establish real Tor exit diversity or settlement. Funding
-fixtures cover irreversible first-positive claims, exact accepted-work ownership,
-scoped observation/backoff, cancellation and restart. Qualification charges each
-accepted attempt under its original case allowance; a later success erases none.
-
-Managed payment crash fixtures use SIGKILL on an owned signing subprocess at
-private-signature, journal-acknowledgement and signed-dispatch boundaries. They
-reopen the real SQLite state, retain exact committed authorizations and their one estimate debit without
-replay, and verify independent peer-pool service. These use unfunded temporary
-wallets and loopback providers; they do not establish live settlement outcomes.
-
-SQLite fault fixtures install a non-default test VFS on temporary stores to fail
-real WAL writes/fsyncs and database checkpoint writes/fsyncs. They also exercise
-`SQLITE_FULL` using SQLite's page limit. Reopen checks require atomic preparation,
-retained input claims/payment journals, atomic estimate updates, exact committed bytes, database integrity and no
-provider dispatch after a failed payment journal acknowledgement. A sync error is
-allowed to leave an entire recoverable commit; it never proves no work occurred.
-
-The SIGKILL and test-VFS scenarios above are Unix-only; native Windows crash
-and SQLite-I/O recovery work is deferred by user decision. Shared payment-admission
-and canceled-waiter ownership fixtures remain enabled on all platforms.
-
-Offline refill fixtures compare exact prepared bytes and transaction facts before
-and after reopening the store. Restart qualification also binds transaction facts
-and the SHA-256 digest of the immutable encrypted prepared record across observed,
-drained and reopened snapshots. Historical evidence lacking these fields stays
-readable but cannot establish that continuity. The digest proves record identity,
-not transaction validity or settlement. Combined cover/payment fixtures retain
-unique managed authorizations through concurrent calls, held range responses and
-store reopen; seller success and cover progress do not release payment exposure.
-These checks do not qualify a live funded restart or Tor privacy.
-
-Production storage preflight uses compact old/current/future boundary fixtures:
-schema 23 opens and older/future schemas reject without source mutation. Current
-fresh/reopen/status/backup fixtures cover interrupted empty-history completion
-without rewriting journals; current corruption tests preserve strict observation
-and transaction-fact failures. Private disposable recovery of committed WAL and
-hot rollback journals preserves accepted obligations through failed reopen. These
-checks cannot supply missing immutable destination-readiness evidence or qualify
-a private conversion or live migration.
-Funded lifecycle, privacy and combined cover/payment acceptance retain the limits
-listed under [qualification status](#qualification-status).
-
-Lifecycle projection tests compare every published field with an independent
-baseline assembly over small synthetic Store states, including complete pools,
-claim generations, job order/phase/health, retirement facts, source history and
-exact encrypted-record hashes. Direct persisted and runtime-cache observations
-retain their different evidence fields. A pinned read-transaction fixture commits
-another writer's changes between collections and rejects mixed snapshots. Required
-phase/facts/raw-record/health errors remain failures; corruption only in diagnostics
-not exported by narrow lifecycle cannot obstruct it, while full Status/export keep
-their required contracts. Existing real-certificate and receipt fixtures verify
-compatible/unavailable runtime evidence and retained receipts/charges after actual
-lifecycle failure. No offline projection fixture qualifies live settlement.
-
-Bootstrap readiness tests pass current Store-produced status 6 and lifecycle 2
-through readiness and restart consumers independently of database schema 23 and
-bootstrap summary 3. Eligible funded READY inventory needs no ACTIVE predecessor.
-They distinguish captured-claim completion from ordinary serving readiness,
-including paged vacant inventory, captured completion after
-current generations advance, recovery after retained historical attempts and assessment
-without writes. Store-level tests cover claim history and obstruction dispositions;
-owner tests cover cancellation and drain. These are complementary checks, not an
-exhaustive enumeration of concurrency schedules.
-The retired-participant restart regression reopens saved empty, retired inventory,
-retains destination routing, and schedules a new small reserve from historical
-credit alone, without first-use demand or source preparation. Its saved retirement
-fixture does not exercise retirement proof acquisition or live settlement.
-Recovery eligibility and startup actionability remain separate: an accepted quote
-can keep startup waiting while the worker may recover its original operation.
-Bootstrap also distinguishes treasury-wide pending source work from the captured
-operation's own source liability when explaining spendable-fund shortages.
-
-Runner orchestration fixtures use real registry reservations, local MCP requests,
-completion records, settlement inspection and owned child close/reopen. Test-only
-external observations let them exercise two rounds, refusal before dispatch,
-rotation/settlement/restart failures and final readiness without funding. They
-assert retained reservations, no extra requests, unchanged expiry/funding authority
-and the same execution clock across restart. Registry and real-process runner
-regressions separately cover no replay, concurrent completion and cancellation
-while draining. Outage preparation refusal has a local fixture; non-promotion
-after a round error is established by review of the unchanged completion gate.
-These fixtures do not establish chain settlement, successful Tor outage
-qualification or the deferred automated funded lifecycle acceptance.
-
-Registry report composition tests compare complete JSON for all-runs and selected
-runs, configuration-only and prepared catalogs, revised authorization, global
-charged reservations and funding usage. They cover ordered corruption failures,
-nonfatal application/debit evidence, immutable pin revisions, selected event
-filtering and exact case/pin/event and complete-document bounds. Component and
-summary tests complement these fixtures. Read helpers preserve query order and
-repeated evidence reads; selected-run sections retain their dependency order and
-fatal versus incomplete error handling. These synthetic reports do not establish
-live settlement or qualification.
-
-Credit-pricing fixtures compare complete descriptions for fixed, bounded, metered
-and batch tariffs, ordered surcharge and normalization suffixes, and unknown
-metadata fallback. They retain zero and maximum values, checked-arithmetic overflow
-rejection and unusual accepted metadata. Caller tests cover original billing text,
-overrides, warnings and absence of pricing probes. Tariff conversion remains a
-display estimate and never grants payment authority.
-
-MCP inventory fixtures record exact eager-listing and discovery request sequences,
-including separate cursor protocols, shared duplicate detection, page/tool and
-response-byte boundaries, and prepared-inventory validation after traversal.
-Failure and acknowledged cancellation tests assert that no later request starts.
-A real keyless-runner test exercises the inventory gate before case execution.
-Full schemas and descriptions must still match the pinned catalog; these local
-fixtures do not qualify a live provider or prove remote cancellation.
-
-Reliability report fixtures compare complete outputs and qualification results for
-multiple ordered groups, malformed evidence, missing observations, canonical debit
-requirements and mixed statuses. Timestamp matrices preserve the distinction
-between invalid timestamped observations that advance the previous timestamp and
-missing or unattempted observations that do not. Window, spacing, checked-add and
-UTC-day boundaries are exercised alongside composed registry and summary tests.
-The report interprets saved dispatch evidence; it does not establish provider health
-or attribute failures to Tor.
-
-Qualification planner fixtures compare complete serialized plans for all scenario
-variants and both start modes, retaining invalid combinations as rejections. They
-cover ordered dependency/case validation, wallet bindings, cap fallback, reservation
-and allocation boundaries, reachable arithmetic overflow, and exact first errors.
-Preset, selection, registry and real preparation consumers complement these tests.
-The offline wrapper is checked without catalog credentials or wallet state. Planning
-still grants no execution authority; synthetic plans do not establish live funding
-feasibility. Infeasible billion-pool overflow fixtures are not manufactured: the
-unchanged checked guards and manifest bounds receive independent review.
-
-Wallet argument-resolution tests run the real resolver in isolated subprocesses
-so process-global network policy and environment do not leak between cases. They
-inspect every command's fields without executing it, including configuration and
-network installation order, path defaults, identity assertions and birthday endpoint
-selection. Missing/malformed state and configuration have explicit expectations.
-Real executable fixtures separately cover Clap conflicts, config placement,
-catalog-free administration and preservation of existing state. Resolution-only tests do not
-claim to exercise funded command execution.
-
-Resumption fixtures compare complete eligibility output and ordered failures for
-case inventories, every event timestamp, original deadlines, prior financial states
-and phase windows. Missing start observations remain distinct from expired runs;
-expired windows cannot bypass unresolved prior work. Tests preserve manifest/phase
-ordering, partial lifecycle refusal and the registry's ownership of canonical proof
-and skipped-suffix validation. Registry and real-process cancellation/reopen and
-window tests cover the caller boundary. Eligibility remains offline information,
-never renewed authority or permission to replay attempted work; these checks do not
-exhaustively enumerate concurrency schedules.
-
-Current treasury reporting fixtures retain immutable principal/fee facts, encrypted
-preparation identity, unresolved work and advisory wallet estimates. Deleted budget
-and refund projections are unavailable rather than invented zero. Unsupported
-historical report formats are refused without rewriting saved evidence or releasing
-execution reservations. Baseline, attribution, registry ownership/reopen and report
-fixtures preserve original qualification charges and unknowns. These summaries
-never supply current spending authority. Current lifecycle 2, exact balance 2,
-advisory admission balance 3 and ownership 1 are distinct contracts. Current intent
-marker 2 and original per-attempt canonical observations remain required for earlier
-runs, including single-attempt cases; aggregate case outcomes cannot replace them.
-Current restart fixtures pin the selected reserve claim while allowing unrelated
-inventory and readiness progress. Unsupported saved admission presentation leaves
-original attempts, exact support and ordinary reconciliation intact.
-
-Deployment validation fixtures pin complete static and managed wallet resolutions,
-ordered contextual failures, listener address uniqueness and port-zero exceptions,
-independent Host/auth settings, and treasury/funding prerequisites after assignment.
-They run without listener creation or credentials; deployment and assignment
-integration tests separately cover real local listeners and offline inspection.
-The characterization protects validation orchestration, not all runtime interleavings.
-
-Shared catalog/price regressions live in `src/http_cache/price_tests.rs`, existing
-catalog cache fixtures, `src/payment/hint_tests.rs` and catalog-state description
-and direct-target fixtures. They cover joint persistence/lifetime, revision and
-content invalidation, alias sharing, received-order updates, delayed writes and
-unchanged concise rendering/per-call offers, without live funds or price probes.
-Forced warm tests cover unconditional catalog and configured-pricing acquisition,
-normal serving reuse, complete-snapshot retention and provenance-family retirement.
-`src/catalog_refresh/`, `src/discovery/refresh.rs` and
-`src/discovery_relay/list_tests.rs` cover final unsigned target removal signals
-after recovery, signed-target and relay-service exclusions, decoded relay
-destinations despite signed relay fees, source-generation coalescing, continued
-tools/search/hints during refresh and catalog failure, replacement preparation
-while current tools serve, repaired tool invocation before optional pricing
-completion, retained challenge observations after advertisement arrival, retired
-generation fences against late enrichment, and usable replacements after optional
-pricing failure. They also cover accepted signed work, cancelled callers, registration
-races and shutdown ownership. Deferred refresh
-fixtures cover combined publication failure, endpoint selection diagnostics and
-unrelated endpoint usability. These are synthetic local contracts, not live
-provider availability or financial qualification.
-The managed relay fixture retains a depleted first wallet: local bootstrap catalogs
-have no shared hint, so the actual relay offer earns an unsigned sibling handoff.
-It pins the exact unchanged relay requests, signing owners and authorization journal
-while retaining the absence of target signing, RPC, funding and allocation.
+- Fixed-chain Base RPC fixtures capture block timestamps at snapshot creation
+  so headers never contradict across a wall-clock second boundary.
+- Deployment-profile tests keep literal expected values rather than deriving
+  expectations from the TOML under test.
+- Automatic retirement tests run through serving or finite sync and canonical
+  publication, crossing 64-record authorization pages, both directions of
+  finalized vs. latest disagreement, malformed optional history, and never-credited
+  source closure.
+- Progress-policy tests cover fragmented 20-second gRPC streams, slow SOCKS
+  connects, stalled bodies, sibling-traffic isolation, first-signal drain, and
+  second-signal forced exit.
 
 ## GitHub Actions and coverage
 
-[CI](../.github/workflows/ci.yml) runs on pushes to `main` and `ci_coverage`, and
-pull requests targeting `main`. The `ci_coverage` push trigger supports pre-merge
-bootstrap; it can be removed once this work is integrated. Linux checks run
-`make check` in its existing order on Ubuntu 24.04, with the repository's pinned
-Rust, Python 3.13 and full Git history for comparison with `origin/main`.
-Each existing `check-*` stage is a separate sequential Actions step, with the
-same ordering and fail-fast selections as `make check`. Stage output, elapsed
-seconds and exit status are retained in the `check-diagnostics` artifact, and
-outcomes are appended to the job summary even when a stage fails. Test concurrency
-remains eight; compiled-artifact caching requires evidence from hosted timings.
-The lifecycle stage selects the opt-in `test-optimized` profile: optimization level
-two with debug assertions, overflow checks and existing debug information retained.
-Other check stages and ordinary local `make check-lifecycle` retain their existing
-profiles. This is a hosted performance experiment, not a measured speedup claim.
-The [treasury diagnostic workflow](../.github/workflows/treasury-sync-diagnostics.yml)
-runs only the offline `treasury_sync` integration target, at eight threads with
-`--nocapture`. Scoped pushes to `ci_coverage` bootstrap it before merge; its manual
-dispatch trigger requires default-branch workflow availability. Existing CI still
-runs alongside a diagnostic-triggering push. A diagnostic run can be retried from
-its Actions page without rerunning the separate ordinary CI workflow.
+CI runs on Ubuntu 24.04 in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
 
-Compilation through Make precedes the diagnostic clock. After five minutes of
-test-binary execution, the monitor records owned process/thread wait state and
-GDB backtraces before terminating that experiment, returning exit 124. This
-diagnostic-only bound is sized above the observed finite synthetic fixture run;
-it is not an application deadline or proof of deadlock. Normal completion retains
-the actual test exit status. The fixture's opt-in `X402_TEST_SYNC_DIAGNOSTICS=1`
-phase breadcrumbs identify scans, individual actor commands, restart, cancellation
-and close; no assertion depends on their text. The opt-in experiment also enables
-existing treasury DEBUG and Pepper sync INFO events through one process subscriber,
-including spawned runtimes. Other log targets remain disabled. Actor RPC markers
-use known method names and distinguish handler entry, prepared responses and its
-intentionally pending mempool request. They do not prove receipt or cancellation.
-Ordinary tests do not enable this subscriber or these breadcrumbs.
-
-Download `treasury-sync-diagnostics` from that workflow's run page. It contains
-revision/build metadata, `test.log`, `status.json`, and, after capture,
-`processes.json` plus `threads-*.txt` (or explicit capture errors). Stacks omit
-frame arguments and locals; no core, environment or wallet-state files are
-uploaded. Native stack collection requires Linux and GDB; it is not a portable
-Rust async-task dump, and parked executor stacks may require the phase markers
-to identify the awaited operation. The ephemeral diagnostic runner enables
-same-user ptrace (`kernel.yama.ptrace_scope=0`); GDB stays unprivileged so the
-monitor can terminate its whole process group. A bounded attach to a disposable
-`sleep` process verifies native GDB before application compilation; its output is
-`debugger-smoke.txt`. Debugger collection has a 30-second aggregate
-budget. Cancellation requests shorten capture to at most four seconds before
-bounded process-group cleanup; artifact upload uses `always()`. Force cancellation,
-runner loss or GitHub's termination grace can still prevent complete evidence.
-
-The actual Linux lifecycle stage uses that monitor's `--lifecycle` mode through
-Make, with the exact `zcash-testutils` library filter and eight threads. There is
-no separate lifecycle diagnostic workflow. The opt-in
-`LIFECYCLE_DIAGNOSTICS=target/ci-checks/lifecycle` command retains fresh Cargo JSON
-compilation metadata and `build-status.json` with command, elapsed time and status;
-failed compilation prevents test execution. Compilation remains outside sampling.
-Real proving and
-accepted-work drains can be long, so this mode has no five-minute test deadline:
-it takes a numbered `snapshot-N/` after each five minutes of execution since the
-previous capture completed, then lets tests continue. Each snapshot contains
-elapsed seconds, owned process/thread state and native stacks. Process CPU counters
-are expressed in seconds and resident memory in bytes; successive captures help
-distinguish active computation from parked waits without claiming progress merely
-from CPU usage. Capture errors are retained without stopping valid test work.
-
-Download `check-diagnostics` from the CI run and inspect its `lifecycle/` directory.
-It includes runner CPU/memory facts, immediate panic output in `test.log`,
-compilation metadata and final execution `status.json`. Stage timing includes both
-compilation and execution; use the separate phase records for comparison and
-include debugger overhead. Simultaneous fixture, profile and runner differences
-prevent attributing a historical timing change solely to optimization.
-Cancellation uses the existing short capture
-budget and does not start a second attach if a periodic capture is already active.
-The original test exit status is retained, including completion during capture.
-The check artifact uses `always()`, but force cancellation or runner loss can still
-prevent upload. GDB temporarily suspends threads and can affect fixture timing;
-CPU counters and stacks provide diagnostic evidence, not proof that a scan is
-making progress or that a parked task is deadlocked.
-
-The independent default-coverage job runs `make coverage` with matching LLVM
-tools and cargo-llvm-cov 0.9.1. Actions and octocov's binary version/checksum are
-pinned. Cargo download inputs are cached; application builds, financial state and
-private local reports are not cached or uploaded. Hosted resource suitability
-requires actual run evidence; this workflow is not release reproducibility or
-live settlement qualification. The remaining advisory automation and Linux
-acceptance work is owned by [release follow-up D2](plans/deferred/release_followups.md).
-
-[Octocov configuration](../.octocov.yml) consumes the filtered LCOV report, writes
-a job summary and generates a **default line coverage** SVG. The denominator
-excludes vendor code, integration harnesses and operational tools; inline unit-test
-helpers may contribute. Optional proving, consensus, Tor and funded qualification
-are not included in this percentage. There is no percentage or test-time gate.
-Coverage collection, export and publication failures fail the coverage job;
-octocov comments and summaries are best-effort reporting. Linux checks remain a
-separate check, and must be selected as a required check in repository settings
-if merging should be blocked on their result.
-
-Open the branch's Actions run or pull-request checks to see results. The
-`default-line-coverage` artifact contains `html/index.html`, the filtered LCOV and
-summaries, provenance and generated `coverage.svg`; download it for branch badge
-preview. Collection logs are retained separately as `coverage-diagnostics`,
-including on failed collection. Initial Cargo compilation/listing output is
-retained in `tests-*.txt` alongside the execution log. Only selected resolved
-files are uploaded, since
-the local `target/coverage` path is an absolute symlink to its successful run.
-For a branch-specific CI badge, use
-`ci.yml/badge.svg?branch=ci_coverage&event=push`. The README badges describe main.
-
-Main runs store octocov comparison reports in Actions artifacts. Pull requests
-can show coverage deltas once a main baseline exists; missing or expired baseline
-artifacts leave absolute coverage available without a historical comparison.
-Fork pull requests retain read-only tokens: summaries and downloadable reports
-remain available, while posting PR comments may be skipped. The workflow does not
-use `pull_request_target` or run fork code under a privileged follow-up workflow.
-Octocov's optional external viewer is disabled in favor of GitHub artifacts.
-
-After both jobs succeed on a main push, a separate publisher updates `coverage.svg`
-and `source-revision.txt` on the dedicated `badges` branch. Repository Actions
-policy and branch rules must permit that job's `contents: write` token to push.
-The permanent badge does not exist until this first successful publication. Only
-publication is serialized: running test jobs are not cancelled, but GitHub may
-replace a superseded pending publisher. A publisher checks current main and skips
-an older revision, then uses a normal non-force push. The badge identifies its
-published source revision; a failing or still-running main revision can leave
-the prior successful coverage badge visible, alongside the current CI status.
-
-### Potential SDK mempool shutdown hang
-
-The vendored Pepper sync has an unresolved shutdown cycle that can affect CI
-fixtures which repeatedly complete mempool streams while scanning is busy. The
-monitor can fill its bounded channel with `NewBlockMined` notices, then block
-sending another notice. These notices are not included in the pending transaction
-count, so the scanner can stop receiving and await the blocked monitor during
-shutdown. Test-thread serialization does not remove this internal task cycle.
-
-This is a source-audit finding, not a reproduced explanation of an observed CI
-hang. The treasury actor diagnostic fixture cannot trigger it: its mempool request
-waits before response headers. The loader/worker activity-ordering patch addresses
-a separate race and does not resolve this cycle.
-
-For a suspected occurrence, retain the diagnostic artifact, identify the last
-unfinished test and inspect its fixture's mempool stream completion behavior.
-Correlate scan/shutdown observations with the monitor send and receiver lifetime;
-parked native executor stacks alone do not establish this async wait cycle. A
-controlled full-notice-channel reproduction and a correction preserving transaction
-draining and accepted-work ownership remain assigned to
-[release follow-up D7](plans/deferred/release_followups.md#intended-future-work-and-acceptance).
+- **Jobs:** `check` runs all seven stages sequentially via
+  `scripts/ci-stage.sh` (`check-static`, `check-clippy`, `check-compat`,
+  `check-default-remaining`, `check-proving`, `check-lifecycle`, and
+  `check-codec`). `coverage` runs in parallel with `check` on every trigger,
+  collecting default Linux line coverage via `make coverage` and reporting with
+  `octocov`. `publish-badge` runs after `check` and `coverage` succeed on
+  `push` to `main`.
+- **Coverage badge:** `publish-badge` writes `coverage.svg` and
+  `source-revision.txt` to the root of the orphan `badges` branch (serializing
+  writes via concurrency group `main-coverage-badge` and skipping superseded
+  commits). It reflects default Linux line coverage only (excluding optional
+  proving, Docker consensus, and live tests).
 
 ### Temporary CI diagnostics
 
-Automatic lifecycle GDB preparation and periodic capture in Linux checks are
-temporary during CI rollout. Keep them enabled until a main push passes Linux
-checks and coverage, publishes the coverage badge successfully, and both README
-badges show results for main. After that acceptance, make lifecycle capture opt-in
-by removing its automatic setup and `LIFECYCLE_DIAGNOSTICS` setting from routine
-CI. Preserve the normal check stages, stage logs, selected test profile and
-eight-thread configuration.
+`scripts/ci-stage.sh` records per-stage logs, durations, and exit status under
+`target/ci-checks/`, uploaded on every `check` run (`if: always()`, default
+GitHub retention). In `check`, `check-lifecycle` currently runs with
+`LIFECYCLE_PROFILE=test-optimized` and automatic `LIFECYCLE_DIAGNOSTICS` GDB
+capture after installing `gdb` and relaxing `kernel.yama.ptrace_scope`.
 
-Retain the diagnostic runner, Make's `LIFECYCLE_DIAGNOSTICS` option and the manual
-treasury-sync workflow for future investigations. Remove the `ci_coverage` push
-bootstrap triggers after integration while retaining `workflow_dispatch` for the
-focused diagnostic workflow. Verify ordinary CI without automatic capture and an
-explicit diagnostic invocation with capture and truthful exit status, then update
-this guide and the scripts guide to describe the resulting behavior.
+Retire the automatic GDB capture in `ci.yml` and the temporary `push` trigger
+on `ci_coverage` in `treasury-sync-diagnostics.yml` once the `main` coverage
+badge is accepted, keeping `scripts/diagnose-treasury-sync.py` and manual
+`workflow_dispatch` available for future investigations.
 
-[Release follow-up D2](plans/deferred/release_followups.md#intended-future-work-and-acceptance)
-owns this cleanup independently of the active CI plan. Removing that plan after
-main badge acceptance does not remove the diagnostic retirement task.
+### Potential SDK mempool shutdown hang
 
-## Coverage and complexity
-
-[Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
-and isolation tests, an opt-in local provider replay, and measurement methodology.
-
-`make coverage` produces default line, region and function reports, plus a filtered
-`lcov.info` for line-coverage reporting, with
-compiler/source/lockfile provenance. Generated reports stay under ignored `target/`;
-failed collection must not replace the latest successful report. Application
-filters exclude external/vendor/test/example paths, although inline test helpers
-can still contribute to the application denominator. Compare identical feature
-sets and filters, and explain denominator changes before attributing a percentage
-change to better tests.
-
-A condition-only baseline/final evaluation uses the pinned
-[condition analysis workflow](../tests/COVERAGE.md#condition-analysis), with only
-necessary focused financial supplements. Other coverage modes are separate capabilities.
-
-Branch collection is an optional separate invocation using a compatible nightly
-compiler and matching LLVM tooling:
-`RUSTUP_TOOLCHAIN=nightly make coverage-branch`. Stable region coverage is not
-branch coverage. Optional proving,
-consensus and Tor results remain distinct from default report percentages.
-The development guide's [coverage section](development.md#local-coverage) documents setup and
-artifact locations; its [complexity section](development.md#local-complexity-metrics)
-documents the local rust-code-analysis workflow.
-
-Review uncovered regions by risk: financial release boundaries, grants, transport
-fallback, durable publication, error handling and concurrency matter more than a
-repository-wide score target. Do not remove guards or mirror implementation details
-in tests solely to raise a number. The small
-[mutation pilot](plans/deferred/mutation_testing.md) remains deferred; no mutation
-score is implied by coverage results.
-
-Policy-removal regressions should exercise remaining authority boundaries through
-normal application paths. Change advisory estimates or cached prices independently
-of current caps and actual offers; assert permitted work proceeds and actual
-over-cap work still cannot sign. Multi-attempt tests retain every original journal
-entry and distinguish ambiguous protocol records from the exact retry category.
-Owner-replacement tests interrupt a scheduler while accepted child work still
-holds its lease, then check exclusion, release, restart, shutdown and retained
-backoff. Count completed scans directly when proving single-scan expiry recovery;
-the authenticated original signed expiry, burial and final unchanged Ready
-snapshot coverage must still be checked. Snapshot revisions also count
-intermediate checkpoints. Missing, relocated or differently spent old inputs must
-not become negative-expiry gates; current SDK state owns spendability. Test bridge
-terminality and current authority separately from local source closure. Diagnostic prose, workflow phases and aggregate
-balances alone do not prove these properties.
-Verify that a changed financial test is reachable through its module declarations
-and actually runs with the intended feature/platform gates. A successful filtered
-Cargo command can run zero tests; a complete complexity report can analyze a file
-the compiler never reaches. Source metrics do not establish test execution.
-
-Focused recovery tests and real SDK Ironwood lifecycle tests cover same-Store
-reconstruction, task replacement, cancelled waiters, accepted input ownership,
-qualification denial, lost submission response and restart without duplicate
-calculation. Unsupported pool/input/receiver paths and transparent address RPCs
-reject without acquiring new inputs, creating bytes or disclosing addresses.
-Financial scenarios use genuine managed or native Ironwood transactions; SDK raw
-state remains unchanged. These fixtures use public deterministic keys and do not
-establish consensus or live-funded settlement qualification.
-
-## Optional proving, consensus and live work
-
-- [LIFECYCLE.md](../tests/LIFECYCLE.md) covers synthetic-note proof and exact-byte
-  restore assertions without mainnet funds.
-- [REGTEST.md](../tests/REGTEST.md) covers mined local Ironwood deposits, reorgs, unsupported-shielding rejection,
-  expiry proof and recovery CLI behavior.
-- [TOR.md](../tests/TOR.md) covers controlled real-Tor circuits and per-process OS
-  confinement using an independently installed Tor binary. A local SOCKS fixture
-  cannot prove actual Tor circuit assignment or host firewall behavior.
-- [Live integration walkthrough](../tests/live/INTEGRATION.md) is the single funded
-  provider workflow; [its reference](../tests/live/INTEGRATION_REFERENCE.md) defines
-  assertions, registry accounting, concurrency, lifecycle and Tor evidence.
+[`.github/workflows/treasury-sync-diagnostics.yml`](../.github/workflows/treasury-sync-diagnostics.yml)
+supports manual `workflow_dispatch` (plus a temporary `push` trigger on
+`ci_coverage` for diagnostic script and test edits). It compiles
+`tests/treasury_sync.rs` and runs `scripts/diagnose-treasury-sync.py` (8
+threads, 5-minute diagnostic window outside compilation) to capture native GDB
+stacks before exiting `124` if a Pepper mempool shutdown hang occurs.
 
 ## Qualification status
 
-| Boundary | Evidence and limitation |
+Offline suites never qualify live settlement, upstream uptime, or live Tor
+circuits. Current status across verification layers:
+
+| Scope | Status | Basis and limits |
+| --- | --- | --- |
+| Offline application suite (`make check`) | Qualified locally and in Linux CI | Unfunded fixtures, localhost sockets, synthetic-chain proving and lifecycle (`tests/LIFECYCLE.md`). |
+| Docker Zcash consensus (`zcash-regtest`) | Opt-in; NU6.3 images predate v8 SDK | Temporary Zebra and Zaino regtest containers (`tests/REGTEST.md`); requires requalification on v8 SDK. |
+| Live Tor circuit isolation and confinement | Qualified on macOS (`scripts/qualify_tor.py`) | Verified on macOS 26.6.2 with Tor 0.4.9.13 using dummy identities and `zec.rocks` reads (`tests/TOR.md`); Linux namespace confinement remains separate. |
+| Reproducible release builds | Qualified on prior 1.99.0 profile; 1.99.1 pending | Same-host network-denied two-build comparison on Apple Silicon macOS (`docs/reproducible-builds.md`). |
+| Live mainnet public swap and single paid call | Opt-in manual runbook | Bounded single-call demo (`docs/public-swap-demo.md`). |
+| Live 23-provider sweep over owned Tor | Opt-in runner preset (`PROVIDER_PRESETS.md`) | Historical 2026-10-04 sweep; new providers, GenuineGood `POST`, and fresh availability require new reviewed runs. |
+| Automated two-round rotation, restart, and combined cover and payment | Deferred | Tracked in [live integration acceptance](plans/deferred/live_integration_acceptance.md); offline fixtures cover local invariants only. |
+| Confidential Zcash swaps and managed Permit2 `upto` | Outside current scope | Managed pools support public Base USDC v1 and v2 `exact` EIP-3009 only. |
+| Live shielded-refund end-to-end delivery | Unqualified | Dry quotes verify format acceptance; live refund observation requires explicit operator review (`tests/live/INTEGRATION_REFERENCE.md#shielded-refund-evidence-and-qualification`). |
+
+## Live runner regression map
+
+Shared runner unit tests run once in `tests/integration_preparation.rs`
+alongside compiled-executable supervision tests:
+
+| Area | Coverage in `tests/live/runner/` and `tests/integration_preparation.rs` |
 | --- | --- |
-| Catalogs, MCP, payments, permissions, durable funding and cancellation | Offline fixtures cover named invariants and interleavings, not exhaustive race freedom or real settlement. |
-| Synthetic proving and local consensus | Optional suites exercise saved-byte recovery, mined deposits, reorg refusal, refunds and expiry. See LIFECYCLE and REGTEST; these results are separate from default coverage. |
-| Fresh HTTP scope recovery and qualification mapping | Local fixtures cover retry credentials and private scope-to-owner/origin handoff, strict STREAM audit and session isolation. The changed recovery paths have not been requalified with a real Tor daemon or funded provider run. |
-| Real Tor and confinement | Exercised on macOS with an installed Tor process, authenticated control events and OS egress controls. Local SOCKS tests do not prove this; other operating systems and all-network anonymity remain outside the claim. |
-| Funded provider workflow | Historical funded runs exercised treasury bootstrap, a selected provider sweep, help caching, canonical debit reporting and the former startup-pricing check through Tor. Current runs require no startup-pricing stage. Failed or omitted providers remain failed or unobserved; this is not universal provider compatibility or current health. The canonical GenuineGood POST migration has only offline evidence; historical funded GET results do not qualify it. |
-| Shared/separate-wallet concurrency and refill service | Manual live tests exercised overlapping paid calls and continued service during pending refill. Runner assertions have offline coverage; manual evidence does not qualify every automated lifecycle preset. |
-| Automated lifecycle/restart | Full confirmed-refill/two-round restart acceptance remains deferred. Promotions or service during treasury insufficiency alone are insufficient. |
-| Cover with paid traffic | Unsigned cover checks are separate. A fully successful combined cover/payment qualification remains deferred; range refusal or missing samples cannot be hidden by payment success. |
-| Mutation and branch coverage | No mutation score is claimed. Branch collection requires a compatible nightly/LLVM setup; stable region coverage is not branch coverage. |
-
-The [scenario presets](../tests/live/integration/SCENARIO_PRESETS.md) retain explicit
-wallet scope, single-use cases, finite authority and observation windows. The
-[provider preset](../tests/live/integration/PROVIDER_PRESETS.md) retains 23 providers,
-22 independently reviewed paid requests, one unsigned directory call and 40 help
-calls. Presets are inputs, not proof of live feasibility or permission to spend.
-Coverage records describe this selected scope; adding a bundled provider requires
-neither a paid case nor an exclusion record. Offline preset validation uses
-explicit captured inputs for its selected remote sources and resolved production
-local catalogs, independently of generated catalog snapshots.
-[Deferred acceptance](plans/deferred/live_integration_acceptance.md) specifies the
-remaining lifecycle and cover gates.
-
-Qualification argument certification preflights every schema branch before checking
-values. Unknown assertions, custom vocabularies and unsupported dialects fail
-closed, including in absent properties and alternatives. OpenAPI `discriminator`
-and `x-` documentation metadata remain opaque and do not bypass type, required or
-composition checks. The exact `propertyNames: { type: "string" }` assertion is
-accepted because JSON object names are strings; other property-name constraints
-remain unsupported. This offline subset is not a general JSON Schema evaluator.
-
-## Runner regression map
-
-| Contract | Maintained tests |
-| --- | --- |
-| Recorded scope has valid, unique configs and matches the reviewed paid preset | `tests/provider_catalogs.rs::reviewed_provider_scope_matches_explicit_paid_preset` |
-| Qualification schema rejection order, recursion/node boundaries and shared alternative work limits | `tests/live/runner/schema.rs` tests through public `validate` |
-| Exact reviewed requests, caps, schemas and wallet arrangements | `tests/live/runner/presets.rs` and independent request fixtures |
-| Authenticated MCP single-attempt fixtures sign exactly once | `tests/server.rs::authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result`, `tests/payments.rs` |
-| Crash/failure cannot replay or refund a charged attempt | Runner registry tests and `tests/integration_preparation.rs` real-process tests |
-| Prior permits and liabilities survive new runs | `src/qualification/funding/registry_state.rs` and immutable-baseline tests |
-| Complete frozen inventories, typed loading failures and exact snapshot byte boundary including newline | `tests/startup.rs`, `tests/integration_preparation.rs`, `tests/snapshot_boundary.rs` |
-| Identity/origin scope and confined egress | Managed/unsigned identity-map tests, `tests/network_audit.rs`, optional `tests/TOR.md` procedure |
-| Rotation output, missing evidence, settlement precedence and original replacement-job bindings | `tests/live/runner/rotation_report.rs` tests; fixtures certify report logic only |
-| Parent death, malformed-control drain and unsigned refusal before disclosure | `tests/supervision.rs` |
-
-MCP success, useful provider content, seller receipts, consumed nonces and verified
-canonical debits are different facts. Missing proof is not a zero fee. Financial
-ledgers, attempted case IDs and failure evidence remain private and immutable;
-removing a Git report never resets authority or permits a retry.
-
-## Generated artifacts
-
-Write live reports, metrics and audit inventories under ignored `target/` or an
-operator-selected private external directory. Preserve raw evidence locally with
-its exact build/configuration pins. Commit durable findings as tests, provider
-configuration, maintained documentation or focused unfinished plans. Do not append
-dated run logs, handoffs, balances or report copies to these documents.
-
-Managed insufficient-funds fixtures exercise real `PaidClient` signing, separate
-identity-bound challenges, unchanged GET/POST arguments and retention of both
-authorizations. Their pinned seller forms are in
-[`insufficient-funds.json`](../tests/fixtures/x402/insufficient-funds.json). These
-local fixtures do not qualify a deployed seller or establish that the first attempt
-cannot charge. Qualification reservations cover every authorization within the
-existing per-case permit; reports correlate each receipt/debit by attempt ID and
-preserve incomplete earlier outcomes. Saved admission estimates do not prove solvency.
-
-V1 fixtures cover static and managed signing from header and body challenges,
-the local SDK version-metadata adapter, and configured challenge limits above the
-default. Legacy receipt failures can traverse existing wallets; successful,
-malformed, duplicate and mixed-version receipt headers cannot earn another attempt.
-Receipt projection retains legacy transaction/payer claims under the canonical
-Base network for recovery. Direct managed header challenges discard their unused
-bodies, while body-only challenges retain the default collection bound. These
-checks use local sellers and unfunded keys, not live settlement.
+| Planning and case selection | Offline `plan` and `select-cases`, placeholder blocking, tag and dependency checks, absolute path pinning, and schema-2 plan JSON. |
+| Registry and budgets | Atomic per-case, `total_test_budget_usdc`, and `cumulative_test_budget_usdc` reservation across concurrent runs, reopen retention, refusal rollback, and legacy read compatibility. |
+| Preparation and frozen reload | Build-identity pinning, full 128 MiB catalog capture, format checks (`date`, `date-time`, `uri`), frozen reload parity, and failure retention without partial publication. |
+| Execution and supervision | Batch reservation, per-case dispatch intent, independent phase continuation, graceful drain on cancellation, `--qualification-no-new-funding` and `--qualification-unsigned`, and `funded_pools` adoption. |
+| Assertions and reports | Content checks (`json_exists`, `json_equals`, `text_contains`, nested `isError: true`, scan bounds), fee and challenge capture bounds, help-cache states (`fetch`, `hit`, `shared`), canonical Base debit proofs, lifecycle schema-2 projections, JSON and sanitized Markdown reports, and offline `audit-tor`. |

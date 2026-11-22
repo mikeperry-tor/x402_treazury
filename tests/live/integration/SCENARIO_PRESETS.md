@@ -1,9 +1,8 @@
 # Scenario presets
 
-These manifests use explicit case IDs, arguments, windows and reservations. They
-are templates, not executable authorizations: fill the treasury/run/authority IDs,
-paths, Tor binary and future UTC windows before planning. No command expands a
-hidden repeat count. All mainnet work remains an explicit invocation.
+These template manifests list explicit case IDs, arguments, windows, and
+reservations. Fill in treasury, run, and authorization IDs, absolute paths, Tor
+binary, and future UTC windows before running `plan`.
 
 | Manifest | Deployment | Calls | Total test budget (USDC) | New funding jobs |
 | --- | --- | ---: | ---: | --- |
@@ -15,93 +14,59 @@ hidden repeat count. All mainnet work remains an explicit invocation.
 | `catalog.example.toml` | `unsigned-deployment.example.toml` | 3 unsigned | $0 | 0 |
 | `reliability.example.toml` | `single-deployment.example.toml` | 2 | $0.40 | 0 |
 
-The broader [23-provider sweep](PROVIDER_PRESETS.md) is a separate breadth preset.
-The table's USDC budgets bound a running total of potentially chargeable API
-authorizations, not a fee forecast or a sum that must be allocated before execution.
-Each paid case retains its explicit per-case reservation. Every authorization
-consumes the test budget even when its result is missing or another wallet is tried.
-New funding has no monetary qualification budget: reviewed job counts and reserve
-sizes, current SDK-spendable ZEC and SDK-calculated transaction fees
-supply its boundaries. A funded wallet's API payments are charged only when authorized.
+For the 23-provider sweep, see [PROVIDER_PRESETS.md](PROVIDER_PRESETS.md).
+`Total test budget (USDC)` caps the running sum of potentially chargeable API
+authorizations across the run (every authorization consumes the budget even if
+its response is lost or another wallet is tried). New wallet funding is bounded
+separately by reviewed job counts, reserve sizes, spendable ZEC, and SDK fees.
 
 ## Wallet and listener scope
 
-The single-pool deployment declares only `test_pool`; a quick test does not need
-an unused second managed pool initialized. The shared SocialFetch source assigns
-that wallet explicitly across listeners A and B. The two-pool deployment adds
-an independent SocialFetch source on listener C using `independent_pool`, and an
-Arkham depletion source on A using `test_pool`. Each source has a distinct tool
-prefix and an exact listener allowlist. Startup does not probe endpoint prices.
+- `single-deployment.example.toml` declares only `test_pool`, shared by
+  SocialFetch across listeners A and B.
+- `managed-deployment.example.toml` adds an independent SocialFetch source on
+  listener C (`independent_pool`) and an Arkham depletion source on listener A
+  (`test_pool`), each with distinct prefixes and exact allowlists.
+- `standard.example.toml` runs one shared-wallet A and B pair followed by one
+  separate-wallet A and C pair, reporting driver, payment-work, and
+  signed-future overlap separately.
 
-The standard preset first runs a shared-wallet A/B pair, then a separate-wallet
-A/C pair. Both batches have two calls. Existing concurrency qualification reports
-driver/application overlap, payment-work overlap and signed-future overlap
-separately; the preset does not promise every level of overlap will be observed.
+## Rotation, service, and restart
 
-## Rotation, service and restart
-
-Each rotation round declares twelve $0.20 Arkham depletion attempts, followed by
-two SocialFetch service cases, one per wallet. The runner checks current balance
-and unresolved exposure before depletion, stops at natural READY consumption with its exact slot/generation,
-and marks unused depletion suffixes not executed. Consumption leaves the slot vacant without allocating in the payment transaction. Service starts independently; the runner later correlates the replacement job through ordinary observations. Group generation stays stable. Service attempts must actually
-pay while the replacement remains pending, and credit/source confirmation must
-qualify independently. A provider failure remains a failure; no automatic paid
-retry is purchased.
-
-Twelve attempts are a finite candidate list, not a promise to rotate every wallet.
-The configured nominal range is $2-$3. The operation's selected draw and any
-accepted bridge minimum can raise its local floor; the upper bound remains $3.
-ZEC input follows the current quote; no fixed ZEC exposure ceiling or equal-share
-per-job budget is imposed. A minimum above the configured USDC maximum stops new
-unsigned acquisition without a deposit.
-A larger starting balance, different live fee, incomplete chain evidence, fast
-refill or missed checkpoint can leave qualification incomplete. Review and expand
-the explicit cases and reservations **before preparation** if the observed balance
-requires more. Do not lower balances, force promotion or delay real funding to
-make an assertion pass.
-
-The extended preset rotates `test_pool` twice and requests one graceful restart
-at the first queued-refill checkpoint while retaining Tor. Both rounds include
-service from `independent_pool`. The treasury-only variant has the same calls but
-starts with no EVM allocations: two bootstrap jobs (one enabled small reserve for each
-of two pools) and two replacement jobs. Existing-wallet presets assume funded
-managed pools; they do not substitute an unrelated EVM private key.
-
-For positive-funding presets, explicitly enable `funding.auto_fund` in the copied
-deployment, authorize sufficient cumulative registry limits and pass
-`--allow-funding` to the supervised command. The committed deployment keeps
-auto-funding off. Zero-funding runs install the production deny-all restriction
-even when the copied deployment enables funding. Existing liabilities and prior
-reservations persist; starting a new run never resets them.
+- Each rotation round lists twelve $0.20 Arkham depletion calls followed by two
+  SocialFetch service calls (one per wallet). The runner checks fresh balances
+  and exposure before depletion, stops on natural `READY` consumption (marking
+  unused suffix cases `SKIPPED_TARGET_REACHED`), dispatches service calls while
+  refill is pending, and verifies independent credit and source confirmation.
+- Twelve depletion calls are a finite candidate list for a $2-$3 reserve range.
+  If a wallet's starting balance or live price needs more calls, expand the
+  explicit case list and reservations **before preparation** rather than
+  editing balances or stalling funding.
+- `extended.example.toml` rotates `test_pool` twice with one graceful
+  application restart at the first `queued_refill` checkpoint while keeping Tor
+  running. `treasury-only.example.toml` runs the same calls starting from empty
+  pools (2 bootstrap jobs plus 2 replacement jobs).
+- Positive-funding presets require setting `funding.auto_fund = true` in the
+  copied deployment, authorizing sufficient cumulative job limits, and passing
+  `--allow-funding`. Zero-funding runs install `--qualification-no-new-funding`
+  regardless of `auto_fund`.
 
 ## Unsigned and reliability scenarios
 
-The catalog preset uses the production keyless mode for a directory help fetch,
-cache hit and directory API call. It selects no managed pools, never reads the
-static key variable and refuses any 402 before signing. Registry authorization
-still requires an initialized treasury identity/baseline, but no funded EVM wallet
-is required. Successful cached help is not evidence of a second external fetch.
-
-The reliability template preserves the historical two-window schema for offline
-validation and archived reports. Automatic continuation is no longer supported:
-do not expect one invocation to schedule tomorrow's window or restart it with
-`report --eligibility`. For current live reliability sampling, prepare separate smoke/provider
-runs with new case IDs and identical reviewed requests/assertions, each in its own
-window, using the same cumulative registry. Compare their dated observations;
-failed/uncertain cases remain recorded and are never replayed.
+- `catalog.example.toml` runs in keyless `--qualification-unsigned` mode for a
+  directory help fetch, cache hit, and directory API call (refusing any `402`
+  before signing; still requires a treasury baseline identity without funded
+  EVM wallets).
+- `reliability.example.toml` preserves the two-window schema for offline
+  validation. Automatic cross-window continuation is unsupported; for
+  multi-day reliability sampling, run separate smoke or provider manifests with
+  fresh case IDs under the same cumulative registry.
 
 ## Configure and validate
 
-Copy the matching deployment and manifest into an owner-only directory. Their
-committed relative paths resolve from `tests/live/integration`; make provider,
-binary, state, key and evidence paths absolute when relocating them. Set the
-existing treasury UUID consistently, choose fresh run IDs, point to the installed
-Tor binary and configure the dedicated SOCKS endpoint before pinning. Listener
-ports must be free; do not share the serving process with unrelated callers.
-
-Run `plan`, review the expanded case/wallet map and ceilings, then follow the
-[integration runbook](../INTEGRATION.md) for registry authorization and
-`prepare` followed by `run`. Build the runner and executable together before pinning. None of
-these templates is evidence that a funded lifecycle or a new Tor run passed.
-Offline tests validate every template's graph, allocations, wallet bindings,
-listener allowlists, tool existence and arguments against committed catalogs.
+Copy the deployment and manifest into an owner-only directory, convert relative
+paths to absolute paths, fill in IDs, Tor path, and free listener ports, then
+run `plan`, `authorize-registry`, `prepare`, and `run` using binaries built
+together (see [INTEGRATION.md](../INTEGRATION.md)). Offline tests validate
+every template's graph, bindings, allowlists, tools, and arguments against
+committed catalogs.

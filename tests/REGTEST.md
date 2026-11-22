@@ -1,16 +1,15 @@
 # Zcash consensus qualification
 
-The opt-in `treasury::regtest::deposit_settlement_and_reorg_recovery` test launches
-Zebra validators and a Zaino indexer in disposable Docker containers. It uses the
-public BIP-39 abandon/about mnemonic, locally mined coins, no peer seeds, and
-random loopback-only RPC ports. It does not use deployment profiles, `.env`,
-operator wallets, external indexers, or real funds.
+`treasury::regtest::deposit_settlement_and_reorg_recovery` launches Zebra
+validators and a Zaino indexer in temporary Docker containers using the public
+BIP-39 `abandon ... about` mnemonic, locally mined coins, no peer seeds, and
+random loopback RPC ports. It never reads deployment profiles, `.env`, operator
+wallets, external indexers, or live funds.
 
-Docker must be running. Pull these images before running the test; the test uses
-`--pull never`. The digests and activation schedule retain the NU6.3 infrastructure
-selected with zingolib v6.0.0. They have not been requalified against the current pinned v8 SDK;
-offline synthetic-chain tests do not establish Docker consensus compatibility.
-Zaino requires amd64 emulation on ARM hosts.
+Docker must be running. Pull these pinned images first (the test uses
+`--pull never`; Zaino requires amd64 emulation on ARM hosts). Note that these
+NU6.3 digests were qualified with Zingolib v6.0.0 and have not yet been
+requalified against the current v8 SDK:
 
 ```sh
 docker pull docker.io/zfnd/zebra:6.0.0@sha256:78a10b7f24b83a86e6223d97e857094a353454e3268f84a87bd987e7140a33bb
@@ -18,87 +17,74 @@ docker pull --platform linux/amd64 docker.io/zingodevops/zaino:0.6.0-rc.1-no-tls
 make test CARGO_ARGS='--features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery' TEST_ARGS='--ignored --exact --nocapture'
 ```
 
-The network selector's regtest variant is compiled only into this crate's unit
-test binary, even when the executable is built with all features. Public treasury
-constructors and the sender remain mainnet-only. The test's database identity and
-encrypted record authentication bind to `regtest`; the production constructor
-must reject it. Existing mainnet databases retain their schema and ciphertext
-associated-data format.
+The regtest network variant compiles only into unit tests; public treasury
+constructors and the shipped executable remain mainnet-only even in
+all-feature builds. Regtest state binds its database identity and AEAD
+associated data to `regtest`, which production constructors reject.
 
-The scenario exercises the shared treasury, journal and submission code:
+## Primary deposit and reorg scenario
 
-1. Mine through NU6.3 activation so the external validator coinbase can fund Ironwood.
-   The application never prepares transparent-input shielding.
-2. Sync the treasury, prepare one bound native Ironwood payment and reopen its encrypted
-   state. No transaction is submitted by preparation.
-3. Submit saved bytes, mine one confirmation, and retain the reservation because
-   two confirmations are required.
-4. Build a longer competing branch on the second validator and submit its blocks
-   to the first. Sync and reconcile the orphaned deposit without freeing its
-   reservation or recalculating it.
-5. Explicitly rebroadcast the same saved bytes and mine sufficient confirmations.
-   Resolve the operation and retain its original amount/fee facts.
-6. Replace that confirmed history with another longer branch. SDK sync updates
-   current spendable state, including after reopening, while exact original bytes
-   and recorded transaction facts remain. No historical monetary equality gate
-   or automatic replacement/rebroadcast is introduced.
+1. Mine through NU6.3 activation so validator coinbase outputs fund Ironwood
+   (never using transparent-input shielding).
+2. Sync the treasury, prepare one bound native Ironwood payment, and reopen
+   encrypted state (confirming preparation submits nothing).
+3. Submit the saved bytes and mine one confirmation (retaining the reservation
+   because two confirmations are required).
+4. Mine a longer competing branch on the second validator, deliver it to the
+   first, and sync without releasing the reservation or recalculating bytes.
+5. Rebroadcast the identical saved bytes, mine required confirmations, and
+   confirm original amount and fee facts persist.
+6. Replace confirmed history with another longer branch; SDK sync updates
+   spendability through reopen while keeping exact original bytes and facts
+   without automatic replacement or rebroadcast.
 
-The harness has a fifteen-minute outer deadline. It removes its UUID-named
-containers and dedicated bridge on normal return, error, panic or timeout. A hard
-process kill can prevent cleanup: remove only the `x402-regtest-<UUID>-*`
-containers and `x402-regtest-<UUID>` network belonging to that interrupted run.
-No host directories are mounted writable into the containers; their chain state
-is disposable. Cached images remain available for subsequent tests.
-
-The deposit scenario does not qualify NEAR swaps, refunds, deep finalized-chain rollback,
-or automatic repair of source spends invalidated after accounting confirmation.
-Original facts remain historical observations; the SDK owns current spendability.
-No replacement transaction or automatic rebroadcast is created as a recovery shortcut.
+The harness has a 15-minute outer deadline and removes its UUID-named
+containers and bridge on normal exit, error, panic, or timeout (if killed with
+`SIGKILL`, remove only `x402-regtest-<UUID>-*` containers and the
+`x402-regtest-<UUID>` network). No host directories mount writable into
+containers. This scenario does not qualify NEAR swaps, refunds, or deep
+finalized-chain rollbacks.
 
 ## Additional isolated scenarios
 
-Run each scenario in its own test process, using its complete name and `--exact`:
+Run each ignored scenario individually with its exact name and
+`TEST_ARGS='--ignored --exact --nocapture'` (add `--test-threads=1` for
+`tor_consensus_lifecycle`):
 
-| Test in `treasury::regtest` | Evidence |
+| Test in `treasury::regtest` | What it verifies |
 | --- | --- |
-| `transparent_refund_shielding_is_unsupported` | Wallet API and CLI reject transparent-input shielding without state, mempool or network effects |
-| `expired_ambiguous_deposit_releases_only_after_chain_proof` | Authenticated finite expiry requires completed canonical SDK coverage at configured depth; current spendability remains SDK-owned and archived bytes cannot submit again |
-| `indexer_non_inclusion_response` | Missing transaction response remains ambiguous |
-| `recovery_cli_lifecycle` | Shared production Clap parser and recovery handlers in test-only child processes: native Ironwood preparation, read-only reconciliation, same-byte rebroadcast, confirmed rebroadcast refusal and expiry recovery |
-| `tor_consensus_lifecycle` | Deposit, refund and expiry scenarios through authenticated fake SOCKS; run alone because it installs process policy |
+| `transparent_refund_shielding_is_unsupported` | Wallet API and CLI reject transparent-input shielding without state, mempool, or network side effects |
+| `expired_ambiguous_deposit_releases_only_after_chain_proof` | Authenticated finite expiry requires completed canonical SDK coverage at configured depth; archived bytes cannot submit again |
+| `indexer_non_inclusion_response` | Missing-transaction responses from Zaino stay ambiguous (`Unknown`) |
+| `recovery_cli_lifecycle` | Production Clap parser and recovery handlers in isolated subprocesses: native Ironwood preparation, read-only reconciliation, same-byte rebroadcast, confirmed-rebroadcast refusal, and expiry recovery |
+| `tor_consensus_lifecycle` | Deposit, refund, and expiry flows through authenticated fake SOCKS (must run alone because it installs process network policy) |
 
-For an instrumented run of exactly one scenario:
+For coverage on one scenario (or synthetic proving without Docker):
 
 ```sh
 make coverage-consensus TEST=transparent_refund_shielding_is_unsupported
+make coverage-proving
 ```
 
-Use `make coverage-proving` for the synthetic proving test without Docker.
-These commands are optional qualification, not tests run by the default suite.
-A fake SOCKS endpoint proves client routing/credentials, not real Tor circuit
-selection. Neither the optional suite nor its coverage qualifies real NEAR swaps.
+Fake SOCKS verifies client routing and credentials, not live Tor circuit
+selection or live NEAR swaps.
 
 ## Recovery command subprocess adapter
 
-`recovery_cli_lifecycle` runs the real wallet command dispatcher against isolated
-regtest state. Only the treasury/sender network constructor is injected. The
-adapter is compiled with `cfg(test)` and `zcash-regtest`; enabling that feature on
-the shipped executable does not provide a regtest flag, environment override or
-alternate public constructor. Default executable tests still cover `main` routing,
-Clap flags, stdout/error conventions and mainnet wallet identity checks.
+`recovery_cli_lifecycle` drives the production wallet CLI dispatcher against
+isolated regtest state by injecting only the test network constructor under
+`cfg(test)` and `zcash-regtest` (never exposed in the shipped binary).
 
-Each child reads relative state/key paths from a TOML profile containing an unused,
-missing API spec, proving recovery does not load API sources. Read-only commands
-receive no submission environment variable. The parent checks no shielding or
-read-only broadcast, identical prepared bytes, immutable transaction facts, one submission
-attempt after refusing reconciliation of an already confirmed operation, and release only after
-expiry proof. Early expiry fails legibly with backtraces enabled; reopening proves
-ownership release after both successful and failed commands. The unit-test runner's
-known stdout prefix is removed before asserting the dispatcher emits one JSON value.
+- Each child loads relative paths from a TOML profile containing a missing API
+  spec, proving recovery never loads API sources. Read-only children receive no
+  submission environment variable.
+- The parent verifies zero shielding or read-only broadcast, identical prepared
+  bytes, immutable facts, refusal to rebroadcast a confirmed operation, release
+  only after expiry proof, legible early-expiry errors, and ownership release
+  after both success and failure.
+- Runs with a 30-minute outer deadline and a 3-minute per-child deadline:
 
-Run this scenario separately with `--features zcash-regtest --lib
- treasury::regtest::recovery_cli_lifecycle -- --ignored --exact --nocapture` or
-`make coverage-consensus TEST=recovery_cli_lifecycle`. It has a thirty-minute
-outer deadline and each child has a three-minute deadline. The ordinary executable
-is still mainnet-only, so this qualifies shared command orchestration with a test
-network adapter, not a funded mainnet invocation.
+```sh
+make test CARGO_ARGS='--features zcash-regtest --lib treasury::regtest::recovery_cli_lifecycle' TEST_ARGS='--ignored --exact --nocapture'
+make coverage-consensus TEST=recovery_cli_lifecycle
+```

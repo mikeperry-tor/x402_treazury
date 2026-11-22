@@ -1,390 +1,81 @@
 # Public-swap lifecycle qualification
 
-These tests use public deterministic keys, localhost fixtures and isolated regtest
-chains. None spends mainnet funds or contacts NEAR's production API.
-Store-worker fixtures cover accepted and disconnected callers, absence of closure
-replay, independent Store progress and sanitized terminal failure.
-Early-rotation StoreHandle coverage queues first-use authorization and background
-promotion/refill in both deterministic orders. It checks captured payer survival,
-one claim-generation advance and replacement allocation, immutable first credits
-and original funding identities, and retained payment liabilities after later
-observations. It uses no network or submitted treasury source transaction.
-Treasury publication loss runs in an isolated child: the original completed result remains
-owned, graceful drain stays pending and forced runtime teardown is confined to
-that child. These controls do not qualify power-loss recovery or settlement.
-The full concurrent worker's local bridge, Base RPC and paid API share a verified
-TLS router, so its actual payment and rotation assertions execute under provider
-HTTPS policy. Infrastructure-only HTTP fixtures remain separate; fixture trust
-does not disable chain or hostname verification.
+These tests use deterministic unfunded keys, localhost fixtures, and isolated
+synthetic or Docker regtest chains. None spends mainnet funds or contacts
+NEAR's production API.
 
-`treasury::lifecycle_tests::refund_addresses` proves a distant Ironwood refund
-becomes SDK-spendable after mnemonic-only restore and early birthday. Binding,
-rollback and native receipt tests use fresh unfunded owners where no actual funds
-are required. New UAs contain only the Orchard-format Ironwood receiver. Negative
-fixtures cover unsupported receiver forms and transparent-input shielding, with
-unchanged snapshots/journals and no RPC disclosure. All six transparent-address
-RPC adapter methods also fail locally before transport activity.
-
-Direct native sends retain actual SDK principal-plus-fee authority and one
-submission/confirmation path. The shared calculation-owner tests cover native
-cancellation and exact-byte restart. Receiver classification is socket-free;
-unfunded preparation checks the actual recipient/binding rejection before input
-ownership. Native receive creation/retry uses an unfunded owner separately from
-the actual partial/excess receipt scan. The receipt test retains successful
-actor/service refresh after spent and reconstructed SDK snapshots, including
-renewed observation demand and absence of transparent RPCs or outgoing work.
-
-The [Ironwood-only policy](../docs/zingo-integration.md#ironwood-only-policy) applies
-to new proposals, actual signed outputs and supported-capital projections.
-Cancellation, blocking calculation, failed publication, restart and expiry tests
-use bound managed deposits or native Ironwood sends. No fixture enables a legacy
-pool or application transparent-input shielding merely to prepare test capital.
-Raw SDK state and already accepted financial evidence retain generic decoding and
-canonical recovery. Tests do not claim unsupported funds become supported capital.
-
-The common funded fixture and relocated-note journeys share canonical faucet
-transactions for 1,000,000 and 10,000 zatoshis, each proved once per test process.
-Only the recipient and immutable raw bytes are shared. Each fresh owner's first
-receiver is checked against the saved recipient; the amount, absent memo, synthetic
-activation schedule and funding height 21 remain fixed. Other amounts use their
-own faucet transactions. Every funded fixture retains a fresh SDK wallet,
-encrypted store and mock chain, mines its own initial funding block, and performs
-real SDK scanning. No mutable wallet state, accepted journal or submission owner
-is shared. Unconditional transparent-shielding rejection uses an unfunded owner
-and preserves its snapshot, healthy state and absence of outgoing work.
-
-Direct-send service fixtures await the actual submission notification and retain
-actor-command barriers before journal inspection. These waits have no fixture
-wall-clock deadline; external lifecycle diagnostics observe long runs without
-interrupting valid work.
-
-Native invoice retries preserve every payment instruction apart from the fresh
-presentation clock. Tests validate each response's UTC clock independently and
-compare the remaining complete instruction objects; repeated calls need not occur
-within the same wall-clock second. Explicit-clock formatter coverage verifies this
-boundary without delaying a fixture or changing the production clock.
-
-Deposit fixtures exercising real `GrpcSubmission` use a managed funding job and
-saved quote so the operation has its required durable recipient identity.
-Preparation-only fixtures do not by themselves establish submission binding.
-Scope temporary `StoreHandle` observers around their reads and release them before
-awaiting `Treasury::close`; its Store worker exits only after its senders are dropped.
-
-Expiry maintenance must consume its completed same-owner canonical scan without
-another indexer request. The direct-source expiry fixture makes the next indexer
-request fail after successful scanning and requires closure with the fault still
-unconsumed, no lookup, no submission and the original bytes/attempts preserved.
-Buried managed and native-source expiry each retain one real pending-expiry journey
-with lookup and submission doubles that panic if called. Canonical expiry does
-not consult external inclusion hints, so these tests do not repeat the journey
-for unused mempool and confirmed hint values.
-
-The SDK reorg fixture keeps its actual rolling-window boundary, deep rollback and
-same-height fork journeys. The manually missing-checkpoint journey uses a short
-chain and removes checkpoint 23 explicitly before reopening; it tests damaged
-rollback state without repeating the retention-window-sized initial scan. Both
-forms retain divergence, original-input/byte ownership and subsequent-scan checks.
-
-Unsubmitted-funding expiry keeps one cold and one already-observed SDK journey,
-each requiring exactly one completed canonical proof scan during recovery and no
-lookup or submission. The warm journey retains damaged disclosure/diagnostic
-sequencing. JSON expiry and stale-txid permutations are checked in the cheap Store
-projection regression against authenticated original bytes, preserving the complete
-saved facts and encrypted transaction without another funded SDK world.
-
-SDK confirmation keeps separate never-disclosed and submitted originals, plus
-one ZIP244 alternate-authorization journey carrying damaged sequencing. Each
-retains zero corroborating lookups or replay and exact original saved bytes;
-cheap Store tests cover additional malformed disclosure/health permutations.
-
-The Store bootstrap fixture covers operation-backed recovery without proving:
-accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
-outcomes permit recovery assessment. Only bound REFUNDED with a confirmed
-receiver receipt and source closure permits a confirmed-deposit replacement under
-current unused-claim authority. `managed_refunds` proves receiver-specific partial
-receipt, unrelated credit rejection, confirmation depth, restart reconstruction,
-disabled funding, fresh replacement receiver and original-byte retention without replay. Store regressions exercise fixed and ranged nominal policies through
-restart, retaining the same selected terms, accepted output, original bytes and
-unchanged original ownership after refusal. Stale bindings and malformed advisory
-negative flags grant no authority. Proven non-disclosure and completed SDK
-finite-expiry coverage retain their independent recovery paths, including when a
-provider reports FAILED/REFUNDED.
-Eligibility, retry permission and startup classification preserve
-the exact selected inputs, accepted quote, signed bytes, attempt count and claim
-ownership, and do not create replacement work.
-
-Reconstruction's cheap error contract retries unavailable SDK snapshots and
-busy/locked Store reads through contextual errors, while corruption and shared
-owner failures propagate. `tests/treasury_sync/recovery.rs` uses the actual
-`wallet recover-expired` command with the existing empty-chain RPC fixture:
-missing-operation failure follows a completed scan, and first-signal cancellation
-checkpoints an interrupted scan. Both release the wallet for reopen, preserve
-addresses and create no funding or submission. Canonical signed-expiry behavior
-is covered by the separate source lifecycle fixtures.
-
-The late-archived-success fixture in `treasury::lifecycle_tests::terminal` uses the
-real actor to retain a disclosed replacement after destination completion. A
-following independent command must finish after maintenance without duplicating
-the replacement's lookup; later canonical confirmation closes its original owner
-without submission or another lookup.
-
-Canonical recovery coverage must distinguish Base finality from confirmation
-depth: finalized lag/unavailability, incoherent headers and mid-read reorgs must
-not produce a depth-only balance, nonce or receipt proof. Replaced historical
-anchors must recover through original authorization pages after atomic archival
-and reopening of derived resolutions, including still-valid signatures and
-unburied expiry. Exercise restart and stale concurrent publication at the reset
-boundary, preserve retired signer exclusion and consumed initial funding claims,
-and assert no payment replay or replacement deposit. Historical resolution/balance
-support must remain audit data without vetoing fresh canonical proof. Equal
-finalized heights with newer latest balances must preserve the newer observation
-through out-of-order publication and forbid retirement on an older zero balance.
-Delivery guards must cover every accepted current/archived bridge operation,
-including after partial credit: provider terminality and local unfinished work
-have separate meanings. Source expiry alone cannot close pending bridge delivery.
-SDK/indexer discrepancies
-must converge through further observations; deeper-than-rolling-history forks
-require full rescan. A full clear without a proven common ancestor must scan from supported
-activation, including replacement credits below the old birthday even when the
-new tip remains above it. The `unknown_deep_fork_rescans_before_birthday_even_when_tip_remains_above_it`
-fixture covers replacement credit below the birthday with a higher replacement
-tip. The earlier floor must survive clearing before its
-first scanned block, interruption and reopen while declared metadata and original
-journals remain unchanged. Initial future birthday hints use that same conservative
-coverage; preactivation chains remain diagnostic failures. The patched SDK
-`future_birthday_rescans_supported_history_and_keeps_floor_across_clear` fixture
-checks the unstarted floor's persistence. These fixtures do not establish live
-consensus finality. SDK reconstruction must preserve keys, original bytes, inputs
-and genuinely unfinished owners without resurrecting terminal source work. Bound
-NEAR SUCCESS must close source work regardless of SDK confirmation, retain delayed
-credit observation and survive restart/reorg without submission or credit
-fabrication. Exercise settlement before acceptance, during calculation, before
-disclosure and after a disclosed request; accepted calculations and I/O retain
-their original completion owners.
-
-The orphaned-input native-source expiry fixture counts completed scans across the
-post-reorg sync and automatic maintenance together, requiring one canonical scan
-while retaining original bytes, accepted inputs and the single submission attempt.
-
-Actual SDK confirmation and signed-expiry fixtures also damage saved plaintext
-txid/expiry projections, including missing fields, wrong types, zero and far-future
-expiry. Recovery must use authenticated original bytes without rewriting the
-journal, replaying a send or altering original authority. Scheduler tests exercise
-the same distinction before routing; first disclosure of an expired original
-must fail despite a permissive projection. Corrupt ciphertext and required facts
-remain scoped failures while a sibling original can still be observed.
-
-The saturated scheduler fixture keeps both inventories above the actual scheduling
-record threshold, held credit/source work, waiter cancellation and close/reopen
-assertions. Existing published health anchors virtual cooldown advancement: the
-first pass observes completed quote prerequisites, while the reopened pass needs
-new preparation-failure and credit completion evidence. Neither callback counts
-nor old saved health acknowledge a new pass. Store work runs with time resumed.
-
-Scheduler admission distinguishes work that is not due from unavailable metadata
-capacity. The occupied-lane fixture checks that pending inventory drops the former
-and retains the latter, while a completed quote prerequisite retains its exact
-handoff in both cases without starting HTTP. Quote prerequisites retain independent
-inventory progress but execute under source ownership; actual quote HTTP uses its
-own observation slots and cadence.
-
-The actor interruption fixture retains one real retry crossing into offline SDK
-reconstruction. Its command acknowledgement precedes the panic and retry-sleep
-registration; advancing from that acknowledgement would race the retained owner.
-Keep queued refund derivation, uncertain claims, exact-byte refusal, cancellation
-ownership and exclusive Store reopen together in that representative case.
-
-| Coverage | Test | Evidence and limits |
-| --- | --- | --- |
-| Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. Qualification restart observations separately preserve the selected reserve slot, generation and wallet while allowing readiness and unrelated inventory progress. |
-| Refund status and pool isolation | `managed::lifecycle::failed_swap_retains_original_source_terms_while_another_pool_serves` | API refund status cannot manufacture treasury credit; bound fulfillment preserves original source terms without inventing native confirmation, while another funded pool keeps paying. |
-| Advisory early rotation and independent refill | `rotation::store::early_rotation::tests`, `rotation::funding::scheduler::opportunity_tests` | Private threshold/framing vectors, tiny and unlimited bounds, rejection mapping, first-credit preservation, used-wallet guard, small-first exact claim consumption, captured payer stability, reopen/rename stability and no allocation during promotion. Injected scheduling and paused-time worker tests cover initial serving delay, accepted jobs and prompt bootstrap. Local tests do not qualify live timing or unlinkability. |
-| Quote refresh, empty treasury, timeouts and backoff | `tests/funding.rs` | Unprepared-only bounded refresh, independent per-kind backoff and saved health reporting, sanitized diagnostics, degraded timeout with continued reconciliation and no repeated send. |
-| Provider-sized fixed-input funding | `rotation::config::tests`, `rotation::store::funding::quote_selection_tests`, `rotation::funding::redraw_tests`, `rotation::near::tests`, `rotation::store::funding::completion_tests::input_quote_journals_usdc_and_preserves_nominal_authority_across_restart` | Slot-aware fixed/range parsing and defaults, inclusive deterministic draws, saved-choice reuse, fixed-mode identity, and provider-floor redraw persistence before the next preview. Increasing-floor responses cannot renew the original deadline; expiry stops further previews without executable quotes or source work. Zero-slippage dry output preview supplies each executable input; live slippage applies once. Expected USDC, chosen nominal sizing and source zatoshis remain distinct across restart. Historical output quotes retain their terms; extra output does not expand source spending, and any positive receipt consumes the initial claim. HTTP fixtures do not establish live settlement speed or route minimums. |
-| Payment ambiguity and admission | `tests/managed.rs` | Typed insufficient-funds traversal retains every signed attempt; other uncertainty grants no paid replay. Advisory balance hints, durable liabilities, qualification nonce proofs, pool isolation and atomic promotion. |
-| Qualification lifecycle snapshots | `rotation::store::qualification::projection_tests`, `qualification::payment::tests` | Complete fields, order, nulls and exact raw-record hashes; strict required facts/health; a pinned SQLite snapshot across an independent WAL writer. Optional observation failure retains receipts and charges. These unfunded SQL/localhost fixtures do not qualify SDK or live settlement. |
-| Direct payment cancellation, process loss and WAL failures | `rotation::manager::admission_tests::{ownership_tests,crash_tests,io_failure_tests}` | Actual signing/HTTP and journal checks at acquired/private-signature/journaled boundaries. Owned subprocess SIGKILL preserves exact committed authorizations without replay; unavailable balance RPC does not block independent peer payment. Real WAL write/fsync failures preserve attempt/evidence/estimate atomicity and disclose no signature. Process/VFS tests run on Unix. Unsigned candidate lookup rejects all role/claim/journal writes and proceeds while the payment gate is held. |
-| Concurrent source funding and scan reuse | `treasury::lifecycle_tests` | Two managed recipients share the real treasury actor; real proving, submission and scans on a synthetic local chain. Covers deferred competing preparation, exact quote/pool and auto-funding checks, unchanged observation age/revision, confirmation depth, pending-byte restart, dropped submission waiter and lost send response without replay. Also covers a funded same-height fork: prepared bytes validate before the fork, lose their anchor afterward, still reach the strict mock validator and remain owned after rejection, blocking another preparation. Exact signed bytes and original transaction facts remain immutable. Historical source reorgs update SDK state without a monetary-history gate. Wallets and the mock use the same upstream synthetic activation schedule. Bridge quotes are fixture inputs; strict mock checks do not establish consensus validity. |
-| Full concurrent funding worker | `treasury::lifecycle_tests::worker` | Real scheduler, production Backend, refund derivation, overlapping local HTTP quotes, signed source transactions, unsigned current Base balance observations and actual payment admission. Two groups bootstrap after reopening historical insufficient-funds failures, pending-source passes reuse scans, and consuming a reserve triggers exactly one funded replacement while the prior payment liability remains. A client-scoped test-only bridge codec supports synthetic-chain addresses; production stays mainnet-only. |
-| Ironwood source recovery and unsupported shielding | `treasury::lifecycle_tests::shielding` | Real native Ironwood source transactions retain orphaned-input and buried expiry closure, uncertain submission/restart, independent payments, accepted submission cancellation and callback-scan drain. Closure grants no replacement authority. Unsupported transparent-input shielding fails without snapshot, journal or network effects. Already accepted byte decoding retains its original identity; no automatic shielding allocator remains. Synthetic chains do not qualify consensus or live settlement. |
-| Inclusion after a wallet scan | `treasury::lifecycle_tests::inclusion_after_wallet_scan_waits_without_resubmitting_or_releasing_inputs` | A real synthetic-chain deposit is mined inside lookup after the wallet scan. Pending confirmation retains exact signed bytes, reservations and the original attempt; a later scan confirms at the configured depth without another submission. Unknown scan progress and contradictory current observations retain original ownership while further canonical scans resolve the discrepancy; established SDK confirmation needs no indexer agreement. |
-| Owner reconstruction/replacement | `treasury::reconstruction`, `treasury::actor`, `exited_funding_task`, `exited_reconciliation_task` | Failed SDK mutation restores the latest committed address range through the same Store. Lost acknowledgments preserve committed originals and restrictions; unpublished calculation recovery requires successful offline reconstruction and absent outgoing/factual journals, preserves exact accepted inputs and uses fresh authority without consuming a transaction recovery attempt; cancelled driver waiters retain queued work. Distinct joined-task IDs prove replacement through existing leases/gates. A scheduler panic while its source is held preserves exact bytes, attempt count and backoff, excludes overlapping replacement, then resumes after release; explicit shutdown prevents replacement. Forced process death does not recover unpublished bytes or replay their original operation. |
-| Due treasury observations under capacity traffic | `treasury::actor::tests::due_observation_precedes_ready_capacity_notifications` | The real treasury owner starts an overdue scan before consuming an already-ready capacity notification. Concurrent payment notifications cannot repeatedly overtake due discovery; shutdown and serialized commands retain their existing ownership. The fixture performs no submission or transaction lookup. |
-| Upstream SDK source integration | Both Cargo workspaces, `tests/treasury.rs`, `tests/crypto_vectors.rs`, application/treasury suites and `scripts/tests/test_reproducible.py` | Unmodified pinned Zingolib/netutils preserve wallet read/save/reopen, signing, ordinary expiry and all financial/network consumers. Pepper's real merge fixture and mutation-rejecting source verification remain selected; release-tool tests retain actual descriptor/Git evidence and parameter isolation without a local SDK source path. |
-| Application RPC adapter | `network::indexer`, `tests/network.rs`, `tests/submission.rs`, `tests/network_audit.rs` and network unit tests | Active public-trait RPCs use the factory transport through sync and exact-byte submission. Parser cases retain nonzero-code rejection and bare/quoted/lone-quote handling; transport fixtures cover identity/clone/cache ownership, remote DNS, metadata and progress versus stalls. Constructor auditing includes generated clients. |
-| Direct Pepper checkpoint ownership | `tests/treasury_sync.rs::checkpoint_waiting_for_pepper_wallet_lock_does_not_stop_engine_progress` | Real pool-recovery fetch holds the wallet write lock across the periodic checkpoint tick. Releasing the response permits failure, periodic/final snapshots and runtime teardown; no submission or surviving I/O remains, and truthful reopen reaches Ready. The inline-engine mutation must stall this interleaving. |
-| Blocking calculation ownership | `treasury::lifecycle_tests::calculation_owner` | Actual pinned managed-deposit and native Ironwood calculations on a current-thread executor retain one accepted input owner through caller cancellation, canceled queued mutation, whole Treasury drop and normal Runtime drop. A real async task's Drop identifies runtime shutdown while a held blocking calculation remains live; no external Store sender props up persistence. Authenticated HTTP MCP tools/call for cached unsigned help completes on the SAME current-thread runtime while actual managed/native calculation is held. An external fixture controller owns release and its existing watchdog, then all held work/server tasks join before assertions; exact accepted inputs and zero new payments/funding jobs are retained. Store/executor progress remains available. A real managed fixed/ranged accepted quote is held after source acceptance while current reserve bounds and new-funding policy change; cancellation still publishes the same original principal/fee authority, saved quote/choice and input owner exactly once, with one job and no payments, redraw or disclosure. Exclusive reopen verifies final exact raw/snapshot/input identity and zero submissions. Both panic paths terminate SDK mutation before reconstruction: SDK panic checks retained accepted inputs and no bytes before reconstruction; a later facts panic retains exact extracted raw/preparedsnapshot/inputs without submission facts or a factual-operation/attempt row, and remains undisclosable after reconstruction. Test barriers release on failure; synthetic proofs are not consensus/live qualification. |
-| Backend deposit calculation and cleanup | `treasury::send::proving_tests` | Real Ironwood proposals/proofs cover expiry boundaries, actual fee/recipient/amount, rejection before ownership, failed publication and identical bytes through reopen. Required refusing prover traits load no Sapling parameters; unsupported SDK pool selection fails before calculation. These synthetic proofs do not establish consensus or live settlement. |
-| Targeted initial destination discovery | `treasury::lifecycle_tests::discovery` | Production treasury proposal and shared Base owner verify that insufficient SDK funds issue no destination request, a previously positive destination prevents source acceptance, failed positive-credit publication blocks acceptance through the cached cooldown, and credit handoff reuses the recipient cooldown without restoring an estimate decremented by a new payment journal. It also exercises new-claim wakeup and shared minute-cadence capital discovery of a later confirmed deposit. The preparation regression evicts the canonical-validation transport while counting accepted sockets, proving no extra actor connection as well as no extra RPC; direct wrong-network failure accepts no inputs. Synthetic/local observations do not qualify live settlement. |
-| Deposit after insufficient funds | `treasury::lifecycle_tests::worker::production_preparation_scans_new_deposit_without_a_readiness_balance_gate` | Readiness accepts a stale low estimate without SDK I/O or input claims. Actual actor preparation scans a newly confirmed synthetic deposit, calculates with SDK-selected funds and retains signed bytes without broadcasting. |
-| Unstarted SDK rejection and later funding | `treasury::lifecycle_tests::worker::unstarted_sdk_failures_keep_the_original_quote_until_funded` | Production Backend and scheduler retain the original quote and operation through repeated actual SDK shortages, then a newly mined deposit. The same operation prepares without a new quote or broadcast. Store regression `preparation_phase_and_input_owner_commit_together` injects a phase-publication failure and verifies atomic rollback, successful acceptance and retained ownership after reopen. |
-| Tip-only fork and canonical return | `treasury::lifecycle_tests` | SDK chain replacement updates spendability without reopening completed source work. Exact original bytes, inputs and attempt count survive; genuinely pending originals remain owned without replay. |
-| SDK source proof without indexer agreement | `treasury::lifecycle_tests::sdk_confirmation_finishes_original_source_without_indexer_agreement_or_replay`, source expiry lifecycle tests | Completed SDK confirmation with matching computed identity/effects finishes without redundant indexer lookup, including a v5 authorization-only encoding variant while the original journaled bytes remain unchanged. Buried signed finite expiry and completed SDK coverage require no indexer-presence or current-input equality veto. Real SDK confirmation and expiry also proceed with malformed local broadcast sequencing, preserving its stored counter and original bytes without a new submission; authenticated original corruption remains scoped. No automatic replay or replacement authority is created. |
-| Relocated Ironwood input | `treasury::lifecycle_tests::ironwood` | A replacement chain moves the identical received note to another commitment position. Ironwood nullifiers remain stable; canonical position changes cannot erase original input/byte ownership. Unspent and competing-spend branches retain early-expiry refusal, exact bytes and attempt counts. |
-| Terminal source preservation | `treasury::lifecycle_tests::terminal`, `rotation::store::source_reconciliation::tests` | Real SDK reconstruction preserves completed historical source journals without resurrection; ordinary reconciliation rejects terminal originals. A retained authenticated original exercises canonical-proof/Store confirmation after expiry and restart, then FAILED/REFUNDED cannot authorize replacement after confirmation, regardless of enabled funding or available capital. The earlier expiry proof, selected inputs, snapshot, original bytes and exact closure archive survive repeat assessment and restart without broadcasts or a new operation. Bound fulfillment remains closed without fabricated confirmation/credit. Store fixtures preserve current schema-23 disposition history, snapshot pins and multiple unfinished accepted originals, while preventing their automatic disclosure. |
-| Interrupted SDK scan boundaries | `treasury::lifecycle_tests::scan_bounds` | A saved scanned range missing its required block boundary rebuilds after restart. Automatic reconstruction preserves historical terminal journals and genuinely unfinished ownership without replay or loss of keys, signed bytes, inputs or attempts. |
-| Replacement credit with unresolved old payments | `managed::replacement_credit_survives_restart_without_releasing_old_authorizations` | Concurrent refill allocates one generation; local Base credit survives restart and promotes the replacement while all older signed liabilities remain. |
-| Provider report reconciliation | `rotation::store::funding::completion_tests::positive_completion_recovers_prior_provider_reports_after_restart`, `rotation::store::bootstrap::tests::provider_reports_do_not_obstruct_live_original_observation` | Earlier incomplete, failed or refunded reports remain recorded, but bound fulfillment plus initial credit settles saved recovery-required work after restart without a source-confirmation conjunction. Delayed negative reports cannot revoke that proof or authorize another deposit. |
-| Multi-group bootstrap completion | `deployment::bootstrap::readiness_tests` | Concurrent destination credits across a group-page boundary, incomplete final-page claims, selected-group scope, stable summaries after reopen and captured claims across generation advancement. Both bootstrap and serving ignore historical capital shortages until the current worker reproduces them; stale callbacks cannot block startup. |
-| Source settlement after partial credit | `rotation::store::funding::completion_tests` | Clean unprepared work closes once; accepted calculations and exact prepared bytes remain owned after credit. Stale source callbacks cannot replace the captured original identity. Bound archived SUCCESS can fulfill the initial claim while a different disclosed source retains its own owner. Partial credit retains unresolved bridge delivery. Fulfilled intent-only restart preserves accepted inputs while allowing unrelated preparation and exact late-result publication. These are Store fixtures, not chain settlement proofs. |
-| Archived swap observation and replacement races | `rotation::funding::scheduler::tests::archive_status`, `treasury::lifecycle_tests::terminal::fulfilled_archived_request_does_not_starve_disclosed_replacement_after_credit` | More than one page of attempts under one job retains exact status identities and quotes across restart, independent completion floors and terminal delivery closure. Status keeps its request identity without borrowing a replacement phase or health; its retry floor survives later current-job reporting failures (`completion_storage_failure_is_fatal`). Held old SUCCESS suppresses untouched/private replacements without changing their provider flags; a disclosed replacement still receives scheduler work after job completion. Store races cover archived SUCCESS before acceptance, during calculation, before first disclosure and after disclosure, changed fixed/ranged bounds and unsigned redraw, and first credit below the nominal minimum or above its maximum. The real SDK test retains two disclosed originals through finite expiry and late old fulfillment, then confirms the replacement without replay, byte loss or reauthorization and prepares another group's work. Local fixtures do not qualify live NEAR settlement. |
-| Managed ownership cleanup | `deployment::{initialization_tests,store_only_tests}`, `deployment::bootstrap::tests` | Concrete store-only and treasury capability paths retain restrictions and release ownership on failure; rejected store-only bootstrap permits immediate reopening. |
-| Balance maintenance across inventory pages | `rotation::manager::maintenance::tests::inventory` | Seventy retained wallets exceed the four-reader lane and 64-row page. A held read permits the finite startup pass to reach independent wallets; a new insufficiency during that read survives for another observation. Requested failures retry across later pages without duplicate active reads or financial writes. Local RPC fixtures do not qualify network availability. |
-| Requested refresh and finite startup | `rotation::manager::maintenance::tests` | Production scalar owners cover zero success stopping work, no idle polling, 59-second notification bursts without cooldown renewal, newer requests during reads, cancellation/restart, scoped inventory failure, retired exclusion and first-positive uncredited claim consumption. No payment or source work is created by discovery. |
-| Shared startup and funding credit | `rotation::funding::credit_tests` | Production startup reconciliation and funding credit share one blocked Base read after cancellation of the startup caller. A newer insufficient-funds notification survives durable publication and cached credit reuse until the next minute's acquisition; no allocation or source work occurs. The real funding worker also adopts failed shared acquisitions without recounting cached errors or adding another backoff, and later zero success clears its credit failure. |
-| Observation cadence and local handoffs | `rotation::funding::scheduler::tests`, `tests/treasury_sync.rs` | Paused-time and actual endpoint counts cover independent minute floors, source/provider/credit failure isolation, local quote→preparation→submission progress without minute delays, blocked or successful no-op preparation retaining the source floor, finite treasury startup, shared scans and accepted jobless ownership with disabled funding. Legacy bound SUCCESS closes previously reopened source work before a held credit read and even for completed work with no eligible observation lane; unrelated preparation proceeds without source/status I/O. |
-| Resolution-observation diagnostics | `rotation::funding::scheduler::tests::diagnostics::{canonical_disagreement_reports_automatic_resolution_once_per_error_episode,retained_request_debug_matches_actual_status_acquisitions_without_shortening_cadence}` | DEBUG identifies each actual retained-request lookup and why checks continue; due/capacity deferral and ordinary current polling add no such logs or requests. Canonical disagreement reports automatic resolution at INFO on a changed error episode; ordinary depth waits stay DEBUG and genuine operator outcomes retain WARN. Trace checks also preserve original bytes/attempts and reject provider prose. |
-| Explicit deployment sync | `wallet_cli::sync::tests`, `tests/treasury_sync.rs`, `tests/integration_preparation.rs` | Existing configured recipients and accepted removed-profile recipients are observed without allocation/provider/NEAR credentials. Asset failures report truthful independent JSON counts and nonzero completion failure; usable scopes still run. Exclusive ownership and reopen checks retain existing financial state. |
-| Exact preparation ownership and expiry journal | Store unit tests and `tests/rotation.rs` | No refund-credit ledger; accepted input ownership, retained publication, snapshot revision guards, expiry-proved operation replacement, backup/restore and crash recovery. |
-| Never-submitted source expiry | `treasury::lifecycle_tests::unsubmitted_funding_expiry_uses_only_its_one_proof_scan` | Actual SDK-managed source bytes with zero attempts expire through one fully completed canonical tip scan, without a preliminary forecast scan or redundant second scan. Original signed expiry burial and final unchanged Ready snapshot coverage remain required. Disabled reauthorization preserves original operation/bytes and performs no submission. Synthetic chain does not validate consensus. |
-| Deposit settlement and reorgs | `treasury::regtest::deposit_settlement_and_reorg_recovery` | Actual proofs, configured confirmation depth, same-byte rebroadcast and fail-closed reorg handling against pinned Zebra/Zaino. |
-| Unsupported wallet shielding | `treasury::regtest::transparent_refund_shielding_is_unsupported` | Public API and CLI refuse transparent-input shielding without snapshot, journal, mempool or network side effects. This negative fixture is not positive shielding qualification. |
-| Expired ambiguous source operation | `treasury::regtest::expired_ambiguous_deposit_releases_only_after_chain_proof` | Crashes after send intent, rejects early release, then recovers using authenticated finite expiry and completed canonical SDK coverage at the configured depth. Current input disposition is SDK-owned; original journals remain preserved and old bytes cannot be broadcast again. |
-| Recovery CLI commands | `treasury::regtest::recovery_cli_lifecycle` | Test-only subprocess adapter drives the production parser/dispatcher: native Ironwood preparation, read-only reconciliation, explicit same-byte broadcast and successful expiry. Confirmed rebroadcast and early expiry refuse without changing accounting. |
-| Indexer ambiguity | `treasury::regtest::indexer_non_inclusion_response` | Pins Zaino's generic Internal response for a missing transaction; production lookup leaves it Unknown rather than inventing proof of absence. |
-
-Scheduling fixtures must await the owner's actual publication before advancing
-time. HTTP callback or event-channel arrival can precede durable publication and
-cooldown assignment; persisted health written after scheduling supplies the
-existing barrier in scheduler tests. Resume real time before awaiting existing
-fixture failure timeouts when an idle blocking Store worker would prevent paused
-automatic time advancement. These tests verify production owners and forbidden
-side effects, without introducing runtime deadlines or a separate test framework.
-Maintenance fixtures await the finite startup inventory and all active client
-publication/retirement futures before pausing time. The test-only completion
-signal requests no reads and does not clear pending work. Follow-up TLS and Store
-publication run with time resumed; scalar cooldown alone is not a startup-drain
-barrier.
-Retirement fixtures use that same startup-drained boundary before adding wallets
-to an initially empty inventory or checking that completed proof work stays idle.
-An owner-entry notification does not establish that the inventory was captured.
-The interrupted treasury command fixture synchronizes at the registered recovery
-sleep, advances its existing maintenance interval virtually, and resumes time
-before releasing SDK reconstruction. Cancellation, retained queue ownership and
-no-replay assertions still execute through the real owner and Store.
-
-Run the offline application suite:
+## Commands
 
 ```sh
+# Offline default application suite:
 make test CARGO_ARGS='--offline --all-targets'
-```
 
-Fast Store expiry checks run without proving or Docker:
-
-```sh
+# Fast Store expiry checks (no proving or Docker):
 make test CARGO_ARGS='--offline --features zcash-testutils --lib' TEST_ARGS='rotation::store::expiry::'
-```
 
-These check revision-guarded expiry publication while preserving the original job,
-bytes and accepted inputs. The [recovery policy](../docs/wallet-rotation.md#recovery-and-reconciliation-policy)
-owns the signed-expiry and canonical-coverage requirements. The SDK lifecycle cases
-in the matrix cover completed scans, missing or relocated inputs, reorg/restart
-and same-command scan reuse; run them with `make check-lifecycle`.
-Actual transaction selection and dummy actions are covered by synthetic proving.
-Expiry arithmetic before, at and after activation uses the SDK's public expiry
-helpers; two real backend builds straddle the activation boundary and retain
-transaction expiry, selected-input, output-shape and proposal-cleanup assertions.
-Consensus-valid chain release remains the separate expiry consensus scenario. The native Ironwood SDK scenarios inject fee-cap and preparation-commit failures,
-checking unchanged submission state and retention of identical completed bytes
-through local publication and reopen, without another calculation. Compilation
-alone does not qualify those Docker-dependent assertions.
-
-Synthetic proving also checks a calculated transaction whose journal publication
-fails. The existing owner retains completed bytes and the durable accepted-input
-claim; local publication retry, proof/facts verification, pending-input
-unspendability and encrypted reopen share that single calculated transaction.
-No second calculation or broadcast occurs. Socket-free actual publisher tests in
-`treasury::publication::tests` also cover bound SUCCESS during calculation, with
-and without credit, positive credit alone, invalid facts, and a committed result
-whose acknowledgment was lost. They retain exact raw bytes, selected inputs and
-snapshot without submission or replacement. Committed projection failure
-clears only the publication retry owner, remains unhealthy and permits offline
-reconstruction; close releases physical ownership before returning its error.
-`treasury::actor::tests::committed_projection_failure_is_debug_and_does_not_retry_publication`
-checks the real background caller and diagnostic severity. The funding scheduler's
-`fulfilled_publication_reply_is_successful_progress_without_source_retry_or_handoff`
-checks the expected typed completion without a preparation/submission retry.
-These journal/projection fixtures do not establish chain settlement or SDK proof
-validity; the existing proving fixtures retain that separate coverage.
-The scan/lookup race lifecycle fixture
-separately asserts normal preparation returns a healthy owner, clears the completed
-calculation and advances its snapshot revision once. Run proving with:
-
-```sh
+# Synthetic proving tests (1 thread):
 make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::send::proving_tests' TEST_ARGS='--test-threads=1'
-```
 
-`make check` includes the synthetic-chain source lifecycle. Run it separately
-without Docker or external services:
-
-```sh
+# Synthetic-chain source lifecycle suite (8 threads; included in make check):
 make check-lifecycle
-```
+# Serial diagnostic run:
+make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::lifecycle_tests' TEST_THREADS=1
 
-The lifecycle stage runs its independent fixtures on eight test threads while
-feature builds remain sequential. For a serial diagnostic run, use
-`make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::lifecycle_tests' TEST_THREADS=1`.
-These opt-in tests use public deterministic keys and a test-only network namespace
-that production wallet opening rejects. They complement the default bootstrap and
-replacement-credit fixtures; they do not establish end-to-end bridge settlement.
-
-Run consensus qualification separately; [REGTEST.md](REGTEST.md) describes the
-pinned images and isolated networking:
-
-```sh
+# Docker consensus scenario (run one named scenario per process):
 RUST_BACKTRACE=0 make test CARGO_ARGS='--offline --features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery' TEST_ARGS='--ignored --exact --nocapture --test-threads=1'
 ```
 
-Run the other named scenarios separately using the same exact-filter pattern.
-Never combine the global-policy Tor case with other tests in one process.
+Never combine `tor_consensus_lifecycle` with other tests in one process
+because it installs process-wide network policy. See [REGTEST.md](REGTEST.md)
+for Docker images and [qualification status](../docs/testing.md#qualification-status)
+for live mainnet scope.
 
-These checks establish local implementation behavior. A funded public swap still
-needs explicit qualification of actual NEAR routing, source fees, destination
-settlement and a real seller's payment acceptance. Confidential authentication is
-outside the public-edition test scope.
+## Shared fixture conventions
 
-For the planned all-provider mainnet run, including Tor observations, two-pool
-rotation/refill and stage-specific failures, see [qualification scope](../docs/testing.md#qualification-status).
+- **Ironwood-only fixtures:** New proposals, signed outputs, and capital
+  projections follow the
+  [Ironwood-only policy](../docs/zingo-integration.md#ironwood-only-policy)
+  with Orchard-only UAs. Common funded fixtures share immutable raw faucet
+  transactions (1,000,000 and 10,000 zatoshis, proved once per process at
+  height 21) while creating fresh SDK wallets, encrypted Stores, and mock
+  chains per test with no shared mutable state.
+- **HTTPS policy and ownership:** The full concurrent worker shares a verified
+  TLS router across its local bridge, Base RPC, and paid API. Release temporary
+  `StoreHandle` observers before awaiting `Treasury::close` so the Store worker
+  can exit cleanly. Direct-send fixtures synchronize on submission
+  notifications and actor barriers without wall-clock deadlines.
+- **Deterministic virtual time:** Scheduler, maintenance, and retirement
+  fixtures await durable publication or startup drain before pausing time, and
+  resume wall-clock time before blocking Store or TLS follow-ups. Native invoice
+  retry tests validate each UTC clock independently and compare the remaining
+  instruction object without assuming same-second calls.
+- **Scan-consumption invariants:** Expiry fixtures inject an indexer fault
+  after the canonical scan to assert closure completes with zero extra lookups
+  or submissions. Damaged plaintext txid and expiry projections verify recovery
+  uses authenticated original bytes without mutating journals or extending
+  broadcast eligibility.
 
-Indexer regression coverage distinguishes an actual retained history horizon from
-unsigned scheduled targets. Same-prefix shallow/deep shorter tips and no-overlap
-or matching-anchor ambiguity preserve observations and recoverable failure;
-interrupted target-only tails can shrink and resume without lowering the scan
-floor. Fresh future birthdays retain activation scanning. A genuine fork with
-retained divergent history still rescans below the declared birthday, including
-interruption/reopen and pruned checkpoint recovery. Compact-block identity checks
-reject wrong heights and incomplete hashes before they can justify a reset, and
-the selected raw-gRPC application fixture proves valid full-header identity wins
-over omitted or conflicting compact hash projections. Interrupted Verify and
-nullifier-retrieval ranges preserve their observations; a confirmed transaction
-merged above published scan bounds also prevents an unsigned-tail reset. A funded
-SDK fixture preserves the current Ironwood checkpoint root, owned-note witness and
-spendability with future cached shard annotations/bare roots after a lower target,
-including failure before root ingestion and equal-tip stale metadata after reopen.
-Future completion ranges are repaired without pruning actual roots or witnesses;
-later owned commitments and both original/new witnesses remain spendable.
-The `indexer_recovery` module adds disclosed-once treasury ownership: a faithful
-shorter prefix preserves exact input/byte/snapshot/quote and identity bindings
-through failure, a pre-canceled scan and reopen, then healthy canonical confirmation
-finishes only the original. A genuine deep fork finds a new credit below birthday
-after interrupted/reopened activation rescan while the orphaned original input
-manifest and liability remain pending. Unused SendTransaction markers prove no
-replay or replacement disclosure, and available capital cannot override an unburied original. The pre-canceled case establishes accepted-source preservation,
-not active-I/O drain; existing `treasury_sync` in-flight cancellation tests retain
-that separate evidence.
-These local fixtures establish no consensus, live bridge settlement or Tor claim.
+## Lifecycle coverage matrix
 
-Fresh receive-policy coverage:
-`treasury::lifecycle_tests::refund_addresses::fresh_shielded_wallet_skips_transparent_rpc_and_reopens_receive_policy`
-uses the actual SDK and synthetic indexer to verify shielded receipt spendability,
-zero transparent-address queries, safe receive output and persisted restart policy.
-Imported seed-only recovery and legacy transparent binding tests remain independent.
-
-Transparent discovery policy is also covered by
-`treasury::lifecycle_tests::refund_addresses::reopened_discovery_enabled_snapshot_preserves_binding_without_transparent_recovery`:
-a discovery-enabled current seed snapshot is overridden on reopen/reconstruction,
-its exact historical binding survives, new use is rejected, and a late T-only
-receipt causes no address RPC or recovered coin. Mnemonic-only shielded recovery
-checks the same negative RPC contract. Unsupported transparent-output fixtures retain raw SDK state without treating it
-as supported capital or allocating shielding. Native Ironwood recovery fixtures
-assert absent transparent-address RPCs throughout reopen and reconstruction.
+| Coverage | Test target | What it verifies |
+| --- | --- | --- |
+| Bootstrap -> payment -> promotion -> pending refill -> restart -> ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Payment admission, EVM signing, durable journals, and Base RPC adapter across five sends, two pools, one refill, and restart. |
+| Refund status and pool isolation | `managed::lifecycle::failed_swap_retains_original_source_terms_while_another_pool_serves` | Provider refund status preserves original terms without inventing credit while a sibling pool keeps paying. |
+| Early rotation and refill opportunities | `rotation::store::early_rotation::tests`, `rotation::funding::scheduler::opportunity_tests` | Private HMAC threshold vectors, used-wallet guard, small-first claim consumption, bound payer stability, rename and reopen stability, and prompt bootstrap. |
+| Quote refresh, empty treasury, timeouts, and backoff | `tests/funding.rs` | Unprepared-only refresh, per-kind backoff, saved health, sanitized diagnostics, degraded timeout without replay. |
+| Fixed and ranged `EXACT_INPUT` funding | `rotation::config::tests`, `quote_selection_tests`, `redraw_tests`, `rotation::near::tests`, `completion_tests` | Slot parsing, uniform draws, saved-choice reuse, provider-floor redraw within deadline, zero-slippage preview -> single-slippage executable quote, distinct nominal vs. source fields across restart. |
+| Payment ambiguity and admission | `tests/managed.rs`, `rotation::manager::admission_tests` | Typed insufficient-funds traversal retaining liabilities, advisory hints, atomic promotion, and Unix `SIGKILL` crash and WAL fsync failure atomicity without replay. |
+| Qualification lifecycle snapshots | `rotation::store::qualification::projection_tests`, `qualification::payment::tests` | Exact schema-2 fields, raw-record hashes, pinned SQLite snapshots across WAL writers, and preserved receipts on observation failure. |
+| Concurrent source funding and scan reuse | `treasury::lifecycle_tests` | Two recipients sharing one treasury actor with synthetic proving, deferred preparation, same-height fork rejection after anchor loss, tip-only forks, and immutable signed bytes. |
+| Full concurrent funding worker | `treasury::lifecycle_tests::worker` | Production scheduler and Backend, refund derivation, overlapping quotes, signed deposits, Base checks, insufficient-funds recovery, and single replacement on reserve consumption. |
+| Shielded refund receivers and seed recovery | `treasury::lifecycle_tests::refund_addresses` | Distant Ironwood refund spendable after mnemonic-only restore, Orchard-only UAs, zero transparent RPCs across all 6 methods, and reopen override of legacy discovery-enabled snapshots. |
+| Direct native sends and receives | `treasury::lifecycle_tests::shielding`, direct-send and native-receive suites | Principal-plus-fee authority, cancellation, exact-byte restart, partial and excess native receipts, zero transparent RPCs, and unconditional refusal of transparent-input shielding. |
+| Blocking calculation and publication ownership | `treasury::lifecycle_tests::calculation_owner`, `treasury::send::proving_tests`, `treasury::publication::tests` | Single accepted input owner surviving cancellation, runtime drop, and concurrent MCP calls; NU7 expiry boundaries; failed publication retries of identical bytes; panic isolation and offline reconstruction. |
+| Targeted destination discovery | `treasury::lifecycle_tests::discovery` | Insufficient SDK funds skip destination checks; positive destination blocks acceptance; credit handoff reuses recipient cooldown without clobbering payment decrements. |
+| SDK confirmation, ZIP 244, and expiry | `treasury::lifecycle_tests::{ironwood,terminal}`, `unsubmitted_funding_expiry_uses_only_its_one_proof_scan` | Confirmation without indexer lookup (including v5 alternate auth), relocated Ironwood notes, buried and unsubmitted expiry in one scan, damaged plaintext projections, and preserved terminal history. |
+| Managed refund replacement | `treasury::lifecycle_tests::managed_refunds` | Four-part replacement rule: bound `REFUNDED`, source closure, receiver-specific confirmed Ironwood receipt (including partial), and unused claim under enabled funding. |
+| Indexer recovery and deep reorgs | `treasury::lifecycle_tests::{scan_bounds,indexer_recovery}`, `unknown_deep_fork_rescans_before_birthday_even_when_tip_remains_above_it` | Shorter same-prefix tips stay safe; full-header identity beats compact hash; missing checkpoints and deep forks rescan from Sapling activation below birthday while keeping original liabilities pending. |
+| Archived swap races and scheduler saturation | `rotation::funding::scheduler::tests::{archive_status,diagnostics}`, `fulfilled_archived_request_does_not_starve_disclosed_replacement_after_credit` | Multi-page archived status polling, late archived `SUCCESS` suppressing undisclosed replacements while letting disclosed replacements confirm, and saturated scheduling-record bounds. |
+| Multi-group bootstrap and Base maintenance | `deployment::bootstrap::readiness_tests`, `rotation::manager::maintenance::tests`, `rotation::funding::credit_tests` | Multi-page group credits, 70-wallet maintenance across 64-row pages and 4-reader lanes, shared startup and funding credit cancellation handoff, and Store-only fallback. |
+| Explicit sync and recovery CLI | `wallet_cli::sync::tests`, `tests/treasury_sync.rs`, `tests/treasury_sync/recovery.rs`, `tests/rotation.rs` | Independent ZEC and Base sync counts, `wallet recover-expired` cancellation checkpoints, Pepper checkpoint lock freedom, and backup and restore recovery. |
+| Docker consensus and CLI regtest | `treasury::regtest::*` | Zebra and Zaino settlement, reorgs, transparent-shielding refusal, expired-deposit release, Zaino non-inclusion ambiguity, recovery CLI subprocesses, and fake-SOCKS Tor lifecycle. |
