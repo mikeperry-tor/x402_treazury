@@ -383,6 +383,27 @@ Alloy and `ark`), and `pin-utils` (`RUSTSEC-2026-0441`, via `wasmtimer`).
 Reassess whenever call paths, features, pinned sources, or upstream fixes
 change.
 
+#### Dependabot alerts
+
+| Alert | RustSec advisory | Disposition |
+| --- | --- | --- |
+| [#1 URI name constraints](https://github.com/mikeperry-tor/x402_treazury/security/dependabot/1) | `RUSTSEC-2026-0098` | Accepted in the baseline above |
+| [#2 Wildcard name constraints](https://github.com/mikeperry-tor/x402_treazury/security/dependabot/2) | `RUSTSEC-2026-0099` | Accepted in the baseline above |
+| [#3 CRL parsing panic](https://github.com/mikeperry-tor/x402_treazury/security/dependabot/3) | `RUSTSEC-2026-0104` | Accepted in the baseline above |
+| [#4 Brotli certificate decompression](https://github.com/mikeperry-tor/x402_treazury/security/dependabot/4) | `RUSTSEC-2026-0348` | Locked versions unaffected or patched |
+| [#5 TLS secrets in session debug output](https://github.com/mikeperry-tor/x402_treazury/security/dependabot/5) | `RUSTSEC-2026-0346` | Accepted in the baseline above |
+| [#6 Key-exchange downgrade](https://github.com/mikeperry-tor/x402_treazury/security/dependabot/6) | `RUSTSEC-2026-0349` | Accepted in the baseline above |
+
+For alert #4, the [GitHub advisory](https://github.com/advisories/GHSA-h2v8-394m-p7vv)
+flags `rustls` versions below 0.23.46. [RustSec](https://rustsec.org/advisories/RUSTSEC-2026-0348.html)
+lists versions before 0.23.9 as unaffected, including the downloader's
+locked 0.21.12. The application locks 0.23.46, which includes the fix.
+Zingolib's parameter downloader retains `rustls` 0.21 through `zcash_proofs`
+and `minreq` 2.14.1. Neither `brotli` nor `brotli-decompressor` appears in the
+root lockfile. Vendored Reqwest's standalone lockfile includes Brotli for its
+own tests, and the application leaves Reqwest's optional Brotli HTTP response
+decompression disabled.
+
 ### TLS security updates
 
 - **Runtime TLS:** Require `rustls-webpki` >= 0.103.16 in the 0.103 series
