@@ -369,14 +369,14 @@ protocol.
 
 These projects explore related approaches to private API access:
 
-| Project | Approach and comparison |
-| --- | --- |
-| [CipherPay](https://github.com/atmospherelabs-dev/cipherpay-x402) | Middleware for accepting shielded ZEC payments through x402 and MPP. API providers must integrate Zcash acceptance to be used with it; `x402_treazury` uses Zcash to fund rotating Base USDC wallets for existing x402 providers. |
-| [zimppy](https://github.com/betterclever/zimppy) | Zcash wallet and Rust and TypeScript SDKs implementing the Machine Payments Protocol (MPP), including prepaid sessions and an MCP example. Requires API servers that support its Zcash payment method. |
-| [SecretPay](https://github.com/DVB-ANRS/SecretPay) | Hackathon prototype using Unlink privacy pools and single-use wallets for Base Sepolia x402 payments. Similar gateway and wallet model, with a different funding mechanism whose direct-transfer fallback can expose the funding link. |
-| [Galactica aztec-x402](https://github.com/Galactica-corp/aztec-x402) | Client and server tooling for private x402 settlement on Aztec, with a public-testnet demo. API providers must integrate Aztec; `x402_treazury` keeps standard Base USDC settlement and reduces linkability through funding, rotation, and network isolation. |
-| [PrivAgent](https://github.com/Himess/privagent) | Shielded-pool payment protocol on Base with x402 middleware and client tooling. Moves privacy into a custom settlement protocol that providers must adopt; `x402_treazury` keeps standard public Base USDC payments. |
-| [zkAPI](https://blog.ethereum.org/2026/10/01/introducing-zkapi) | Private usage credits backed by zero-knowledge proofs, with temporary capped API keys for metered usage. Separates payment identity from API usage through credits and sessions; network anonymity and request-content correlation remain separate concerns. |
+| Project | Approach | Comparison to `x402_treazury` |
+| --- | --- | --- |
+| [CipherPay](https://github.com/atmospherelabs-dev/cipherpay-x402) | Middleware for accepting shielded ZEC payments through x402 and MPP. | API providers must integrate Zcash acceptance. `x402_treazury` uses Zcash to fund rotating Base USDC wallets for existing x402 providers. |
+| [zimppy](https://github.com/betterclever/zimppy) | Zcash wallet and Rust and TypeScript SDKs implementing the Machine Payments Protocol (MPP), including prepaid sessions and an MCP example. | Requires API servers that support its Zcash payment method. `x402_treazury` works with existing Base USDC x402 APIs. |
+| [SecretPay](https://github.com/DVB-ANRS/SecretPay) | Hackathon prototype using Unlink privacy pools and single-use wallets for Base Sepolia x402 payments. | Uses a similar gateway and wallet model. Its funding mechanism has a direct-transfer fallback that can expose the funding link. |
+| [Galactica aztec-x402](https://github.com/Galactica-corp/aztec-x402) | Client and server tooling for private x402 settlement on Aztec, with a public-testnet demo. | API providers must integrate Aztec. `x402_treazury` keeps standard Base USDC settlement and reduces linkability through funding, rotation, and network isolation. |
+| [PrivAgent](https://github.com/Himess/privagent) | Shielded-pool payment protocol on Base with x402 middleware and client tooling. | Providers must adopt its custom settlement protocol. `x402_treazury` keeps standard public Base USDC payments. |
+| [zkAPI](https://blog.ethereum.org/2026/10/01/introducing-zkapi) | Private usage credits backed by zero-knowledge proofs, with temporary capped API keys for metered usage. | Uses credits and sessions to separate payment identity from API usage. `x402_treazury` uses wallet rotation and optional Tor isolation. Network anonymity and request-content correlation remain separate concerns for zkAPI. |
 
 ## License
 
