@@ -148,11 +148,9 @@ sticky session required) and stdio for standalone providers.
   list in one response (logging an advisory `WARN` when more than 500
   definitions are advertised) and attaches `_meta["x402_treazury/catalog"]`
   carrying listener instructions, catalog generation, and publication-stop
-  status. With `discover_on_demand = true`, `tools/list` advertises only the
-  search and call wrappers plus enabled provider-management tools and
-  `x402_treazury_raw_call` (when `raw_url_calls = true`). Enabled direct-swap
-  tools are omitted from `tools/list` and remain discoverable via
-  `x402_treazury_tools_search` and callable via `x402_treazury_tool_call`.
+  status. [On-demand discovery](configuration.md#listener-settings-host-validation-and-authentication)
+  replaces provider API schemas with search and call wrappers in `tools/list`.
+  Enabled built-in tools appear directly in the list.
   `instructions_text` overrides composed source guidance while preserving
   pricing caveats and operational coverage notices.
 - **Images and binary output (`src/output.rs`):** Small PNG, JPEG, and WebP

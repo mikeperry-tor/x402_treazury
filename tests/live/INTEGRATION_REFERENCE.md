@@ -295,6 +295,9 @@ Use production wallet commands (`wallet init`, `wallet addresses`,
 - **Preflight checks:** Verifies DB schema 23, treasury UUID, wallet key
   readability (when funded), and clean baseline correspondence in one
   read-only pass.
+- **MCP inventory:** The runner checks advertised and on-demand tool schemas
+  against the prepared inventory. A prepared built-in tool can appear once in
+  each response stream with an identical description and schema.
 
 ## Ownership and authority
 

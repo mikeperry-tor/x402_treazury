@@ -3,6 +3,12 @@ use serde_json::{Value, json};
 
 #[tokio::test]
 async fn direct_discovery_dispatch_and_status_share_listener_authority() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt as _;
+
     let dir = tempfile::tempdir().unwrap();
     let state = crate::rotation::store::Store::create(
         &dir.path().join("state"),
@@ -49,12 +55,40 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
             .unwrap()
             .contains("Native receiving needs no swap provider")
     );
-    assert!(
-        server
-            .management_tools()
-            .iter()
-            .all(|t| !t.name.contains("swap_status"))
-    );
+    let request = Request::builder()
+        .method("POST")
+        .uri("/mcp")
+        .header("host", "localhost")
+        .header("authorization", "Bearer fixture")
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .body(Body::from(
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}).to_string(),
+        ))
+        .unwrap();
+    let response = http_app(server.clone(), "fixture".into())
+        .unwrap()
+        .oneshot(request)
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    let (parts, body) = response.into_parts();
+    let bytes = to_bytes(body, usize::MAX).await.unwrap();
+    let json =
+        crate::mcp_wire::response_json(&bytes, parts.headers["content-type"].to_str().unwrap())
+            .unwrap();
+    let result: Value = serde_json::from_slice(&json).unwrap();
+    let listed = result["result"]["tools"].as_array().unwrap();
+    assert_eq!(listed.len(), 5);
+    for name in [
+        "x402_treazury_tools_search",
+        "x402_treazury_tool_call",
+        "x402_treazury_swap_status",
+        "x402_treazury_swap_assets",
+        "x402_treazury_payment_request_create",
+    ] {
+        assert!(listed.iter().any(|tool| tool["name"] == name));
+    }
     let search: Value = serde_json::from_str(
         &server
             .invoke(
@@ -116,6 +150,11 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
             .any(|tool| tool["tool_id"] == "x402_treazury_payment_request_create")
     );
     server.direct_swap.as_mut().unwrap().1.receive = false;
+    assert_eq!(
+        server.direct_definitions().len(),
+        1,
+        "only status is enabled after receive is disabled"
+    );
     let disabled: Value = serde_json::from_str(
         &server
             .invoke("x402_treazury_tools_search", &Map::new())
@@ -256,7 +295,7 @@ async fn send_only_discovery_native_preview_and_disabled_status_preserve_authori
         server
             .management_tools()
             .iter()
-            .all(|tool| tool.name != "x402_treazury_swap_send")
+            .any(|tool| tool.name == "x402_treazury_swap_send")
     );
     for query in ["Zcash send", "ZEC"] {
         let search: Value = serde_json::from_str(

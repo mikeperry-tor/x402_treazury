@@ -1,7 +1,7 @@
 //! Local stateless MCP wire client; it never contacts a provider itself.
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 #[derive(Clone)]
 pub struct Client {
     pub http: reqwest::Client,
@@ -70,13 +70,30 @@ impl Client {
     }
     pub async fn check_inventory(&self, expected: &Value, limit: usize) -> Result<()> {
         let mut actual = self.eager_inventory(limit).await?;
+        let mut eager_matches = true;
         if expected["discover_on_demand"] == true {
-            self.discovered_inventory(&mut actual, limit).await?;
+            let mut builtins: BTreeSet<_> = expected["management_tools"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|tool| tool["name"].as_str())
+                .collect();
+            eager_matches = actual
+                .keys()
+                .map(String::as_str)
+                .eq(builtins.iter().copied());
+            builtins.retain(|name| actual.contains_key(*name));
+            self.discovered_inventory(&mut actual, builtins, limit)
+                .await?;
         }
         let prepared = prepared_inventory(expected)?;
         ensure!(
             actual == prepared,
             "served MCP inventory differs from pinned catalog"
+        );
+        ensure!(
+            eager_matches,
+            "on-demand tools/list differs from pinned built-ins"
         );
         Ok(())
     }
@@ -137,6 +154,7 @@ impl Client {
     async fn discovered_inventory(
         &self,
         actual: &mut BTreeMap<String, Value>,
+        mut listed_builtins: BTreeSet<&str>,
         limit: usize,
     ) -> Result<()> {
         let mut cursor = Value::Null;
@@ -162,21 +180,28 @@ impl Client {
                 .context("MCP discovery items missing")?
             {
                 ensure!(
-                    actual.len() < 10000,
+                    actual.len() < 10000
+                        || tool["tool_id"]
+                            .as_str()
+                            .is_some_and(|name| listed_builtins.contains(name)),
                     "MCP discovered inventory exceeds 10000 tools"
                 );
                 let name = tool["tool_id"]
                     .as_str()
                     .context("discovered tool missing name")?;
-                ensure!(
-                    actual
-                        .insert(
-                            name.to_owned(),
-                            json!({"description":tool["description"],"schema":tool["input_schema"]})
-                        )
-                        .is_none(),
-                    "duplicate discovered or eagerly advertised tool"
-                );
+                let definition =
+                    json!({"description":tool["description"],"schema":tool["input_schema"]});
+                match actual.entry(name.to_owned()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(definition);
+                    }
+                    Entry::Occupied(entry) => {
+                        ensure!(
+                            listed_builtins.remove(name) && entry.get() == &definition,
+                            "duplicate discovered or eagerly advertised tool"
+                        );
+                    }
+                }
             }
             cursor = page["next_cursor"].clone();
             if cursor.is_null() {

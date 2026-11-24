@@ -240,6 +240,89 @@ async fn inventory_discovery_errors_share_names_but_preserve_own_validation_orde
 }
 
 #[tokio::test]
+async fn inventory_accepts_one_matching_discovery_entry_for_a_listed_builtin() {
+    let name = "x402_treazury_swap_status";
+    let listed = json!({"name":name,"description":"Check status","inputSchema":{"type":"object"}});
+    let found =
+        json!({"tool_id":name,"description":"Check status","input_schema":{"type":"object"}});
+    let mut conflicting = found.clone();
+    conflicting["input_schema"] = json!({});
+    for (items, error) in [
+        (json!([found]), None),
+        (
+            json!([conflicting]),
+            Some("duplicate discovered or eagerly advertised tool"),
+        ),
+        (
+            json!([found, found]),
+            Some("duplicate discovered or eagerly advertised tool"),
+        ),
+    ] {
+        inventory_case(
+            vec![
+                eager_page(json!([listed]), Value::Null),
+                discovery_page(items, Value::Null),
+            ],
+            json!({"tools":[],"management_tools":[listed],"discover_on_demand":true}),
+            error,
+            vec![
+                inventory_request(0, None, false),
+                inventory_request(0, None, true),
+            ],
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn inventory_requires_builtins_and_only_builtins_in_on_demand_tools_list() {
+    for (name, eager, discovered, tools, management_tools) in [
+        (
+            "x402_treazury_swap_status",
+            false,
+            true,
+            json!([]),
+            json!([{"name":"x402_treazury_swap_status"}]),
+        ),
+        (
+            "provider_api",
+            true,
+            false,
+            json!([{"name":"provider_api"}]),
+            json!([]),
+        ),
+    ] {
+        inventory_case(
+            vec![
+                eager_page(
+                    if eager {
+                        json!([{"name":name}])
+                    } else {
+                        json!([])
+                    },
+                    Value::Null,
+                ),
+                discovery_page(
+                    if discovered {
+                        json!([{"tool_id":name}])
+                    } else {
+                        json!([])
+                    },
+                    Value::Null,
+                ),
+            ],
+            json!({"tools":tools,"management_tools":management_tools,"discover_on_demand":true}),
+            Some("on-demand tools/list differs from pinned built-ins"),
+            vec![
+                inventory_request(0, None, false),
+                inventory_request(0, None, true),
+            ],
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
 async fn inventory_prepared_validation_occurs_after_both_traversals() {
     for (mut expected, error) in [
         (json!({}), "prepared inventory missing tools"),
@@ -355,11 +438,15 @@ async fn inventory_tool_bounds_preserve_eager_name_before_limit_and_discovery_li
         )
         .await;
     }
-    let discovered: Vec<_> = (1..10000)
+    let mut discovered: Vec<_> = (1..10000)
         .map(|n| json!({"tool_id":format!("tool-{n}")}))
         .collect();
-    let mut lazy = expected.clone();
-    lazy["discover_on_demand"] = json!(true);
+    discovered.push(json!({"tool_id":"tool-0"}));
+    let lazy = json!({
+        "tools": &eager[1..],
+        "management_tools": [&eager[0]],
+        "discover_on_demand": true,
+    });
     inventory_case(
         vec![
             json!({"tools":[{"name":"tool-0"}]}),

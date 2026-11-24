@@ -68,7 +68,7 @@ startup. To allow unauthenticated access, set `auth = false`, omit
 | `auth` | Whether bearer authentication is required (default `true`) |
 | `wallet` | Default wallet group for this listener's sources |
 | `sources` | Source names exposed on this listener |
-| `discover_on_demand` | Advertise search and call wrapper tools instead of every API schema |
+| `discover_on_demand` | Advertise search and call wrappers in place of individual provider API schemas |
 | `wait_for_catalogs` | Wait for this endpoint's catalogs to settle before serving (default `true`) |
 | `instructions_text` | Custom guidance included in the endpoint's MCP instructions |
 
@@ -109,8 +109,8 @@ To route one source's tools across multiple listeners instead of filtering them
 out, use `send_tools`. See
 [source tool distribution](../configuration.md#source-tool-distribution).
 
-When a catalog is large, enable on-demand discovery rather than advertising
-every tool schema up front:
+Enable on-demand discovery to show provider tool schemas when agents search
+for them. Enabled built-in tools appear in the initial list.
 
 ```toml
 [servers.research]

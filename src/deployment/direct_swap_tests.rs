@@ -37,6 +37,16 @@ fn direct_only_listener_requires_treasury_and_auth_but_no_base_wallet() {
     let definitions = listener_management_tools(&config.servers["control"]);
     assert_eq!(definitions.len(), 1);
     assert_eq!(definitions[0].name, "x402_treazury_swap_status");
+    let listener = config.servers.get_mut("control").unwrap();
+    listener.discover_on_demand = true;
+    let definitions = listener_management_tools(listener);
+    assert_eq!(definitions.len(), 3);
+    assert!(
+        definitions
+            .iter()
+            .any(|tool| tool.name == "x402_treazury_swap_status")
+    );
+    listener.discover_on_demand = false;
     for serving in [false, true] {
         let inventory = listener_tool_inventory(
             "control",

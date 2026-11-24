@@ -232,8 +232,8 @@ guide. Run `catalog tags` and `catalog tools` to pick a focused subset rather
 than exposing a huge catalog.
 
 For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to
-advertise `x402_treazury_tools_search` and `x402_treazury_tool_call` instead of
-every tool schema. See [on-demand discovery](docs/agent-sources.md).
+advertise `x402_treazury_tools_search` and `x402_treazury_tool_call` in place of
+individual provider API schemas. See [on-demand discovery](docs/agent-sources.md).
 
 Provider management lets agents search bundled providers and
 [operator-selected remote directories](docs/agent-sources.md#external-directory-matching),

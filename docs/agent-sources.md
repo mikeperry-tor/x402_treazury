@@ -32,7 +32,7 @@ source_registry_file = "../../state/toolbox-sources.sqlite"
 | `remote_provider_directories` | `[]` | Ordered subset of `"coinbase"`, `"coinbase_curated"`, `"x402-list"`, and `"agents-trust"` for remote search |
 | `raw_url_calls` | `false` | Direct calls to documented public HTTPS URLs via `x402_treazury_raw_call` |
 | `source_registry_file` | omitted | Owner-only SQLite file for persisting registrations across restarts (ephemeral when omitted) |
-| `discover_on_demand` | `false` | Advertise search and call wrappers instead of individual API tool schemas |
+| `discover_on_demand` | `false` | Advertise search and call wrappers in place of individual provider API schemas |
 
 Authority boundaries:
 

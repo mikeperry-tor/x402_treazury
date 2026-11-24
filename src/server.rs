@@ -227,9 +227,7 @@ impl Server {
             self.providers_search_remote_tool_instructions_text
                 .as_deref(),
         );
-        if !self.discover_on_demand {
-            tools.extend(self.direct_definitions());
-        }
+        tools.extend(self.direct_definitions());
         tools
     }
 }
@@ -243,7 +241,7 @@ impl ServerHandler for Server {
             .unwrap_or(&self.instructions);
         let mut instructions = pricing_instructions(authored.as_deref());
         if self.discover_on_demand {
-            instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a limit (default 25) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
+            instructions.push_str("\n\nProvider API tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a limit (default 25) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call.");
         }
         if let Some((_, config)) = &self.direct_swap {
             if config.receive {
@@ -266,13 +264,6 @@ impl ServerHandler for Server {
     fn get_tool(&self, name: &str) -> Option<Tool> {
         let snapshot = self.catalog.read();
         if let Some(tool) = self.management_tools().into_iter().find(|t| t.name == name) {
-            return Some(tool);
-        }
-        if let Some(tool) = self
-            .direct_definitions()
-            .into_iter()
-            .find(|t| t.name == name)
-        {
             return Some(tool);
         }
         catalog_state::find(&snapshot, &self.catalog_server, name)

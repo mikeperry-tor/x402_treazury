@@ -340,11 +340,11 @@ allowed_hosts = ["mcp.example.com", "localhost"]
   Warnings log without credentials at most once per 30 seconds per listener and
   failure category (reporting suppressed counts on the next warning).
 - **On-demand discovery and instructions:** Set `discover_on_demand = true`
-  (default `false`) to advertise only `x402_treazury_tools_search` and
-  `x402_treazury_tool_call` plus any enabled provider-management tools and
-  `x402_treazury_raw_call` (when `raw_url_calls = true`). Enabled direct-swap
-  tools are omitted from `tools/list` and remain discoverable via
-  `x402_treazury_tools_search` and callable via `x402_treazury_tool_call`.
+  (default `false`) to advertise `x402_treazury_tools_search` and
+  `x402_treazury_tool_call` in place of individual provider API schemas.
+  `tools/list` includes enabled built-in tools, including provider management,
+  raw calls, and direct swap control. Enabled swap tools also appear in tool
+  search and can be invoked through the call wrapper.
   Search uses BM25 keyword ranking with literal-substring priority (25 results
   per page by default); see
   [tool search matching](agent-sources.md#tool-search-matching-and-results).
@@ -738,8 +738,7 @@ send = true
   inventory.
 - **Principal and isolation:** The authenticated listener owns its requests;
   all callers sharing its token share that principal. `auto_fund`, raw calls,
-  and provider management never grant swap permissions. First-party swap tools
-  remain discoverable under `discover_on_demand`.
+  and provider management never grant swap permissions.
 - **`x402_treazury_swap_assets`:** Always includes native ZEC (`Zcash`,
   `nep141:zec.omft.near`, chain `zec`) locally; foreign asset metadata reports
   availability explicitly. Nonblank queries use literal-priority BM25 search

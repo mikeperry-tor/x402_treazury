@@ -141,9 +141,7 @@ fn listener_management_tools(listener: &ListenerConfig) -> Vec<rmcp::model::Tool
             .providers_search_remote_tool_instructions_text
             .as_deref(),
     );
-    if !listener.discover_on_demand
-        && let Some(config) = &listener.swap_control
-    {
+    if let Some(config) = &listener.swap_control {
         tools.extend(crate::direct_swap::definitions(config));
     }
     tools

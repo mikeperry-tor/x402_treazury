@@ -233,8 +233,8 @@ Agent-added tool registrations belong only to the endpoint that created them and
 until the process exits unless you set `source_registry_file`. Payment caps and
 endpoint tool filters still apply.
 
-Set `discover_on_demand = true` on an endpoint with a large catalog to keep full
-API definitions out of the advertised tool list. With this enabled, the endpoint
+Set `discover_on_demand = true` on an endpoint with a large catalog to keep
+provider API definitions out of the advertised tool list. The endpoint
 also exposes two wrapper tools so the agent retrieves schemas only when needed:
 
 | Tool | What the agent uses it for |
