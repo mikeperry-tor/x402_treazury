@@ -21,8 +21,9 @@ source_discovery = true # directory search and service metadata
 api_requests = false # opt in to disclose actual API requests
 provider_metadata = true # schemas/help, startup and explicit non-direct warming
 
-# Select by original target method; absent/empty lists mean origin-only.
 [relay_fallback.relays]
-GET = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
-POST = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
-HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+# Published hints: readFetch $0.003, Curl $0.01, AGProxy $0.0156-$0.0372.
+# Actual offers govern payment; incompatible adapters skip before paid I/O.
+GET = ["../../providers/readfetch.toml", "../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/readfetch.toml", "../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+HEAD = ["../../providers/readfetch.toml", "../../providers/curl/provider.toml", "../../providers/agproxy.toml"]

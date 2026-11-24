@@ -77,12 +77,6 @@ keeping configured filters intact. See
 [framework integration](../docs/framework-integration.md) for degraded warming
 and activation behavior.
 
-Its discovery relay fallback order is readFetch ($0.003), Curl ($0.01), and
-AGProxy ($0.0156-$0.0372). These published prices are estimates; live x402
-challenges determine actual charges. Curl serves as a public text-fetch
-fallback and skips requests with required headers or nonempty bodies. API
-request relay fallback stays off.
-
 | Endpoint | Port | Group | Scope |
 | --- | --- | --- | --- |
 | `toolbox` | 3010 | `general` | Provider management, raw calls, and agent-added APIs |
@@ -369,6 +363,13 @@ examples expect Tor Browser's SOCKS listener at `127.0.0.1:9150`; adjust
 `[network]` (and `[relay_fallback]` when present) for one command, or copy it
 into a deployment file. Tor resolves DNS remotely with no direct fallback, and
 separate circuits do not hide identifying request content.
+
+The comprehensive deployment, research desk, and Tor network override all try
+readFetch ($0.003), Curl ($0.01), then AGProxy ($0.0156-$0.0372) for eligible
+`GET`, `POST`, and `HEAD` requests. These prices are estimates. The x402
+challenge determines the charge. Curl handles public text fetches and
+skips requests with required headers or nonempty bodies. All three examples
+leave API request relay fallback off.
 
 Managed serving binds listeners before background funding starts. Initialize
 the treasury with `wallet init` and fund its shielded receive address; tools

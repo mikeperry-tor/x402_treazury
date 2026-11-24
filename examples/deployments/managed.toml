@@ -32,8 +32,8 @@ wallet = "research"
 sources = ["exa"]
 provider_management_local = true
 provider_management_remote = true
-# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
-remote_provider_directories = ["coinbase", "x402-list"]
+# Coinbase often needs a paid relay via Tor. Agents Trust costs $0.01 per search.
+remote_provider_directories = ["coinbase", "x402-list", "agents-trust"]
 raw_url_calls = true
 # Registrations last until exit; optionally persist them:
 # source_registry_file = "../../state/managed-sources.sqlite"

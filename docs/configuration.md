@@ -1359,9 +1359,9 @@ api_requests = false      # Generated API tools and raw_call (default false).
 # sources = ["social"]    # Optional static source filter; empty selects all.
 
 [relay_fallback.relays]
-GET = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
-POST = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
-HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
+GET = ["../../providers/readfetch.toml", "../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/readfetch.toml", "../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+HEAD = ["../../providers/readfetch.toml", "../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
 ```
 
 ### Configuration and categories

@@ -180,8 +180,10 @@ deployment that embeds Tor settings.
 and provider directory searches using the deployment's wallets. If a provider or
 directory blocks Tor (captcha, HTTP 429, HTTP 503, or similar) across three
 separate Tor circuits, `x402_treazury` tries each configured fallback relay in
-order (two in `examples/network/tor.toml` and `comprehensive.toml`, and three in
-`research_desk.toml`). API call data never goes through a relay unless you set
+order. The Tor network example and both Tor deployments use the same relay
+order. See [example relay settings](examples/README.md#operator-notes).
+
+API call data never goes through a relay unless you set
 `api_requests = true`, which is off by default to avoid exposing API payloads to
 relay providers. None of the bundled providers require relay fallback for API
 calls over Tor.
