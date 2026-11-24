@@ -72,11 +72,11 @@ together).
 
 ## Testing efficiency
 
-- **Pinned single toolchain:** Run normal validation on the pinned production
-  compiler and named Make stages without building compiler, feature, profile,
-  or coverage matrices. Nightly condition analysis (`make coverage-condition`)
-  runs only for explicit coverage comparisons, outside `make test` and
-  `make check`.
+- **Consistent local toolchain:** Use the same host-selected compiler across
+  related Make stages and record its version with the results. Run only the
+  compiler, feature, profile, and coverage configurations the change requires.
+  Nightly condition analysis (`make coverage-condition`) runs only for explicit
+  coverage comparisons, outside `make test` and `make check`.
 - **Reuse valid evidence:** Keep passed stage results while source, features,
   profiles, and inputs are unchanged, and resume unfinished stages after
   localized fixes. Never add automatic skip caches to Make stages.
@@ -268,6 +268,9 @@ condition-analysis workflow. Key testing invariants:
 CI runs on Ubuntu 24.04 in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
 
+- **Rust:** The checks, line coverage, and treasury diagnostics workflows
+  explicitly select and verify the version in
+  [the shared pin](../scripts/rust-toolchain-pin.toml).
 - **Jobs:** `check` runs all seven stages sequentially via
   `scripts/ci-stage.sh` (`check-static`, `check-clippy`, `check-compat`,
   `check-default-remaining`, `check-proving`, `check-lifecycle`, and

@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install the repository's pinned Rust toolchain
-        run: rustup show active-toolchain
+        run: sh scripts/ci-toolchain.sh
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -99,10 +99,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install the repository's pinned Rust and matching LLVM tools
-        run: |
-          rustup show active-toolchain
-          rustup component add llvm-tools-preview
-          make toolchain
+        run: sh scripts/ci-toolchain.sh --component llvm-tools-preview
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |

@@ -4,6 +4,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
+pub const TOOLCHAIN_PIN: &str = "scripts/rust-toolchain-pin.toml";
 // Membership is shared with the runtime bundle; private provider overrides are excluded.
 include!("../providers/assets.rs");
 macro_rules! provider_files {
@@ -71,7 +72,7 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
         "tools/protoc/Cargo.lock",
         "tools/protoc/src",
         "build.rs",
-        "rust-toolchain.toml",
+        TOOLCHAIN_PIN,
     ] {
         walk(&root.join(name), &mut files)?;
     }
@@ -96,7 +97,7 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{provider_files, source_hash};
+    use super::{TOOLCHAIN_PIN, provider_files, source_hash};
 
     #[test]
     fn digest_hex_preserves_zeroes_and_matches_independent_sha256() {
@@ -124,7 +125,7 @@ mod tests {
             "tools/protoc/Cargo.lock",
             "tools/protoc/src/main.rs",
             "build.rs",
-            "rust-toolchain.toml",
+            TOOLCHAIN_PIN,
             "tests/live/live_integration.rs",
             "tests/live/runner/driver.rs",
             "tests/live/runner/fixtures/reporting_complete.txt",
@@ -155,6 +156,7 @@ mod tests {
             "tools/protoc/Cargo.toml",
             "tools/protoc/Cargo.lock",
             "tools/protoc/src/main.rs",
+            TOOLCHAIN_PIN,
             "tests/live/live_integration.rs",
             "tests/live/runner/driver.rs",
             "tests/live/runner/fixtures/reporting_complete.txt",

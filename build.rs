@@ -15,7 +15,7 @@ fn main() {
         "tools/protoc/Cargo.lock",
         "tools/protoc/src",
         "build.rs",
-        "rust-toolchain.toml",
+        inputs::TOOLCHAIN_PIN,
         ".git/HEAD",
         ".git/index",
         ".git/refs",
@@ -62,7 +62,7 @@ fn main() {
                     "tools/protoc/Cargo.lock",
                     "tools/protoc/src",
                     "build.rs",
-                    "rust-toolchain.toml",
+                    inputs::TOOLCHAIN_PIN,
                 ];
                 paths.extend_from_slice(inputs::provider_files());
                 git(&paths, root).is_none_or(|s| !s.is_empty())

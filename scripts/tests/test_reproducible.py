@@ -129,7 +129,7 @@ class ReproducibleTests(unittest.TestCase):
                 r.check_environment({"host": "expected"})
 
     def test_homebrew_style_toolchain_selection_is_enforced(self):
-        expected = tomllib.loads((r.ROOT / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
+        expected = tomllib.loads((r.ROOT / "scripts/rust-toolchain-pin.toml").read_text())["toolchain"]["channel"]
         with tempfile.TemporaryDirectory() as tmp:
             for tool in ("rustc", "cargo"):
                 path = Path(tmp) / tool
@@ -251,24 +251,34 @@ class ZingolibReleaseInputsTests(unittest.TestCase):
             self.assertIn("fixture warning", (root / "log").read_text())
             self.assertIn('"packages": []', (root / "log").read_text())
 
-    def test_build_failure_preserves_observed_inputs_and_generated_output_when_available(self):
-        for phase in ("compile", "smoke"):
+    def test_failure_preserves_evidence_available_at_the_failing_step(self):
+        for phase in ("rustc", "cargo", "compile", "smoke"):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp, ExitStack() as patches:
                 root = Path(tmp)
                 (root / "scripts").mkdir()
-                (root / "scripts/release-environment.json").write_text('{"host": "fixture"}')
+                (root / "scripts/release-environment.json").write_text(
+                    '{"host": "fixture", "cargo_version": "fixture cargo"}')
                 run_directory = root / "evidence"
                 run_directory.mkdir()
                 inputs = {"source": "git+fixture", "git": {"diff_index": {"returncode": 0}}}
                 descriptor = {"path": "fixture/out/git_description.txt", "text": "actual-fixture-output"}
 
                 def logged(command, *args):
+                    if phase in ("rustc", "cargo") and command[0] == "cargo":
+                        self.fail("Cargo build ran before compiler verification")
                     if (phase == "compile" and "--release" in command) or (phase == "smoke" and "--help" in command):
                         raise RuntimeError("fixture " + phase + " failure")
 
+                def captured(command, *args):
+                    if command in (["rustc", "-vV"], ["cargo", "--version"]):
+                        return "unexpected version" if phase == command[0] else f"fixture {command[0]}\n"
+                    if phase in ("rustc", "cargo"):
+                        self.fail("Cargo metadata ran before compiler verification")
+                    return '{"packages": []}'
+
                 replacements = {
                     "ROOT": root,
-                    "check_environment": lambda profile: {},
+                    "check_environment": lambda profile: {"rust_verbose": "fixture rustc"},
                     "output": lambda command, **kwargs: "" if "status" in command else "fixture",
                     "digest": lambda *args: "fixture-hash",
                     "parameter_directory": lambda: root / "params",
@@ -276,7 +286,7 @@ class ZingolibReleaseInputsTests(unittest.TestCase):
                     "stage_parameters": lambda *args: None,
                     "build_environment": lambda *args: {"CARGO_TARGET_DIR": str(root / "target")},
                     "run_logged": logged,
-                    "capture_logged": lambda *args: '{"packages": []}',
+                    "capture_logged": captured,
                     "zingolib_inputs": lambda *args: dict(inputs),
                     "generated_zingolib_descriptor": lambda *args: descriptor,
                 }
@@ -284,13 +294,18 @@ class ZingolibReleaseInputsTests(unittest.TestCase):
                     patches.enter_context(patch.object(r, name, value))
                 patches.enter_context(patch.object(r.subprocess, "run"))
                 patches.enter_context(patch.object(r.shutil, "which", return_value="/fixture/bin/tool"))
-                with self.assertRaisesRegex(RuntimeError, "fixture " + phase + " failure"):
+                error = (f"Release environment mismatch inside sandbox for {phase}"
+                         if phase in ("rustc", "cargo") else f"fixture {phase} failure")
+                with self.assertRaisesRegex(RuntimeError, error):
                     r.qualify(run_directory)
                 report = json.loads((run_directory / "report.json").read_text())
                 self.assertEqual(report["status"], "failed")
                 self.assertEqual(report["builds"][0]["label"], "first")
                 self.assertEqual(report["builds"][0]["status"], "failed")
                 self.assertIn(phase, report["builds"][0]["error"])
+                if phase in ("rustc", "cargo"):
+                    self.assertNotIn("zingolib", report["builds"][0])
+                    continue
                 self.assertEqual(report["builds"][0]["zingolib"]["source"], inputs["source"])
                 if phase == "smoke":
                     self.assertEqual(report["builds"][0]["zingolib"]["descriptor"], descriptor)

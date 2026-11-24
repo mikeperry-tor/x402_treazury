@@ -9,11 +9,12 @@ operational utilities. Run Make from the repository root (or via
 - **Make and shell:** GNU Make 3.81+ (including macOS Make) and a POSIX shell.
   Supported platforms are Linux and macOS (Windows runtime and native
   validation are deferred).
-- **Rust and protoc:** Install Rust and Cargo. The build targets use the
-  toolchain on `PATH`, subject to Cargo's minimum Rust version in
-  [`Cargo.toml`](../Cargo.toml). Validation targets such as `make test` and
-  `make check` require the exact versions in `rust-toolchain.toml`. The
-  independently locked helper in `tools/protoc/` supplies `protoc`.
+- **Rust and protoc:** Install Rust and Cargo. Local build and validation
+  targets use the host's selected toolchain, subject to Cargo's minimum Rust
+  version in [`Cargo.toml`](../Cargo.toml). The independently locked helper in
+  `tools/protoc/` supplies `protoc`.
+  Formatting and lint checks also need rustfmt and Clippy. For a minimal
+  rustup installation, add them with `rustup component add rustfmt clippy`.
 - **Python:** Not needed for the application or `make test`. Full `make check`,
   `make check-static`, `make check-clippy`, `make check-compat`,
   `make check-default-remaining`, and complexity scripts require Python 3.11+
@@ -36,9 +37,9 @@ operational utilities. Run Make from the repository root (or via
 | `make` or `make build` | Optimized release build (`CARGO_INCREMENTAL=0`, including `protoc`) |
 | `make build-dev` | Incremental dev build (`target/debug/x402_treazury`) |
 | `make build PROFILE=NAME` | Non-incremental build with another profile |
-| `make toolchain` | Verify Rust and Cargo match `rust-toolchain.toml` |
+| `make toolchain` | Verify Rust and Cargo match [the CI and release pin](rust-toolchain-pin.toml) |
 | `make test` | Run Cargo tests through `scripts/test-runner.sh` |
-| `make cargo-check` and `make run` | Run `cargo check` or `cargo run` with pinned toolchain and `protoc` |
+| `make cargo-check` and `make run` | Run `cargo check` or `cargo run` with locked dependencies and bundled `protoc` |
 | `make fmt` and `make fmt-check` | Format Rust sources or verify `cargo fmt --check` |
 | `make clippy` | All-target Clippy with `-D warnings` (no Python required) |
 | `make check-clippy` | Production compiler and all-target `zcash-regtest` Clippy via `check_warnings.py` (catches dependency and cached warnings; requires Python) |
@@ -58,12 +59,12 @@ operational utilities. Run Make from the repository root (or via
 | `tools/protoc/` | Independently locked build helper locating bundled `protoc` |
 | `scripts/generate_crypto_vectors.py` | Regenerates independent Keccak and EIP-712 vectors via `uv` |
 
-With rustup-managed Cargo and Rust on `PATH`, `rust-toolchain.toml` selects the
-project toolchain by default. Set `RUSTUP_TOOLCHAIN` to select a specific
-installed version for either build target, such as
-`RUSTUP_TOOLCHAIN=1.96.1 make build`. With a direct Homebrew or system install,
-select a version by putting its binaries first on `PATH`. Run `make toolchain`
-to verify that the selected Rust and Cargo match the project pin. See
+With rustup-managed Cargo and Rust on `PATH`, rustup selects its configured
+default or explicit override. Set `RUSTUP_TOOLCHAIN` to select a different
+installed version for a command, such as `RUSTUP_TOOLCHAIN=1.96.1 make build`.
+With a direct Homebrew or system install, select a version by putting its
+binaries first on `PATH`. Run `make toolchain` to verify the selected Rust
+and Cargo against the CI and release pin. See
 [release qualification](../docs/reproducible-builds.md) for byte-for-byte checks.
 
 ## Arguments and quoting
@@ -165,7 +166,6 @@ python3 scripts/dependency_audit.py \
   Focused analyzer check:
 
 ```sh
-make toolchain
 scripts/test-runner.sh --cargo cargo test --locked -p treazury-complexity --target-dir target
 cargo clippy --locked -p treazury-complexity --target-dir target --all-targets -- -D warnings
 ```

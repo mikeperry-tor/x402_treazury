@@ -111,7 +111,7 @@ def run_logged(command, cwd, env, log):
 
 
 def capture_logged(command, cwd, env, log):
-    # Cargo metadata is JSON on stdout; warnings on stderr must not corrupt it.
+    # Keep stderr diagnostics out of captured stdout.
     with log.open("ab") as stream:
         stream.write((json.dumps(command) + "\n").encode())
         stream.flush()
@@ -192,6 +192,16 @@ def qualify(run):
             # Prove that the sandbox is active: a refused connection is NOT enough.
             probe = "import socket\ns=socket.socket()\ntry: s.connect(('127.0.0.1',9))\nexcept PermissionError: pass\nelse: raise RuntimeError('network sandbox did not deny connect')"
             run_logged([sys.executable, "-c", probe], source, env, log)
+            # The isolated PATH, source path, and environment must select the
+            # same compiler and Cargo that passed the host profile check.
+            for command, version in (
+                (["rustc", "-vV"], report["environment"]["rust_verbose"]),
+                (["cargo", "--version"], profile["cargo_version"]),
+            ):
+                actual = capture_logged(command, source, env, log).strip()
+                if actual != version:
+                    raise RuntimeError(f"Release environment mismatch inside sandbox for {command[0]}: "
+                                       f"expected {version!r}, found {actual!r}")
             for verifier in ("verify.py", "verify_pepper.py"):
                 run_logged([sys.executable, str(source / "vendor" / verifier)], source, env, log)
             metadata = json.loads(capture_logged(

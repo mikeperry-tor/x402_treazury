@@ -72,8 +72,9 @@ make clippy
 ```
 
 Run focused tests while developing; `make check` runs the full offline suite.
-Use the pinned toolchain and run opt-in test-feature configurations sequentially
-because subprocess tests share `target/debug/x402_treazury`. Report which checks
+Use the same local toolchain across related checks and run opt-in test-feature
+configurations sequentially because subprocess tests share
+`target/debug/x402_treazury`. Report the compiler version and which checks
 passed, failed, or could not run. See [testing](docs/testing.md) for
 qualification limits: offline tests do not validate live payments or live Tor
 isolation.

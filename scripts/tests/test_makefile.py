@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -23,9 +24,9 @@ class MakefileTests(unittest.TestCase):
         self.root.mkdir()
         (self.root / 'bin').mkdir()
         shutil.copy(ROOT / 'Makefile', self.root)
-        shutil.copy(ROOT / 'rust-toolchain.toml', self.root)
         (self.root / 'scripts').mkdir()
-        for name in ('test-runner.sh', 'test-runner.toml', 'default_targets.py'):
+        for name in ('test-runner.sh', 'test-runner.toml', 'default_targets.py',
+                     'rust-toolchain-pin.toml', 'ci-toolchain.sh'):
             shutil.copy(ROOT / 'scripts' / name, self.root / 'scripts' / name)
         (self.root / 'Cargo.toml').write_text("""[package]
 name='root'
@@ -63,14 +64,15 @@ bench=false
         self.metadata_file = self.root / 'metadata.json'
         self.metadata_file.write_text(json.dumps(self.metadata, ensure_ascii=False), encoding='utf-8')
         self.log = self.root / 'calls.jsonl'
-        version = next(line.split('"')[1] for line in
-                       (ROOT / 'rust-toolchain.toml').read_text().splitlines()
-                       if line.startswith('channel = '))
+        pin = (self.root / 'scripts/rust-toolchain-pin.toml').read_text()
+        self.toolchain_version = tomllib.loads(pin)['toolchain']['channel']
         mock = f'''#!{sys.executable}
 import json, os, pathlib, sys
 name = pathlib.Path(sys.argv[0]).name
 if sys.argv[1:] == ['--version']:
-    version = os.environ.get('FAKE_' + name.upper() + '_VERSION', {version!r})
+    if os.environ.get('REQUIRE_PINNED_TOOLCHAIN') and os.environ.get('RUSTUP_TOOLCHAIN') != {self.toolchain_version!r}:
+        sys.exit(41)
+    version = os.environ.get('FAKE_' + name.upper() + '_VERSION', {self.toolchain_version!r})
     print(name + ' ' + version + ' (fixture)')
 else:
     with open(os.environ['MAKE_TEST_LOG'], 'a') as log:
@@ -86,7 +88,7 @@ else:
             sys.exit(42)
         print('/fixture/protoc with spaces')
 '''
-        for name in ('cargo', 'rustc', 'python3'):
+        for name in ('cargo', 'rustc', 'python3', 'rustup'):
             path = self.root / 'bin' / name
             path.write_text(mock)
             path.chmod(0o755)
@@ -165,24 +167,45 @@ else:
                 self.assertEqual(len(calls), count)
                 self.assertIn('tools/protoc/Cargo.toml', calls[-1][1])
 
-    def test_builds_accept_newer_toolchain(self):
-        for args in ([], ['build'], ['build-dev']):
+    def test_local_commands_accept_newer_toolchain(self):
+        for args, expected in (([], ['run', 'build']),
+                               (['build'], ['run', 'build']),
+                               (['build-dev'], ['run', 'build']),
+                               (['test'], ['run', 'test']),
+                               (['cargo-check'], ['run', 'check']),
+                               (['run'], ['run', 'run']),
+                               (['clippy'], ['run', 'clippy']),
+                               (['fmt'], ['fmt']),
+                               (['fmt-check'], ['fmt'])):
             with self.subTest(args=args):
                 _, calls = self.make(*args, FAKE_RUSTC_VERSION='999.0.0',
                                      FAKE_CARGO_VERSION='999.0.0')
-                self.assertEqual([call[1][0] for call in calls], ['run', 'build'])
+                self.assertEqual([call[1][0] for call in calls], expected)
 
-    def test_toolchain_mismatch_stops_strict_checks_before_protoc(self):
-        for target in ('toolchain', 'cargo-check', 'check-clippy'):
-            for name in ('RUSTC', 'CARGO'):
-                with self.subTest(target=target, tool=name):
-                    result, calls = self.make(target, success=False,
-                                              **{f'FAKE_{name}_VERSION': '999.0.0'})
-                    self.assertIn('Toolchain mismatch', result.stderr)
-                    self.assertEqual(calls, [])
+    def test_explicit_toolchain_check_rejects_mismatches(self):
+        for name in ('RUSTC', 'CARGO'):
+            with self.subTest(tool=name):
+                result, calls = self.make('toolchain', success=False,
+                                          **{f'FAKE_{name}_VERSION': '999.0.0'})
+                self.assertIn('Toolchain mismatch', result.stderr)
+                self.assertEqual(calls, [])
+
+    def test_ci_installs_verifies_and_selects_pinned_toolchain(self):
+        github_env = self.root / 'github.env'
+        result = subprocess.run(['sh', 'scripts/ci-toolchain.sh', '--component', 'llvm-tools-preview'],
+                                cwd=self.root, capture_output=True, text=True,
+                                env={**self.env, 'GITHUB_ENV': str(github_env),
+                                     'RUSTUP_TOOLCHAIN': 'stable', 'REQUIRE_PINNED_TOOLCHAIN': 'yes'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tool, args, *_ = json.loads(self.log.read_text())
+        self.assertEqual((tool, args), ('rustup', ['toolchain', 'install', self.toolchain_version,
+                                                  '--profile', 'minimal', '--component', 'rustfmt',
+                                                  '--component', 'clippy', '--component', 'llvm-tools-preview']))
+        self.assertEqual(github_env.read_text(), f'RUSTUP_TOOLCHAIN={self.toolchain_version}\n')
 
     def test_help_and_dry_runs_do_not_execute_cargo(self):
-        for args in (['help'], ['-n', 'build'], ['-n', 'check'], ['-n', 'check-default-remaining']):
+        for args in (['help'], ['-n', 'build'], ['-n', 'check'], ['-n', 'check-default-remaining'],
+                     ['-n', 'toolchain']):
             _, calls = self.make(*args, FAKE_RUSTC_VERSION='0.0.0')
             self.assertEqual(calls, [])
 
@@ -261,7 +284,7 @@ else:
         stages = self.check_stages()
         (self.root / 'check').touch()
         _, calls = self.make('-j8', 'check', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong',
-                             'COMPAT_TESTS=wrong')
+                             'COMPAT_TESTS=wrong', FAKE_RUSTC_VERSION='999.0.0', FAKE_CARGO_VERSION='999.0.0')
         self.assertEqual(self.check_commands(calls), [command for stage in stages.values() for command in stage])
 
     def test_named_check_stages_are_independent_and_ignore_focused_run_overrides(self):
@@ -269,10 +292,9 @@ else:
             with self.subTest(stage=stage):
                 # A same-named file must never turn validation into a cached pass.
                 (self.root / stage).touch()
-                _, calls = self.make('-j8', stage, 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
+                _, calls = self.make('-j8', stage, 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong',
+                                     FAKE_RUSTC_VERSION='999.0.0', FAKE_CARGO_VERSION='999.0.0')
                 self.assertEqual(self.check_commands(calls), expected)
-                _, calls = self.make(stage, success=False, FAKE_CARGO_VERSION='0.0.0')
-                self.assertEqual(calls, [])
 
     def test_resume_runs_only_requested_remaining_stages(self):
         stages = self.check_stages()

@@ -337,7 +337,8 @@ delegation request. Scale review to the change.
 
 Run Rust builds and checks from the repository root via the
 [Makefile entrypoints](scripts/README.md) so locked dependencies and Cargo-managed
-`protoc` are used. Validation targets require the pinned toolchain.
+`protoc` are used. Local validation uses the host-selected toolchain. CI and
+release qualification verify the shared toolchain pin explicitly.
 Zcash is always compiled in; static-wallet deployments simply
 omit treasury configuration. Python is development tooling only, never a runtime
 dependency.
@@ -350,7 +351,7 @@ dependency.
 | `make check-clippy` | Production compiler and all-target `zcash-regtest` warning gate | Pipes builds through `scripts/check_warnings.py`, catching emitted dependency and cached warnings. |
 | `make fmt-check` | Formatting check | Verifies `cargo fmt --check`. |
 | `make check` | Full application qualification | Runs the ordered `check-*` stages (`check-default-remaining` after `check-compat`), including the synthetic-chain treasury lifecycle. |
-| `make toolchain` | When a command requires the exact project toolchain | Verifies Rust and Cargo match `rust-toolchain.toml`. |
+| `make toolchain` | When a command requires the exact CI or release toolchain | Verifies Rust and Cargo match `scripts/rust-toolchain-pin.toml`. |
 
 - **Documentation-only edits:** Verify local links, heading anchors, and
   `git diff --check` without running Cargo suites.

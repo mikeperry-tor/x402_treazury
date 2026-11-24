@@ -35,7 +35,7 @@ jobs:
           python-version: '3.13'
       - name: Install pinned Rust and native debugger
         run: |
-          rustup show active-toolchain
+          sh scripts/ci-toolchain.sh
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y gdb
           # Same-user attach on this ephemeral diagnostic runner. GDB stays

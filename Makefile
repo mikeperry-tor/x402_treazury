@@ -13,6 +13,12 @@ TEST_ARGS ?= --test-threads='$(TEST_THREADS)'
 COMPLEXITY_BASE_REF ?= main
 override COMPAT_TESTS := sdk_compat payments server crypto_vectors
 
+# Read the shared pin only for commands that need an exact Rust version.
+define read_toolchain_pin
+version=$$(sed -n 's/^channel = "\(.*\)"$$/\1/p' scripts/rust-toolchain-pin.toml); \
+[ -n "$$version" ] || { echo 'Missing pinned Rust toolchain' >&2; exit 1; };
+endef
+
 # Resolve protoc only when executing an application Cargo command. Keep failures
 # in the assignment visible; an empty/failed helper must never use system protoc.
 define application_cargo
@@ -35,7 +41,7 @@ for arg do \
 done;
 endef
 
-.PHONY: build build-dev test check cargo-check run clippy fmt fmt-check toolchain \
+.PHONY: build build-dev test check cargo-check run clippy fmt fmt-check toolchain toolchain-version \
         check-static check-clippy check-compat check-default check-default-remaining check-proving \
         check-lifecycle check-codec \
         coverage coverage-condition coverage-condition-financial coverage-branch coverage-proving coverage-consensus help
@@ -53,35 +59,39 @@ build-dev:
 # CARGO_ARGS replaces the default selection, allowing focused --test/--lib runs.
 test clippy: CARGO_ARGS ?= --all-targets
 
-test: toolchain
+test:
 	@$(call application_cargo,test,$(CARGO_ARGS) -- $(TEST_ARGS))
 
-cargo-check: toolchain
+cargo-check:
 	@$(call application_cargo,check,$(CARGO_ARGS))
 
-run: toolchain
+run:
 	@$(call application_cargo,run,$(CARGO_ARGS))
 
-clippy: toolchain
+clippy:
 	@$(call application_cargo,clippy,$(CARGO_ARGS) -- -D warnings)
 
-fmt: toolchain
+fmt:
 	cargo fmt
 
-fmt-check: toolchain
+fmt-check:
 	cargo fmt --check
 
 toolchain:
 	@set -eu; \
-	expected=$$(sed -n 's/^channel = "\(.*\)"$$/\1/p' rust-toolchain.toml); \
-	[ -n "$$expected" ] || { echo 'Missing pinned Rust toolchain' >&2; exit 1; }; \
+	$(read_toolchain_pin) \
 	for tool in rustc cargo; do \
 		actual=$$("$$tool" --version); \
 		case "$$actual" in \
-			"$$tool $$expected "*) ;; \
-			*) echo "Toolchain mismatch: expected $$tool $$expected; found $$actual. Select the pinned toolchain and try again." >&2; exit 1 ;; \
+			"$$tool $$version "*) ;; \
+			*) echo "Toolchain mismatch: expected $$tool $$version; found $$actual. Select the pinned toolchain and try again." >&2; exit 1 ;; \
 		esac; \
 	done
+
+toolchain-version:
+	@set -eu; \
+	$(read_toolchain_pin) \
+	printf '%s\n' "$$version"
 
 # Each stage is independently callable for focused validation and continuation.
 # Separate recursive calls preserve fail-fast behavior even with make -k.
@@ -95,7 +105,7 @@ check:
 	$(MAKE) check-lifecycle
 	$(MAKE) check-codec
 
-check-static: toolchain
+check-static:
 	cargo fmt --check
 	scripts/tests/coverage.sh
 	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
@@ -104,36 +114,36 @@ check-static: toolchain
 	$(PYTHON) vendor/verify.py
 	$(PYTHON) vendor/verify_pepper.py
 
-check-clippy: toolchain
+check-clippy:
 	@$(call application_cargo,check,--lib --bins --message-format=json,$(PYTHON) scripts/check_warnings.py)
 	@$(call application_cargo,clippy,--all-targets --features zcash-regtest --message-format=json -- -D warnings,$(PYTHON) scripts/check_warnings.py)
 
-check-compat: toolchain
+check-compat:
 	$(PYTHON) vendor/verify_pepper.py
 	@$(call application_cargo,test,$(foreach name,$(COMPAT_TESTS),--test $(name)) -- --test-threads='$(TEST_THREADS)')
 
-check-default: toolchain
+check-default:
 	@$(call application_cargo,test,--all-targets -- --test-threads='$(TEST_THREADS)')
 
 # Explicit continuation after still-valid compatibility evidence, also used by check.
-check-default-remaining: toolchain
+check-default-remaining:
 	@$(call application_cargo,test,-- --test-threads='$(TEST_THREADS)',$(PYTHON) scripts/default_targets.py $(foreach name,$(COMPAT_TESTS),--compat $(name)) --)
 
-check-proving: toolchain
+check-proving:
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
 
-check-lifecycle: toolchain
+check-lifecycle:
 ifeq ($(strip $(LIFECYCLE_DIAGNOSTICS)),)
 	@$(call application_cargo,test,--profile '$(LIFECYCLE_PROFILE)' --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=8 --nocapture)
 else
 	@$(call application_cargo,test,--profile '$(LIFECYCLE_PROFILE)' --features zcash-testutils --lib --no-run --message-format=json,$(PYTHON) scripts/diagnose-treasury-sync.py --lifecycle '$(LIFECYCLE_DIAGNOSTICS)/build.jsonl' '$(LIFECYCLE_DIAGNOSTICS)' --build-command)
 endif
 
-check-codec: toolchain
+check-codec:
 	@$(call application_cargo,test,--features zcash-testutils --lib synthetic_address_codec_is_scoped_to_its_test_client -- --test-threads=1)
 
 # Complex report publication remains in an internal helper. Nightly branch
-# coverage intentionally uses a different toolchain from the pinned application.
+# coverage can select a different toolchain from default coverage.
 coverage:
 	scripts/coverage.sh
 

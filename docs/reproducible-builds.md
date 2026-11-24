@@ -11,17 +11,17 @@ requests; `make build` and `make check` do not run it. See
 
 ## Toolchain and release environment
 
-- `rust-toolchain.toml` pins Rust 1.99.1 for rustup, and `make toolchain`
-  verifies matching Rust and Cargo versions before release qualification.
-  `rust-version` in `Cargo.toml` declares the minimum supported Rust version.
-  See the [build commands](../scripts/README.md#common-entrypoints) to select
-  a toolchain for ordinary builds.
+- `make toolchain` verifies Rust and Cargo against the
+  [CI and release pin](../scripts/rust-toolchain-pin.toml) before release
+  qualification. See the [build commands](../scripts/README.md#common-entrypoints)
+  for local toolchain selection and the minimum Rust version.
 - The current profile in `scripts/release-environment.json` pins Apple Silicon
   macOS, Homebrew Rust and Cargo 1.99.1, Apple Clang 21.0.0
   (`clang-2100.1.1.101`), `ld-1267`, and SDK 26.5 targeting macOS 14.0. The
-  runner rejects mismatched tool versions or host architectures; updating
-  profile versions requires a fresh qualification, and other operating systems
-  require their own profile and OS network sandbox.
+  runner rejects mismatched tool versions or host architectures and verifies
+  Rust and Cargo again inside each build sandbox. Updating profile versions
+  requires a fresh qualification. Other operating systems require their own
+  profile and OS network sandbox.
 - The root release profile enables integer overflow checks across the
   application and dependencies; preserve that setting in release builds.
 
