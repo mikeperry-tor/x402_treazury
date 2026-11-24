@@ -14,6 +14,11 @@ use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 #[cfg(test)]
 mod bootstrap_tests;
+mod challenge;
+pub use challenge::X402Version;
+pub(crate) use challenge::{PinError, bound_challenge};
+#[cfg(test)]
+mod challenge_tests;
 mod document_identity;
 mod lifetime;
 pub(crate) mod signer;
@@ -163,6 +168,7 @@ pub struct PaidClient {
     unavailable: Option<crate::rotation::error::AdmissionError>,
     selection: crate::network::SelectionPolicy,
     transport: crate::network::HttpPolicy,
+    x402_version: Option<X402Version>,
     public_only: bool,
     timeout: Option<std::time::Duration>,
     max_response_bytes: usize,
@@ -271,6 +277,7 @@ impl PaidClient {
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
+            x402_version: None,
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -296,6 +303,7 @@ impl PaidClient {
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
+            x402_version: None,
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -322,6 +330,7 @@ impl PaidClient {
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
+            x402_version: None,
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
@@ -433,6 +442,13 @@ impl PaidClient {
     }
     pub fn transport(&self) -> crate::network::HttpPolicy {
         self.transport
+    }
+    pub fn with_x402_version(mut self, version: Option<X402Version>) -> Self {
+        self.x402_version = version;
+        self
+    }
+    pub(crate) fn x402_version(&self) -> Option<X402Version> {
+        self.x402_version
     }
     /// Override HTTP read inactivity. None inherits the network setting.
     pub fn with_timeout(mut self, timeout: impl Into<Option<std::time::Duration>>) -> Self {
@@ -814,7 +830,8 @@ impl PaidClient {
                 }
                 let challenge_facts = ResponseFacts::provider(response.status());
                 let original_headers = response.headers().clone();
-                let bounded = bound_challenge(response, self.max_response_bytes).await;
+                let bounded =
+                    bound_challenge(response, self.max_response_bytes, self.x402_version).await;
                 crate::qualification::record_challenge(
                     bounded
                         .as_ref()
@@ -1254,38 +1271,6 @@ impl PaidClient {
             relay_payment_may_have_occurred: false,
         })
     }
-}
-
-// PaidClient challenges and direct body-only challenges are collected here once.
-// Normalize legacy body-only envelopes so admission and qualification share the
-// same challenge. Header-based v1 providers can have unrelated wrapper bodies.
-pub(crate) async fn bound_challenge(
-    response: reqwest::Response,
-    limit: usize,
-) -> Result<reqwest::Response> {
-    let mut envelope = axum::http::Response::builder().status(response.status());
-    *envelope.headers_mut().expect("valid status") = response.headers().clone();
-    let bytes = crate::limits::read(
-        response,
-        limit,
-        "payment challenge body",
-        "max_response_bytes",
-    )
-    .await
-    .context("payment challenge rejected before signing")?;
-    if !envelope
-        .headers_ref()
-        .expect("valid status")
-        .contains_key("payment-required")
-        && let Ok(challenge) = serde_json::from_slice::<Value>(&bytes)
-        && challenge["x402Version"] == 1
-    {
-        envelope.headers_mut().expect("valid status").insert(
-            "payment-required",
-            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
-        );
-    }
-    Ok(envelope.body(bytes)?.into())
 }
 
 // Capture receipt time before challenge handling, and release unsigned padding

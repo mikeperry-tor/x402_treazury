@@ -230,6 +230,8 @@ pub struct Config {
     pub cover_traffic_enabled: Option<bool>,
     pub allow_http1: bool,
     pub allow_tls12: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x402_version: Option<crate::payment::X402Version>,
     pub read_timeout_seconds: Option<f64>,
     pub max_response_bytes: usize,
     pub max_help_bytes: usize,
@@ -336,6 +338,7 @@ impl Default for Config {
             cover_traffic_enabled: None,
             allow_http1: false,
             allow_tls12: false,
+            x402_version: None,
             read_timeout_seconds: None,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,

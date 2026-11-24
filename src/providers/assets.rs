@@ -20,6 +20,7 @@ macro_rules! provider_manifest {
             ("botsmith", "providers/botsmith.toml", None),
             ("brave-search", "providers/brave-search.toml", None),
             ("brazilayer", "providers/brazilayer.toml", None),
+            ("carredge", "providers/carredge.toml", Some("providers/carredge/patents.openapi.json")),
             ("claw402", "providers/claw402.toml", None),
             ("coinmarketcap", "providers/coinmarketcap/provider.toml", Some("providers/coinmarketcap/openapi.json")),
             ("companyrecords", "providers/companyrecords.toml", None),

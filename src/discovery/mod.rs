@@ -603,6 +603,13 @@ impl Manager {
                         .unwrap_or_default(),
                 )
                 .with_timeout(import::read_timeout(record.candidate.provider.as_ref()))
+                .with_x402_version(
+                    record
+                        .candidate
+                        .provider
+                        .as_ref()
+                        .and_then(|p| p.settings.x402_version),
+                )
                 .with_download_limits(
                     record
                         .candidate

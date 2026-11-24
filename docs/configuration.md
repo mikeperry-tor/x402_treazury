@@ -1138,6 +1138,26 @@ trusted_ca_files = ["/absolute/path/private-ca.pem"]
   `cover_traffic_enabled = false` per provider or source to opt out. See
   [cover traffic](cover-traffic.md).
 
+## Provider payment version
+
+Set `x402_version = 1` or `x402_version = 2` in a provider TOML or deployment
+source to require that version on paid API calls. Omit the setting to use
+normal negotiation.
+
+- **Version 1:** Uses a version 1 challenge from the response header or JSON
+  body. Two version 1 copies must carry identical offers. A header advertising
+  version 2 can accompany a version 1 body, as in
+  [Carredge](../providers/CAVEATS.md#carredgetoml--carredge).
+- **Version 2:** Requires a version 2 `PAYMENT-REQUIRED` header. The v1 body
+  cannot supply a payment when the v2 challenge fails.
+
+The setting applies before signing and inherits through `extends`. A
+registered bundled provider retains its version. Raw calls and generic
+OpenAPI imports use normal negotiation. An explicitly configured relay adapter
+uses its own provider's version when paying its fee.
+Payment errors distinguish duplicate challenge headers, conflicting version 1
+offers, and a missing configured version without returning seller text.
+
 ## Pricing metadata and runtime hints
 
 Startup, inspection, and warming never send API calls to probe prices; tool

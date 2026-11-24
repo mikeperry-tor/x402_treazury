@@ -996,6 +996,19 @@ directory entries (not live occupancy), and Wikivoyage returns snippets.
   Form D private offerings, and OFAC wallet checks (AgOSINT adds 4-list
   metadata).
 
+## carredge.toml | Carredge
+
+The bundled definition uses the
+[patent-search request contract](https://api.carredge.com/docs#patents).
+Carredge's OpenAPI omits request parameters across its catalog. The other
+routes need review before inclusion, particularly GET routes that return
+signable transactions or can trigger side effects.
+
+Carredge's response header labels the v1 offer as v2. `x402_version = 1`
+selects the explicitly versioned JSON body and the standard `X-PAYMENT`
+request header. The unsigned response advertises 0.01 USDC on Base. Carredge
+has accepted a pinned v1 request and returned patent results.
+
 ## fastaf.toml | FastAF
 
 FastAF's Base x402 catalog includes `fastaf_patents` as an optional keyword

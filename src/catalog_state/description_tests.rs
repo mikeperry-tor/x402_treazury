@@ -103,6 +103,22 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             }
             assert_eq!(other.description(), fallback);
         }
+        let mut v1 = tools[0].clone();
+        v1.client = v1
+            .client
+            .with_x402_version(Some(crate::payment::X402Version::V1));
+        let mut v2 = v1.clone();
+        v2.client = v2
+            .client
+            .with_x402_version(Some(crate::payment::X402Version::V2));
+        assert_eq!(v1.description(), fallback);
+        assert_eq!(v2.description(), fallback);
+        v1.operation_key()
+            .unwrap()
+            .learn(U256::from(3000), received().unwrap());
+        assert!(v1.description().contains("Observed cost: ~$0.003/call."));
+        assert_eq!(v2.description(), fallback);
+        assert_eq!(tools[0].description(), expected);
         let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
             registrations: Default::default(),
             generation: 11,

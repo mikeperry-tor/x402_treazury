@@ -143,6 +143,9 @@ pub(crate) fn summary(error: &anyhow::Error) -> Option<String> {
 }
 
 fn kind(error: &anyhow::Error, facts: Option<ResponseFacts>) -> &'static str {
+    if let Some(pin) = error.downcast_ref::<super::PinError>() {
+        return pin.reason();
+    }
     if let Some(problem) = error.downcast_ref::<crate::catalog::diagnostics::Problem>() {
         return problem.0;
     }

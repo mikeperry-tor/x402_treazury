@@ -1513,6 +1513,7 @@ impl Deployment {
                             .with_source_identity(id)
                             .with_document_relay(self.search_relay.clone())
                             .with_transport(source.config.transport())
+                            .with_x402_version(source.config.x402_version)
                             .with_cover(
                                 source.config.cover_traffic.clone(),
                                 crate::cover::Scope {

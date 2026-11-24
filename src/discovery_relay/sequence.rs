@@ -42,6 +42,10 @@ impl Entry {
             cfg.read_timeout_seconds.map(f64::to_bits),
             cfg.max_response_bytes,
         ))?;
+        let provider_key = match cfg.x402_version {
+            Some(version) => serde_json::to_string(&(provider_key, version))?,
+            None => provider_key,
+        };
         let key = serde_json::to_string(&(method, position, &provider_key))?;
         Ok(Self {
             key,
@@ -65,6 +69,7 @@ impl Entry {
             .for_relay()
             .with_source_identity("builtin:discovery-relay")
             .with_transport(self.cfg.transport())
+            .with_x402_version(self.cfg.x402_version)
             .with_timeout(
                 timeout.or_else(|| self.cfg.read_timeout_seconds.map(Duration::from_secs_f64)),
             )

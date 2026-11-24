@@ -304,8 +304,12 @@ impl ManagedPool {
                     let response = if response.headers().contains_key("payment-required") {
                         response
                     } else {
-                        crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES)
-                            .await?
+                        crate::payment::bound_challenge(
+                            response,
+                            crate::limits::RESPONSE_BYTES,
+                            None,
+                        )
+                        .await?
                     };
                     let (response, extensions_omitted, _) = pool
                         .pay_with_cover_observed(
@@ -996,16 +1000,19 @@ mod offer_tests {
                     .unwrap(),
             )
         };
-        let error =
-            crate::payment::bound_challenge(response(body.clone()), crate::limits::RESPONSE_BYTES)
-                .await
-                .unwrap_err();
+        let error = crate::payment::bound_challenge(
+            response(body.clone()),
+            crate::limits::RESPONSE_BYTES,
+            None,
+        )
+        .await
+        .unwrap_err();
         assert!(
             error
                 .to_string()
                 .contains("payment challenge rejected before signing")
         );
-        let normalized = crate::payment::bound_challenge(response(body.clone()), body.len())
+        let normalized = crate::payment::bound_challenge(response(body.clone()), body.len(), None)
             .await
             .unwrap();
         let (_, selected, _) = prepare_challenge(

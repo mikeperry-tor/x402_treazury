@@ -68,6 +68,7 @@ treasury, funding, and source-management settings.
 | botsmith | `botsmith.toml` | Vendor OpenAPI |
 | Brave Search Proxy | `brave-search.toml` | Vendor proxy catalog; fixed $0.005 searches; x402 v2 only |
 | Brazilayer | `brazilayer.toml` | Vendor OpenAPI |
+| Carredge | `carredge.toml` | Authored worldwide patent search, using x402 v1 |
 | Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
 | CoinMarketCap | `coinmarketcap/provider.toml` | Authored union of public keyless routes and four x402 counterparts |
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |

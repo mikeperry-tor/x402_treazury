@@ -70,6 +70,14 @@ intent = "authored"
 guidance = "providers/CAVEATS.md#apexfaucettoml--apex-faucet"
 sources = [{ url = "https://apexfaucet.xyz/openapi.json", purpose = "schema" }]
 
+[carredge]
+intent = "authored"
+guidance = "providers/CAVEATS.md#carredgetoml--carredge"
+sources = [
+    { url = "https://api.carredge.com/openapi.json", purpose = "schema" },
+    { url = "https://api.carredge.com/docs", purpose = "guide" },
+]
+
 [ax1]
 intent = "authored"
 guidance = "providers/CAVEATS.md#ax1-verdict"

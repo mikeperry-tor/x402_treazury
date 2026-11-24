@@ -55,6 +55,7 @@ enum LegacyReceipt {
     Malformed,
     Duplicate,
     Mixed,
+    HybridChallenge,
 }
 type CapturedRequest = (SocketAddr, Method, String, Vec<u8>);
 #[derive(Clone)]
@@ -96,7 +97,17 @@ async fn seller(
             return status.into_response();
         }
         if matches!(f.wire, Wire::V1(_)) {
-            return (StatusCode::PAYMENT_REQUIRED, Json(legacy_challenge())).into_response();
+            let body = legacy_challenge();
+            let mut response = (StatusCode::PAYMENT_REQUIRED, Json(body.clone())).into_response();
+            if matches!(f.wire, Wire::V1(LegacyReceipt::HybridChallenge)) {
+                let mut header = body;
+                header["x402Version"] = json!(2);
+                response.headers_mut().insert(
+                    "payment-required",
+                    STANDARD.encode(header.to_string()).parse().unwrap(),
+                );
+            }
+            return response;
         }
         let mut offer = challenge();
         if matches!(f.wire, Wire::ChangingSettlement) {
@@ -115,6 +126,16 @@ async fn seller(
     };
     let payload: Value =
         serde_json::from_slice(&STANDARD.decode(encoded.as_bytes()).unwrap()).unwrap();
+    if matches!(f.wire, Wire::V1(_)) {
+        assert!(headers.contains_key("x-payment"));
+        assert!(!headers.contains_key("payment-signature"));
+        assert_eq!(payload["x402Version"], 1);
+        assert_eq!(payload["payload"]["authorization"]["value"], "100");
+        assert_eq!(
+            payload["payload"]["authorization"]["to"],
+            "0x0000000000000000000000000000000000000003"
+        );
+    }
     let payer = payload["payload"]["authorization"]["from"]
         .as_str()
         .unwrap()
@@ -446,14 +467,18 @@ async fn run_private(
         )
         .unwrap(),
     );
-    let client = PaidClient::managed(manager.clone()).with_download_limits(
-        if matches!(wire, Wire::Oversized) {
-            1024
-        } else {
-            16384
-        },
-        16384,
-    );
+    let client = PaidClient::managed(manager.clone())
+        .with_download_limits(
+            if matches!(wire, Wire::Oversized) {
+                1024
+            } else {
+                16384
+            },
+            16384,
+        )
+        .with_x402_version(
+            matches!(wire, Wire::V1(LegacyReceipt::HybridChallenge)).then_some(X402Version::V1),
+        );
     let mut route = RoutedRequest {
         json_media_type: None,
         headers: BTreeMap::from([
@@ -563,7 +588,11 @@ async fn run_private(
     if matches!(
         wire,
         Wire::Verification
-            | Wire::V1(LegacyReceipt::Verification | LegacyReceipt::Failure)
+            | Wire::V1(
+                LegacyReceipt::Verification
+                    | LegacyReceipt::Failure
+                    | LegacyReceipt::HybridChallenge
+            )
             | Wire::Settlement
             | Wire::ChangingSettlement
             | Wire::UnsignedAfterSettlement(_)
@@ -653,6 +682,18 @@ async fn run_private(
 }
 fn legacy_challenge() -> Value {
     json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","asset":USDC,"maxAmountRequired":"100","resource":"https://localhost/pay","description":"legacy fixture","mimeType":"application/json","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
+}
+
+#[tokio::test]
+async fn pinned_v1_managed_uses_fresh_hybrid_challenges_and_journals_each_attempt() {
+    let (success, signed, requests, error) =
+        run("GET", Wire::V1(LegacyReceipt::HybridChallenge), 1).await;
+    assert!(success, "{error}");
+    assert_eq!(requests.len(), 4);
+    assert_eq!(signed.len(), 2);
+    assert_ne!(signed[0].0, signed[1].0);
+    assert_ne!(signed[0].1, signed[1].1);
+    assert!(requests.iter().all(|request| request.2 == requests[0].2));
 }
 
 #[tokio::test]

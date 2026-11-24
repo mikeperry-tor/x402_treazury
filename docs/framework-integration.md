@@ -162,7 +162,10 @@ alongside their `message` rather than rejecting the JSON summary.
   `target_payment_required`, `unsolicited_not_modified`,
   `unsupported_response`, `no_representable_relay`, `provider_unavailable`,
   `qualification_authority`, `funding_denied`, `payer_changed`,
-  `unsupported_payment`, `price_limit`, `payment_pending`, `wallet_not_ready`,
+  `unsupported_payment`, `duplicate_payment_challenge_headers`,
+  `conflicting_v1_offers`, `missing_pinned_v1_challenge`,
+  `missing_pinned_v2_challenge`, `price_limit`, `payment_pending`,
+  `wallet_not_ready`,
   `funding_unavailable`, `payment_outcome_unknown`, `chain_recovery_required`,
   and `payment_or_response` (plus the shared HTTP, timeout, and limit codes). A
   relay payment refusal stays a source failure; missing required wallet

@@ -1,0 +1,17 @@
+
+# This provider is extremely non-compliant wrt OpenAPI and x402
+# specifications. It is kept primarily to test provider-level
+# x402 version pinning against a live API.
+description = "Worldwide patent keyword search through Google Patents."
+name = "Carredge"
+spec = "carredge/patents.openapi.json"
+base_url = "https://api.carredge.com"
+prefix = "carredge"
+include = ["/v1", ""]
+x402_version = 1
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

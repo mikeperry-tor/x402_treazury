@@ -118,6 +118,40 @@ async fn observed_failures_explain_safe_causes_at_warn_without_replay_authority(
 }
 
 #[tokio::test]
+async fn pin_refusal_emits_stable_warn_code_before_submission() {
+    if crate::test_log_capture::run_in_child(
+        "payment::diagnostics::http_tests::pin_refusal_emits_stable_warn_code_before_submission",
+    ) {
+        return;
+    }
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    scope(async {
+        let result: Result<()> = Err(super::super::PinError::ConflictingV1Offers.into());
+        let relay = crate::discovery_relay::RelayFailure::from_error(result.as_ref().unwrap_err());
+        finish(&result, &SubmissionProgress::default(), false);
+        finish::<()>(&Err(relay.into()), &SubmissionProgress::default(), false);
+    })
+    .with_subscriber(subscriber)
+    .await;
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warnings.len(), 2, "{logs}");
+    for warning in warnings {
+        assert!(
+            warning.contains("failure_kind=\"conflicting_v1_offers\""),
+            "{logs}"
+        );
+        assert!(warning.contains("authorization_may_charge=false"), "{logs}");
+    }
+}
+
+#[tokio::test]
 async fn response_facts_replace_previous_claims_and_classify_body_shapes() {
     scope(async {
         let response = axum::http::Response::builder()

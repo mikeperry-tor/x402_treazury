@@ -296,7 +296,8 @@ Method retry boundaries are enforced strictly before any retry or relay:
 
 Remote catalog cache entries own passive operation price hints, shared across
 compatible aliases, listeners, and wallet groups without sharing signers or
-transports. Cache entries and hints share the catalog's
+transports. Explicit provider payment versions use separate hint keys. Cache
+entries and hints share the catalog's
 `catalog_cache_ttl_seconds` lifetime (default indefinite) and invalidate
 together on expiry, forced refresh, changed bytes, or source configuration
 updates.
@@ -316,6 +317,10 @@ canonical Base mainnet USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`).
   provisioned allowance and never auto-approves one). Managed profiles support
   v1 and v2 `exact` EIP-3009 only, requiring v2 `extra.assetTransferMethod` to
   be absent or `"eip3009"` (rejecting Permit2 and unknown transfer selectors).
+- **Version selection:** An operator can pin the
+  [provider payment version](configuration.md#provider-payment-version).
+  The bounded unsigned challenge selects the envelope before either signer
+  runs. Each eligible managed wallet uses the same pin on its own challenge.
 - **Top-level challenge extensions:** Managed payments strip top-level
   challenge extensions before validation and signing so unrecognized or
   optional extensions cannot silently alter signing behavior. Stripping

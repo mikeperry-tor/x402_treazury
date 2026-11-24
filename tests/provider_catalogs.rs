@@ -2,6 +2,39 @@
 use serde_json::Value;
 use std::path::Path;
 
+#[tokio::test]
+async fn carredge_bundles_documented_patent_arguments_and_v1_pin() {
+    use x402_treazury::{catalog, config, payment::X402Version, providers};
+    let provider = providers::get("carredge").unwrap();
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/carredge.toml");
+    let settings = config::load(&file).await.unwrap().settings;
+    assert_eq!(settings.x402_version, Some(X402Version::V1));
+    assert_eq!(provider.config.x402_version, settings.x402_version);
+    assert_eq!(
+        tokio::fs::read_to_string(&settings.spec).await.unwrap(),
+        provider.local_schema.unwrap()
+    );
+    let document = serde_json::from_str(provider.local_schema.unwrap()).unwrap();
+    let tools = catalog::build_tools(&settings, &document, "carredge").unwrap();
+    assert_eq!(tools.len(), 1);
+    let tool = &tools[0];
+    assert_eq!(tool.name, "carredge_patents");
+    assert_eq!(tool.input_schema["required"], serde_json::json!(["q"]));
+    assert_eq!(tool.input_schema["properties"]["limit"]["default"], 10);
+    assert_eq!(
+        tool.advertised_pricing.amount(),
+        Some(alloy_primitives::U256::from(10_000))
+    );
+    let args = serde_json::json!({"q":"patent title","limit":5});
+    let request = tool
+        .route("https://api.carredge.com", args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.url, "https://api.carredge.com/v1/patents");
+    assert_eq!(request.query["q"], "patent title");
+    assert_eq!(request.query["limit"], 5);
+}
+
 // Named regressions below inspect the original body constraints independently
 // of whether those constraints live at the MCP root or an explicit body argument.
 fn body_schema(tool: &x402_treazury::catalog::ToolSpec) -> &Value {

@@ -200,10 +200,12 @@ impl BoundTool {
     }
 
     fn operation_key(&self) -> Option<crate::pricing::runtime::OperationKey> {
-        self.tool
-            .catalog_hints
-            .as_ref()
-            .map(|hints| hints.operation(&self.tool.method, &self.tool.path))
+        let hints = self.tool.catalog_hints.as_ref()?;
+        let mut key = hints.operation(&self.tool.method, &self.tool.path);
+        if let Some(version) = self.client.x402_version() {
+            key.operation = format!("x402-{} {}", u8::from(version), key.operation);
+        }
+        Some(key)
     }
 
     pub(crate) fn description(&self) -> String {

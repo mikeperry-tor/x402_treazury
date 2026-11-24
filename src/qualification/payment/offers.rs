@@ -111,9 +111,10 @@ mod tests {
         let response = reqwest::Response::from(axum::http::Response::builder().status(402).body(
             json!({"x402Version":1,"accepts":[{"network":"base","asset":crate::payment::USDC,"scheme":"exact","maxAmountRequired":"50000","resource":"private","description":"private","payTo":"private"}]}).to_string()
         ).unwrap());
-        let response = crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES)
-            .await
-            .unwrap();
+        let response =
+            crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES, None)
+                .await
+                .unwrap();
         let observed = summary(response.headers());
         assert_eq!(observed["status"], "observed");
         assert_eq!(observed["version"], 1);

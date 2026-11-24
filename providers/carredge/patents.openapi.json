@@ -1,0 +1,42 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carredge Patent Search",
+    "version": "1",
+    "description": "Patent search request contract from Carredge's API reference."
+  },
+  "servers": [
+    { "url": "https://api.carredge.com" }
+  ],
+  "paths": {
+    "/v1/patents": {
+      "get": {
+        "operationId": "patents",
+        "description": "Search worldwide Google Patents publications. Returns titles, publication numbers, inventors, assignees, and filing or grant dates.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Patent search terms.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results to return.",
+            "schema": { "type": "number", "default": 10 }
+          }
+        ],
+        "x-payment-info": {
+          "protocols": [{ "x402": {} }],
+          "price": { "mode": "fixed", "currency": "USD", "amount": "0.01" }
+        },
+        "responses": {
+          "200": { "description": "Patent search results" },
+          "402": { "description": "Base USDC payment challenge" }
+        }
+      }
+    }
+  }
+}

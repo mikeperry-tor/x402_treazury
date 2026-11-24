@@ -456,6 +456,7 @@ async fn prepare_standalone_server(
         tools,
         PaidClient::new(payer)
             .with_transport(cfg.transport())
+            .with_x402_version(cfg.x402_version)
             .with_cover(
                 cfg.cover_traffic.clone(),
                 x402_treazury::cover::Scope {

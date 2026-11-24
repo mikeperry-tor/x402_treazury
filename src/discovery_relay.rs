@@ -133,6 +133,14 @@ impl RelayFailure {
                 status: None,
             };
         }
+        if let Some(pin) = error.downcast_ref::<crate::payment::PinError>() {
+            return Self {
+                reason: pin.code(),
+                status: crate::payment::ResponseFacts::from_error(error)
+                    .and_then(|facts| facts.provider)
+                    .map(|status| status.as_u16()),
+            };
+        }
         if error.is::<crate::payment::IncompleteRelayResponse>() {
             return Self {
                 reason: "partial_response",
@@ -207,6 +215,9 @@ impl RelayFailure {
         self.status
     }
     pub(crate) fn explanation(&self) -> &'static str {
+        if let Some(pin) = crate::payment::PinError::from_code(self.reason) {
+            return pin.reason();
+        }
         match self.reason {
             "http_status" => "The server returned an unsuccessful HTTP status",
             "tls_failure" => "The secure connection failed TLS validation or negotiation",

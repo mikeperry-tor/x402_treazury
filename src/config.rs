@@ -177,6 +177,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_x402_version_accepts_only_explicit_protocol_numbers() {
+        for version in [1, 2] {
+            let settings: Config =
+                toml::from_str(&format!("spec = 'schema.json'\nx402_version = {version}")).unwrap();
+            assert_eq!(
+                serde_json::to_value(settings).unwrap()["x402_version"],
+                version
+            );
+        }
+        for invalid in ["0", "3", "-1", "true", "'1'"] {
+            assert!(
+                toml::from_str::<Config>(&format!(
+                    "spec = 'schema.json'\nx402_version = {invalid}"
+                ))
+                .is_err()
+            );
+        }
+        assert!(
+            serde_json::to_value(Config::default())
+                .unwrap()
+                .get("x402_version")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn timeout_and_credit_validation_preserve_current_limits() {
         let mut cfg = Config {
             spec: "schema.json".into(),

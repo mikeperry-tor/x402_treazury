@@ -204,15 +204,27 @@ pub(crate) fn omitted_extensions(extensions: &serde_json::Map<String, serde_json
 }
 
 pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay_call: bool) {
-    let kind = match result {
-        Err(error) if error.is::<super::PrivatePayerHandoff>() => "private_payer_handoff",
-        Err(error) if error.is::<super::HttpFailure>() => "http_status",
-        Err(error) if error.is::<crate::rotation::error::AdmissionError>() => {
-            "payment_admission_or_dispatch"
-        }
-        Err(error) if error.is::<reqwest::Error>() => "http_transport_or_body",
-        _ => "operation",
-    };
+    let pin = result
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<super::PinError>())
+        .copied();
+    let relay = result
+        .as_ref()
+        .err()
+        .and_then(crate::discovery_relay::RelayFailure::retained);
+    let kind = pin
+        .map(super::PinError::code)
+        .or_else(|| relay.map(|failure| failure.kind()))
+        .unwrap_or_else(|| match result {
+            Err(error) if error.is::<super::PrivatePayerHandoff>() => "private_payer_handoff",
+            Err(error) if error.is::<super::HttpFailure>() => "http_status",
+            Err(error) if error.is::<crate::rotation::error::AdmissionError>() => {
+                "payment_admission_or_dispatch"
+            }
+            Err(error) if error.is::<reqwest::Error>() => "http_transport_or_body",
+            _ => "operation",
+        });
     let transport = result
         .as_ref()
         .err()
@@ -233,7 +245,7 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay
         transport,
         progress,
         relay_call,
-        reason.or_else(|| provider_failure.map(ProviderFailure::reason)).or_else(|| {
+        pin.map(super::PinError::reason).or_else(|| relay.map(|failure| failure.explanation())).or(reason).or_else(|| provider_failure.map(ProviderFailure::reason)).or_else(|| {
             http_failure.filter(|error| error.status == reqwest::StatusCode::PAYMENT_REQUIRED)
                 .map(|_| "The provider rejected payment; the cause and settlement outcome remain unconfirmed")
         }),
@@ -381,12 +393,13 @@ fn emit(
             last_seller_success = observation.payment_response.seller_success,
             response_body_kind = observation.response_body_kind,
             omitted_extensions = ?observation.omitted_extensions,
-            "{}",
+            "{}. {}.",
             if authorization_may_charge {
                 "Payment call failed; do not automatically repeat a call whose authorization may charge"
             } else {
                 "Payment call failed before any potentially chargeable authorization"
-            }
+            },
+            reason
         );
     }
 }
