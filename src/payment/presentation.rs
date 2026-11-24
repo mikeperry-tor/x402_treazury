@@ -107,7 +107,11 @@ pub(crate) fn summary(error: &anyhow::Error) -> Option<String> {
             destination: Some(destination),
             ..
         }) => {
-            let suffix = if destination.is_success() {
+            let suffix = if crate::discovery_relay::RelayFailure::retained(error)
+                .is_some_and(|failure| failure.kind() == "partial_response")
+            {
+                ": the relay returned an incomplete target response."
+            } else if destination.is_success() {
                 ": response unavailable."
             } else {
                 "."
@@ -143,6 +147,12 @@ pub(crate) fn summary(error: &anyhow::Error) -> Option<String> {
 }
 
 fn kind(error: &anyhow::Error, facts: Option<ResponseFacts>) -> &'static str {
+    if matches!(
+        error.downcast_ref::<super::IncompleteResponse>(),
+        Some(super::IncompleteResponse::Directory)
+    ) {
+        return "the directory returned an incomplete response";
+    }
     if let Some(pin) = error.downcast_ref::<super::PinError>() {
         return pin.reason();
     }

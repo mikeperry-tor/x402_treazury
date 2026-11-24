@@ -104,6 +104,7 @@ pub(crate) enum Contract {
     Catalog,
     Document,
     Api,
+    Directory,
     Search(fn(&[u8]) -> Result<()>),
 }
 impl Contract {
@@ -115,7 +116,12 @@ impl Contract {
         if matches!(self, Self::Catalog) && status == 304 {
             return Decision::Terminal("unsolicited_not_modified");
         }
-        if !matches!(self, Self::Api)
+        let complete_required = match self {
+            Self::Api => false,
+            Self::Directory => (200..300).contains(&status),
+            _ => true,
+        };
+        if complete_required
             && (status == 206
                 || response
                     .headers
@@ -125,7 +131,7 @@ impl Contract {
         }
         // Terminal runtime statuses remain terminal even when the relay also
         // reports failed delivery. Such metadata grants no second paid read.
-        if matches!(self, Self::Document | Self::Api)
+        if matches!(self, Self::Document | Self::Api | Self::Directory)
             && !(200..300).contains(&status)
             && !crate::network::acquisition::blocking_status(status)
         {
@@ -147,8 +153,10 @@ impl Contract {
                 }
                 Err(_) => Decision::Next("catalog_parse"),
             },
-            Self::Document | Self::Api if (200..300).contains(&status) => Decision::Accept,
-            Self::Document | Self::Api => Decision::Next("http_status"),
+            Self::Document | Self::Api | Self::Directory if (200..300).contains(&status) => {
+                Decision::Accept
+            }
+            Self::Document | Self::Api | Self::Directory => Decision::Next("http_status"),
             Self::Search(_) if status != 200 => Decision::Next("http_status"),
             Self::Search(validate) if validate(&response.body).is_err() => {
                 Decision::Next("response_rejected")
@@ -630,7 +638,7 @@ impl Entry {
                     .downcast_ref::<reqwest::Error>()
                     .is_some_and(crate::network::eligible_retry_transport)
                 || http.is_some()
-                || cause.is::<crate::payment::IncompleteRelayResponse>();
+                || cause.is::<crate::payment::IncompleteResponse>();
             failure.retry_after = typed.and_then(|f| f.retry_after);
             tracing::debug!(
                 relay_format = label(self.format),
@@ -690,7 +698,7 @@ impl Entry {
         // retain the consumer's advancement decision.
         let decision = match contract.decision(&response) {
             Decision::Accept
-                if matches!(contract, Contract::Api)
+                if matches!(contract, Contract::Api | Contract::Directory)
                     && self.format == Format::Curl
                     && target.method != Method::HEAD
                     && response

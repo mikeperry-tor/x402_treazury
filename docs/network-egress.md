@@ -111,7 +111,8 @@ followed by ordered paid relay fallback (`[relay_fallback.relays]` `GET`,
   hands off after exhausting its configured scopes on retryable failures, and
   HTTP `501`, `505`, and `520` hand off immediately without fresh Tor retries.
   Local policy, destination, and size errors, unsolicited `206` on complete
-  catalogs, and terminal `4xx` never pay a relay.
+  catalogs, and terminal `4xx` never pay a relay. Built-in directory reads
+  require [complete results](agent-sources.md#external-directory-matching).
 - **Traversal and liability:** Each listed relay runs at most once using its
   own `relay_format` (`curl`, `agproxy`, `horizonpulse`, `readfetch`) and
   unsigned Tor retry count, with recursive fallback disabled. Adapters skip

@@ -378,7 +378,13 @@ async fn partial_fixture() {
         let error = result.unwrap_err();
         let failure = error.downcast_ref::<Failure>();
         let cause = failure.map(|failure| &failure.error).unwrap_or(&error);
-        assert!(cause.is::<IncompleteRelayResponse>(), "{error:#}");
+        assert!(
+            matches!(
+                cause.downcast_ref::<IncompleteResponse>(),
+                Some(IncompleteResponse::Relay)
+            ),
+            "{error:#}"
+        );
         if let Some(failure) = failure {
             assert!(!failure.retry && !failure.fallback);
         }

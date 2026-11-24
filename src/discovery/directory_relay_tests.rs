@@ -55,6 +55,7 @@ async fn directory_relay_fixture() {
                     | "/api/v1/services"
                     | "/api/v1/services/relayed"
                     | "/api/v1/services/invalid"
+                    | "/api/v1/services/partial"
                     | "/api/v1/services/mixed"
                     | "/openapi.json"
                     | "/llms.txt" => StatusCode::FORBIDDEN.into_response(),
@@ -101,6 +102,9 @@ async fn directory_relay_fixture() {
             assert_eq!(payload["payload"]["authorization"]["value"], "10000");
             let expected: crate::payment::signer::EvmSigner = format!("{:064x}", 1).parse().unwrap();
             assert_eq!(crate::test_signatures::recover_exact(&payload), expected.address());
+            if url.ends_with("/partial") {
+                return axum::Json(json!({"url":url,"method":"GET","statusCode":200,"headers":{"content-type":"application/json","content-range":"bytes 0-10/50"},"body":"{\"service\":{}}","redirectChain":[],"error":null})).into_response();
+            }
             let body = if url.ends_with("/invalid") {
                 "complete but invalid directory JSON".to_owned()
             } else if url.ends_with("/mixed") {
@@ -409,6 +413,20 @@ async fn directory_relay_fixture() {
             assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
         }
     }
+    let before = paid_calls.lock().unwrap().len();
+    let error = manager
+        .invoke_directory(
+            "writer",
+            directory::DETAILS,
+            json!({"slug":"partial"}).as_object().unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is::<crate::discovery_relay::document::PossiblePayment>());
+    let failure = crate::discovery_relay::RelayFailure::retained(&error).unwrap();
+    assert_eq!(failure.kind(), "partial_response");
+    assert_eq!(failure.status(), Some(200));
+    assert_eq!(paid_calls.lock().unwrap().len() - before, 2);
     origin_task.abort();
     relay_task.abort();
 }

@@ -526,7 +526,11 @@ async fn unsolicited_catalog_not_modified_stays_terminal_despite_delivery_metada
 
 #[tokio::test]
 async fn target_partial_documents_stay_terminal_when_relay_also_reports_truncation() {
-    for contract in [Contract::Catalog, Contract::Search(|_| Ok(()))] {
+    for contract in [
+        Contract::Catalog,
+        Contract::Search(|_| Ok(())),
+        Contract::Directory,
+    ] {
         for status in [206, 200] {
             let mut partial = agproxy(status, "{}", true);
             if status == 200 {
@@ -550,6 +554,24 @@ async fn target_partial_documents_stay_terminal_when_relay_also_reports_truncati
             harness.assert_order(&[(0, false), (0, true)]);
         }
     }
+}
+
+#[tokio::test]
+async fn directory_http_failure_keeps_relay_recovery_with_content_range() {
+    let mut failure = agproxy(503, "{}", false);
+    failure[0]["headers"] = json!({"content-range":"bytes 0-1/10"});
+    let harness = Harness::new(vec![
+        (Format::Agproxy, failure),
+        (Format::Agproxy, agproxy(200, "{\"complete\":true}", false)),
+    ])
+    .await;
+    let result = harness
+        .acquire(&target(Method::GET), Contract::Directory, 4096, None)
+        .await
+        .unwrap();
+    assert_eq!(result.status, 200);
+    assert!(result.payment_may_have_occurred);
+    harness.assert_order(&[(0, false), (0, true), (1, false), (1, true)]);
 }
 
 #[tokio::test]

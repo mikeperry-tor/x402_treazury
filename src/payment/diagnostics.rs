@@ -218,6 +218,7 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay
         .or_else(|| relay.map(|failure| failure.kind()))
         .unwrap_or_else(|| match result {
             Err(error) if error.is::<super::PrivatePayerHandoff>() => "private_payer_handoff",
+            Err(error) if error.is::<super::IncompleteResponse>() => "partial_response",
             Err(error) if error.is::<super::HttpFailure>() => "http_status",
             Err(error) if error.is::<crate::rotation::error::AdmissionError>() => {
                 "payment_admission_or_dispatch"
@@ -308,6 +309,7 @@ fn failure_reason(kind: &str, transport: Option<&str>) -> &'static str {
         (_, Some("request_construction")) => "The HTTP request could not be constructed",
         (_, Some(_)) => "The HTTP request or response failed during transport",
         ("http_status", None) => "The server returned an unsuccessful HTTP status",
+        ("partial_response", None) => "The server returned an incomplete response",
         ("private_payer_handoff", None) => {
             "Private request headers cannot be sent under another wallet; this call has stopped"
         }

@@ -46,13 +46,19 @@ impl std::fmt::Display for HttpFailure {
 impl std::error::Error for HttpFailure {}
 
 #[derive(Debug)]
-pub(crate) struct IncompleteRelayResponse;
-impl std::fmt::Display for IncompleteRelayResponse {
+pub(crate) enum IncompleteResponse {
+    Relay,
+    Directory,
+}
+impl std::fmt::Display for IncompleteResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("relay service partial_response")
+        f.write_str(match self {
+            Self::Relay => "relay service partial_response",
+            Self::Directory => "the directory returned an incomplete response",
+        })
     }
 }
-impl std::error::Error for IncompleteRelayResponse {}
+impl std::error::Error for IncompleteResponse {}
 /// Operation-scoped refusal, with a fixed safe diagnostic reason.
 #[derive(Debug)]
 struct PrivatePayerHandoff;
@@ -62,18 +68,6 @@ impl std::fmt::Display for PrivatePayerHandoff {
     }
 }
 impl std::error::Error for PrivatePayerHandoff {}
-
-fn complete_relay_response(response: &reqwest::Response, relay: bool) -> Result<()> {
-    ensure!(
-        !relay
-            || (response.status() != reqwest::StatusCode::PARTIAL_CONTENT
-                && !response
-                    .headers()
-                    .contains_key(reqwest::header::CONTENT_RANGE)),
-        IncompleteRelayResponse
-    );
-    Ok(())
-}
 
 #[cfg(test)]
 mod best_effort_tests;
@@ -185,6 +179,28 @@ pub struct PaidClient {
     initial_price: Option<U256>,
 }
 impl PaidClient {
+    pub(crate) fn directory_response(&self) -> bool {
+        matches!(
+            self.relay_purpose,
+            crate::discovery_relay::Purpose::SourceDiscovery
+        )
+    }
+
+    fn check_response_completeness(&self, response: &reqwest::Response) -> Result<()> {
+        if response.status() == reqwest::StatusCode::PARTIAL_CONTENT
+            || response
+                .headers()
+                .contains_key(reqwest::header::CONTENT_RANGE)
+        {
+            ensure!(!self.relay_call, IncompleteResponse::Relay);
+            ensure!(
+                !(self.directory_response() && response.status().is_success()),
+                IncompleteResponse::Directory
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) fn with_initial_price(mut self, amount: Option<U256>) -> Self {
         self.initial_price = amount;
         self
@@ -959,7 +975,7 @@ impl PaidClient {
                 call.response_headers();
             }
             if stage_paid {
-                complete_relay_response(&response, self.relay_call)
+                self.check_response_completeness(&response)
                     .context(ResponseFacts::provider(response.status()))?;
             }
             break (
@@ -1094,33 +1110,28 @@ impl PaidClient {
                 crate::qualification::check_retry_authority()
                     .await
                     .map_err(Failure::local)?;
-                let (response, retry, receipt) = unsigned_response(
-                    &transport,
-                    request,
-                    cover.as_mut(),
-                    self.relay_call,
-                    collect_unsigned,
-                )
-                .await
-                .map_err(|error| {
-                    // TLS can fail after a write executes, even before response
-                    // headers arrive. Only connection setup proves this attempt
-                    // could not have delivered the request.
-                    let ordinary_retry =
-                        error.downcast_ref::<reqwest::Error>().is_some_and(|error| {
-                            error.is_connect() && crate::network::tls_failure(error)
-                        });
-                    let mut failure = if error.is::<IncompleteRelayResponse>() {
-                        Failure::validation(error)
-                    } else {
-                        Failure::body(error)
-                    };
-                    if !common_transport {
-                        failure.retry &= ordinary_retry;
-                        failure.fallback = false;
-                    }
-                    failure
-                })?;
+                let (response, retry, receipt) =
+                    unsigned_response(&transport, request, cover.as_mut(), self, collect_unsigned)
+                        .await
+                        .map_err(|error| {
+                            // TLS can fail after a write executes, even before response
+                            // headers arrive. Only connection setup proves this attempt
+                            // could not have delivered the request.
+                            let ordinary_retry =
+                                error.downcast_ref::<reqwest::Error>().is_some_and(|error| {
+                                    error.is_connect() && crate::network::tls_failure(error)
+                                });
+                            let mut failure = if error.is::<IncompleteResponse>() {
+                                Failure::validation(error)
+                            } else {
+                                Failure::body(error)
+                            };
+                            if !common_transport {
+                                failure.retry &= ordinary_retry;
+                                failure.fallback = false;
+                            }
+                            failure
+                        })?;
                 diagnostics::response(&response);
                 let status = response.status();
                 let relay_rejected = self.relay_call
@@ -1279,7 +1290,7 @@ async fn unsigned_response(
     transport: &crate::network::HttpTransport,
     request: &reqwest::Request,
     mut cover: Option<&mut crate::cover::runtime::Call>,
-    relay: bool,
+    client: &PaidClient,
     collect_unsigned: Option<(usize, bool)>,
 ) -> Result<(
     reqwest::Response,
@@ -1308,7 +1319,9 @@ async fn unsigned_response(
         c.rejected_padding(response.status());
     }
     crate::network::log_http(&response, "payment_challenge");
-    complete_relay_response(&response, relay)
+    client
+        .check_response_completeness(&response)
+        .inspect_err(|_| diagnostics::response(&response))
         .context(ResponseFacts::provider(response.status()))?;
     // Collect successful unsigned bodies inside the same finite attempt sequence. A body
     // failure cannot restart payer selection or enter the signed dispatch path.

@@ -166,8 +166,9 @@ optional `max_price_usd`:
 - **Coinbase (`coinbase` and `coinbase_curated`):** Queries Coinbase's public
   resource directory unsigned, constrained to Base mainnet USDC `exact` offers
   and enforcing Coinbase's 400-character query limit. `max_price_usd` filters
-  resource prices. Coinbase origin `402` challenges are never signed, and HTTP
-  `206`, `Content-Range`, and invalid JSON fail without paid fallback or replay.
+  resource prices. Coinbase origin `402` challenges are never signed and
+  stop acquisition, as do HTTP `206` and `Content-Range`. A complete origin
+  response with invalid JSON can trigger configured relay fallback.
 - **x402 List (`x402-list`):** Queries `/best` for Base services with
   `prefer=balanced` and `require_verified=false`, filtering by minimum service
   price. Has no 400-character query limit when used alone. Directory data from
@@ -182,9 +183,11 @@ optional `max_price_usd`:
   [Agents Trust receipt caveat](../providers/CAVEATS.md#agents-trusttoml--agents-trust).
 
 Responses return a map keyed by directory name (`coinbase`, `coinbase_curated`,
-`x402-list`, `agents-trust`): each successful entry contains the full upstream JSON object,
-while a failed directory returns `local_error` without cancelling healthy
-siblings. Relay advisories and possible-payment notices sit outside individual
+`x402-list`, `agents-trust`). Each successful entry contains the full upstream
+JSON object. A direct or relayed HTTP `206` or successful response with
+`Content-Range` returns `local_error` with any possible charge preserved.
+Other directories can still return results.
+Relay advisories and possible-payment notices sit outside individual
 directory objects. Paid directories and configured `source_discovery` relay
 fallbacks can authorize multiple payments per search. The tool returns each
 directory's response directly and leaves any follow-up search to the caller.

@@ -141,7 +141,7 @@ impl RelayFailure {
                     .map(|status| status.as_u16()),
             };
         }
-        if error.is::<crate::payment::IncompleteRelayResponse>() {
+        if error.is::<crate::payment::IncompleteResponse>() {
             return Self {
                 reason: "partial_response",
                 status: None,

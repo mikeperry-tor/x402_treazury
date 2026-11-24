@@ -52,7 +52,11 @@ pub(crate) fn fallback<'a>(
             .acquire(
                 client.clone(),
                 &target,
-                Contract::Api,
+                if client.directory_response() {
+                    Contract::Directory
+                } else {
+                    Contract::Api
+                },
                 client.response_limit(),
                 "max_response_bytes",
                 Some(client.response_limit()),

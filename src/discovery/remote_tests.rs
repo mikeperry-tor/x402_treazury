@@ -20,9 +20,22 @@ async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_p
                 crate::test_signatures::recover_exact(&payload).to_string()
             });
             let paid = signature.is_some();
+            let partial = uri
+                .query()
+                .is_some_and(|query| query.contains("partial-agents"));
             captured.lock().unwrap().push((uri.to_string(), signature));
             if paid {
+                if partial {
+                    return (StatusCode::PARTIAL_CONTENT, axum::Json(json!({"picks":[]})))
+                        .into_response();
+                }
                 return axum::Json(json!({"picks":[], "provider_field":true})).into_response();
+            }
+            if uri
+                .query()
+                .is_some_and(|query| query.contains("partial-list"))
+            {
+                return axum::Json(json!({"picks":[]})).into_response();
             }
             let challenge = json!({
                 "x402Version":2,
@@ -38,11 +51,21 @@ async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_p
                 .into_response()
         }
     });
-    let (base, task) = listen(
-        axum::Router::new()
-            .route("/recommend", recommend)
-            .route("/best", get(|| async { axum::Json(json!({"data":[]})) })),
-    )
+    let (base, task) = listen(axum::Router::new().route("/recommend", recommend).route(
+        "/best",
+        get(|uri: Uri| async move {
+            let mut response = axum::Json(json!({"data":[]})).into_response();
+            if uri
+                .query()
+                .is_some_and(|query| query.contains("partial-list"))
+            {
+                response
+                    .headers_mut()
+                    .insert("content-range", "bytes 0-10/50".parse().unwrap());
+            }
+            response
+        }),
+    ))
     .await;
     let mut config = listeners(false);
     config
@@ -83,15 +106,17 @@ async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_p
     );
     assert_eq!(response["x402-list"], json!({"data":[]}));
     assert!(output.payment_may_have_occurred);
-    let calls = seen.lock().unwrap();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].0, calls[1].0);
-    assert!(calls[0].1.is_none());
-    assert_eq!(
-        calls[1].1.as_deref(),
-        Some("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
-    );
-    let url = reqwest::Url::parse(&format!("https://fixture.example{}", calls[0].0)).unwrap();
+    let url = {
+        let calls = seen.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, calls[1].0);
+        assert!(calls[0].1.is_none());
+        assert_eq!(
+            calls[1].1.as_deref(),
+            Some("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
+        );
+        reqwest::Url::parse(&format!("https://fixture.example{}", calls[0].0)).unwrap()
+    };
     let query: BTreeMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(
         query,
@@ -103,6 +128,38 @@ async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_p
             ("view".into(), "compact".into()),
         ])
     );
+    for (query, failed, status, charged, sibling, sibling_result) in [
+        (
+            "partial-agents",
+            "agents-trust",
+            206,
+            true,
+            "x402-list",
+            json!({"data":[]}),
+        ),
+        (
+            "partial-list",
+            "x402-list",
+            200,
+            false,
+            "agents-trust",
+            json!({"picks":[]}),
+        ),
+    ] {
+        let output = manager
+            .invoke_search_remote("writer", json!({"q":query}).as_object().unwrap())
+            .await
+            .unwrap();
+        let response: Value = serde_json::from_str(&output.text).unwrap();
+        assert_eq!(response[sibling], sibling_result);
+        assert_eq!(response[failed]["local_error"]["http_status"], status);
+        assert_eq!(
+            response[failed]["local_error"]["payment_may_have_occurred"],
+            charged
+        );
+        assert_eq!(output.payment_may_have_occurred, charged);
+    }
+    assert_eq!(seen.lock().unwrap().len(), 5);
     task.abort();
 }
 
