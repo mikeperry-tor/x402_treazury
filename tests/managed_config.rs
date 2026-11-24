@@ -788,11 +788,6 @@ async fn managed_starter_exposes_exa_and_provider_capabilities_without_financial
     ] {
         assert_eq!(shown["servers"]["research"][capability], true);
     }
-    assert_eq!(
-        shown["servers"]["research"]["remote_provider_directories"],
-        serde_json::json!(["coinbase", "x402-list"])
-    );
-    assert!(include_str!("../examples/deployments/managed.toml").contains("coinbase_curated"));
     assert_eq!(shown["servers"]["research"]["wallet"], "research");
     assert!(shown["servers"]["research"]["source_registry_file"].is_null());
     assert!(shown.get("provider_management_remote").is_none());

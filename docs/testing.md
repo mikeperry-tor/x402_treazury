@@ -104,12 +104,15 @@ plus any user-requested checks:
 
 | Change | Validation |
 | --- | --- |
-| Prose or comments only | Review accuracy, local links, heading anchors, and `git diff --check`; skip Cargo builds and tests (executable examples and doc-embedded assets still verify their consumers). |
+| Prose or comments only | Review accuracy, local links, heading anchors, and `git diff --check`. Skip Cargo builds and tests; do not add tests for these. |
 | Configuration, provider TOML, or schema data | Parse edited inputs and run matching catalog, routing, or request tests. Recompile when testing embedded bundled providers (`src/providers/assets.rs`). |
 | Tests or fixtures only | Compile, lint, and run matching test targets and consumers; broaden when shared helpers change. |
 | Runtime Rust | Run `make check-clippy` and focused behavior and consumer tests; add compatibility and runtime stages for touched boundaries. |
 | Dependencies, toolchain, build rules, or broad refactors | Check resolution, compilation, compatibility, and complete call chains; run vendor verifiers under [source verification boundaries](../vendor/README.md#source-verification-boundaries). |
 | Financial authority, payment or recovery, network isolation, protocol, or concurrency | Always include boundary, failure, recovery, and forbidden-side-effect tests regardless of file type. |
+
+When editing executable examples or embedded assets, verify the code paths that
+use them.
 
 Verify filtered test runs execute nonzero tests. Run
 [reproducible release builds](reproducible-builds.md) only for release
@@ -230,7 +233,7 @@ lifecycle coverage to avoid a permission prompt.
 
 ## Test boundaries
 
-| Area | Principal coverage |
+| Area | Test scope |
 | --- | --- |
 | Catalog, config, and providers | Schema projection, structural budgets, `prefer_post`, `send_tools`, `response_mappings`, pricing descriptions, cache acceptance, alias refresh, pricing retirement, and pinned local catalogs (`src/catalog.rs`, `tests/provider_catalogs.rs`, `tests/config.rs`, `tests/catalog_selection.rs`). |
 | MCP, deployment, and discovery | Listener auth and Host validation, local, remote, and raw authority, manual raw headers (`discovery::raw::tests`, `TRACE` redaction, header-capacity overflow), directory subsets, immutable invocation snapshots, concurrent registration, deferred startup, foreground drain (`tests/foreground_capacity.rs`, `tests/shutdown.rs`, `tests/supervision.rs`). |
@@ -239,10 +242,15 @@ lifecycle coverage to avoid a permission prompt.
 | Network and Tor isolation | Authenticated fake SOCKS, wire-credential correlation, pre-I/O cache race isolation, TLS retry and post-header corruption (`network::tls_retry_tests`), `Retry-After` waits, HTTP and gRPC inactivity, zero-stream-capacity cancellation, relay fallback, and `tests/network_audit.rs` (`tests/network.rs`, `rotation::base::tor_*`). |
 | Output and resource limits | Exact byte bounds, visible rejections and logs, no partial cache writes, no paid retry on oversized bodies, inline image extraction (`tests/download_limits.rs`, `tests/media.rs`, `tests/confidential_errors.rs`). |
 | Live runner offline tests | Registry reservations, budget atomicity, lifecycle schema-2 projection, content assertions, report composition, Tor audit interpretation, and preset parity (`tests/integration_preparation.rs`, `tests/live/runner/`). |
+| Documentation, logs, and comments | Do not test wording. |
 
 See [COVERAGE.md](../tests/COVERAGE.md) for the full boundary map and
 condition-analysis workflow. Key testing invariants:
 
+- **Fixtures and diagnostics:** Use standalone fixtures or construct inputs in
+  test code. Test runnable examples from their source files. For diagnostics,
+  verify event presence or absence, severity, stable identifiers, safe
+  structured fields, and redaction as applicable.
 - Fixed-chain Base RPC fixtures capture block timestamps at snapshot creation
   so headers never contradict across a wall-clock second boundary.
 - Deployment-profile tests keep literal expected values rather than deriving

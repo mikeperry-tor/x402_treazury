@@ -171,17 +171,7 @@ async fn wire_fixture() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let table: toml::Table = toml::from_str(
-        include_str!("../../docs/cover-traffic.md")
-            .split("```toml\n")
-            .nth(1)
-            .unwrap()
-            .split("```")
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
-    let mut cover: crate::cover::Config = table["cover_traffic"].clone().try_into().unwrap();
+    let mut cover = crate::cover::example_config();
     cover.ranges_enabled = false;
     cover.validate().unwrap();
     let client = client_for_capacity().with_cover(

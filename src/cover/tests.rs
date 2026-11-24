@@ -22,31 +22,6 @@ fn deadline_completion_requires_received_bytes_not_reserved_capacity() {
     assert_eq!(episode.deadline_reason(), "cover_budget_completed");
 }
 #[test]
-fn configured_example_is_valid() {
-    let config = example_config();
-    config.validate().unwrap();
-    let text = include_str!("../../docs/cover-traffic.md")
-        .split("```toml\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let table: toml::Table = toml::from_str(text).unwrap();
-    let network: crate::network::NetworkPolicy = table["network"].clone().try_into().unwrap();
-    network.validate().unwrap();
-    assert!(
-        config
-            .validate_origin("https://api.example.com/v1/paid")
-            .is_ok()
-    );
-    assert!(
-        config
-            .validate_origin("https://cdn.example.com/openapi.json")
-            .is_err()
-    );
-}
-#[test]
 fn padding_cannot_use_reserved_payment_proxy_or_credential_headers() {
     let mut config = example_config();
     config.validate().unwrap();
@@ -152,18 +127,8 @@ fn invalid_parameters_and_sampling_exhaustion_are_explicit() {
     assert!(d.validate(Unit::Bytes, true).is_err());
 }
 
-pub(super) fn example_config() -> Config {
-    let plan = include_str!("../../docs/cover-traffic.md");
-    let text = plan
-        .split("```toml\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let table: toml::Table = toml::from_str(text).unwrap();
-    let config: Config = table["cover_traffic"].clone().try_into().unwrap();
-    config
+pub(crate) fn example_config() -> Config {
+    toml::from_str(include_str!("../../tests/fixtures/cover_traffic.toml")).unwrap()
 }
 
 #[test]

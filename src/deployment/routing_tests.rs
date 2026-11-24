@@ -811,17 +811,7 @@ async fn serving_selection_preserves_cross_listener_cover_ownership() {
         let path = dir.path().join("deployment.toml");
         std::fs::write(&path, toml::to_string(&config(&value)).unwrap()).unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();
-        let table: toml::Table = toml::from_str(
-            include_str!("../../docs/cover-traffic.md")
-                .split("```toml\n")
-                .nth(1)
-                .unwrap()
-                .split("```")
-                .next()
-                .unwrap(),
-        )
-        .unwrap();
-        let mut cover: crate::cover::Config = table["cover_traffic"].clone().try_into().unwrap();
+        let mut cover = crate::cover::example_config();
         cover.url = "https://example.com/cover".into();
         for source in deployment.sources.values_mut() {
             source.config.cover_traffic = Some(cover.clone());

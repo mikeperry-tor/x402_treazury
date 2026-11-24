@@ -359,6 +359,10 @@ dependency.
   do not run full compiler, provenance, or reproducibility checks for every
   edit. Explicitly requested full checks and named stages keep their fixed
   selections.
+- **Test assertions and fixtures:** Keep tests independent of wording in logs,
+  maintained documentation, and comments in code or configuration. Use stable
+  diagnostic fields and dedicated test inputs. See
+  [test boundaries](docs/testing.md#test-boundaries).
 - **Efficiency, ordering, and continuation:** Follow
   [testing efficiency](docs/testing.md#testing-efficiency) (reuse valid
   evidence, avoid matrices, consolidate expensive setup, and prefer functional
@@ -506,10 +510,9 @@ dependency.
     `--network-config`).
   - Verify factual claims against the implementation, pinned dependencies, and
     downstream checkouts in `reference_repos/` when present.
-  - Before renaming headings, changing exact diagnostic strings, or editing
-    code blocks, cross-check markdown inbound links, `reference_repos/` links
-    and scripts, and non-markdown consumers (such as `include_str!` tests or
-    TOML `guidance` anchors).
+  - Before renaming headings, editing code blocks, or changing diagnostic
+    wording, check existing consumers, including inbound links, scripts,
+    `reference_repos/`, and TOML `guidance` anchors.
 
 ### Writing style
 

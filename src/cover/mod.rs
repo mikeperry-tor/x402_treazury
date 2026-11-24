@@ -230,6 +230,8 @@ impl Config {
 }
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::example_config;
 
 #[cfg(test)]
 mod runtime_tests;

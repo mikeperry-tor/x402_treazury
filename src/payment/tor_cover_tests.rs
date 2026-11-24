@@ -219,15 +219,7 @@ async fn fixture() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let example = include_str!("../../docs/cover-traffic.md")
-        .split("```toml\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let table: toml::Table = toml::from_str(example).unwrap();
-    let mut config: crate::cover::Config = table["cover_traffic"].clone().try_into().unwrap();
+    let mut config = crate::cover::example_config();
     config.url = "https://api.example.com/cover".into();
     config.start_delay = fixed("ms", 0);
     config.request_gap = fixed("ms", 0);

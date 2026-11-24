@@ -503,9 +503,6 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
         toolbox["remote_provider_directories"],
         json!(["coinbase", "x402-list", "agents-trust"])
     );
-    assert!(
-        include_str!("../examples/deployments/comprehensive.toml").contains("coinbase_curated")
-    );
     assert_eq!(shown["relay_fallback"]["provider_metadata"], true);
     assert_eq!(shown["relay_fallback"]["source_discovery"], true);
     assert!(shown["relay_fallback"]["wallet"].is_null());

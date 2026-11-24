@@ -1176,17 +1176,8 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
 #[tokio::test]
 async fn cover_compatibility_uses_selected_non_help_routes_and_complete_owner_key() {
     tls::install_trust();
-    let documented = include_str!("../docs/cover-traffic.md");
-    let table: toml::Table = toml::from_str(
-        documented
-            .split("```toml\n")
-            .nth(1)
-            .unwrap()
-            .split("```")
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
+    let cover: toml::Table = toml::from_str(include_str!("fixtures/cover_traffic.toml")).unwrap();
+    let cover = serde_json::to_value(cover).unwrap();
     for case in [
         "same",
         "conflict",
@@ -1236,10 +1227,8 @@ sources=['a','b']
         )
         .unwrap();
         let mut config = serde_json::to_value(config).unwrap();
-        config["sources"]["a"]["cover_traffic"] =
-            serde_json::to_value(&table["cover_traffic"]).unwrap();
-        config["sources"]["b"]["cover_traffic"] =
-            serde_json::to_value(&table["cover_traffic"]).unwrap();
+        config["sources"]["a"]["cover_traffic"] = cover.clone();
+        config["sources"]["b"]["cover_traffic"] = cover.clone();
         if case != "same" && case != "absolute" {
             config["sources"]["b"]["cover_traffic"]["concurrency"] = 1.into();
         }

@@ -98,45 +98,35 @@ fn section_names_are_strict_in_deployments_and_network_overrides() {
 }
 
 #[test]
-fn shipped_examples_use_explicit_relay_lists() {
+fn shipped_examples_resolve_the_shared_relay_order() {
+    use x402_treazury::{deployment::MetaConfig, network::NetworkConfig};
+
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let tor = x402_treazury::network::NetworkConfig::load(&root.join("examples/network/tor.toml"))
-        .unwrap();
-    let relay = tor.relay_fallback.unwrap();
-    for method in ["GET", "POST", "HEAD"] {
-        assert_eq!(relay.relays()[method].len(), 2);
-    }
-    assert!(
-        relay
-            .provider_paths()
-            .all(|path| path.is_absolute() && path.is_file())
-    );
-    let comprehensive: x402_treazury::deployment::MetaConfig =
-        toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
-    let relay = comprehensive.relay_fallback.unwrap();
-    for method in ["GET", "POST", "HEAD"] {
-        assert_eq!(
-            relay.relays()[method],
-            [
-                "../../providers/readfetch.toml",
-                "../../providers/agproxy.toml"
-            ]
-            .map(PathBuf::from)
-        );
-    }
-    let research: x402_treazury::deployment::MetaConfig =
-        toml::from_str(include_str!("../examples/deployments/research_desk.toml")).unwrap();
-    let relay = research.relay_fallback.unwrap();
-    for method in ["GET", "POST", "HEAD"] {
-        assert_eq!(
-            relay.relays()[method],
-            [
-                "../../providers/readfetch.toml",
-                "../../providers/curl/provider.toml",
-                "../../providers/agproxy.toml"
-            ]
-            .map(PathBuf::from)
-        );
+    let expected = [
+        "providers/readfetch.toml",
+        "providers/curl/provider.toml",
+        "providers/agproxy.toml",
+    ]
+    .map(|path| root.join(path).canonicalize().unwrap());
+    let tor = NetworkConfig::load(&root.join("examples/network/tor.toml")).unwrap();
+    let deployments = ["comprehensive", "research_desk"].map(|name| {
+        let path = root.join(format!("examples/deployments/{name}.toml"));
+        let config: MetaConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let mut policy = config.relay_fallback.unwrap();
+        policy.resolve_paths(&path).unwrap();
+        policy
+    });
+    for policy in [tor.relay_fallback.unwrap()].into_iter().chain(deployments) {
+        for method in ["GET", "POST", "HEAD"] {
+            let resolved: Vec<_> = policy.relays()[method]
+                .iter()
+                .map(|path| {
+                    assert!(path.is_absolute() && path.is_file(), "{}", path.display());
+                    path.canonicalize().unwrap()
+                })
+                .collect();
+            assert_eq!(resolved, expected, "{method}");
+        }
     }
 }
 

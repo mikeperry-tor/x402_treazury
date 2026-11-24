@@ -1,0 +1,52 @@
+url = "https://api.example.com/openapi.json"
+volume_mode = "extra_body"
+concurrency = 2
+max_requests_per_episode = 8
+max_cover_body_bytes_per_episode = 65536
+max_episode_ms = 10000
+qualification_range_bytes = 1024
+max_resource_bytes = 16777216
+
+[volume]
+distribution = "log_normal"
+median_bytes = 32768
+sigma = 0.65
+min_bytes = 16384
+max_bytes = 65536
+
+[ranges]
+distribution = "uniform"
+min_bytes = 4096
+max_bytes = 16384
+
+[start_delay]
+distribution = "uniform"
+min_ms = 0
+max_ms = 100
+
+[request_gap]
+distribution = "weibull"
+scale_ms = 100.0
+shape = 0.8
+min_ms = 50
+max_ms = 250
+
+[tail]
+distribution = "uniform"
+min_ms = 100
+max_ms = 500
+
+[padding]
+header_name = "x-example-padding"
+on_api_requests = true
+on_cover_requests = false
+max_value_bytes_per_request = 1024
+max_value_bytes_per_episode = 8192
+max_total_header_list_bytes = 8192
+
+[padding.size]
+distribution = "log_normal"
+median_bytes = 256
+sigma = 0.7
+min_bytes = 32
+max_bytes = 1024
