@@ -1,10 +1,11 @@
 //! Built-in directory operations; schemas load offline, calls use ordinary PaidClient.
-use crate::catalog::{Config, ToolSpec};
+use crate::catalog::{Config, RoutedRequest, ToolSpec, diagnostics::Problem};
 use anyhow::{Result, bail, ensure};
 use serde_json::{Map, Value, json};
 use std::sync::OnceLock;
 
 pub const BASE: &str = "https://x402-list.com/api/v1";
+pub const AGENTS_TRUST_BASE: &str = "https://api.agents-trust.com";
 pub const SEARCH: &str = "x402_treazury_providers_search_remote";
 pub const DETAILS: &str = "x402_treazury_provider_details_remote";
 
@@ -36,18 +37,55 @@ pub fn tool(path: &str) -> &'static ToolSpec {
 pub fn search_schema(coinbase: bool) -> Value {
     let ranked = &tool("/best").input_schema["properties"];
     let mut schema = json!({"type":"object","properties":{
-        "q":{"type":"string","description":"Capability keywords; omit to search without keywords."},
+        "q":{"type":"string","description":"Describe what the API should do. Omit to browse where supported."},
         "limit":ranked["limit"], "max_price_usd":ranked["max_price_usd"]
     },"additionalProperties":false});
     if coinbase {
         schema["properties"]["q"]["maxLength"] = json!(400);
     }
     schema["properties"]["limit"]["description"] =
-        json!("Results requested from each directory; defaults to 5.");
-    schema["properties"]["max_price_usd"]["description"] = json!(
-        "Advertised USD price filter: service minimum on x402 List, individual resources on Coinbase. Omit for any price; this is not a spending cap."
-    );
+        json!("How many results to request per directory. Defaults to 5.");
+    schema["properties"]["max_price_usd"]["description"] =
+        json!("Filter results by advertised API price in USD. Omit to search at any price.");
     schema
+}
+
+pub fn agents_trust_request(base: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
+    let need = args
+        .get("q")
+        .and_then(Value::as_str)
+        .filter(|q| {
+            q.chars().count() <= 300
+                && q.chars().filter(|c| c.is_alphanumeric()).take(2).count() == 2
+        })
+        .ok_or(Problem(
+            "provide a query of up to 300 characters with at least two letters or digits",
+        ))?;
+    let mut query = std::collections::BTreeMap::from([
+        ("need".into(), json!(need)),
+        (
+            "limit".into(),
+            json!(
+                args.get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(5)
+                    .min(5)
+            ),
+        ),
+        ("chain".into(), json!("eip155:8453")),
+        ("view".into(), json!("compact")),
+    ]);
+    if let Some(price) = args.get("max_price_usd") {
+        query.insert("max_price_usd".into(), price.clone());
+    }
+    Ok(RoutedRequest {
+        method: "GET".into(),
+        url: format!("{base}/recommend"),
+        query,
+        body: None,
+        headers: Default::default(),
+        json_media_type: None,
+    })
 }
 
 pub fn validate_search(args: &Map<String, Value>, coinbase: bool) -> Result<()> {

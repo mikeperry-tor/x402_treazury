@@ -10,7 +10,7 @@ fn search_schema() -> Value {
     object(
         json!({
             "source_name":{"type":"string","description":"Registration name to search; omit to search all APIs on this endpoint."},
-            "query":{"type":"string","description":"Capability keywords. Omit or pass blank text to enumerate callable tools."},
+            "query":{"type":"string","description":"Describe the tool you need. Omit or pass blank text to list callable tools."},
             "cursor":{"type":"string","description":"Returned next_cursor; keep the same query and source filter. Restart after catalog changes."},
             "limit":{"type":"integer","minimum":1,"default":25,"description":"Results per page; defaults to 25."}
         }),
@@ -33,19 +33,21 @@ pub fn listener_definitions(
         }), &["provider_id"])));
     }
     if policy.remote_search() {
-        let mut description = "Find APIs across the operator-selected remote directories. Returns native JSON objects keyed by directory; local_error marks a failed directory.".to_owned();
+        let mut description = "Find APIs across configured directories. Returns each directory's results or error. Searches may charge.".to_owned();
+        if policy
+            .directories
+            .contains(&super::policy::RemoteDirectory::AgentsTrust)
+        {
+            description
+                .push_str(" Agents Trust requires search text and usually charges 0.01 USDC.");
+        }
         if policy.has_x402_list() {
             description.push_str(" Cite x402-list.com for its CC BY 4.0 data.");
         }
         definitions.push((
             super::directory::SEARCH,
             description,
-            super::directory::search_schema(
-                policy
-                    .directories
-                    .iter()
-                    .any(|d| *d != super::policy::RemoteDirectory::X402List),
-            ),
+            super::directory::search_schema(policy.has_coinbase()),
         ));
     }
     if policy.remote {

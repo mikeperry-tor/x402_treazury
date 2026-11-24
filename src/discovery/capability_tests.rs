@@ -117,12 +117,13 @@ async fn directory_subsets_control_search_and_id_schema_without_gating_url_detai
         RemoteDirectory::Coinbase,
         RemoteDirectory::CoinbaseCurated,
         RemoteDirectory::X402List,
+        RemoteDirectory::AgentsTrust,
     ];
     let base = crate::providers::all()
         .iter()
         .find_map(|provider| provider.config.base_url.as_deref())
         .unwrap();
-    for mask in 0..8 {
+    for mask in 0..1 << keys.len() {
         let selected: Vec<_> = keys
             .iter()
             .enumerate()
@@ -132,10 +133,24 @@ async fn directory_subsets_control_search_and_id_schema_without_gating_url_detai
         let has_x402 = selected.contains(&RemoteDirectory::X402List);
         let m = no_payer(false, true, false, selected.clone()).await;
         let advertised = tools::listener_definitions(m.policy("writer"), false, None, None);
-        assert_eq!(
-            advertised.iter().any(|tool| tool.name == directory::SEARCH),
-            !selected.is_empty()
-        );
+        let search = advertised
+            .iter()
+            .find(|tool| tool.name == directory::SEARCH);
+        assert_eq!(search.is_some(), !selected.is_empty());
+        if let Some(search) = search {
+            let schema = serde_json::to_value(&*search.input_schema).unwrap();
+            let has_coinbase = selected.iter().any(|d| {
+                matches!(
+                    d,
+                    RemoteDirectory::Coinbase | RemoteDirectory::CoinbaseCurated
+                )
+            });
+            assert_eq!(
+                schema["properties"]["q"]["maxLength"].is_number(),
+                has_coinbase
+            );
+            assert_eq!(schema["properties"].as_object().unwrap().len(), 3);
+        }
         let details = advertised
             .iter()
             .find(|tool| tool.name == source_details::NAME)

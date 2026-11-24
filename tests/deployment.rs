@@ -1104,8 +1104,8 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
         listed["result"]["tools"][0]["inputSchema"]["properties"]["query"]["description"]
             .as_str()
             .unwrap();
-    assert!(query_help.contains("Capability keywords"));
-    assert!(query_help.contains("enumerate"));
+    assert!(query_help.contains("Describe the tool you need"));
+    assert!(query_help.contains("Omit or pass blank text to list callable tools"));
     let names: Vec<_> = listed["result"]["tools"]
         .as_array()
         .unwrap()

@@ -710,6 +710,18 @@ Exposes public reads, synchronous `/assess` (nonrefundable charge),
 queue). Excludes owner-token routes (`request-update`, `verify-ownership`,
 `reissue-token`). Distinct from the embedded 3-read directory contract.
 
+## agents-trust.toml | Agents Trust
+
+Recommendations and endpoint evidence use the standard Base x402 flow.
+Agents Trust's payment-attempt challenge extension is optional. Paid answers
+can arrive before settlement. The response header carries an attempt ID for
+the provider's free receipt lookup. The client has no recovery or
+reconciliation action that uses this ID. The ID gives the agent no useful
+next step for the returned answer, and a receipt status gives it no authority
+to repeat the paid call. The client keeps the ID out of tool results. Receipt
+lookup accepts an ID obtained separately. See the
+[Agents Trust payment guide](https://agents-trust.com/guides/pay-a-402-from-an-agent/).
+
 ## agproxy.toml | AGProxy
 
 Pinned `agproxy-openapi.json` with root `base_url` (fixing `/v1`), `/x402`
@@ -983,6 +995,16 @@ directory entries (not live occupancy), and Wikivoyage returns snippets.
   adds SEC and White House crypto regulation tracking (may duplicate entries),
   Form D private offerings, and OFAC wallet checks (AgOSINT adds 4-list
   metadata).
+
+## fastaf.toml | FastAF
+
+FastAF's Base x402 catalog includes `fastaf_patents` as an optional keyword
+search. Quote an exact title for precise lookup. Result counts can differ from
+the requested page size. Use a separate details endpoint for full claims or
+patent families. The definition excludes the Base Sepolia demo because it
+uses testnet USDC. It also excludes scrape submission and polling because a
+slow scrape can return an accepted job with a private polling token only in
+the response headers. The hosted MCP API uses account credentials.
 
 ## google-patents.toml | Google Patents through x402 Atlas
 

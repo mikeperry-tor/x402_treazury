@@ -13,13 +13,7 @@ impl Manager {
     ) -> Result<ToolOutput> {
         let policy = self.policy(owner);
         ensure!(policy.remote_search(), "remote_provider_search_disabled");
-        directory::validate_search(
-            args,
-            policy
-                .directories
-                .iter()
-                .any(|d| *d != RemoteDirectory::X402List),
-        )?;
+        directory::validate_search(args, policy.has_coinbase())?;
         let client = self.source_client(owner)?;
         let (manager, owner, args) = (self.clone(), owner.to_owned(), args.clone());
         client
@@ -39,6 +33,9 @@ impl Manager {
                                     .invoke_directory(owner, directory::SEARCH, args)
                                     .await
                             }
+                            RemoteDirectory::AgentsTrust => {
+                                manager.invoke_agents_trust_search(owner, args).await
+                            }
                         };
                         (directory, result)
                     }
@@ -46,6 +43,23 @@ impl Manager {
                 Ok(aggregate(futures_util::future::join_all(children).await))
             })
             .await?
+    }
+
+    async fn invoke_agents_trust_search(
+        &self,
+        owner: &str,
+        args: &Map<String, Value>,
+    ) -> Result<ToolOutput> {
+        let (client, base) = self.directory_client(
+            owner,
+            RemoteDirectory::AgentsTrust,
+            directory::AGENTS_TRUST_BASE,
+        )?;
+        let route = directory::agents_trust_request(&base, args)
+            .map_err(|error| crate::payment::ApiExecution { non_read: false }.attach(error))?;
+        client
+            .execute_rendered_refresh(route, None, None, &Default::default(), None)
+            .await
     }
 }
 

@@ -328,34 +328,37 @@ impl Manager {
         }
     }
 
-    pub fn directory(&self, owner: &str) -> Result<BoundTool> {
+    fn directory_client(
+        &self,
+        owner: &str,
+        directory: policy::RemoteDirectory,
+        base: &str,
+    ) -> Result<(PaidClient, String)> {
+        let policy = self.policy(owner);
         ensure!(
-            self.policy(owner).remote && self.policy(owner).has_x402_list(),
+            policy.remote && policy.directories.contains(&directory),
             "remote_directory_disabled"
         );
         let client = self
             .source_client(owner)?
             .with_relay_purpose(crate::discovery_relay::Purpose::SourceDiscovery)
-            .with_source_identity("builtin:x402-list");
-        let base = directory::BASE.to_owned();
+            .with_source_identity(&format!("builtin:{}", directory.key()));
         #[cfg(test)]
         if let Some(fixture) = self.fixture_directory.lock().unwrap().clone() {
-            let (base, client) = match fixture {
-                DirectoryFixture::LocalTls(base) => (base, client),
-                DirectoryFixture::Public(base) => (base, client.public_destinations()),
-            };
-            return Ok(BoundTool {
-                tool: directory::tool("/services").clone(),
-                client: client.clone(),
-                base,
-                source: None,
-                refresh: None,
-                help: Arc::new(crate::catalog_state::HelpBinding::new(client.clone())),
+            return Ok(match fixture {
+                DirectoryFixture::LocalTls(base) => (client, base),
+                DirectoryFixture::Public(base) => (client.public_destinations(), base),
             });
         }
+        Ok((client.public_destinations(), base.to_owned()))
+    }
+
+    pub fn directory(&self, owner: &str) -> Result<BoundTool> {
+        let (client, base) =
+            self.directory_client(owner, policy::RemoteDirectory::X402List, directory::BASE)?;
         Ok(BoundTool {
             tool: directory::tool("/services").clone(),
-            client: client.clone().public_destinations(),
+            client: client.clone(),
             base,
             source: None,
             refresh: None,

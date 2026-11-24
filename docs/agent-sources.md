@@ -29,7 +29,7 @@ source_registry_file = "../../state/toolbox-sources.sqlite"
 | --- | --- | --- |
 | `provider_management_local` | `false` | Offline bundled provider listing and registration by `provider_id` |
 | `provider_management_remote` | `false` | Remote directory search, URL or slug details lookup, and public HTTPS OpenAPI registration |
-| `remote_provider_directories` | `[]` | Ordered subset of `"coinbase"`, `"coinbase_curated"`, and `"x402-list"` for remote search |
+| `remote_provider_directories` | `[]` | Ordered subset of `"coinbase"`, `"coinbase_curated"`, `"x402-list"`, and `"agents-trust"` for remote search |
 | `raw_url_calls` | `false` | Direct calls to documented public HTTPS URLs via `x402_treazury_raw_call` |
 | `source_registry_file` | omitted | Owner-only SQLite file for persisting registrations across restarts (ephemeral when omitted) |
 | `discover_on_demand` | `false` | Advertise search and call wrappers instead of individual API tool schemas |
@@ -169,14 +169,22 @@ optional `max_price_usd`:
   `prefer=balanced` and `require_verified=false`, filtering by minimum service
   price. Has no 400-character query limit when used alone. Directory data from
   `x402-list.com` carries a CC BY 4.0 attribution requirement.
+- **Agents Trust (`agents-trust`):** Queries `/recommend` for Base API offers
+  with compact results. Requires a query of up to 300 characters containing at
+  least two letters or digits. Missing or invalid queries skip this directory
+  and return a local error. Requests up to five results. `max_price_usd`
+  filters recommended offers. A recommendation normally costs 0.01 USDC
+  separately, under the listener's payment cap. A paid answer can arrive
+  before settlement. See the
+  [Agents Trust receipt caveat](../providers/CAVEATS.md#agents-trusttoml--agents-trust).
 
 Responses return a map keyed by directory name (`coinbase`, `coinbase_curated`,
-`x402-list`): each successful entry contains the full upstream JSON object,
+`x402-list`, `agents-trust`): each successful entry contains the full upstream JSON object,
 while a failed directory returns `local_error` without cancelling healthy
 siblings. Relay advisories and possible-payment notices sit outside individual
-directory objects. Because `x402-list` and configured `source_discovery` relay
-fallbacks can charge via x402, one search call can authorize multiple payments;
-no automatic federation replay or merged truncation is performed.
+directory objects. Paid directories and configured `source_discovery` relay
+fallbacks can authorize multiple payments per search. The tool returns each
+directory's response directly and leaves any follow-up search to the caller.
 
 ### Registration matching and naming
 
@@ -340,7 +348,7 @@ behavior:
   `discovery_search_tool_instructions_text` (appended to
   `x402_treazury_tools_search`'s description, which clients re-read with tool
   definitions even if they ignore server instructions).
-- Put remote directory selection hints in
+- Put remote search guidance in
   `providers_search_remote_tool_instructions_text` (appended to
   `x402_treazury_providers_search_remote`'s description).
 - Neither `*_tool_instructions_text` setting enables discovery or provider

@@ -16,6 +16,8 @@ pub enum RemoteDirectory {
     CoinbaseCurated,
     #[serde(rename = "x402-list")]
     X402List,
+    #[serde(rename = "agents-trust")]
+    AgentsTrust,
 }
 impl RemoteDirectory {
     pub fn key(self) -> &'static str {
@@ -23,6 +25,7 @@ impl RemoteDirectory {
             Self::Coinbase => "coinbase",
             Self::CoinbaseCurated => "coinbase_curated",
             Self::X402List => "x402-list",
+            Self::AgentsTrust => "agents-trust",
         }
     }
 }
@@ -61,6 +64,14 @@ impl EndpointPolicy {
     }
     pub fn has_x402_list(&self) -> bool {
         self.directories.contains(&RemoteDirectory::X402List)
+    }
+    pub fn has_coinbase(&self) -> bool {
+        self.directories.iter().any(|d| {
+            matches!(
+                d,
+                RemoteDirectory::Coinbase | RemoteDirectory::CoinbaseCurated
+            )
+        })
     }
 }
 

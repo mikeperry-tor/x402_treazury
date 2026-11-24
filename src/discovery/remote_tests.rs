@@ -1,6 +1,111 @@
 use super::*;
 use crate::discovery::policy::RemoteDirectory;
 
+#[tokio::test]
+async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_path() {
+    use axum::{
+        http::{HeaderMap, StatusCode, Uri},
+        response::IntoResponse,
+        routing::get,
+    };
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let captured = seen.clone();
+    let recommend = get(move |headers: HeaderMap, uri: Uri| {
+        let captured = captured.clone();
+        async move {
+            let signature = headers.get("payment-signature").map(|header| {
+                let payload = serde_json::from_slice(&STANDARD.decode(header).unwrap()).unwrap();
+                crate::test_signatures::recover_exact(&payload).to_string()
+            });
+            let paid = signature.is_some();
+            captured.lock().unwrap().push((uri.to_string(), signature));
+            if paid {
+                return axum::Json(json!({"picks":[], "provider_field":true})).into_response();
+            }
+            let challenge = json!({
+                "x402Version":2,
+                "resource":{"url":"https://api.agents-trust.com/recommend"},
+                "accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,
+                    "amount":"10000","payTo":"0x0000000000000000000000000000000000000003",
+                    "maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]
+            });
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [("payment-required", STANDARD.encode(challenge.to_string()))],
+            )
+                .into_response()
+        }
+    });
+    let (base, task) = listen(
+        axum::Router::new()
+            .route("/recommend", recommend)
+            .route("/best", get(|| async { axum::Json(json!({"data":[]})) })),
+    )
+    .await;
+    let mut config = listeners(false);
+    config
+        .get_mut("writer")
+        .unwrap()
+        .remote_provider_directories =
+        vec![RemoteDirectory::AgentsTrust, RemoteDirectory::X402List];
+    let manager = manager_with(config).await;
+    *manager.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(base));
+
+    for args in [json!({}), json!({"q":"a!"}), json!({"q":"é".repeat(301)})] {
+        let output = manager
+            .invoke_search_remote("writer", args.as_object().unwrap())
+            .await
+            .unwrap();
+        let response: Value = serde_json::from_str(&output.text).unwrap();
+        assert_eq!(response["x402-list"], json!({"data":[]}));
+        assert_eq!(
+            response["agents-trust"]["local_error"]["message"],
+            "Provide a query of up to 300 characters with at least two letters or digits."
+        );
+        assert!(!output.payment_may_have_occurred);
+    }
+    assert!(seen.lock().unwrap().is_empty());
+    let output = manager
+        .invoke_search_remote(
+            "writer",
+            json!({"q":"patent & lookup","limit":20,"max_price_usd":0.02})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let response: Value = serde_json::from_str(&output.text).unwrap();
+    assert_eq!(
+        response["agents-trust"],
+        json!({"picks":[],"provider_field":true})
+    );
+    assert_eq!(response["x402-list"], json!({"data":[]}));
+    assert!(output.payment_may_have_occurred);
+    let calls = seen.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].0, calls[1].0);
+    assert!(calls[0].1.is_none());
+    assert_eq!(
+        calls[1].1.as_deref(),
+        Some("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
+    );
+    let url = reqwest::Url::parse(&format!("https://fixture.example{}", calls[0].0)).unwrap();
+    let query: BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(
+        query,
+        BTreeMap::from([
+            ("need".into(), "patent & lookup".into()),
+            ("limit".into(), "5".into()),
+            ("max_price_usd".into(), "0.02".into()),
+            ("chain".into(), "eip155:8453".into()),
+            ("view".into(), "compact".into()),
+        ])
+    );
+    task.abort();
+}
+
 #[test]
 fn grouped_errors_preserve_status_attribution_and_one_retry_instruction() {
     let error = anyhow::anyhow!("PRIVATE contract trace")

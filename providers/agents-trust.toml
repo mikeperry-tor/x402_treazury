@@ -1,0 +1,34 @@
+description = "Ranked x402 API recommendations and stored endpoint evidence, including prices and calling details."
+name = "Agents Trust"
+spec = "https://agents-trust.com/openapi.json"
+base_url = "https://api.agents-trust.com"
+prefix = "agents_trust"
+help_url = "https://agents-trust.com/llms.txt"
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true
+
+[overrides.agents_trust_recommend]
+description = "Find x402 APIs for a task. Returns ranked endpoints with prices, inputs, and evidence. Paid answers can arrive before settlement completes."
+
+[overrides.agents_trust_recommend.params]
+need = "Describe the work the API should do in 2–300 characters, with at least two letters or digits."
+live = "Use 1. Check each result's liveness and payment evidence before calling."
+max_price_usd = "Maximum advertised price for a recommended API. The recommendation fee is separate."
+chain = "Payment network of the recommended API, such as eip155:8453 for Base."
+
+[overrides.agents_trust_inspect]
+description = "Look up stored evidence for a specific x402 endpoint. The lookup uses catalog evidence and leaves the target untouched. Paid answers can arrive before settlement completes."
+pricing_description = "Advertised fee: 1% of the target's lowest quoted price, with a 0.001 USDC minimum outside the free demo set."
+
+[overrides.agents_trust_receipt]
+description = "Look up settlement by an Agents Trust payment attempt ID. A pending result leaves settlement unresolved."
+
+[overrides.agents_trust_health]
+description = "Check the Agents Trust API deployment identity."
+
+[overrides.agents_trust_help]
+description = "Read the Agents Trust usage and settlement guide."

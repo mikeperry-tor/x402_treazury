@@ -214,8 +214,9 @@ providers using the an `openapi.json` API specification URL for that provider.
 > of the bundled provider definitions, these repairs will be applied to that
 > schema automatically.
 
-The `remote_provider_directories` option can enable [Coinbase Bazaar](https://www.coinbase.com/developer-platform/discover/launches/x402-bazaar) and/or [x402-list](https://x402-list.com/) provider directory search. The `raw_url_calls` option
-also enables raw HTTPS requests with x402 payment.
+Choose which [remote API directories](docs/agent-sources.md#external-directory-matching)
+the endpoint searches with `remote_provider_directories`. Enable
+`raw_url_calls` to let agents call documented HTTPS APIs directly.
 
 This table shows the tools each option provides:
 
@@ -223,7 +224,7 @@ This table shows the tools each option provides:
 | --- | --- | --- |
 | `x402_treazury_providers_list_local` | `provider_management_local = true` | Finds bundled provider definitions offline, with optional `q`, `page`, and `per_page`. |
 | `x402_treazury_providers_add_local` | `provider_management_local = true` | Registers a bundled provider by exact `provider_id`, with optional `name`. |
-| `x402_treazury_providers_search_remote` | `provider_management_remote = true` plus `remote_provider_directories` | Searches each configured directory, with optional `q`, `limit`, and `max_price_usd`. |
+| `x402_treazury_providers_search_remote` | `provider_management_remote = true` plus `remote_provider_directories` | Searches the configured directories for APIs. |
 | `x402_treazury_providers_add_remote` | `provider_management_remote = true` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url`, with optional `name`. |
 | `x402_treazury_provider_details_remote` | `provider_management_remote = true` | Locates specs or help from `base_url`, reads usage text from `documentation_url`, or looks up an `x402_list_id` when `x402-list` is enabled. |
 | `x402_treazury_raw_call` | `raw_url_calls = true` | Calls a documented public HTTPS URL with `method`, `url`, and optional `query`, `headers`, and JSON `body`. |

@@ -756,6 +756,12 @@ send_tools = [
   { to = "exclude" },
 ]
 
+# Optional Google Patents keyword and exact-title search on business.
+# [sources.fastaf]
+# allow_catalog_failure = true
+# extends = "../../providers/fastaf.toml"
+# send_tools = [{ to = "business", tools = ["patents"] }, { to = "exclude" }]
+
 # Market families and project trend feeds are available on the finance endpoint.
 # Entity, funding and ecosystem/category research is available on business.
 [sources.claw402]

@@ -1,0 +1,25 @@
+description = "Google Patents keyword search, web search, public profiles, commerce data and page extraction."
+name = "FastAF"
+spec = "https://api.fastaf.co/openapi.json"
+base_url = "https://api.fastaf.co"
+prefix = "fastaf"
+help_url = "https://fastaf.co/llms.txt"
+include = ["/x402/v1", ""]
+exclude = ["/x402/v1/demo/search", "/x402/v1/scrape", "/x402/v1/scrape/jobs/{job_id}"]
+recommended_tools = ["fastaf_patents"]
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true
+
+[overrides.fastaf_patents]
+description = "Search Google Patents for publication links, patent IDs, and bibliographic results. Filter by inventor, assignee, office, status, or date. Use a patent detail API for claims."
+
+[overrides.fastaf_patents.params]
+query = "Patent search keywords. Quote a known title or phrase for a tighter match."
+num = "Requested page size. The upstream search can return a different number of results."
+
+[overrides.fastaf_help]
+description = "Read FastAF's route and usage guide. Use its x402 routes for pay-per-call access."

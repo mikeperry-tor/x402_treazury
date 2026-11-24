@@ -235,9 +235,9 @@ For large catalogs, set `discover_on_demand = true` under `[servers.NAME]` to
 advertise `x402_treazury_tools_search` and `x402_treazury_tool_call` instead of
 every tool schema. See [on-demand discovery](docs/agent-sources.md).
 
-Provider management lets agents search bundled providers,
-[x402 List](https://x402-list.com), and Coinbase's resource directory, then
-register APIs on their endpoint. It is off by default; enable local management,
+Provider management lets agents search bundled providers and
+[operator-selected remote directories](docs/agent-sources.md#external-directory-matching),
+then register APIs on their endpoint. It is off by default. Enable local management,
 remote management, and raw URL calls independently on any endpoint that names a
 `wallet`, and set `source_registry_file` if registrations should survive
 restarts. Agent tools cannot modify configured sources, wallet settings, or

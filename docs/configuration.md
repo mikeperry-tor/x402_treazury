@@ -968,8 +968,8 @@ omitted.
 Enable dynamic API discovery per authenticated listener with
 `provider_management_local`, `provider_management_remote`, and `raw_url_calls`
 (all default `false`), an explicit `wallet`, optional
-`remote_provider_directories` (subset of `coinbase`, `coinbase_curated`, and
-`x402-list`), and optional `source_registry_file` for persistence.
+[`remote_provider_directories`](agent-sources.md#external-directory-matching),
+and optional `source_registry_file` for persistence.
 
 | Arrangement | Configuration | Payment identity sharing |
 | --- | --- | --- |
@@ -980,8 +980,9 @@ Enable dynamic API discovery per authenticated listener with
 - Tool counts do not gate registration or refresh. A `tools/list` response with
   more than 500 advertised definitions logs an advisory `WARN` suggesting
   `discover_on_demand = true`.
-- `providers/x402-list.toml` exposes the public x402 List API as a regular
-  provider (separate from the built-in directory search).
+- `providers/x402-list.toml` and `providers/agents-trust.toml` expose those
+  APIs as regular providers. Directory search uses the listener's
+  `remote_provider_directories` choice independently.
 - See [agent source management](agent-sources.md) for the complete tool table,
   directory matching, URL discovery, raw headers, limits, and `sources` CLI
   maintenance.
@@ -1332,7 +1333,7 @@ reads, directory searches, and opt-in API requests, either inline or via
 
 ```toml
 [relay_fallback]
-source_discovery = true   # Built-in Coinbase and x402 List searches (default true).
+source_discovery = true   # Remote directory searches and service details (default true).
 provider_metadata = true  # Catalogs, help, imports, and URL probes (default true).
 api_requests = false      # Generated API tools and raw_call (default false).
 # wallet = "web"          # Optional static payer override when [wallet_bootstrap] is absent.
@@ -1359,7 +1360,7 @@ HEAD = ["../../providers/readfetch.toml", "../../providers/agproxy.toml"]
 
 | Flag | Covered requests | Default |
 | --- | --- | --- |
-| `source_discovery` | Built-in Coinbase and x402 List searches and service details | `true` |
+| `source_discovery` | Remote directory searches and x402 List service details | `true` |
 | `provider_metadata` | Static catalogs and warming, dynamic imports, help, usage docs, and URL probes | `true` |
 | `api_requests` | Generated API tools and `raw_call` | `false` |
 

@@ -13,7 +13,7 @@ fn pagination_properties() -> Map<String, Value> {
 
 pub fn list_schema() -> Value {
     let mut properties = pagination_properties();
-    properties.insert("q".into(), json!({"type":"string","description":"Capability keywords. Omit or pass blank text to enumerate bundled definitions."}));
+    properties.insert("q".into(), json!({"type":"string","description":"Describe the API you need. Omit or pass blank text to list bundled providers."}));
     json!({"type":"object","properties":properties,"additionalProperties":false})
 }
 

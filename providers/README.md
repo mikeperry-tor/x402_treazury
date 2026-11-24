@@ -54,6 +54,7 @@ treasury, funding, and source-management settings.
 | AgData | `agdata.toml` | Web and social data; both x402-capable aliases; screenshot and PDF JSON |
 | Agent402 | `agent402.toml` | Full supported catalog; advisory web-research recommendations and lowercase tags |
 | AgentFund | `agentfund.toml` | Vendor OpenAPI |
+| Agents Trust | `agents-trust.toml` | API recommendations, stored endpoint evidence and settlement lookup |
 | AgentUtility | `agentutility/provider.toml` | Full supported aliases and catalog; advisory research recommendations; enriched provenance |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | AGProxy | `agproxy.toml` | Pinned `agproxy-openapi.json`; residential fetch and proxy packs |
@@ -77,6 +78,7 @@ treasury, funding, and source-management settings.
 | Degenscan Intel | `degenscan.toml` | Event intelligence, keyless Carry reads, and public forecast submit and poll |
 | Duo Leads | `duoleads.toml` | Full synchronous keyword, Google Trends, SEO, and search-data catalog |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents, and lazy help |
+| FastAF | `fastaf.toml` | Base x402 web-data catalog with optional Google Patents search |
 | FindMyDirectDoctor | `findmydirectdoctor.toml` | Full read-only doctor, clinic, hospital cash-price, and healthcare-access catalog |
 | ForgeMesh Utility Grid | `forgemesh.toml` | Full fixed-price POST catalog; free route menu; duplicate aliases retained |
 | FreeQ | `freeq.toml` | Remote REST catalog; pending completion, credential ownership, webhook lifecycles, and gift-card purchases excluded |

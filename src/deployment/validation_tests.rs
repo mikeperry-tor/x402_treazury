@@ -436,8 +436,8 @@ fn capability_preferences_parse_strictly_and_display_defaults() {
         };
         assert!(serde_json::from_value::<MetaConfig>(value).is_err());
     }
-    let keys = ["coinbase", "coinbase_curated", "x402-list"];
-    for mask in 0..8 {
+    let keys = ["coinbase", "coinbase_curated", "x402-list", "agents-trust"];
+    for mask in 0..1 << keys.len() {
         let mut value = original.clone();
         let selected: Vec<_> = keys
             .iter()
