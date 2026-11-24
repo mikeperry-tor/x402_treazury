@@ -9,9 +9,11 @@ operational utilities. Run Make from the repository root (or via
 - **Make and shell:** GNU Make 3.81+ (including macOS Make) and a POSIX shell.
   Supported platforms are Linux and macOS (Windows runtime and native
   validation are deferred).
-- **Rust and protoc:** Install Rust and Cargo matching `rust-toolchain.toml`
-  (verified by `make toolchain`, including under Homebrew). `protoc` is
-  provided by the independently locked helper in `tools/protoc/`.
+- **Rust and protoc:** Install Rust and Cargo. The build targets use the
+  toolchain on `PATH`, subject to Cargo's minimum Rust version in
+  [`Cargo.toml`](../Cargo.toml). Validation targets such as `make test` and
+  `make check` require the exact versions in `rust-toolchain.toml`. The
+  independently locked helper in `tools/protoc/` supplies `protoc`.
 - **Python:** Not needed for the application or `make test`. Full `make check`,
   `make check-static`, `make check-clippy`, `make check-compat`,
   `make check-default-remaining`, and complexity scripts require Python 3.11+
@@ -55,6 +57,14 @@ operational utilities. Run Make from the repository root (or via
 | `scripts/tests/coverage.sh` | Offline regression test for coverage publication and failure preservation |
 | `tools/protoc/` | Independently locked build helper locating bundled `protoc` |
 | `scripts/generate_crypto_vectors.py` | Regenerates independent Keccak and EIP-712 vectors via `uv` |
+
+With rustup-managed Cargo and Rust on `PATH`, `rust-toolchain.toml` selects the
+project toolchain by default. Set `RUSTUP_TOOLCHAIN` to select a specific
+installed version for either build target, such as
+`RUSTUP_TOOLCHAIN=1.99.1 make build`. With a direct Homebrew or system install,
+select a version by putting its binaries first on `PATH`. Run `make toolchain`
+to verify that the selected Rust and Cargo match the project pin. See
+[release qualification](../docs/reproducible-builds.md) for byte-for-byte checks.
 
 ## Arguments and quoting
 

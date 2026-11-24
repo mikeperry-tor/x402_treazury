@@ -165,11 +165,21 @@ else:
                 self.assertEqual(len(calls), count)
                 self.assertIn('tools/protoc/Cargo.toml', calls[-1][1])
 
-    def test_toolchain_mismatch_stops_before_protoc(self):
-        for name in ('RUSTC', 'CARGO'):
-            result, calls = self.make('build', success=False, **{f'FAKE_{name}_VERSION': '0.0.0'})
-            self.assertIn('Toolchain mismatch', result.stderr)
-            self.assertEqual(calls, [])
+    def test_builds_accept_newer_toolchain(self):
+        for args in ([], ['build'], ['build-dev']):
+            with self.subTest(args=args):
+                _, calls = self.make(*args, FAKE_RUSTC_VERSION='999.0.0',
+                                     FAKE_CARGO_VERSION='999.0.0')
+                self.assertEqual([call[1][0] for call in calls], ['run', 'build'])
+
+    def test_toolchain_mismatch_stops_strict_checks_before_protoc(self):
+        for target in ('toolchain', 'cargo-check', 'check-clippy'):
+            for name in ('RUSTC', 'CARGO'):
+                with self.subTest(target=target, tool=name):
+                    result, calls = self.make(target, success=False,
+                                              **{f'FAKE_{name}_VERSION': '999.0.0'})
+                    self.assertIn('Toolchain mismatch', result.stderr)
+                    self.assertEqual(calls, [])
 
     def test_help_and_dry_runs_do_not_execute_cargo(self):
         for args in (['help'], ['-n', 'build'], ['-n', 'check'], ['-n', 'check-default-remaining']):

@@ -336,20 +336,21 @@ delegation request. Scale review to the change.
 ### Checks and test environment
 
 Run Rust builds and checks from the repository root via the
-[Makefile entrypoints](scripts/README.md) so pinned Cargo and Cargo-managed
-`protoc` are used. Zcash is always compiled in; static-wallet deployments simply
+[Makefile entrypoints](scripts/README.md) so locked dependencies and Cargo-managed
+`protoc` are used. Validation targets require the pinned toolchain.
+Zcash is always compiled in; static-wallet deployments simply
 omit treasury configuration. Python is development tooling only, never a runtime
 dependency.
 
 | Make command | When to run | Scope and limits |
 | --- | --- | --- |
-| `make build` or `make build-dev` | Release build (`CARGO_INCREMENTAL=0`) or incremental dev build | Verifies compilation against pinned toolchain and locked dependencies. |
+| `make build` or `make build-dev` | Release build (`CARGO_INCREMENTAL=0`) or incremental dev build | Builds with the selected toolchain and locked dependencies. |
 | `make test` | Targeted (`CARGO_ARGS=...`, `TEST_ARGS=...`) or full test runs | Runs Cargo tests through `scripts/test-runner.sh`. Check that filtered runs actually execute tests. |
 | `make clippy` | Quick all-target Clippy lint check (`--all-targets -- -D warnings`) | Does not run `zcash-regtest` or cover dependency warnings. |
 | `make check-clippy` | Production compiler and all-target `zcash-regtest` warning gate | Pipes builds through `scripts/check_warnings.py`, catching emitted dependency and cached warnings. |
 | `make fmt-check` | Formatting check | Verifies `cargo fmt --check`. |
 | `make check` | Full application qualification | Runs the ordered `check-*` stages (`check-default-remaining` after `check-compat`), including the synthetic-chain treasury lifecycle. |
-| `make toolchain` | Before plain Homebrew Cargo commands | Verifies the pinned Rust toolchain from `rust-toolchain.toml`. |
+| `make toolchain` | When a command requires the exact project toolchain | Verifies Rust and Cargo match `rust-toolchain.toml`. |
 
 - **Documentation-only edits:** Verify local links, heading anchors, and
   `git diff --check` without running Cargo suites.

@@ -40,12 +40,12 @@ endef
         check-lifecycle check-codec \
         coverage coverage-condition coverage-condition-financial coverage-branch coverage-proving coverage-consensus help
 
-build: toolchain
+build:
 	@$(build_arguments) \
 	export CARGO_INCREMENTAL=0; \
 	$(call application_cargo,build,--profile '$(PROFILE)' "$$@")
 
-build-dev: toolchain
+build-dev:
 	@$(build_arguments) \
 	export CARGO_INCREMENTAL=1; \
 	$(call application_cargo,build,--profile dev "$$@")
@@ -79,7 +79,7 @@ toolchain:
 		actual=$$("$$tool" --version); \
 		case "$$actual" in \
 			"$$tool $$expected "*) ;; \
-			*) echo "Toolchain mismatch: expected $$tool $$expected; found $$actual. Select the pinned toolchain before building." >&2; exit 1 ;; \
+			*) echo "Toolchain mismatch: expected $$tool $$expected; found $$actual. Select the pinned toolchain and try again." >&2; exit 1 ;; \
 		esac; \
 	done
 

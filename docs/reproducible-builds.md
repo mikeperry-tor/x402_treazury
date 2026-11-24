@@ -12,10 +12,10 @@ requests; `make build` and `make check` do not run it. See
 ## Toolchain and release environment
 
 - `rust-toolchain.toml` pins Rust 1.99.1 for rustup, and `make toolchain`
-  enforces matching Rust and Cargo versions under Homebrew and system installs
-  (run `make toolchain` before direct Cargo commands under Homebrew).
-  `rust-version` in `Cargo.toml` is the minimum supported language version, not
-  the toolchain pin.
+  verifies matching Rust and Cargo versions before release qualification.
+  `rust-version` in `Cargo.toml` declares the minimum supported Rust version.
+  See the [build commands](../scripts/README.md#common-entrypoints) to select
+  a toolchain for ordinary builds.
 - The current profile in `scripts/release-environment.json` pins Apple Silicon
   macOS, Homebrew Rust and Cargo 1.99.1, Apple Clang 21.0.0
   (`clang-2100.1.1.101`), `ld-1267`, and SDK 26.5 targeting macOS 14.0. The

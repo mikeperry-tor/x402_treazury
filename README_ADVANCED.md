@@ -17,10 +17,10 @@ shared-payer model.
 
 ## Prerequisites
 
-Run commands from the repository root. `make build` checks the pinned Rust and
-Cargo toolchain and supplies `protoc`. GNU Make 3.81+ and a POSIX shell are
-required. Runtime support covers Linux and macOS; Windows runtime support is
-deferred (see [portability](docs/development.md#portability)).
+Run commands from the repository root with GNU Make 3.81+ and a POSIX shell.
+`make build` uses the selected Rust toolchain and supplies `protoc`. See the
+[build commands](scripts/README.md#common-entrypoints) for toolchain selection
+and [portability](docs/development.md#portability) for platform support.
 
 Zcash support is always compiled in; static-wallet deployments simply omit
 `[treasury]`. Only synthetic proving and local consensus tests use opt-in Cargo
