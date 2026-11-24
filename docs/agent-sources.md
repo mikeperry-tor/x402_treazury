@@ -63,16 +63,19 @@ Authority boundaries:
 
 ## Agent tools
 
+All built-in tools use the `x402_treazury_` prefix. This table shows their
+short names.
+
 | Tool | Enabled by | Purpose |
 | --- | --- | --- |
-| `x402_treazury_tools_search` | `discover_on_demand` or either provider-management flag | Searches callable tools on this endpoint and returns full input schemas. Makes no network requests. |
-| `x402_treazury_tool_call` | `discover_on_demand` or either provider-management flag | Invokes a callable `tool_id` with `arguments`, applying normal payment caps and filters. |
-| `x402_treazury_providers_list_local` | `provider_management_local` | Lists or searches bundled provider definitions offline (`q`, `page`, `per_page`). |
-| `x402_treazury_providers_add_local` | `provider_management_local` | Registers a bundled provider by exact `provider_id` and optional `name`. |
-| `x402_treazury_providers_search_remote` | `provider_management_remote` plus nonempty `remote_provider_directories` | Queries every selected remote directory concurrently (`q`, `limit`, `max_price_usd`). |
-| `x402_treazury_provider_details_remote` | `provider_management_remote` | Checks bundled matches, then probes `base_url`, reads `documentation_url`, or looks up `x402_list_id` (requires `x402-list`). |
-| `x402_treazury_providers_add_remote` | `provider_management_remote` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url` and optional `name`. |
-| `x402_treazury_raw_call` | `raw_url_calls` | Calls a documented public HTTPS URL (`method`, `url`, optional `query`, `headers`, and JSON `body`). |
+| `tools_search` | `discover_on_demand` or either provider-management flag | Searches callable tools on this endpoint and returns full input schemas. Makes no network requests. |
+| `tool_call` | `discover_on_demand` or either provider-management flag | Invokes a callable `tool_id` with `arguments`, applying normal payment caps and filters. |
+| `providers_list_local` | `provider_management_local` | Lists or searches bundled provider definitions offline (`q`, `page`, `per_page`). |
+| `providers_add_local` | `provider_management_local` | Registers a bundled provider by exact `provider_id` and optional `name`. |
+| `providers_search_remote` | `provider_management_remote` plus nonempty `remote_provider_directories` | Queries every selected remote directory concurrently (`q`, `limit`, `max_price_usd`). |
+| `provider_details_remote` | `provider_management_remote` | Checks bundled matches, then probes `base_url`, reads `documentation_url`, or looks up `x402_list_id` (requires `x402-list`). |
+| `providers_add_remote` | `provider_management_remote` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url` and optional `name`. |
+| `raw_call` | `raw_url_calls` | Calls a documented public HTTPS URL (`method`, `url`, optional `query`, `headers`, and JSON `body`). |
 
 Recommended agent workflow:
 

@@ -218,16 +218,18 @@ Choose which [remote API directories](docs/agent-sources.md#external-directory-m
 the endpoint searches with `remote_provider_directories`. Enable
 `raw_url_calls` to let agents call documented HTTPS APIs directly.
 
-This table shows the tools each option provides:
-
 | Tool | Enabled by | What the agent uses it for |
 | --- | --- | --- |
-| `x402_treazury_providers_list_local` | `provider_management_local = true` | Finds bundled provider definitions offline, with optional `q`, `page`, and `per_page`. |
-| `x402_treazury_providers_add_local` | `provider_management_local = true` | Registers a bundled provider by exact `provider_id`, with optional `name`. |
-| `x402_treazury_providers_search_remote` | `provider_management_remote = true` plus `remote_provider_directories` | Searches the configured directories for APIs. |
-| `x402_treazury_providers_add_remote` | `provider_management_remote = true` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url`, with optional `name`. |
-| `x402_treazury_provider_details_remote` | `provider_management_remote = true` | Locates specs or help from `base_url`, reads usage text from `documentation_url`, or looks up an `x402_list_id` when `x402-list` is enabled. |
-| `x402_treazury_raw_call` | `raw_url_calls = true` | Calls a documented public HTTPS URL with `method`, `url`, and optional `query`, `headers`, and JSON `body`. |
+| `providers_list_local` | `provider_management_local = true` | Finds bundled provider definitions offline, with optional `q`, `page`, and `per_page`. |
+| `providers_add_local` | `provider_management_local = true` | Registers a bundled provider by exact `provider_id`, with optional `name`. |
+| `providers_search_remote` | `provider_management_remote = true` plus `remote_provider_directories` | Searches the configured directories for APIs. |
+| `providers_add_remote` | `provider_management_remote = true` | Registers a public HTTPS OpenAPI 3 JSON specification by `spec_url`, with optional `name`. |
+| `provider_details_remote` | `provider_management_remote = true` | Locates specs or help from `base_url`, reads usage text from `documentation_url`, or looks up an `x402_list_id` when `x402-list` is enabled. |
+| `raw_call` | `raw_url_calls = true` | Calls a documented public HTTPS URL with `method`, `url`, and optional `query`, `headers`, and JSON `body`. |
+
+> All built-in tools are prefixed with `x402_treazury_`, to avoid tool
+> collision and/or confusion with provider APIs. The tool tables in this README
+> show names without this prefix.
 
 Agent-added tool registrations belong only to the endpoint that created them and last
 until the process exits unless you set `source_registry_file`. Payment caps and
@@ -239,8 +241,8 @@ also exposes two wrapper tools so the agent retrieves schemas only when needed:
 
 | Tool | What the agent uses it for |
 | --- | --- |
-| `x402_treazury_tools_search` | Finds callable tools and their full input schemas on this endpoint (`query`, `source_name`, `cursor`, and `limit`). Makes no provider requests. |
-| `x402_treazury_tool_call` | Invokes a discovered `tool_id` with `arguments`; payment checks still apply. |
+| `tools_search` | Finds callable tools and their full input schemas on this endpoint (`query`, `source_name`, `cursor`, and `limit`). Makes no provider requests. |
+| `tool_call` | Invokes a discovered `tool_id` with `arguments`; payment checks still apply. |
 
 These two wrapper tools are also advertised whenever either provider-management
 flag is enabled so the agent can find and call newly registered APIs. On-demand
@@ -284,11 +286,11 @@ Native ZEC transfers need no NEAR setup; foreign assets require the
 
 | Tool | Enabled by | What it does |
 | --- | --- | --- |
-| `x402_treazury_swap_assets` | Either flag | Searches native ZEC and supported foreign assets by symbol, chain, or keywords. |
-| `x402_treazury_payment_request_create` | `receive` | Creates a fresh shielded ZEC receive address or a single-use foreign swap deposit request. |
-| `x402_treazury_swap_preview` | `send` | Previews an outgoing payment and checks whether its estimated total fits `max_send_zec` and spendable ZEC. |
-| `x402_treazury_swap_send` | `send` | Sends native ZEC or swaps treasury ZEC for a requested foreign amount. |
-| `x402_treazury_swap_status` | Either flag; retained for persisted requests | Checks sent payments or receive requests, including UTC time and expiry countdowns. |
+| `swap_assets` | Either flag | Searches native ZEC and supported foreign assets by symbol, chain, or keywords. |
+| `payment_request_create` | `receive` | Creates a fresh shielded ZEC receive address or a single-use foreign swap deposit request. |
+| `swap_preview` | `send` | Previews an outgoing payment and checks whether its estimated total fits `max_send_zec` and spendable ZEC. |
+| `swap_send` | `send` | Sends native ZEC or swaps treasury ZEC for a requested foreign amount. |
+| `swap_status` | Either flag; retained for persisted requests | Checks sent payments or receive requests, including UTC time and expiry countdowns. |
 
 The tool descriptions tell the agent the usage rules for these tools. In
 particular, foreign payers must send the **exact requested amount** (with
