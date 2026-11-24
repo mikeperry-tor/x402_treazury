@@ -183,10 +183,12 @@ separate Tor circuits, `x402_treazury` tries each configured fallback relay in
 order. The Tor network example and both Tor deployments use the same relay
 order. See [example relay settings](examples/README.md#operator-notes).
 
-API call data never goes through a relay unless you set
-`api_requests = true`, which is off by default to avoid exposing API payloads to
-relay providers. None of the bundled providers require relay fallback for API
-calls over Tor.
+When a provider directory search falls back to a paid relay due to rate limits
+or bans (most common with Coinbase), the relay provider receives the search
+text in the target URL.  `source_discovery` controls this fallback.
+`api_requests` controls fallback for provider tool calls and raw URL calls and
+defaults to `false`. See the [relay trust
+boundary](docs/network-egress.md#relay-fallback).
 
 ### Wallet state and concurrency
 
