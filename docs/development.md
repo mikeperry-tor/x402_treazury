@@ -44,10 +44,11 @@ evidence warrants a focused change:
   and tooling consumers without exposing MCP tools; loader differences reflect
   distinct failure contracts; test-hook attributes stay where concrete
   responsibilities justify them.
-- **Compiler baseline and arithmetic:** Rust 1.99.1 matches the pinned
-  toolchain. Release builds enable integer overflow checks throughout the
-  dependency graph; financial code must return checked-arithmetic errors rather
-  than relying on panic recovery.
+- **Compiler baseline and arithmetic:** The application declares its minimum
+  Rust version in [`Cargo.toml`](../Cargo.toml). Validation uses the toolchain
+  in [`rust-toolchain.toml`](../rust-toolchain.toml). Release builds enable
+  integer overflow checks throughout the dependency graph. Financial code must
+  return checked-arithmetic errors rather than relying on panic recovery.
 - **File locks and storage guards:** `fs2` locks protect exclusive ownership.
   Registry and treasury storage share an explicit-unlock guard released after
   the database closes; Store handles retain that guard through accepted work

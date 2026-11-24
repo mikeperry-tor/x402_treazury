@@ -61,7 +61,7 @@ operational utilities. Run Make from the repository root (or via
 With rustup-managed Cargo and Rust on `PATH`, `rust-toolchain.toml` selects the
 project toolchain by default. Set `RUSTUP_TOOLCHAIN` to select a specific
 installed version for either build target, such as
-`RUSTUP_TOOLCHAIN=1.99.1 make build`. With a direct Homebrew or system install,
+`RUSTUP_TOOLCHAIN=1.96.1 make build`. With a direct Homebrew or system install,
 select a version by putting its binaries first on `PATH`. Run `make toolchain`
 to verify that the selected Rust and Cargo match the project pin. See
 [release qualification](../docs/reproducible-builds.md) for byte-for-byte checks.
