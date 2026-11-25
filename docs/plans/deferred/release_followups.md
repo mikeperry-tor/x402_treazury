@@ -27,7 +27,7 @@ its own concrete threat question. Vendor retirement remains in its existing
 | --- | --- |
 | D1 — Windows support / B8 | Deferred implementation and native acceptance. Inventory runtime, private files/ACLs, SQLite sidecars, locking, supervision, process/network semantics and SDK/native dependencies; implement real contracts and test native positive/negative controls before claiming support. Current unsupported-operation errors are not a Windows implementation. Preserve existing portable improvements. |
 | D2 — Linux CI / B1 | Complete main-branch acceptance of the [CI workflow](../../../.github/workflows/ci.yml), including fmt/tooling/vendor integrity, production warnings/all-target Clippy, compatibility/runtime stages, exact source/toolchain identities, failure propagation and functional README CI/coverage badges. After badge acceptance, retire automatic lifecycle GDB setup/capture and `ci_coverage` bootstrap triggers under the [temporary diagnostics policy](../../testing.md#temporary-ci-diagnostics). Retain normal checks/logs, selected profile/thread count and opt-in/manual diagnostic tools. Verify ordinary CI without capture and an explicit diagnostic invocation with capture and truthful exit status; update the testing/scripts guides. This cleanup survives removal of the completed CI plan. Integrate advisory evaluation including source versions hidden by path patches. CI deferral does not waive local dependency-security assessment or release checks. |
-| D3 — Provider-output assessment / R3 | Examine descriptions, control characters and unfamiliar pricing JSON through actual MCP output and consumers, using small synthetic cases. Identify harmful rendering, loss of useful meaning or avoidable output amplification, then decide which focused transformations are warranted. Exit with supported output policy in the agent-source guide and regressions for any selected changes, or explicit evidence-backed acceptance of current behavior. A generic description cap is not presumed necessary and does not solve instruction injection. This assessment is planned work, not contingent on receiving a new report. |
+| D3 - Provider output (R3) | Review descriptions and pricing in MCP output and clients. Follow the [assessment criteria](#provider-output-assessment). |
 | D4 — Snapshot visibility / R6 | Add derived operator visibility for database/WAL sizes, unique snapshot count/bytes, current snapshot size and reference reasons separating unresolved work from resolved history without double counting. Validate actual shared references with small fixtures and explain results in wallet administration. Use existing metadata; add no permanent accounting ledger, quota or implicit deletion. Snapshot pruning is not selected work: retention remains the current recovery contract. |
 | D6 — Archive provenance / B10 | Correct unknown-versus-dirty reporting for builds without Git metadata. Define honest provenance using the existing versioned build-identity contract and inspect qualification/reproducibility consumers before choosing a compatible representation. Validate clean, dirty and repository-free inputs with faithful fixtures and update development/release guidance. Preserve hashes and do not fabricate a clean revision. Other B10 observations have documented non-action dispositions, not a deferred catchall refactor. |
 | D7 — SDK mempool shutdown | Reproduce the [potential shutdown hang](../../testing.md#potential-sdk-mempool-shutdown-hang) with a controlled full notice channel, consumer shutdown and monitor join. Check the pinned SDK and candidate upstream implementation before selecting a correction. Preserve transaction draining, accepted-work ownership and unrelated progress; do not substitute a timeout or abandonment of accepted transactions. Independently review the correction and vendor provenance, and verify both the blocked-notice control and pending-transaction drain behavior. This unresolved source-audit finding is distinct from the loader/worker activity race and is not a confirmed cause of earlier CI hangs. |
@@ -35,6 +35,17 @@ its own concrete threat question. Vendor retirement remains in its existing
 Track identifiers retain gaps when a proposed track is removed rather than
 renumbering existing work. Non-action decisions belong in owning guides, not this
 future-work queue.
+
+### Provider output assessment
+
+Use small synthetic cases to inspect tool descriptions, control characters,
+and unfamiliar pricing metadata in MCP output and clients. Look for harmful
+rendering, loss of useful meaning, and avoidable output growth. Assess instruction
+injection separately from the [description limit](../../configuration.md#observed-prices-and-description-overrides).
+
+Record the supported output policy in the agent-source guide and add regression
+tests for selected changes. If the behavior stays as it is, record the evidence
+for that decision. The assessment can proceed without a new report.
 
 ## Workflow when a track is scheduled
 

@@ -101,7 +101,7 @@ always govern payment. See
 ### Pricing in packets
 
 - Reports effective `catalog_key`, `pricing_metadata_operations`,
-  `total_operations`, generated `Cost:` text, `pricing.evidence` (root shapes,
+  `total_operations`, generated pricing text, `pricing.evidence` (root shapes,
   statuses, and diffs), `pricing.relocation` (empty catalog key or changed
   external source), and `pricing.signals` (bounded sorted JSON pointers whose
   keys match pricing terms across remote documents, excluding local files and
@@ -132,7 +132,7 @@ always govern payment. See
 ### Pricing coverage triage and adapter gaps
 
 Compare `pricing_metadata_operations` against `total_operations` and inspect
-generated `Cost:` text: a key may exist on every operation while rendering
+generated pricing text: a key may exist on every operation while rendering
 `Cost: unknown.` for an unsupported shape. Use `pricing.signals` to locate
 candidate fields and inspect the raw object.
 

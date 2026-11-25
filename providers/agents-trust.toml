@@ -22,7 +22,7 @@ chain = "Payment network of the recommended API, such as eip155:8453 for Base."
 
 [overrides.agents_trust_inspect]
 description = "Look up stored evidence for a specific x402 endpoint. The lookup uses catalog evidence and leaves the target untouched. Paid answers can arrive before settlement completes."
-pricing_description = "Advertised fee: 1% of the target's lowest quoted price, with a 0.001 USDC minimum outside the free demo set."
+pricing_description = "Fee is 1% of the target's lowest quoted price, with a 0.001 USDC minimum outside the free demo set."
 
 [overrides.agents_trust_receipt]
 description = "Look up settlement by an Agents Trust payment attempt ID. A pending result leaves settlement unresolved."

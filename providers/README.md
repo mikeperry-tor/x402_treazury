@@ -214,9 +214,9 @@ index.
 - **Pricing separation:** Declare `[pricing]` (`source = "catalog"` preferred,
   or an explicit HTTPS URL) when the catalog uses a supported format, setting
   `unit = "call"` and `usd_as_usdc = true` only after checking the vendor's
-  billing contract. In TOML description overrides, place current-call tariffs
-  (including unconditional free claims) in `pricing_description` alongside a
-  tariff-free `description` so observed offers replace only the price line.
+  billing contract. Add independent `pricing_description` notes for
+  vendor terms the configured source cannot express. MCP descriptions show
+  published terms, configured notes, and samples for individual requests.
   Leave dynamic, credit, and metered prices display-only. See
   [pricing metadata](../docs/configuration.md#pricing-metadata-and-runtime-hints).
 - **Targeted regression fixtures:** Store provider-specific fixtures and tests

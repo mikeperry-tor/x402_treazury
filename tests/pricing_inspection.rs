@@ -91,7 +91,7 @@ async fn inspection_keeps_authored_prices_unknown_cost_and_zero_endpoint_io() {
             .as_str()
             .unwrap()
     };
-    assert!(description("/read").contains("Cost: ~$0.015/call [spec]."));
+    assert!(description("/read").contains("Listed: ~$0.015 [spec, no unit]."));
     assert!(description("/unknown").contains("Cost: unknown."));
     let checked = cli(
         dir.path(),
@@ -167,7 +167,7 @@ include_tools=['api_read']
             listener["tools"][0]["description"]
                 .as_str()
                 .unwrap()
-                .contains("Cost: ~$0.015/call [spec].")
+                .contains("Listed: ~$0.015 [spec, no unit].")
         );
     }
     assert_eq!(

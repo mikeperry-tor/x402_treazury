@@ -222,6 +222,16 @@ directory's response directly and leaves any follow-up search to the caller.
   `provider_id` or `spec_url` returns the existing registration without
   refreshing it. Concurrent registrations on the same endpoint share one import
   slot and publish complete snapshots atomically.
+- Bundled tool descriptions and instructions use the registered names for
+  whole known tool references and the provider-wide wildcard. Markdown code
+  spans, emphasis, and visible link labels can contain these references.
+  Markdown destinations, reference definitions, and bare addresses such as
+  `https://example.com/tool` and `./docs/tool` keep their authored bytes. Shortcut and
+  collapsed reference links keep their labels because those labels identify
+  the destination. Use an inline link or a full reference link to let the
+  visible label follow the registered name. A plain slash-separated token
+  denotes alternatives when every part is a known tool reference. Use a
+  prefix such as `./` when writing an unlinked relative URL.
 
 ## Manual raw headers
 

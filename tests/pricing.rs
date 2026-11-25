@@ -11,7 +11,10 @@ fn advertised_prices_preserve_provenance_even_when_amounts_appear_in_prose() {
         {"method":"GET","path":"/unit","pricing":{"amount":"0.01","currency":"USD","unit":"token"}},
         {"method":"GET","path":"/unknown"}
     ]});
-    let tools = build_tools(&Config::default(), &root, "api").unwrap();
+    let cfg: Config =
+        toml::from_str("[pricing]\nsource='catalog'\nformat='payment-info'\nunit='call'\n")
+            .unwrap();
+    let tools = build_tools(&cfg, &root, "api").unwrap();
     let desc = |path: &str| {
         tools
             .iter()
@@ -20,12 +23,12 @@ fn advertised_prices_preserve_provenance_even_when_amounts_appear_in_prose() {
             .description
             .as_str()
     };
-    assert!(desc("/fixed").contains("Cost: ~$0.10/call [spec]."));
+    assert!(desc("/fixed").contains("Listed: ~$0.10/call [spec]."));
     assert!(desc("/fixed").contains("[spec]"));
-    assert!(desc("/range").contains("Cost: ~$0.10–$2.00/call [spec]."));
+    assert!(desc("/range").contains("Listed: ~$0.10–$2.00/call [spec]."));
     assert!(desc("/dynamic").contains("[spec, dynamic]"));
-    assert!(desc("/free").contains("Cost: free [spec]."));
-    assert!(desc("/unit").contains("Cost: ~$0.01/token [spec]."));
+    assert!(desc("/free").contains("Listed: free [spec]."));
+    assert!(desc("/unit").contains("Listed: ~$0.01/token [spec]."));
     assert!(desc("/unknown").contains("Cost: unknown."));
     assert!(!desc("/unknown").contains("X402_MAX_PRICE_USD"));
 }

@@ -868,7 +868,7 @@ async fn repaired_tools_publish_while_pricing_is_pending_and_keep_generation_sco
             assert!(
                 current
                     .description()
-                    .contains("Observed cost: ~$0.000456/call.")
+                    .contains("Sample offer: $0.000456 for one request.")
             );
             // Completion must neither rotate the observed cache nor replace its cells.
             let cached = fixture.slot().read().await.unwrap();

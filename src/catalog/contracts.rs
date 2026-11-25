@@ -125,7 +125,7 @@ impl CatalogBuild {
 pub(super) fn render_descriptions(tools: &mut [ToolSpec]) {
     for tool in tools {
         if let Some(rendering) = &tool.description_rendering {
-            tool.description = rendering.canonical();
+            tool.description = rendering.canonical(&tool.name);
         }
     }
 }
@@ -204,6 +204,38 @@ fn position(key: &str, value: &Value) -> Position {
         _ => Position::Opaque,
     }
 }
+pub(crate) fn rebind_schema_descriptions(value: &mut Value, rebind: &impl Fn(&str) -> String) {
+    let Some(schema) = value.as_object_mut() else {
+        return;
+    };
+    for (key, value) in schema {
+        if key == "description"
+            && let Some(description) = value.as_str()
+        {
+            *value = Value::String(rebind(description));
+            continue;
+        }
+        match position(key, value) {
+            Position::Schema => rebind_schema_descriptions(value, rebind),
+            Position::Map => {
+                if let Some(properties) = value.as_object_mut() {
+                    for schema in properties.values_mut() {
+                        rebind_schema_descriptions(schema, rebind);
+                    }
+                }
+            }
+            Position::List => {
+                if let Some(branches) = value.as_array_mut() {
+                    for schema in branches {
+                        rebind_schema_descriptions(schema, rebind);
+                    }
+                }
+            }
+            Position::Opaque => {}
+        }
+    }
+}
+
 fn exclusive<'a>(node: &'a Value, key: &str, value: &'a Value) -> Option<&'a Value> {
     if !matches!(key, "exclusiveMinimum" | "exclusiveMaximum") {
         return Some(value);

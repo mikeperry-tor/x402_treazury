@@ -6,6 +6,8 @@ use serde_json::Value;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
+pub(crate) const UNKNOWN_PRICE: &str = "Cost: unknown.";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PricingFormat {
@@ -97,257 +99,655 @@ pub struct NormalizedPrice {
     pub asset: Option<String>,
     pub unit: Option<String>,
     pub selection_amount: Option<U256>,
-    description: String,
+    description: Option<String>,
+    legacy_listing: Option<String>,
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct TariffText {
+    pub(crate) text: String,
+    pub(crate) usdc: bool,
+    pub(crate) legacy_listing: Option<String>,
+    pub(crate) exact_offer: Option<U256>,
+}
+
 impl NormalizedPrice {
     pub fn description(&self) -> &str {
-        &self.description
+        self.description.as_deref().unwrap_or(UNKNOWN_PRICE)
     }
-    pub fn parse(config: &PricingConfig, value: &Value) -> Self {
-        if value.is_null() {
-            return Self::payment_info(config, value);
-        }
-        if matches!(
-            config.format,
-            PricingFormat::X402Resources | PricingFormat::X402Discovery
-        ) {
-            // Explicit ranges describe the tariff, not a fixed accepts sample.
-            if explicit_range_block(value).is_some() {
-                return Self::payment_info(config, value);
-            }
-            let mut result = Self::payment_requirements(&value["accepts"]);
-            let block = tariff_block(value);
-            let unit = enclosing_field(value, block, "unit");
-            let dynamic = dynamic_tariff(value, block);
-            if dynamic
-                || unit.is_some_and(|unit| {
-                    !unit
-                        .as_str()
-                        .is_some_and(|unit| matches!(unit, "call" | "request"))
-                })
-            {
-                let quoted = result.selection_amount;
-                result.selection_amount = None;
-                result.kind = if dynamic {
-                    TariffKind::Dynamic
-                } else {
-                    TariffKind::Other
-                };
-                result.unit = unit.and_then(Value::as_str).map(str::to_owned);
-                result.description = if block.get("amount").is_some() {
-                    Self::payment_info(config, value).description
-                } else if let Some(amount) = quoted {
-                    format!(
-                        "Advertised amount: ~${} USDC; unit: {} [spec{}].",
-                        crate::pricing::ObservedPrice { amount },
-                        result.unit.as_deref().unwrap_or("unknown"),
-                        if dynamic { ", dynamic" } else { "" }
-                    )
-                } else if dynamic {
-                    "Pricing: dynamic [spec].".into()
-                } else {
-                    "Cost: unknown.".into()
-                };
-            }
-            return result;
-        }
-        if config.format == PricingFormat::X402 {
-            let mut normalized = value.clone();
-            if let Some(price) = value["price"].as_str().and_then(|p| p.strip_prefix('$')) {
-                normalized["amount"] = Value::String(price.into());
-                if normalized.get("currency").is_none() {
-                    normalized["currency"] = Value::String("USD".into());
-                }
-                normalized.as_object_mut().unwrap().remove("price");
-            }
-            return Self::payment_info(config, &normalized);
-        }
-        Self::payment_info(config, value)
+
+    pub(crate) fn tariff_text(&self) -> Option<TariffText> {
+        Some(TariffText {
+            text: self.description.as_ref()?.clone(),
+            usdc: self
+                .currency
+                .as_deref()
+                .is_some_and(|currency| currency.eq_ignore_ascii_case("USDC")),
+            legacy_listing: self.legacy_listing.clone(),
+            exact_offer: None,
+        })
     }
-    fn payment_info(config: &PricingConfig, p: &Value) -> Self {
-        let mut result = Self {
+
+    pub(crate) fn unknown() -> Self {
+        Self {
             kind: TariffKind::Unknown,
             currency: None,
             network: None,
             asset: None,
             unit: None,
             selection_amount: None,
-            description: "Cost: unknown.".into(),
+            description: None,
+            legacy_listing: None,
+        }
+    }
+
+    pub fn parse(config: &PricingConfig, value: &Value) -> Self {
+        let origin = Origin::from_format(&config.format);
+        let dollar = if config.format == PricingFormat::X402 {
+            dollar_price(value)
+        } else {
+            None
         };
-        if p.is_null() || p == &serde_json::json!({}) {
-            return result;
+        let price = dollar.as_ref().unwrap_or(value);
+        let range = explicit_range_block(price);
+        let block = range.unwrap_or_else(|| tariff_block(price));
+        let mode = tariff_mode(price, block);
+        let free = tariff_blocks(price)
+            .into_iter()
+            .flatten()
+            .any(|block| block["authMode"] == "free");
+        let mut result =
+            Self::payment_info(config, price, block, range.is_some(), origin, free, mode);
+        let paid = free
+            && (tariff_blocks(value)
+                .into_iter()
+                .flatten()
+                .any(competes_with_free)
+                || match result.kind {
+                    TariffKind::Unknown => false,
+                    TariffKind::Fixed if is_zero_amount(&block["amount"]) => {
+                        opaque_price(price, origin.is_external(), true).is_some()
+                    }
+                    _ => true,
+                });
+        if free && !paid {
+            let mut description = format!("Listed: free [{}].", origin.label());
+            append_billing_terms(&mut description, price, origin);
+            return Self {
+                kind: TariffKind::Free,
+                selection_amount: Some(U256::ZERO),
+                description: Some(description),
+                legacy_listing: result.legacy_listing,
+                ..Self::unknown()
+            };
         }
-        let range = explicit_range_block(p);
-        if p["authMode"] == "free" && p.get("price").is_none() && range.is_none() {
-            result.kind = TariffKind::Free;
-            result.selection_amount = Some(U256::ZERO);
-            result.description = "Cost: free [spec].".into();
-            return result;
+
+        let unrendered_terms = free && result.kind == TariffKind::Unknown;
+        let supports_estimate =
+            enclosing_blocks(price, block).all(allows_request_estimate) && compatible_rail(price);
+        if origin.is_external() {
+            result = result.with_external_offer(price, block, supports_estimate && !paid);
+        } else {
+            result.selection_amount = result.selection_amount.filter(|_| supports_estimate);
         }
-        let block = range.unwrap_or_else(|| tariff_block(p));
-        // A fixed estimate requires currency in its own amount block.
-        let currency = if range.is_some() {
-            enclosing_field(p, block, "currency")
+        if free {
+            result.selection_amount = None;
+            const CONFLICT: &str = "Conflicting free and paid metadata.";
+            let description = result.append_description(CONFLICT);
+            if unrendered_terms {
+                append_billing_terms(description, price, origin);
+            }
+        }
+        result
+    }
+
+    fn payment_info(
+        config: &PricingConfig,
+        price: &Value,
+        block: &Value,
+        range: bool,
+        origin: Origin,
+        free: bool,
+        mode: Option<&Value>,
+    ) -> Self {
+        let mut result = Self::unknown();
+        let currency = if range {
+            enclosing_field(price, block, "currency")
         } else {
             block.get("currency")
         };
         result.currency = currency.and_then(Value::as_str).map(str::to_owned);
-        result.network = enclosing_field(p, block, "network")
+        result.network = enclosing_field(price, block, "network")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        result.asset = enclosing_field(p, block, "asset")
+        result.asset = enclosing_field(price, block, "asset")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        let declared_unit = enclosing_field(p, block, "unit");
-        result.unit = match declared_unit {
-            Some(value) => value.as_str().map(str::to_owned),
-            None => config.unit.clone(),
-        };
-        let unit = result
-            .unit
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .unwrap_or("call");
-        let show = |amount: String| match currency.and_then(Value::as_str) {
-            Some(c) if c.eq_ignore_ascii_case("USD") || c.eq_ignore_ascii_case("USDC") => {
-                format!("${amount}")
-            }
-            Some(c) => format!("{amount} {c}"),
-            None => amount,
-        };
-        if let Some(range) = range {
-            if let (Some(lo), Some(hi)) = (money(&range["min"]), money(&range["max"]))
-                && declared_unit
-                    .is_none_or(|unit| unit.as_str().is_some_and(|unit| !unit.is_empty()))
-            {
-                result.kind = TariffKind::Range;
-                result.description = format!("Cost: ~{}–{}/{unit} [spec].", show(lo), show(hi));
-            } else {
-                result.kind = TariffKind::Other;
-                result.description = format!("Pricing: {p} [spec].");
-            }
-        } else if let Some(amount) = money(&block["amount"]) {
-            let dynamic = dynamic_tariff(p, block);
+        let declared_unit = enclosing_field(price, block, "unit");
+        result.unit = effective_unit(config, declared_unit);
+        let legacy_unit = result.unit.as_deref();
+        let dynamic = mode.is_some_and(is_dynamic_mode);
+        let label = evidence_label(origin, mode, result.unit.is_none());
+        let suffix = unit_suffix(result.unit.as_deref());
+        let show = |amount| display_amount(amount, result.currency.as_deref());
+        if range {
+            result.kind = TariffKind::Range;
+            let (min, max) = (&block["min"], &block["max"]);
+            let legacy_unit = legacy_unit.filter(|_| !min.is_f64() && !max.is_f64());
+            let terms = match (range_bound(min), range_bound(max)) {
+                (Some(min), Some(max)) => {
+                    let terms = format!("~{}–{}", show(min), show(max));
+                    result.legacy_listing =
+                        legacy_unit.map(|unit| format!("Cost: {terms}/{unit} [spec]."));
+                    Some(terms)
+                }
+                (Some(min), None) => Some(format!("from ~{}", show(min))),
+                (None, Some(max)) => Some(format!("up to ~{}", show(max))),
+                (None, None) => None,
+            };
+            result.description = Some(terms.map_or_else(
+                || format!("Published price range unavailable [{label}]."),
+                |terms| format!("Listed: {terms}{suffix} [{label}]."),
+            ));
+        } else if let Some(amount) = money(&block["amount"]).filter(|_| !has_variable_terms(price))
+        {
             result.kind = if dynamic {
                 TariffKind::Dynamic
             } else {
                 TariffKind::Fixed
             };
-            result.description = format!(
-                "Cost: ~{}/{unit} [spec{}].",
-                show(amount),
-                if dynamic { ", dynamic" } else { "" }
-            );
-            let currency = result.currency.as_deref();
-            if !dynamic
-                && result
-                    .unit
-                    .as_deref()
-                    .is_some_and(|u| matches!(u, "call" | "request"))
-                && currency.is_some_and(|c| {
-                    c.eq_ignore_ascii_case("USDC")
-                        || config.usd_as_usdc && c.eq_ignore_ascii_case("USD")
+            let amount = show(amount);
+            result.description = Some(format!("Listed: ~{amount}{suffix} [{label}]."));
+            // Legacy external records display a listed amount for dynamic tariffs
+            // and explicit non-call units. Other external records display the offer.
+            let legacy_listed = !origin.is_external()
+                || dynamic
+                || declared_unit.is_some_and(|unit| !call_unit(unit.as_str()));
+            let legacy_mode = if dynamic { ", dynamic" } else { "" };
+            result.legacy_listing = legacy_unit
+                .filter(|_| legacy_listed)
+                .map(|unit| format!("Cost: ~{amount}/{unit} [spec{legacy_mode}]."));
+            if !origin.is_external()
+                && !dynamic
+                && call_unit(result.unit.as_deref())
+                && result.currency.as_deref().is_some_and(|currency| {
+                    currency.eq_ignore_ascii_case("USDC")
+                        || config.usd_as_usdc && currency.eq_ignore_ascii_case("USD")
                 })
-                && compatible_rail(p)
             {
                 result.selection_amount = decimal(&value_text(&block["amount"]));
             }
-        } else {
+        } else if let Some(opaque) = opaque_price(price, origin.is_external(), free) {
             result.kind = TariffKind::Other;
-            result.description = format!("Pricing: {p} [spec].");
+            result.description = Some(format!(
+                "Pricing: {opaque} [{}].",
+                evidence_label(origin, mode, false)
+            ));
+        } else if dynamic {
+            result.kind = TariffKind::Dynamic;
+            let kind = if mode
+                .and_then(Value::as_str)
+                .is_some_and(|mode| mode.eq_ignore_ascii_case("metered"))
+            {
+                "metered"
+            } else {
+                "dynamic"
+            };
+            result.description = Some(format!("Pricing: {kind} [{}].", origin.label()));
+        }
+        if matches!(
+            result.kind,
+            TariffKind::Range | TariffKind::Fixed | TariffKind::Dynamic
+        ) && let Some(description) = &mut result.description
+        {
+            append_billing_terms(description, price, origin);
         }
         result
     }
+
+    fn with_external_offer(
+        mut self,
+        price: &Value,
+        block: &Value,
+        supports_estimate: bool,
+    ) -> Self {
+        let quoted = exact_base_usdc_amount(&price["accepts"]);
+        self.selection_amount = quoted.filter(|_| {
+            supports_estimate
+                && matches!(self.kind, TariffKind::Fixed | TariffKind::Unknown)
+                && (call_unit(self.unit.as_deref())
+                    || self.unit.is_none() && enclosing_field(price, block, "unit").is_none())
+        });
+        let Some(quoted) = quoted else {
+            if price["accepts"]
+                .as_array()
+                .is_some_and(|offers| offers.iter().any(has_advertised_offer))
+            {
+                const NO_ESTIMATE: &str = "Advertised offers supply no exact Base USDC price estimate [external pricing].";
+                if self.kind == TariffKind::Unknown {
+                    self.kind = TariffKind::Other;
+                }
+                self.append_description(NO_ESTIMATE);
+            }
+            return self;
+        };
+
+        let eligible = self.selection_amount.is_some();
+        let sample_unit = self
+            .unit
+            .as_deref()
+            .filter(|unit| !call_unit(Some(unit)) && money(&block["amount"]).is_none());
+        let billing_unit = sample_unit.map(|unit| format!("Billing unit: {unit}."));
+        if self.kind == TariffKind::Unknown {
+            let mut offer = Self::request_offer(quoted, eligible);
+            if let Some(billing_unit) = billing_unit {
+                offer.append_description(&billing_unit);
+                offer.unit = self.unit;
+            }
+            return offer;
+        }
+        self.append_description(&external_offer(quoted, eligible));
+        if self.kind == TariffKind::Dynamic
+            && let Some(billing_unit) = billing_unit
+        {
+            self.append_description(&billing_unit);
+        }
+        self
+    }
+
     pub fn payment_requirements(accepts: &Value) -> Self {
-        let amount = accepts
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|a| {
-                a["scheme"] == "exact"
-                    && a["network"] == "eip155:8453"
-                    && a["asset"].as_str().is_some_and(|s| {
-                        s.eq_ignore_ascii_case("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913")
-                    })
-                    && a.pointer("/extra/decimals")
-                        .is_none_or(|v| v.as_u64() == Some(6))
-            })
-            .filter_map(|a| {
-                a["amount"]
-                    .as_str()
-                    .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-                    .and_then(|s| s.parse::<U256>().ok())
-            })
-            .min();
+        exact_base_usdc_amount(accepts)
+            .map_or_else(Self::unknown, |amount| Self::request_offer(amount, true))
+    }
+
+    fn append_description(&mut self, fragment: &str) -> &mut String {
+        let text = self.description.get_or_insert_with(String::new);
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(fragment);
+        text
+    }
+
+    fn request_offer(amount: U256, eligible: bool) -> Self {
         Self {
-            kind: if amount.is_some() {
+            kind: if eligible {
                 TariffKind::Fixed
             } else {
-                TariffKind::Unknown
+                TariffKind::Other
             },
             currency: Some("USDC".into()),
             network: Some("eip155:8453".into()),
-            asset: Some("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".into()),
-            unit: Some("call".into()),
-            selection_amount: amount,
-            description: amount.map_or_else(
-                || format!("Pricing: {accepts} [spec]."),
-                |amount| {
-                    format!(
-                        "Cost: ~${}/call [spec].",
-                        crate::pricing::ObservedPrice { amount }
-                    )
-                },
-            ),
+            asset: Some(crate::payment::USDC.to_ascii_lowercase()),
+            unit: Some("request".into()),
+            selection_amount: eligible.then_some(amount),
+            description: Some(external_offer(amount, eligible)),
+            legacy_listing: None,
         }
     }
 }
+
+pub(crate) fn external_offer(amount: U256, eligible: bool) -> String {
+    let heading = if eligible {
+        "Advertised exact offer"
+    } else {
+        "Advertised sample offer"
+    };
+    let amount = crate::pricing::ObservedPrice { amount };
+    format!("{heading}: ~${amount}/request [external pricing].")
+}
+
+fn has_advertised_offer(offer: &Value) -> bool {
+    ["scheme", "network", "asset"]
+        .into_iter()
+        .all(|field| offer[field].as_str().is_some_and(|value| !value.is_empty()))
+}
+
+fn exact_base_usdc_amount(accepts: &Value) -> Option<U256> {
+    accepts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|a| {
+            a["scheme"] == "exact"
+                && a["network"] == "eip155:8453"
+                && a["asset"]
+                    .as_str()
+                    .is_some_and(|s| s.eq_ignore_ascii_case(crate::payment::USDC))
+                && a.pointer("/extra/decimals")
+                    .is_none_or(|v| v.as_u64() == Some(6))
+        })
+        .filter_map(|a| {
+            a["amount"]
+                .as_str()
+                .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                .and_then(|s| s.parse::<U256>().ok())
+        })
+        .min()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Origin {
+    Spec,
+    External,
+}
+
+impl Origin {
+    fn from_format(format: &PricingFormat) -> Self {
+        match format {
+            PricingFormat::X402Resources | PricingFormat::X402Discovery => Self::External,
+            _ => Self::Spec,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Spec => "spec",
+            Self::External => "external pricing",
+        }
+    }
+
+    fn is_external(self) -> bool {
+        self == Self::External
+    }
+}
+
+const VARIABLE_TERMS: [(&str, &str); 2] = [
+    ("percentage", "Percentage fee"),
+    ("minimum", "Minimum charge"),
+];
+
+fn append_billing_terms(description: &mut String, price: &Value, origin: Origin) {
+    use std::fmt::Write;
+
+    let mut included = Vec::new();
+    for scope in tariff_blocks(price).into_iter().flatten() {
+        for (key, label) in [
+            ("pricingTerms", "Billing terms"),
+            ("conditions", "Billing conditions"),
+        ]
+        .into_iter()
+        .chain(VARIABLE_TERMS)
+        {
+            let Some(terms) = scope
+                .get(key)
+                .filter(|value| meaningful_billing_value(value))
+            else {
+                continue;
+            };
+            if included.contains(&(key, terms)) {
+                continue;
+            }
+            let content = terms
+                .as_str()
+                .map_or_else(|| terms.to_string(), str::to_owned);
+            included.push((key, terms));
+            let _ = write!(description, " {label} [{}] {content}", origin.label());
+        }
+    }
+}
+
+fn has_variable_terms(price: &Value) -> bool {
+    tariff_blocks(price).into_iter().flatten().any(|block| {
+        VARIABLE_TERMS
+            .iter()
+            .any(|(key, _)| block.get(*key).is_some_and(meaningful_billing_value))
+    })
+}
+
+fn opaque_price(value: &Value, external: bool, free: bool) -> Option<String> {
+    if value.is_string() || value.is_number() {
+        return Some(value.to_string());
+    }
+    // Keep unhandled tariff declarations visible. Authentication capability
+    // flags and payment requirements alone supply no tariff text.
+    let terms: std::collections::BTreeMap<_, _> = value
+        .as_object()?
+        .iter()
+        .filter(|(key, value)| {
+            !value.is_null()
+                && (!matches!(key.as_str(), "pricingTerms" | "conditions")
+                    || meaningful_billing_value(value))
+                && if external {
+                    VARIABLE_TERMS.iter().any(|(term, _)| key.as_str() == *term)
+                        || matches!(
+                            key.as_str(),
+                            "price"
+                                | "fixed"
+                                | "amount"
+                                | "pricingTerms"
+                                | "conditions"
+                                | "mode"
+                                | "pricingMode"
+                                | "currency"
+                                | "unit"
+                                | "network"
+                                | "asset"
+                        )
+                } else {
+                    !matches!(
+                        key.as_str(),
+                        "authMode"
+                            | "paymentRequired"
+                            | "securitySchemes"
+                            | "protocols"
+                            | "accepts"
+                    )
+                }
+        })
+        .collect();
+    if !terms
+        .iter()
+        .any(|(key, value)| has_tariff_term(key, value, free))
+    {
+        return None;
+    }
+    if terms.len() == 1
+        && let Some((key, scalar)) = terms.first_key_value()
+        && key.as_str() == "price"
+        && (scalar.is_string() || scalar.is_number())
+    {
+        return Some(scalar.to_string());
+    }
+    Some(serde_json::to_string(&terms).expect("serializable price metadata"))
+}
+
+fn has_tariff_term(key: &str, value: &Value, free: bool) -> bool {
+    if value.is_null() {
+        return false;
+    }
+    match key {
+        "authMode" | "paymentRequired" | "securitySchemes" | "protocols" | "accepts" | "mode"
+        | "pricingMode" | "currency" | "unit" | "network" | "asset" => false,
+        // Conditions can describe access to a free operation. A separate price
+        // declaration, including unstructured pricing terms, still conflicts.
+        "conditions" if free => false,
+        "amount" if free => !is_zero_amount(value),
+        "pricingTerms" | "conditions" => meaningful_billing_value(value),
+        "price" | "fixed" => value.as_object().map_or_else(
+            || {
+                value.is_number()
+                    || free && value.is_boolean()
+                    || value.as_str().is_some_and(|text| !text.trim().is_empty())
+                    || value.as_array().is_some_and(|terms| !terms.is_empty())
+            },
+            |fields| {
+                fields
+                    .iter()
+                    .any(|(key, value)| has_tariff_term(key, value, free))
+            },
+        ),
+        _ => true,
+    }
+}
+
+fn is_zero_amount(value: &Value) -> bool {
+    value.as_f64() == Some(0.0)
+        || money(value).is_some_and(|amount| amount.bytes().all(|byte| matches!(byte, b'0' | b'.')))
+}
+
+fn competes_with_free(block: &Value) -> bool {
+    block
+        .get("amount")
+        .is_some_and(|amount| !is_zero_amount(amount))
+        || block["paymentRequired"] == true
+        || matches!(block["authMode"].as_str(), Some("paid" | "x402"))
+        || block["accepts"]
+            .as_array()
+            .is_some_and(|values| !values.is_empty())
+        || mode_of(block).is_some_and(is_dynamic_mode)
+}
+
+fn meaningful_billing_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(terms) => !terms.is_empty(),
+        Value::Object(terms) => !terms.is_empty(),
+        _ => true,
+    }
+}
+
+fn dollar_price(value: &Value) -> Option<Value> {
+    let text = value["price"].as_str()?;
+    let amount = text.strip_prefix('$')?;
+    money(&Value::String(amount.into()))?;
+    let mut metadata = value.as_object().cloned().unwrap_or_default();
+    // Preserve any independent range declaration when normalizing the fixed value.
+    metadata.remove("price");
+    metadata
+        .entry("currency")
+        .or_insert_with(|| Value::String("USD".into()));
+    metadata.insert("amount".into(), Value::String(amount.into()));
+    Some(Value::Object(metadata))
+}
+
+fn effective_unit(config: &PricingConfig, declared_unit: Option<&Value>) -> Option<String> {
+    match declared_unit {
+        Some(unit) => unit
+            .as_str()
+            .filter(|unit| !unit.is_empty())
+            .map(str::to_owned),
+        None => config.unit.clone(),
+    }
+}
+
+fn call_unit(unit: Option<&str>) -> bool {
+    unit.is_some_and(|unit| matches!(unit, "call" | "request"))
+}
+
+fn unit_suffix(unit: Option<&str>) -> String {
+    unit.map_or_else(String::new, |unit| format!("/{unit}"))
+}
+
+fn display_amount(amount: String, currency: Option<&str>) -> String {
+    match currency {
+        Some(code) if code.eq_ignore_ascii_case("USD") || code.eq_ignore_ascii_case("USDC") => {
+            format!("${amount}")
+        }
+        Some(code) => format!("{amount} {code}"),
+        None => amount,
+    }
+}
+
+fn evidence_label(origin: Origin, mode: Option<&Value>, no_unit: bool) -> String {
+    let mut label = origin.label().to_owned();
+    if let Some(mode) = mode {
+        match mode.as_str() {
+            Some(mode) if mode.eq_ignore_ascii_case("fixed") => {}
+            Some(mode) if mode.eq_ignore_ascii_case("metered") => label.push_str(", metered"),
+            _ => label.push_str(", dynamic"),
+        }
+    }
+    if no_unit {
+        label.push_str(", no unit");
+    }
+    label
+}
+
 /// Inner tariff wrappers take display precedence, but an explicit outer range
 /// still prevents an inner fixed sample from becoming a selection estimate.
 fn explicit_range_block(value: &Value) -> Option<&Value> {
+    tariff_blocks(value).into_iter().flatten().find(|block| {
+        block.is_object() && (block.get("min").is_some() || block.get("max").is_some())
+    })
+}
+
+fn tariff_blocks(value: &Value) -> [Option<&Value>; 4] {
     [
         value.pointer("/price/fixed"),
         value.get("price"),
         value.get("fixed"),
         Some(value),
     ]
-    .into_iter()
-    .flatten()
-    .find(|block| block.is_object() && (block.get("min").is_some() || block.get("max").is_some()))
 }
 
 /// Both decimal tariffs and atomic alternatives use the same authored wrappers.
 fn tariff_block(value: &Value) -> &Value {
-    let price = value
-        .get("price")
-        .filter(|price| price.is_object())
-        .unwrap_or(value);
-    price
-        .get("fixed")
-        .filter(|fixed| fixed.is_object())
-        .unwrap_or(price)
+    tariff_blocks(value)
+        .into_iter()
+        .flatten()
+        .find(|block| block.is_object())
+        .unwrap_or(value)
 }
 
-fn dynamic_tariff(root: &Value, block: &Value) -> bool {
-    enclosing_field(root, block, "mode")
-        .or_else(|| root.get("pricingMode"))
-        .is_some_and(|mode| {
-            !mode
-                .as_str()
-                .is_some_and(|mode| mode.eq_ignore_ascii_case("fixed"))
-        })
+fn mode_of(value: &Value) -> Option<&Value> {
+    let mode = value.get("mode");
+    let legacy_mode = value.get("pricingMode");
+    // A fixed marker cannot make a nonfixed declaration eligible.
+    [mode, legacy_mode]
+        .into_iter()
+        .flatten()
+        .find(|mode| is_dynamic_mode(mode))
+        .or(mode)
+        .or(legacy_mode)
 }
 
-/// Metadata follows the selected block outward; nested samples cannot supply it.
+fn tariff_mode<'a>(root: &'a Value, block: &'a Value) -> Option<&'a Value> {
+    enclosing_value(root, block, mode_of)
+}
+
+// The nearest declaration supplies display terms. Every enclosing declaration
+// must allow a fixed request estimate.
+fn allows_request_estimate(block: &Value) -> bool {
+    mode_of(block).is_none_or(|mode| !is_dynamic_mode(mode))
+        && block
+            .get("unit")
+            .is_none_or(|unit| call_unit(unit.as_str()))
+}
+
+fn is_dynamic_mode(mode: &Value) -> bool {
+    !mode
+        .as_str()
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("fixed"))
+}
+
+/// Metadata follows the selected block outward. Nested samples carry their own metadata.
+fn enclosing_blocks<'a>(root: &'a Value, block: &'a Value) -> impl Iterator<Item = &'a Value> {
+    let parent = root.get("price").filter(|price| {
+        price
+            .get("fixed")
+            .is_some_and(|fixed| std::ptr::eq(fixed, block))
+    });
+    [
+        Some(block),
+        parent,
+        (!std::ptr::eq(root, block)).then_some(root),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+fn enclosing_value<'a>(
+    root: &'a Value,
+    block: &'a Value,
+    get: impl Fn(&'a Value) -> Option<&'a Value>,
+) -> Option<&'a Value> {
+    enclosing_blocks(root, block).find_map(get)
+}
+
 fn enclosing_field<'a>(root: &'a Value, block: &'a Value, key: &str) -> Option<&'a Value> {
-    block
-        .get(key)
-        .or_else(|| {
-            root.pointer("/price/fixed")
-                .filter(|fixed| std::ptr::eq(*fixed, block))
-                .and_then(|_| root["price"].get(key))
-        })
-        .or_else(|| root.get(key))
+    enclosing_value(root, block, |value| value.get(key))
 }
 
 fn supported_network(value: &Value) -> bool {
@@ -362,35 +762,51 @@ fn supported_asset(value: &Value) -> bool {
     })
 }
 fn compatible_rail(value: &Value) -> bool {
+    compatible_rail_fields(value)
+        && value.get("protocols").is_none_or(compatible_protocols)
+        && ["price", "fixed"]
+            .into_iter()
+            .filter_map(|key| value.get(key).filter(|child| child.is_object()))
+            .all(compatible_rail)
+}
+
+fn compatible_protocols(value: &Value) -> bool {
+    let Some(protocols) = value.as_array() else {
+        return false;
+    };
+    let mut declared = protocols
+        .iter()
+        .filter_map(|protocol| protocol.get("x402"))
+        .peekable();
+    if declared.peek().is_some() {
+        declared.any(compatible_x402_protocol)
+    } else {
+        protocols.iter().any(|protocol| protocol == "x402")
+    }
+}
+
+fn compatible_rail_fields(value: &Value) -> bool {
     // Explicit contrary rail information never becomes a supported estimate.
-    for key in ["network", "caip2Network", "x402Network"] {
-        if let Some(v) = value.get(key)
-            && !supported_network(v)
-        {
-            return false;
-        }
-    }
-    if let Some(v) = value.get("asset")
-        && !supported_asset(v)
-    {
-        return false;
-    }
-    if let Some(v) = value.get("price").filter(|v| v.is_object())
-        && !compatible_rail(v)
-    {
-        return false;
-    }
-    if let Some(v) = value.get("fixed").filter(|v| v.is_object())
-        && !compatible_rail(v)
-    {
-        return false;
-    }
-    if let Some(protocols) = value.get("protocols").and_then(Value::as_array) {
-        return protocols
-            .iter()
-            .any(|p| p.as_str() == Some("x402") || p.get("x402").is_some_and(compatible_rail));
-    }
-    true
+    ["network", "caip2Network", "x402Network"]
+        .into_iter()
+        .all(|key| value.get(key).is_none_or(supported_network))
+        && value.get("asset").is_none_or(supported_asset)
+}
+
+fn compatible_x402_protocol(value: &Value) -> bool {
+    value.is_object()
+        && value.get("scheme").is_none_or(|scheme| scheme == "exact")
+        && compatible_rail(value)
+        && value.get("networks").is_none_or(|networks| {
+            networks.as_array().is_some_and(|networks| {
+                networks.iter().any(|entry| {
+                    entry.get("network").is_some()
+                        && entry.get("asset").is_some()
+                        && entry.get("scheme").is_none_or(|scheme| scheme == "exact")
+                        && compatible_rail_fields(entry)
+                })
+            })
+        })
 }
 fn value_text(value: &Value) -> String {
     value
@@ -401,16 +817,28 @@ pub(crate) fn money(value: &Value) -> Option<String> {
     if !(value.is_string() || value.is_u64() || value.is_i64()) {
         return None;
     }
-    let text = value_text(value).trim().to_owned();
+    format_money(value_text(value).trim())
+}
+
+// Fractional JSON numbers can describe a range without specifying an exact charge.
+fn range_bound(value: &Value) -> Option<String> {
+    money(value).or_else(|| {
+        value.as_f64().filter(|number| *number >= 0.0)?;
+        let text = value.to_string();
+        Some(format_money(&text).unwrap_or(text))
+    })
+}
+
+fn format_money(text: &str) -> Option<String> {
     static RE: std::sync::LazyLock<regex::Regex> =
         std::sync::LazyLock::new(|| regex::Regex::new(r"^\d+(?:\.\d+)?$").expect("constant regex"));
-    if !RE.is_match(&text) {
+    if !RE.is_match(text) {
         return None;
     }
     Some(if let Some((whole, fraction)) = text.split_once('.') {
         format!("{whole}.{:0<2}", fraction.trim_end_matches('0'))
     } else {
-        text
+        text.to_owned()
     })
 }
 pub fn decimal(text: &str) -> Option<U256> {
@@ -446,8 +874,19 @@ pub struct Advertisement {
     pub price: NormalizedPrice,
     pub source: String,
     pub fresh_until: Option<Instant>,
-    external: bool,
+    pub(crate) external: bool,
 }
+impl Advertisement {
+    pub(crate) fn external_tariff(&self) -> Option<TariffText> {
+        let mut tariff = self.external.then(|| self.price.tariff_text()).flatten()?;
+        tariff.exact_offer = self
+            .price
+            .selection_amount
+            .filter(|_| self.price.kind == TariffKind::Fixed);
+        Some(tariff)
+    }
+}
+
 #[derive(Debug, Default)]
 struct AdvertisementState {
     invalidated: bool,
@@ -473,15 +912,16 @@ impl AdvertisedPricing {
 
     /// Fresh external metadata can enrich presentation after source publication.
     pub fn external_description(&self) -> Option<String> {
-        self.value
-            .read()
-            .expect("advertised pricing poisoned")
+        self.with_fresh(|value, _| Some(value?.external_tariff()?.text))
+    }
+
+    pub(crate) fn with_fresh<T>(&self, read: impl FnOnce(Option<&Advertisement>, bool) -> T) -> T {
+        let state = self.value.read().expect("advertised pricing poisoned");
+        let value = state
             .value
             .as_ref()
-            .filter(|value| {
-                value.external && value.fresh_until.is_none_or(|until| Instant::now() < until)
-            })
-            .map(|value| value.price.description().to_owned())
+            .filter(|value| value.fresh_until.is_none_or(|until| Instant::now() < until));
+        read(value, state.invalidated)
     }
 
     /// Original catalog or metadata URL, distinct from observed payment offers.
@@ -509,12 +949,7 @@ impl AdvertisedPricing {
         }
     }
     pub fn amount(&self) -> Option<U256> {
-        let value = self.value.read().expect("advertised pricing poisoned");
-        value
-            .value
-            .as_ref()
-            .filter(|v| v.fresh_until.is_none_or(|until| Instant::now() < until))
-            .and_then(|v| v.price.selection_amount)
+        self.with_fresh(|value, _| value.and_then(|value| value.price.selection_amount))
     }
     pub fn replace(&self, price: NormalizedPrice, source: String, fresh_until: Option<Instant>) {
         let mut state = self.value.write().expect("advertised pricing poisoned");
@@ -548,12 +983,6 @@ impl AdvertisedPricing {
         state.invalidated = true;
         state.value = None;
     }
-    pub(crate) fn invalidated(&self) -> bool {
-        self.value
-            .read()
-            .expect("advertised pricing poisoned")
-            .invalidated
-    }
     /// Serialize durable publication with this generation's terminal invalidation.
     pub(crate) fn while_current<T>(&self, publish: impl FnOnce() -> T) -> Option<T> {
         let state = self.value.read().expect("advertised pricing poisoned");
@@ -565,399 +994,5 @@ impl AdvertisedPricing {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    fn config() -> PricingConfig {
-        PricingConfig {
-            source: "catalog".into(),
-            format: PricingFormat::PaymentInfo,
-            key: None,
-            unit: Some("call".into()),
-            usd_as_usdc: true,
-        }
-    }
-    #[test]
-    fn exact_selection_requires_explicit_currency_unit_and_fixed_amount() {
-        let cfg = config();
-        let normalized = NormalizedPrice::parse(
-            &cfg,
-            &json!({"price":{"amount":"0.010000","currency":"USD"}}),
-        );
-        assert_eq!(normalized.selection_amount, Some(U256::from(10_000)));
-        assert_eq!(normalized.description(), "Cost: ~$0.01/call [spec].");
-        for value in [
-            json!({"amount":"0.01"}),
-            json!({"amount":"0.01","currency":"USD","unit":"record"}),
-            json!({"amount":"0.01","currency":"USD","unit":null}),
-            json!({"unit":"record","price":{"fixed":{"amount":"0.01","currency":"USD"}}}),
-            json!({"amount":"0.01","currency":"USD","mode":"dynamic"}),
-            json!({"amount":"0.01","currency":"USD","mode":"quote"}),
-            json!({"amount":"0.0000001","currency":"USD"}),
-            json!({"min":"0.01","max":"0.02","currency":"USD"}),
-            json!({"amount":"0.01","currency":"USDC","network":"solana:mainnet"}),
-            json!({"price":{"amount":"0.01","currency":"USD"},"protocols":[{"x402":{"network":"solana:mainnet"}}]}),
-        ] {
-            assert_eq!(
-                NormalizedPrice::parse(&cfg, &value).selection_amount,
-                None,
-                "{value}"
-            );
-        }
-        let legacy = PricingConfig::legacy("x-price");
-        assert_eq!(
-            NormalizedPrice::parse(&legacy, &json!({"amount":"0.01","currency":"USD"}))
-                .selection_amount,
-            None
-        );
-        assert_eq!(
-            NormalizedPrice::parse(&cfg, &json!({"amount":"0","currency":"USDC"})).selection_amount,
-            Some(U256::ZERO)
-        );
-        assert_eq!(
-            NormalizedPrice::parse(&cfg, &json!({"authMode":"free"})).kind,
-            TariffKind::Free
-        );
-    }
-    #[test]
-    fn nested_effective_modes_render_consistent_dynamic_labels() {
-        for value in [
-            json!({"mode":"dynamic","price":{"fixed":{"amount":"0.01","currency":"USD"}}}),
-            json!({"pricingMode":"quote","price":{"fixed":{"amount":"0.01","currency":"USD"}}}),
-            json!({"price":{"mode":"dynamic","fixed":{"amount":"0.01","currency":"USD"}}}),
-            json!({"price":{"mode":"fixed","fixed":{"amount":"0.01","currency":"USD","mode":"quote"}}}),
-        ] {
-            let normalized = NormalizedPrice::parse(&config(), &value);
-            assert_eq!(normalized.kind, TariffKind::Dynamic);
-            assert_eq!(normalized.selection_amount, None);
-            assert_eq!(
-                normalized.description(),
-                "Cost: ~$0.01/call [spec, dynamic]."
-            );
-        }
-        let fixed = NormalizedPrice::parse(
-            &config(),
-            &json!({"mode":"dynamic","price":{"mode":"fixed","fixed":{"amount":"0.01","currency":"USD"}}}),
-        );
-        assert_eq!(fixed.kind, TariffKind::Fixed);
-        assert_eq!(fixed.selection_amount, Some(U256::from(10_000)));
-        assert_eq!(fixed.description(), "Cost: ~$0.01/call [spec].");
-    }
-
-    fn range_wrappers(range: Value) -> Vec<Value> {
-        vec![
-            range.clone(),
-            json!({"price":range.clone()}),
-            json!({"price":{"fixed":range.clone()}}),
-            json!({"fixed":range.clone()}),
-            json!({"min":range["min"],"max":range["max"],"currency":"USD",
-                "price":{"fixed":{"amount":"0.01","currency":"USD"}}}),
-            json!({"price":{"min":range["min"],"max":range["max"],"currency":"USD",
-                "fixed":{"amount":"0.01","currency":"USD"}}}),
-        ]
-    }
-
-    #[test]
-    fn explicit_ranges_override_fixed_samples_across_catalog_and_external_formats() {
-        let range = json!({"amount":"0.01","min":"0.01","max":"1","currency":"USD"});
-        for format in [
-            PricingFormat::PaymentInfo,
-            PricingFormat::X402,
-            PricingFormat::X402Resources,
-            PricingFormat::X402Discovery,
-        ] {
-            let mut cfg = config();
-            cfg.format = format;
-            for mut value in range_wrappers(range.clone()) {
-                value["accepts"] = json!([{"scheme":"exact","network":"eip155:8453",
-                    "asset":crate::payment::USDC,"amount":"1000"}]);
-                let normalized = NormalizedPrice::parse(&cfg, &value);
-                assert_eq!(normalized.kind, TariffKind::Range, "{value}");
-                assert_eq!(normalized.selection_amount, None, "{value}");
-                assert_eq!(
-                    normalized.description(),
-                    "Cost: ~$0.01–$1/call [spec].",
-                    "{value}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn range_metadata_follows_selected_block_and_enclosing_wrappers() {
-        for format in [PricingFormat::PaymentInfo, PricingFormat::X402Resources] {
-            let mut cfg = config();
-            cfg.format = format;
-            let mut outer = json!({"min":"0.01","max":"1","currency":"TOK","unit":"token",
-                "network":"networkA","asset":"assetA",
-                "price":{"fixed":{"amount":"0.01","currency":"USD","unit":"call",
-                    "network":"networkB","asset":"assetB"}},
-                "accepts":[{"scheme":"exact","network":"eip155:8453",
-                    "asset":crate::payment::USDC,"amount":"1000"}]});
-            let normalized = NormalizedPrice::parse(&cfg, &outer);
-            assert_eq!(
-                normalized.description(),
-                "Cost: ~0.01 TOK–1 TOK/token [spec]."
-            );
-            assert_eq!(normalized.currency.as_deref(), Some("TOK"));
-            assert_eq!(normalized.unit.as_deref(), Some("token"));
-            assert_eq!(normalized.network.as_deref(), Some("networkA"));
-            assert_eq!(normalized.asset.as_deref(), Some("assetA"));
-            assert_eq!(normalized.selection_amount, None);
-            for key in ["currency", "unit", "network", "asset"] {
-                outer.as_object_mut().unwrap().remove(key);
-            }
-            let sparse = NormalizedPrice::parse(&cfg, &outer);
-            assert_eq!(sparse.description(), "Cost: ~0.01–1/call [spec].");
-            assert_eq!(sparse.currency, None);
-            assert_eq!(sparse.network, None);
-            assert_eq!(sparse.asset, None);
-            assert_eq!(sparse.selection_amount, None);
-            let inner = NormalizedPrice::parse(
-                &cfg,
-                &json!({
-                    "currency":"ROOT","unit":"root-unit","network":"root-network","asset":"root-asset",
-                    "price":{"currency":"TOK","unit":"token","network":"parent-network","asset":"parent-asset",
-                        "fixed":{"min":"0.01","max":"1"}}
-                }),
-            );
-            assert_eq!(inner.description(), "Cost: ~0.01 TOK–1 TOK/token [spec].");
-            assert_eq!(inner.currency.as_deref(), Some("TOK"));
-            assert_eq!(inner.unit.as_deref(), Some("token"));
-            assert_eq!(inner.network.as_deref(), Some("parent-network"));
-            assert_eq!(inner.asset.as_deref(), Some("parent-asset"));
-            assert_eq!(inner.selection_amount, None);
-        }
-        let fixed = NormalizedPrice::parse(
-            &config(),
-            &json!({
-                "currency":"USD","price":{"fixed":{"amount":"0.01"}}
-            }),
-        );
-        assert_eq!(fixed.currency, None);
-        assert_eq!(fixed.selection_amount, None);
-    }
-
-    #[test]
-    fn malformed_range_units_preserve_details_without_inventing_call_unit() {
-        for unit in [json!(null), json!(false), json!({}), json!("")] {
-            let value = json!({"min":"0.01","max":"1","currency":"USD","unit":unit,
-                "price":{"fixed":{"amount":"0.01","currency":"USD","unit":"call"}}});
-            let normalized = NormalizedPrice::parse(&config(), &value);
-            assert_eq!(normalized.kind, TariffKind::Other);
-            assert_eq!(normalized.selection_amount, None);
-            assert_eq!(
-                normalized.description(),
-                format!("Pricing: {value} [spec].")
-            );
-        }
-    }
-
-    #[test]
-    fn external_atomic_samples_obey_nested_tariff_units_and_modes() {
-        for format in [PricingFormat::X402Resources, PricingFormat::X402Discovery] {
-            let mut cfg = config();
-            cfg.format = format;
-            let accepts = serde_json::json!([{"scheme":"exact","network":"eip155:8453",
-                "asset":crate::payment::USDC,"amount":"1000"}]);
-            let metered = NormalizedPrice::parse(
-                &cfg,
-                &json!({"accepts":accepts,
-                "price":{"fixed":{"unit":"record","amount":"0.01","currency":"USD"}}}),
-            );
-            assert_eq!(metered.selection_amount, None);
-            assert_eq!(metered.unit.as_deref(), Some("record"));
-            assert_eq!(metered.description(), "Cost: ~$0.01/record [spec].");
-            let dynamic = NormalizedPrice::parse(
-                &cfg,
-                &json!({"accepts":accepts,
-                "price":{"fixed":{"mode":"dynamic","amount":"0.01","currency":"USD"}}}),
-            );
-            assert_eq!(dynamic.selection_amount, None);
-            assert_eq!(dynamic.kind, TariffKind::Dynamic);
-            assert_eq!(dynamic.description(), "Cost: ~$0.01/call [spec, dynamic].");
-            let fixed = NormalizedPrice::parse(
-                &cfg,
-                &json!({"accepts":accepts,
-                "mode":"dynamic","price":{"unit":"record","fixed":{
-                    "mode":"fixed","unit":"call","amount":"0.01","currency":"USD"}}}),
-            );
-            assert_eq!(
-                fixed.selection_amount,
-                Some(U256::from(1000)),
-                "atomic accepts, not decimal display, supplies selection"
-            );
-            let malformed = NormalizedPrice::parse(
-                &cfg,
-                &json!({"accepts":accepts,
-                "price":{"fixed":{"unit":null}}}),
-            );
-            assert_eq!(malformed.selection_amount, None);
-        }
-    }
-
-    #[test]
-    fn partial_and_malformed_ranges_never_become_fixed_estimates() {
-        for range in [
-            json!({"min":"0.01"}),
-            json!({"max":"1"}),
-            json!({"min":null,"max":"1"}),
-            json!({"min":"bad","max":"1"}),
-            json!({"min":"0.01","max":{}}),
-            json!({"min":false,"max":[]}),
-        ] {
-            let mut range = range;
-            range["amount"] = json!("0.01");
-            range["currency"] = json!("USD");
-            for format in [PricingFormat::PaymentInfo, PricingFormat::X402Resources] {
-                let mut cfg = config();
-                cfg.format = format;
-                for mut value in range_wrappers(range.clone()) {
-                    value["accepts"] = json!([{"scheme":"exact","network":"eip155:8453",
-                        "asset":crate::payment::USDC,"amount":"1000"}]);
-                    let normalized = NormalizedPrice::parse(&cfg, &value);
-                    assert_eq!(normalized.kind, TariffKind::Other, "{value}");
-                    assert_eq!(normalized.selection_amount, None, "{value}");
-                    assert!(normalized.description().starts_with("Pricing: "), "{value}");
-                }
-            }
-        }
-        let mut free = json!({"authMode":"free","min":null});
-        assert_eq!(
-            NormalizedPrice::parse(&config(), &free).selection_amount,
-            None
-        );
-        free.as_object_mut().unwrap().remove("min");
-        assert_eq!(
-            NormalizedPrice::parse(&config(), &free).selection_amount,
-            Some(U256::ZERO)
-        );
-    }
-
-    #[test]
-    fn x402_dollar_forwarding_preserves_explicit_range_restrictions() {
-        let mut cfg = config();
-        cfg.format = PricingFormat::X402;
-        for range in [
-            json!({"min":"0.01","max":"1"}),
-            json!({"min":"0.01"}),
-            json!({"max":null}),
-        ] {
-            let mut value = range;
-            value["price"] = json!("$0.01");
-            let normalized = NormalizedPrice::parse(&cfg, &value);
-            assert_eq!(normalized.selection_amount, None, "{value}");
-            if value.get("max").is_some_and(Value::is_string) {
-                assert_eq!(normalized.kind, TariffKind::Range);
-                assert_eq!(normalized.description(), "Cost: ~$0.01–$1/call [spec].");
-            } else {
-                assert_eq!(normalized.kind, TariffKind::Other);
-            }
-        }
-    }
-
-    #[test]
-    fn atomic_alternatives_require_supported_asset_and_choose_one_offer() {
-        let base = json!({"scheme":"exact","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"4000"});
-        let mut lower = base.clone();
-        lower["amount"] = json!("1000");
-        assert_eq!(
-            NormalizedPrice::payment_requirements(&json!([base.clone(), lower])).selection_amount,
-            Some(U256::from(1000))
-        );
-        for (key, value) in [
-            ("asset", json!("USDC")),
-            ("network", json!("base")),
-            ("amount", json!("0.001")),
-            ("scheme", json!("upto")),
-            ("extra", json!({"decimals":18})),
-        ] {
-            let mut altered = base.clone();
-            altered[key] = value;
-            assert_eq!(
-                NormalizedPrice::payment_requirements(&json!([altered])).selection_amount,
-                None
-            );
-        }
-    }
-    #[test]
-    fn handle_clones_share_fresh_advertisements_independently_of_observed_cache() {
-        let price = NormalizedPrice::parse(&config(), &json!({"amount":"0.01","currency":"USD"}));
-        let handle = AdvertisedPricing::new(price.clone(), "local.json".into(), None);
-        let clone = handle.clone();
-        assert_eq!(clone.amount(), Some(U256::from(10_000)));
-        handle.set_expires(0);
-        assert_eq!(clone.amount(), None);
-        handle.replace(price, "metadata".into(), None);
-        assert_eq!(clone.amount(), Some(U256::from(10_000)));
-        assert_eq!(AdvertisedPricing::default().amount(), None);
-    }
-    #[test]
-    fn x402_dollar_format_and_decimal_parsing_are_exact() {
-        let mut cfg = config();
-        cfg.format = PricingFormat::X402;
-        assert_eq!(
-            NormalizedPrice::parse(&cfg, &json!({"price":"$0.015","network":"eip155:8453"}))
-                .selection_amount,
-            Some(U256::from(15_000))
-        );
-        for text in ["-1", "1e-3", "1.", ".1", " 1", "1.0000000"] {
-            assert_eq!(decimal(text), None);
-        }
-        assert_eq!(decimal("0.000001"), Some(U256::from(1)));
-        assert_eq!(decimal(&U256::MAX.to_string()), None);
-    }
-
-    #[test]
-    fn external_exact_samples_do_not_override_explicit_metering_or_dynamic_tariffs() {
-        let mut cfg = config();
-        cfg.format = PricingFormat::X402Resources;
-        let record = json!({"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"1000"}]});
-        assert_eq!(
-            NormalizedPrice::parse(&cfg, &record).selection_amount,
-            Some(U256::from(1000))
-        );
-        for patch in [
-            json!({"unit":"record"}),
-            json!({"unit":null}),
-            json!({"mode":"dynamic"}),
-            json!({"price":{"min":"0.001","max":"1"}}),
-            json!({"unit":"call","price":{"unit":"record"}}),
-            json!({"unit":"call","price":{"unit":null}}),
-            json!({"mode":"fixed","price":{"mode":"dynamic"}}),
-        ] {
-            let mut modified = record.clone();
-            modified
-                .as_object_mut()
-                .unwrap()
-                .extend(patch.as_object().unwrap().clone());
-            assert_eq!(
-                NormalizedPrice::parse(&cfg, &modified).selection_amount,
-                None
-            );
-        }
-        let mut metered = record.clone();
-        metered["unit"] = json!("record");
-        assert!(
-            NormalizedPrice::parse(&cfg, &metered)
-                .description()
-                .contains("unit: record")
-        );
-        let mut ranged = record;
-        ranged["price"] =
-            json!({"min":"0.001","max":"1","currency":"USDC","unit":"call","mode":"dynamic"});
-        assert!(
-            NormalizedPrice::parse(&cfg, &ranged)
-                .description()
-                .contains("$0.001–$1/call")
-        );
-        ranged
-            .as_object_mut()
-            .unwrap()
-            .insert("unit".into(), json!("record"));
-        ranged["price"].as_object_mut().unwrap().remove("unit");
-        let range = NormalizedPrice::parse(&cfg, &ranged);
-        assert_eq!(range.selection_amount, None);
-        assert!(range.description().contains("$0.001–$1/record"));
-    }
-}
+#[path = "advertised_tests.rs"]
+mod tests;

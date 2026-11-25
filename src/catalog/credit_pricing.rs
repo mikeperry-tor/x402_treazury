@@ -20,37 +20,20 @@ impl CreditPricing {
         Ok(())
     }
     fn rate(&self) -> Result<u64> {
-        let (whole, fraction) = self
-            .usdc_per_credit
-            .split_once('.')
-            .unwrap_or((&self.usdc_per_credit, ""));
-        ensure!(
-            !whole.is_empty()
-                && whole.bytes().all(|b| b.is_ascii_digit())
-                && fraction.len() <= 6
-                && fraction.bytes().all(|b| b.is_ascii_digit()),
-            "credit_pricing.usdc_per_credit must be a positive decimal with at most six decimal places"
-        );
-        let units = whole
-            .parse::<u64>()
+        let units = crate::pricing::advertised::decimal(&self.usdc_per_credit).context(
+            "credit_pricing.usdc_per_credit must be a positive decimal with at most six decimal places",
+        )?;
+        u64::try_from(units)
             .ok()
-            .and_then(|n| n.checked_mul(1_000_000))
-            .and_then(|n| n.checked_add(format!("{fraction:0<6}").parse().ok()?))
             .filter(|n| *n > 0)
-            .context("credit_pricing.usdc_per_credit is zero or out of range")?;
-        Ok(units)
+            .context("credit_pricing.usdc_per_credit is zero or out of range")
     }
-    pub(super) fn describe(&self, metadata: &Value) -> (String, Option<&'static str>) {
+    pub(super) fn describe(
+        &self,
+        metadata: &Value,
+        published: &Value,
+    ) -> Result<(String, bool), &'static str> {
         let rate = self.rate().expect("validated credit pricing");
-        match self.estimate(metadata, rate) {
-            Ok(line) => (format!("Estimated cost: {line} [conf]."), None),
-            Err(reason) => (
-                "Per-call USDC estimate unavailable [conf].".into(),
-                Some(reason),
-            ),
-        }
-    }
-    fn estimate(&self, metadata: &Value, rate: u64) -> std::result::Result<String, &'static str> {
         if metadata.is_null() {
             return Err("missing_metadata");
         }
@@ -71,14 +54,31 @@ impl CreditPricing {
         {
             return Err("unsupported_settlement");
         }
+        let fixed = p.metered.is_none()
+            && p.batch.is_none()
+            && p.base_credits == p.max_credits
+            && p.surcharges.is_empty();
+        // Collapse only the vendor's bare fixed-credit sentence. Other prose
+        // may include billing conditions absent from the structured schedule.
+        let covered = fixed
+            && published.as_str().is_some_and(|text| {
+                let credits = p.base_credits;
+                let unit = if credits == 1 { "credit" } else { "credits" };
+                text == format!("{credits} {unit} per successful request.")
+            });
         let mut line = if let Some(m) = &p.metered {
             m.estimate(p.base_credits, p.max_credits, rate)
                 .ok_or("invalid_or_unsupported_metered_tariff")?
         } else if let Some(b) = &p.batch {
             b.estimate(p.base_credits, p.max_credits, rate)
                 .ok_or("invalid_or_unsupported_batch_tariff")?
-        } else if p.base_credits == p.max_credits && p.surcharges.is_empty() {
-            format!("{}/request", cost(p.base_credits, rate))
+        } else if fixed {
+            let base = cost(p.base_credits, rate);
+            if covered {
+                format!("{base} on success")
+            } else {
+                format!("{base}/request")
+            }
         } else {
             format!(
                 "{} base; maximum {}/request",
@@ -88,11 +88,11 @@ impl CreditPricing {
         };
         p.append_charges(&mut line, rate)
             .ok_or("invalid_or_unsupported_charge")?;
-        Ok(line)
+        Ok((format!("Estimated cost: {line}."), covered))
     }
 }
 fn cost(credits: u64, rate: u64) -> String {
-    format!("{} USDC", amount(credits as u128 * rate as u128))
+    format!("${}", amount(credits as u128 * rate as u128))
 }
 
 fn amount(units: u128) -> String {
@@ -243,10 +243,8 @@ pub(super) struct Diagnostics {
     failures: std::collections::BTreeMap<String, &'static str>,
 }
 impl Diagnostics {
-    pub(super) fn record(&mut self, tool: &str, reason: Option<&'static str>) {
-        if let Some(reason) = reason {
-            self.failures.insert(tool.to_owned(), reason);
-        }
+    pub(super) fn record(&mut self, tool: &str, reason: &'static str) {
+        self.failures.insert(tool.to_owned(), reason);
     }
     pub(super) fn report(
         &self,
@@ -273,7 +271,7 @@ impl Diagnostics {
                 code = "credit_pricing_unrecognized", provider,
                 metadata_key = %pricing.credit_cost_key,
                 affected_operations, categories = ?categories,
-                "Catalog credit pricing incomplete: per-call USDC display estimates unavailable for affected operations; retaining original pricing and configured conversion. Payment limits are unchanged; enable DEBUG for per-operation reasons"
+                "Some catalog tools omit price estimates because their credit schedules could not be interpreted. Enable DEBUG for the affected tools and reasons"
             );
         }
     }

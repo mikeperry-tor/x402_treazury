@@ -1382,6 +1382,7 @@ base_url='{base}'
 [sources.priced]
 spec='priced.json'
 base_url='{base}'
+pricing_key='pricing'
 [sources.failed]
 spec='{base}/spec'
 base_url='{base}'
@@ -1966,9 +1967,11 @@ wait_for_catalogs=false
         }
         let (_dir, mut running, _catalog, _fixture, relay, api) = prepared(false, true, None).await;
         let runtime = &mut running.deferred;
+        let mut config = runtime.deployment.sources["healthy"].config.clone();
+        config.pricing_key = Some("pricing".into());
         let authored = Source::from_document(
             "healthy",
-            runtime.deployment.sources["healthy"].config.clone(),
+            config,
             Arc::new(json!({"operations":[{"method":"GET","path":"/read",
                 "pricing":{"amount":"0.014","currency":"USDC"}}]})),
         )

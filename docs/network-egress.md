@@ -343,8 +343,8 @@ controls. External API traffic inside confined subprocesses still uses
 
 These timers and protocol windows are independent: transport progress renews
 only read inactivity, never financial expiry or qualification authority. For
-memory, cache, and queue bounds, see
-[local resource limits](local-resource-limits.md).
+memory, cache, queue bounds, and the opt-in tool description display limit,
+see [local resource limits](local-resource-limits.md).
 
 | Timer or window | Default and range | Scope and behavior |
 | --- | --- | --- |

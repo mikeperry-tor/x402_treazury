@@ -185,7 +185,11 @@ async fn scope_child() {
             .iter()
             .find(|bound| bound.tool.method == "GET")
             .unwrap();
-        assert!(tool.tool.description.contains("Cost: ~$0.025/call [spec]."));
+        assert!(
+            tool.tool
+                .description
+                .contains("Listed: ~$0.025 [spec, no unit].")
+        );
     }
     assert_eq!(
         requests.load(Ordering::SeqCst),

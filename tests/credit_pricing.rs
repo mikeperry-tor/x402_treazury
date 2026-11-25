@@ -36,7 +36,7 @@ fn fixed_metered_batch_and_conditional_costs_preserve_credit_terms() {
     assert!(
         fixed[0]
             .description
-            .contains("Estimated cost: 0.014 USDC/request")
+            .contains("Estimated cost: $0.014/request")
     );
     assert!(fixed[0].description.contains("Original credit conditions."));
     let mut metered = tariff();
@@ -47,13 +47,9 @@ fn fixed_metered_batch_and_conditional_costs_preserve_credit_terms() {
     assert!(
         metered[0]
             .description
-            .contains("0.028 USDC base + 0.028 USDC per returned record")
+            .contains("$0.028 base + $0.028 per returned record")
     );
-    assert!(
-        metered[0]
-            .description
-            .contains("maximum 28.028 USDC/request")
-    );
+    assert!(metered[0].description.contains("maximum $28.028/request"));
     let mut batch = tariff();
     batch["baseCredits"] = json!(3);
     batch["maxCredits"] = json!(150);
@@ -61,23 +57,23 @@ fn fixed_metered_batch_and_conditional_costs_preserve_credit_terms() {
     assert!(
         tools(batch)[0]
             .description
-            .contains("up to 0.042 USDC/URL; maximum 50 URLs and 2.1 USDC/request")
+            .contains("up to $0.042/URL; maximum 50 URLs and $2.1/request")
     );
     let mut media = tariff();
     media["maxCredits"] = json!(49);
     media["surcharges"] = json!([{"credits":48,"label":"+2 credits per hosted asset (up to 24)","queryParam":"hostMedia","when":"boolean_true"}]);
     let media = tools(media);
-    assert!(media[0].description.contains("maximum 0.686 USDC/request"));
+    assert!(media[0].description.contains("maximum $0.686/request"));
     assert!(
         media[0]
             .description
-            .contains("up to 0.672 USDC extra when hostMedia is true")
+            .contains("up to $0.672 extra when hostMedia is true")
     );
-    assert!(!media[0].description.contains("0.672 USDC per"));
+    assert!(!media[0].description.contains("$0.672 per"));
     let mut zero = tariff();
     zero["baseCredits"] = json!(0);
     zero["maxCredits"] = json!(0);
-    assert!(tools(zero)[0].description.contains("0 USDC/request"));
+    assert!(tools(zero)[0].description.contains("$0"));
 }
 #[test]
 fn invalid_conversion_is_rejected_without_rounding() {
@@ -85,6 +81,7 @@ fn invalid_conversion_is_rejected_without_rounding() {
         "0",
         "-1",
         "NaN",
+        "1.",
         "1e-3",
         "0.0000001",
         "18446744073709551615",
@@ -103,8 +100,8 @@ fn invalid_conversion_is_rejected_without_rounding() {
     assert!(cfg.validate().is_err());
 }
 #[test]
-fn unsupported_metadata_has_visible_fallback_and_warning() {
-    if log_capture::run_in_child("unsupported_metadata_has_visible_fallback_and_warning") {
+fn unsupported_metadata_keeps_published_tariff_and_warns() {
+    if log_capture::run_in_child("unsupported_metadata_keeps_published_tariff_and_warns") {
         return;
     }
     use std::sync::{Arc, Mutex};
@@ -138,12 +135,8 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     let invalid = [Value::Null, future, unknown, negative, inconsistent];
     for metadata in &invalid {
         let tool = tools(metadata.clone()).remove(0);
-        assert!(
-            tool.description
-                .contains("Per-call USDC estimate unavailable")
-        );
         assert!(tool.description.contains("Original credit conditions."));
-        assert!(tool.description.ends_with(" [conf]."));
+        assert!(tool.description.ends_with(" [spec]."));
         assert!(!tool.description.contains("Estimated cost:"));
     }
     let logs = String::from_utf8(writer.0.lock().unwrap().clone()).unwrap();
@@ -260,14 +253,7 @@ instructions_text = "Search the web and retrieve answers."
                 "{}",
                 tool.name
             );
-            assert!(tool.description.ends_with(" [conf]."));
-            assert!(
-                !tool
-                    .description
-                    .contains("Per-call USDC estimate unavailable"),
-                "{}",
-                tool.name
-            );
+            assert!(!tool.description.contains("USDC"), "{}", tool.name);
             let tags = document["paths"][&tool.path][tool.method.to_lowercase()]["tags"]
                 .as_array()
                 .unwrap();
@@ -280,21 +266,18 @@ instructions_text = "Search the web and retrieve answers."
             .iter()
             .find(|tool| tool.name == "socialfetch_twitter_profiles_handle")
         {
+            profile.advertised_pricing.set_fresh_until(None);
             let fallback = profile.description.clone();
-            assert!(fallback.contains("1 credit per successful request."));
-            assert!(fallback.contains("0.014"));
+            assert!(fallback.ends_with("Estimated cost: $0.014 on success."));
+            assert!(!fallback.contains("1 credit per successful request."));
             let observed = Some(x402_treazury::output::ObservedPrice {
                 amount: alloy_primitives::U256::from(5_000),
             });
             let rendered = profile.render_description(observed);
             assert_eq!(
                 rendered,
-                "Get an X (Twitter) profile by handle or numeric user id. Observed cost: ~$0.005/call."
+                format!("{fallback} Sample offer: $0.005 for one request.")
             );
-            assert!(!rendered.contains("1 credit per successful request."));
-            assert!(!rendered.contains("Estimated cost:"));
-            assert!(!rendered.contains("0.014"));
-            assert!(!rendered.contains("[conf]"));
             assert_eq!(profile.render_description(observed), rendered);
             assert_eq!(profile.render_description(None), fallback);
             assert_eq!(profile.description, fallback);
@@ -331,7 +314,7 @@ fn structured_credit_prices_remain_authored_and_support_digests() {
     ];
     for document in documents {
         let tools = catalog::build_tools(&cfg, &document, "api").unwrap();
-        assert!(tools[0].description.contains("0.000025 USDC/request"));
+        assert!(tools[0].description.contains("$0.000025"));
         assert!(!tools[0].description.contains("Cost: unknown"));
     }
 }
@@ -340,7 +323,7 @@ fn expect_estimate(metadata: Value, estimate: &str) {
     assert_eq!(
         tools(metadata).remove(0).description,
         format!(
-            "Original description. Pricing: \"Original credit conditions.\" [spec]. Estimated cost: {estimate} [conf]."
+            "Original description. Pricing: \"Original credit conditions.\" [spec]. Estimated cost: {estimate}."
         )
     );
 }
@@ -358,7 +341,7 @@ fn tiktok_transcript_billable_domain_error_preserves_all_charges() {
         ],"billableDomainErrors":[
             {"code":"transcript_target_not_video","httpStatus":400,"credits":1}
         ]}),
-        "0.014 USDC base; maximum 8.414 USDC/request; up to 0.14 USDC extra when useAiFallback is true (+10 credits when AI transcribes the audio (useAiFallback)); up to 8.26 USDC extra when allowLongTranscription is true (+10 credits per started minute of AI transcript, replacing the flat +10 (allowLongTranscription)); 0.014 USDC for transcript_target_not_video (HTTP 400)",
+        "$0.014 base; maximum $8.414/request; up to $0.14 extra when useAiFallback is true (+10 credits when AI transcribes the audio (useAiFallback)); up to $8.26 extra when allowLongTranscription is true (+10 credits per started minute of AI transcript, replacing the flat +10 (allowLongTranscription)); $0.014 for transcript_target_not_video (HTTP 400)",
     );
 }
 
@@ -377,7 +360,7 @@ fn billable_domain_error_charges_preserve_order_zero_and_maximum() {
     ]);
     expect_estimate(
         p.clone(),
-        "0.014 USDC/request; normalization-failure charge 0.014 USDC; 0 USDC for free_error (HTTP 400); 0.014 USDC for charged_error (HTTP 422)",
+        "$0.014/request; normalization-failure charge $0.014; $0 for free_error (HTTP 400); $0.014 for charged_error (HTTP 422)",
     );
     p["baseCredits"] = json!(u64::MAX);
     p["maxCredits"] = json!(u64::MAX);
@@ -387,7 +370,7 @@ fn billable_domain_error_charges_preserve_order_zero_and_maximum() {
     ]);
     expect_estimate(
         p,
-        "258254417031933722.61 USDC/request; 258254417031933722.61 USDC for maximum (HTTP 400)",
+        "$258254417031933722.61/request; $258254417031933722.61 for maximum (HTTP 400)",
     );
 }
 
@@ -420,7 +403,7 @@ fn malformed_billable_domain_errors_keep_original_terms_and_unknown_estimate() {
         p["billableDomainErrors"] = errors;
         assert_eq!(
             tools(p.clone()).remove(0).description,
-            "Original description. Pricing: \"Original credit conditions.\" [spec]. Per-call USDC estimate unavailable [conf].",
+            "Original description. Pricing: \"Original credit conditions.\" [spec].",
             "{p}"
         );
     }
@@ -441,7 +424,7 @@ fn exact_policy_hints_and_instagram_include_surcharges_preserve_estimates() {
             {"queryParam":"include","when":"includes","value":"recentMedia","credits":1,"label":"+1 credit for recentMedia"},
             {"queryParam":"include","when":"includes","value":"about","credits":1,"label":"+1 credit for about"}
         ]}),
-        "0.014 USDC base; maximum 0.042 USDC/request; up to 0.014 USDC extra when include includes recentMedia (+1 credit for recentMedia); up to 0.014 USDC extra when include includes about (+1 credit for about)",
+        "$0.014 base; maximum $0.042/request; up to $0.014 extra when include includes recentMedia (+1 credit for recentMedia); up to $0.014 extra when include includes about (+1 credit for about)",
     );
     expect_estimate(
         json!({"version":1,"baseCredits":1,"maxCredits":61,
@@ -449,13 +432,13 @@ fn exact_policy_hints_and_instagram_include_surcharges_preserve_estimates() {
         "x402ExactPolicy":"fixed_price_only","surcharges":[
             {"queryParam":"include","when":"includes","value":"files","credits":60,"label":"+10 credits per 16 MB of files, max 60","badge":"+10 / 16 MB"}
         ]}),
-        "0.014 USDC base; maximum 0.854 USDC/request; up to 0.84 USDC extra when include includes files (+10 credits per 16 MB of files, max 60)",
+        "$0.014 base; maximum $0.854/request; up to $0.84 extra when include includes files (+10 credits per 16 MB of files, max 60)",
     );
 }
 
 #[test]
 fn complete_tariff_descriptions_preserve_modes_and_ordered_suffixes() {
-    expect_estimate(tariff(), "0.014 USDC/request");
+    expect_estimate(tariff(), "$0.014/request");
     let mut bounded = tariff();
     bounded["maxCredits"] = json!(4);
     bounded["normalizationFailureCredits"] = json!(2);
@@ -466,7 +449,7 @@ fn complete_tariff_descriptions_preserve_modes_and_ordered_suffixes() {
     ]);
     expect_estimate(
         bounded,
-        "0.014 USDC base; maximum 0.056 USDC/request; up to 0.042 USDC extra when media is true (three-credit cap); up to 0.014 USDC extra when details is supplied (one-credit cap); normalization-failure charge 0.028 USDC",
+        "$0.014 base; maximum $0.056/request; up to $0.042 extra when media is true (three-credit cap); up to $0.014 extra when details is supplied (one-credit cap); normalization-failure charge $0.028",
     );
     let mut metered = tariff();
     metered["baseCredits"] = json!(2);
@@ -475,16 +458,13 @@ fn complete_tariff_descriptions_preserve_modes_and_ordered_suffixes() {
     metered["metered"] = json!({"chargedUnits":"returned_records","creditsPerUnit":2,"defaultUnits":3,"maxUnits":3,"queryParam":"limit","unit":"record"});
     expect_estimate(
         metered,
-        "0.028 USDC base + 0.028 USDC per returned record (limit defaults to 3, maximum 3 records); maximum 0.112 USDC/request; normalization-failure charge 0.014 USDC",
+        "$0.028 base + $0.028 per returned record (limit defaults to 3, maximum 3 records); maximum $0.112/request; normalization-failure charge $0.014",
     );
     let mut batch = tariff();
     batch["baseCredits"] = json!(3);
     batch["maxCredits"] = json!(150);
     batch["batch"] = json!({"unit":"url","maxUnits":50});
-    expect_estimate(
-        batch,
-        "up to 0.042 USDC/URL; maximum 50 URLs and 2.1 USDC/request",
-    );
+    expect_estimate(batch, "up to $0.042/URL; maximum 50 URLs and $2.1/request");
 }
 
 #[test]
@@ -597,7 +577,7 @@ fn unsupported_tariff_rules_and_arithmetic_overflow_keep_complete_unknown_descri
     for metadata in invalid {
         assert_eq!(
             tools(metadata.clone()).remove(0).description,
-            "Original description. Pricing: \"Original credit conditions.\" [spec]. Per-call USDC estimate unavailable [conf].",
+            "Original description. Pricing: \"Original credit conditions.\" [spec].",
             "{metadata}"
         );
     }
@@ -608,28 +588,28 @@ fn zero_and_maximum_units_preserve_existing_permissive_tariffs() {
     let mut zero = tariff();
     zero["baseCredits"] = json!(0);
     zero["maxCredits"] = json!(0);
-    expect_estimate(zero.clone(), "0 USDC/request");
+    expect_estimate(zero.clone(), "$0/request");
     zero["metered"] = json!({"chargedUnits":"returned_records","creditsPerUnit":0,"defaultUnits":0,"maxUnits":0,"queryParam":"","unit":"record"});
     expect_estimate(
         zero.clone(),
-        "0 USDC base + 0 USDC per returned record ( defaults to 0, maximum 0 records); maximum 0 USDC/request",
+        "$0 base + $0 per returned record ( defaults to 0, maximum 0 records); maximum $0/request",
     );
     zero["metered"]["maxUnits"] = json!(u64::MAX);
     zero["metered"]["defaultUnits"] = json!(u64::MAX);
     expect_estimate(
         zero.clone(),
-        "0 USDC base + 0 USDC per returned record ( defaults to 18446744073709551615, maximum 18446744073709551615 records); maximum 0 USDC/request",
+        "$0 base + $0 per returned record ( defaults to 18446744073709551615, maximum 18446744073709551615 records); maximum $0/request",
     );
     zero["metered"] = Value::Null;
     zero["batch"] = json!({"unit":"url","maxUnits":u64::MAX});
     expect_estimate(
         zero,
-        "up to 0 USDC/URL; maximum 18446744073709551615 URLs and 0 USDC/request",
+        "up to $0/URL; maximum 18446744073709551615 URLs and $0/request",
     );
     let mut maximum = tariff();
     maximum["baseCredits"] = json!(u64::MAX);
     maximum["maxCredits"] = json!(u64::MAX);
-    expect_estimate(maximum, "258254417031933722.61 USDC/request");
+    expect_estimate(maximum, "$258254417031933722.61/request");
     let mut unusual = tariff();
     unusual["surcharges"] = json!([
         {"credits":1,"queryParam":"","when":"present","label":""},
@@ -639,6 +619,6 @@ fn zero_and_maximum_units_preserve_existing_permissive_tariffs() {
     // Individual surcharges are capped, but their sum plus base is not validated.
     expect_estimate(
         unusual,
-        "0.014 USDC base; maximum 0.014 USDC/request; up to 0.014 USDC extra when  is supplied (); up to 0.014 USDC extra when  is supplied (); normalization-failure charge 0.014 USDC",
+        "$0.014 base; maximum $0.014/request; up to $0.014 extra when  is supplied (); up to $0.014 extra when  is supplied (); normalization-failure charge $0.014",
     );
 }

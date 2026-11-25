@@ -1134,7 +1134,7 @@ omit = ['/local', '/ordered']
         .tools;
     assert_eq!(
         tools[0].tool.description,
-        "Catalog prose. Configured pricing: Billed per request."
+        "Catalog prose. Billed per request."
     );
     assert_eq!(
         tools[0].tool.input_schema["properties"]["q/r"]["description"],

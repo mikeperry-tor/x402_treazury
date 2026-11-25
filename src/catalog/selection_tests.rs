@@ -32,7 +32,7 @@ fn operation_filters_precede_collision_counts_and_preserve_payloads() {
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(&cfg, &root, "api").unwrap();
+    } = selected_operations(&cfg, &root, "api", None).unwrap();
     assert!(issues.is_empty());
     let input = &selected[0].2;
     assert_eq!(
@@ -70,7 +70,7 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(&Config::default(), &root, "api").unwrap();
+    } = selected_operations(&Config::default(), &root, "api", None).unwrap();
     assert!(issues.is_empty());
     assert_eq!(
         selected
@@ -91,7 +91,7 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(&both_methods, &root, "api").unwrap();
+    } = selected_operations(&both_methods, &root, "api", None).unwrap();
     assert!(issues.is_empty());
     assert_eq!(
         selected
@@ -110,7 +110,7 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
 
 #[test]
 fn empty_source_filtered_inventory_and_invalid_operations_keep_error_categories() {
-    let empty = selected_operations(&Config::default(), &json!({"operations":[]}), "api")
+    let empty = selected_operations(&Config::default(), &json!({"operations":[]}), "api", None)
         .err()
         .expect("invalid operation selection must fail");
     assert_eq!(empty.to_string(), "no operations matched");
@@ -123,6 +123,7 @@ fn empty_source_filtered_inventory_and_invalid_operations_keep_error_categories(
         &cfg,
         &json!({"operations":[{"path":"/a","method":"get"}]}),
         "api",
+        None,
     )
     .err()
     .expect("invalid operation selection must fail");
@@ -133,7 +134,7 @@ fn empty_source_filtered_inventory_and_invalid_operations_keep_error_categories(
     assert!(filtered.downcast_ref::<ToolConfigurationError>().is_some());
     // Invalid entries must fail even when the allowlist would discard them.
     for invalid in [json!({"path":7,"method":"get"}), json!({"path":"/a"})] {
-        let error = selected_operations(&cfg, &json!({"operations":[invalid]}), "api")
+        let error = selected_operations(&cfg, &json!({"operations":[invalid]}), "api", None)
             .err()
             .expect("invalid operation selection must fail");
         assert_eq!(error.to_string(), "invalid operation");

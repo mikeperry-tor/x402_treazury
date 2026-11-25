@@ -1,4 +1,4 @@
-//! Canonical pricing survives expiry while runtime rendering replaces owned fragments.
+//! Canonical pricing survives expiry while runtime rendering adds scoped evidence.
 use super::*;
 use crate::output::ObservedPrice;
 use alloy_primitives::U256;
@@ -16,15 +16,15 @@ fn tool(cfg: Config, op: Value) -> ToolSpec {
 }
 
 #[test]
-fn observed_rendering_replaces_generated_fixed_range_and_unknown_prices() {
+fn observed_rendering_keeps_generated_fixed_range_and_unknown_prices() {
     for (pricing, suffix) in [
         (
-            json!({"amount":"0.01","currency":"USDC"}),
-            "Cost: ~$0.01/call [spec].",
+            json!({"amount":"0.01","currency":"USDC","unit":"call"}),
+            "Listed: ~$0.01/call [spec].",
         ),
         (
-            json!({"min":"0.01","max":"0.02","currency":"USD"}),
-            "Cost: ~$0.01–$0.02/call [spec].",
+            json!({"min":"0.01","max":"0.02","currency":"USD","unit":"call"}),
+            "Listed: ~$0.01–$0.02/call [spec].",
         ),
         (Value::Null, "Cost: unknown."),
     ] {
@@ -40,8 +40,10 @@ fn observed_rendering_replaces_generated_fixed_range_and_unknown_prices() {
             fallback,
             format!("Search company records; a $9 returned value is data. {suffix}")
         );
-        let expected =
-            "Search company records; a $9 returned value is data. Observed cost: ~$0.005/call.";
+        let prose_and_tariff = fallback
+            .strip_suffix(" Cost: unknown.")
+            .unwrap_or(&fallback);
+        let expected = format!("{prose_and_tariff} Sample offer: $0.005 for one request.");
         assert_eq!(tool.render_description(observed()), expected);
         assert_eq!(tool.render_description(observed()), expected);
         assert_eq!(tool.render_description(None), fallback);
@@ -56,17 +58,17 @@ fn exact_generated_suffix_is_replaced_once_without_parsing_vendor_prose() {
             pricing_key: Some("x-price".into()),
             ..Default::default()
         },
-        json!({"description":"Search. Cost: ~$0.01/call [spec].", "x-price":{"amount":"0.01","currency":"USD"}}),
+        json!({"description":"Search. Cost: ~$0.01/call [spec].", "x-price":{"amount":"0.01","currency":"USD","unit":"call"}}),
     );
-    assert_eq!(tool.description, "Search. Cost: ~$0.01/call [spec].");
+    assert_eq!(tool.description, "Search. Listed: ~$0.01/call [spec].");
     assert_eq!(
         tool.render_description(observed()),
-        "Search. Observed cost: ~$0.005/call."
+        "Search. Listed: ~$0.01/call [spec]. Sample offer: $0.005 for one request."
     );
 }
 
 #[test]
-fn observed_rendering_replaces_the_whole_owned_credit_section() {
+fn observed_rendering_preserves_the_whole_owned_credit_section() {
     let cfg = Config {
         credit_pricing: Some(CreditPricing {
             credit_cost_key: "x-credit".into(),
@@ -83,7 +85,7 @@ fn observed_rendering_replaces_the_whole_owned_credit_section() {
     let tool = tool(cfg, operation);
     assert_eq!(tool.description, compiled.description);
     assert!(tool.description.contains("Original credit conditions."));
-    assert!(tool.description.contains("0.014 USDC/request"));
+    assert!(tool.description.contains("Estimated cost: $0.014/request."));
     let bound = crate::catalog_state::bind(vec![(
         tool.clone(),
         crate::payment::PaidClient::unsigned(),
@@ -97,7 +99,7 @@ fn observed_rendering_replaces_the_whole_owned_credit_section() {
     );
     assert_eq!(
         tool.render_description(observed()),
-        "Find posts. Observed cost: ~$0.005/call."
+        format!("{} Sample offer: $0.005 for one request.", tool.description)
     );
 }
 
@@ -116,11 +118,15 @@ fn authored_tariff_fragments_work_without_schema_pricing_and_opaque_overrides_st
     );
     assert_eq!(
         split.description,
-        "Read records. Vendor bills successful calls. Configured pricing: Cost: $0.01 [vendor guide]."
+        "Read records. Vendor bills successful calls. Cost: $0.01 [vendor guide]."
     );
     assert_eq!(
         split.render_description(observed()),
-        "Read records. Vendor bills successful calls. Observed cost: ~$0.005/call."
+        concat!(
+            "Read records. Vendor bills successful calls. ",
+            "Configured pricing: Cost: $0.01 [vendor guide]. ",
+            "Sample offer: $0.005 for one request."
+        )
     );
     let opaque = tool(
         Config {
@@ -131,7 +137,7 @@ fn authored_tariff_fragments_work_without_schema_pricing_and_opaque_overrides_st
     );
     assert_eq!(
         opaque.render_description(observed()),
-        "Opaque $0.01 authored prose. Observed cost: ~$0.005/call."
+        "Opaque $0.01 authored prose. Sample offer: $0.005 for one request."
     );
 }
 
@@ -159,18 +165,18 @@ fn explicit_limits_preserve_fallback_contract_and_visibly_truncate_observed_over
     let authored = tool(
         Config {
             max_description_chars: Some(8),
-            overrides: json!({"api_read":{"description":"Read original authored description.","pricing_description":"Free."}}),
+            overrides: json!({"api_read":{"description":"雪🙂雪🙂雪🙂雪🙂 authored text","pricing_description":"Free."}}),
             ..Default::default()
         },
         json!({}),
     );
     assert_eq!(
         authored.description,
-        "Read ori\n[truncated by max_description_chars=8]"
+        "雪🙂雪🙂雪🙂雪🙂\n[truncated by max_description_chars=8]"
     );
     assert_eq!(
         authored.render_description(observed()),
-        "Read ori\n[truncated by max_description_chars=8]"
+        "雪🙂雪🙂雪🙂雪🙂\n[truncated by max_description_chars=8]"
     );
     assert_eq!(authored.render_description(None), authored.description);
 }
@@ -184,11 +190,11 @@ fn runtime_rendering_metadata_is_not_serialized_and_restored_descriptions_are_op
     assert!(restored.description_rendering.is_none());
     assert_eq!(
         restored.render_description(observed()),
-        "Read. Cost: unknown. Observed cost: ~$0.005/call."
+        "Read. Cost: unknown. Sample offer: $0.005 for one request."
     );
     assert_eq!(
         original.render_description(observed()),
-        "Read. Observed cost: ~$0.005/call."
+        "Read. Sample offer: $0.005 for one request."
     );
 }
 
@@ -201,15 +207,27 @@ fn description_and_pricing_overrides_edit_independent_fields() {
     for (patch, description) in [
         (
             json!({"description":"Authored prose."}),
-            "Authored prose. Cost: ~$0.01/call [spec].",
+            "Authored prose. Listed: ~$0.01/call [spec].",
         ),
         (
             json!({"pricing_description":"Billed only on success."}),
-            "Catalog description. Cost: ~$0.01/call [spec]. Configured pricing: Billed only on success.",
+            "Catalog description. Listed: ~$0.01/call [spec]. Billed only on success.",
         ),
         (
-            json!({"description":"Authored prose.","pricing_description":"Cost: ~$0.01/call [spec]."}),
-            "Authored prose. Cost: ~$0.01/call [spec]. [also configured]",
+            json!({"description":"Authored prose.","pricing_description":"Listed: ~$0.01/call [spec]."}),
+            "Authored prose. Listed: ~$0.01/call [spec].",
+        ),
+        (
+            json!({"pricing_description":"Cost: ~$0.01/call [spec]. Billed only on success."}),
+            "Catalog description. Listed: ~$0.01/call [spec]. Billed only on success.",
+        ),
+        (
+            json!({"pricing_description":"Cost: ~$0.01/call [spec, USDC]. Billed only on success."}),
+            "Catalog description. Listed: ~$0.01/call [spec]. Billed only on success.",
+        ),
+        (
+            json!({"pricing_description":"Cost: ~$0.02/call [spec, USDC]."}),
+            "Catalog description. Listed: ~$0.01/call [spec]. Configured pricing: Cost: ~$0.02/call [spec, USDC].",
         ),
     ] {
         let selected = tool(
@@ -226,6 +244,145 @@ fn description_and_pricing_overrides_edit_independent_fields() {
             Some(U256::from(10_000))
         );
     }
+}
+
+#[test]
+fn legacy_usdc_tariff_in_catalog_prose_is_rendered_once() {
+    let selected = tool(
+        Config {
+            pricing_key: Some("x-price".into()),
+            ..Default::default()
+        },
+        json!({
+            "description":"Read records. Cost: ~$0.01/call [spec].",
+            "x-price":{"amount":"0.01","currency":"USDC","unit":"call"}
+        }),
+    );
+    assert_eq!(
+        selected.description,
+        "Read records. Listed: ~$0.01/call [spec]."
+    );
+}
+
+#[test]
+fn legacy_tariff_deduplication_preserves_distinct_currency_and_extra_terms() {
+    let operation = json!({
+        "description":"Read.",
+        "x-price":{"amount":"0.01","currency":"USD","pricingTerms":"Billed on success."}
+    });
+    let listed = "Read. Listed: ~$0.01 [spec, no unit]. Billing terms [spec] Billed on success.";
+    for (note, expected) in [
+        (
+            "Cost: ~$0.01/call [spec]. Empty results are free.",
+            format!(
+                "{listed} Configured pricing: Cost: ~$0.01/call [spec]. Empty results are free."
+            ),
+        ),
+        (
+            "Cost: ~$0.01 (unit unspecified) [spec]. Billing terms [spec] Billed on success. Empty results are free.",
+            format!("{listed} Empty results are free."),
+        ),
+        (
+            "Listed: ~$0.01 [spec, no unit]. Empty results are free.",
+            format!("{listed} Empty results are free."),
+        ),
+        (
+            "Cost: ~$0.01 (unit unspecified) [spec, USDC].",
+            format!("{listed} Configured pricing: Cost: ~$0.01 (unit unspecified) [spec, USDC]."),
+        ),
+        (
+            "Billed per item in $.results.",
+            format!("{listed} Billed per item in $.results."),
+        ),
+    ] {
+        let selected = tool(
+            Config {
+                pricing_key: Some("x-price".into()),
+                overrides: json!({"api_read":{"pricing_description":note}}),
+                ..Default::default()
+            },
+            operation.clone(),
+        );
+        assert_eq!(selected.description, expected);
+        assert_eq!(
+            selected.render_description(observed()),
+            format!("{expected} Sample offer: $0.005 for one request.")
+        );
+    }
+}
+
+#[test]
+fn legacy_ranges_match_only_with_a_known_unit() {
+    for (unit, suffix, note) in [
+        (
+            Value::Null,
+            " [spec, dynamic, no unit]",
+            "Configured pricing: Cost: ~$0.01–$0.10/call [spec]. Some calls are free.",
+        ),
+        (
+            json!("call"),
+            "/call [spec, dynamic]",
+            "Some calls are free.",
+        ),
+    ] {
+        let mut range = json!({"min":"0.01","max":"0.10","currency":"USD","mode":"dynamic"});
+        if !unit.is_null() {
+            range["unit"] = unit;
+        }
+        let selected = tool(
+            Config {
+                pricing_key: Some("x-price".into()),
+                overrides: json!({"api_read":{"pricing_description":
+                    "Cost: ~$0.01–$0.10/call [spec]. Some calls are free."}}),
+                ..Default::default()
+            },
+            json!({"description":"Read.","x-price":range}),
+        );
+        assert_eq!(
+            selected.description,
+            format!("Read. Listed: ~$0.01–$0.10{suffix}. {note}")
+        );
+    }
+}
+
+#[test]
+fn billing_terms_with_offer_like_text_keep_a_distinct_configured_price() {
+    let selected = tool(
+        Config {
+            pricing_key: Some("x-price".into()),
+            overrides: json!({"api_read":{"pricing_description":"Cost: ~$0.01/call [spec]."}}),
+            ..Default::default()
+        },
+        json!({"summary":"Read.","x-price":{
+            "amount":"0.02","currency":"USD","unit":"call",
+            "conditions":"Advertised exact offer: ~$0.01/request [external pricing]."
+        }}),
+    );
+    assert!(
+        selected
+            .description
+            .ends_with("Configured pricing: Cost: ~$0.01/call [spec].")
+    );
+}
+
+#[test]
+fn the_legacy_dynamic_label_matches_a_metered_tariff() {
+    let selected = tool(
+        Config {
+            pricing_key: Some("x-price".into()),
+            overrides: json!({"api_read":{"pricing_description":
+                "Cost: ~$0.01/call [spec, dynamic]. Empty results are free."}}),
+            ..Default::default()
+        },
+        json!({"description":"Read.","x-price":{
+            "amount":"0.01","currency":"USD","unit":"call","mode":"metered"
+        }}),
+    );
+    assert_eq!(
+        selected.description,
+        "Read. Listed: ~$0.01/call [spec, metered]. Empty results are free."
+    );
+    assert!(selected.advertised_pricing.amount().is_none());
 }
 
 #[test]

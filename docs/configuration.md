@@ -853,9 +853,9 @@ limits. Agents cannot change these limits.
 - **Display limits:** Completed tool output is returned in full except for
   explicit JSON field omissions (disclosed in the result). The obsolete
   `max_response_chars` setting and `--max-response-chars` flag fail parsing.
-  `max_description_chars` remains an explicit tool-description limit with a
-  visible truncation marker and stderr log. Incoming MCP HTTP requests have a
-  4 MiB body limit (HTTP `413` with a stderr warning).
+  See [tool description limits](#observed-prices-and-description-overrides)
+  for `max_description_chars`. Incoming MCP HTTP requests have a 4 MiB body
+  limit (HTTP `413` with a stderr warning).
 
 ### JSON response projection
 
@@ -1238,6 +1238,10 @@ usd_as_usdc = true # Opt in to treating reviewed USD tariffs as 1:1 USDC hints.
   `format = "payment-info"`). `x402` defaults to `x-x402` and parses
   dollar-prefixed `price` strings. A local `pricing` or `pricing_key` replaces
   both inherited pricing settings as one unit.
+  A catalog with a top-level `operations` array can supply a structured
+  `pricing` field on each operation. The compiler reads it as `payment-info`
+  by default. The configured key selects an OpenAPI field. An operations
+  digest uses `pricing`. Selecting an external source takes precedence.
 - **External formats:** Set `source` to an HTTPS URL with
   `format = "x402-resources"` (`resources` array with explicit HTTP methods) or
   `format = "x402-discovery"` (`items` array; may omit method when one catalog
@@ -1246,52 +1250,93 @@ usd_as_usdc = true # Opt in to treating reviewed USD tariffs as 1:1 USDC hints.
   tool publication, and is skipped by inspection and qualification. Refreshing
   a catalog re-downloads its external pricing document and binds its expiry to
   the parent catalog.
-- **Normalization:** Selection hints require exact nonnegative per-call Base
-  USDC amounts (at most 6 decimal places; USD amounts require `usd_as_usdc = true`).
-  Metered, credit, dynamic, range (`min` and `max`), and unsupported-asset
-  tariffs stay display-only. Unhandled vendor pricing shapes are tracked in the
-  [custom pricing adapters plan](plans/custom-pricing-adapters.md); refresh
-  advertised evidence via
-  [provider pricing review](provider-updates.md#pricing-evidence-and-variation-review).
-- **Description suffixes:** Generated descriptions append compact suffixes such
-  as `Cost: ~$0.015/call [spec].`, `Cost: ~$0.01-$0.20/call [spec].`,
-  `Cost: free [spec].`, or `Cost: unknown.` (preserving explicit vendor units
-  and `[spec, dynamic]` tags). Server instructions include the pricing caveat
-  once:
+- **Catalog selection estimates:** A fixed per-call or per-request price can
+  supply a selection estimate in Base USDC. The amount must be nonnegative
+  with at most six decimal places. Enable `usd_as_usdc` to use a fixed USD
+  price as the estimate. Explicit units take precedence over the configured
+  fallback. Catalog prices with missing or malformed units, ranges, and
+  dynamic, metered, credit, or unsupported-asset tariffs remain display
+  evidence. When `protocols[].x402.networks` lists network alternatives, one
+  must support Base USDC. A scheme declared under `protocols[].x402` must be
+  `exact`.
+- **Nested tariff terms:** The selected price block and its enclosing tariff
+  objects supply billing terms. The nearest declaration supplies the display
+  mode and unit. Any nonfixed mode or explicit unit other than `call` or
+  `request` along that path prevents using the tariff as a selection estimate
+  for a paid request. Malformed declarations also prevent an estimate. This
+  applies to both `mode` and `pricingMode` and to embedded and external
+  prices. A matching external offer remains visible as a sample.
+- **External selection estimates:** A matched external record can supply a
+  compatible exact Base USDC offer for one request. An offer can supply a
+  selection estimate when the tariff is fixed per call or request, or when
+  the offer is the only price. If the record and configuration omit the unit,
+  the offer itself supplies the per-request unit. Alongside a range, a dynamic
+  or metered tariff, or an unrecognized tariff such as a percentage fee, the
+  renderer labels the offer as a sample. Explicit non-call or malformed units
+  also keep the offer as a sample. The description reports when published
+  offers supply no exact Base USDC amount.
+- **Free operations:** An explicit `authMode = "free"` supplies a zero estimate
+  without an amount, currency, or unit. A fixed zero amount can agree with
+  that declaration, and the description retains access conditions. Conflicting
+  free and paid declarations leave the estimate unknown.
+- **Description suffixes:** Published amounts appear as
+  `Listed: ~$0.015/call [spec].`, `Listed: from ~$0.01/call [spec, dynamic].`,
+  or `Listed: free [spec].`. A missing billing unit appears as `[spec, no unit]`
+  or alongside the external source label. Generated USD and USDC amounts use
+  `$`. `Cost: unknown.` appears when no pricing fragment is available.
+  Server instructions include the pricing caveat once.
   > Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.
+
+See the [custom pricing adapters plan](plans/custom-pricing-adapters.md) for
+unhandled formats and the [provider pricing review](provider-updates.md#pricing-evidence-and-variation-review)
+for maintaining advertised evidence.
 
 ### Credit tariff conversion
 
 Providers with structured credit tariffs can display approximate USDC costs:
 
 ```toml
-pricing_key = "x-socialfetch-credits-pricing" # Keep original billing prose.
+pricing_key = "x-socialfetch-credits-pricing" # Read vendor billing terms.
 [credit_pricing]
 credit_cost_key = "x-socialfetch-pricing"
 usdc_per_credit = "0.014"
 ```
 
-Conversion uses exact integer arithmetic (positive decimal rate, at most 6
-decimal places) for display only; it never affects challenges or caps. Supports
+Conversion uses exact integer arithmetic with a positive rate of at most six
+decimal places. It supplies display estimates. The converter supports
 `baseCredits`, `maxCredits`, `normalizationFailureCredits`, `surcharges`
-(including `includes` array conditions), URL batches, per-record metering,
-`billableDomainErrors`, and `x402ExactPolicy` hints. Malformed metadata retains
-original prose, marks estimates unavailable, and logs one `WARN` summary per
-catalog build (`DEBUG` logs per-tool failure reasons without raw metadata).
+(including conditions that check for a value in an array), URL batches,
+per-record metering, and `billableDomainErrors`. It accepts `x402ExactPolicy`
+as transport metadata. A fixed estimate appears
+as `Estimated cost: $0.014 on success.` when it replaces a matching
+fixed-credit tariff for successful requests. Metering, surcharges, and
+failure charges remain visible. Malformed metadata leaves vendor
+terms in place and logs one `WARN` summary per catalog build. `DEBUG` logs
+per-tool failure reasons without raw metadata.
 SocialFetch uses `0.014` USDC per credit as a fixed display estimate.
 
 ### Observed prices and description overrides
 
-When a fresh observed offer exists in the runtime cache, MCP tool definitions
-and search results replace the generated pricing suffix with
-`Observed cost: ~$0.005/call.` (restoring the fallback on expiry; CLI
-inspection and canonical search text keep the fallback).
+MCP listing, definition, and search results can show published pricing and
+configured terms alongside a cached offer from an earlier request, such as
+`Sample offer: $0.005 for one request.` The amount can vary with arguments.
+The live description drops cached pricing when it expires or the source
+retires. CLI output and search ranking use the compiled description. External
+prices loaded in the background and recorded offers leave search cursors stable.
 
-An override edits one field. `description` replaces operation prose, and
-`pricing_description` adds a configured pricing note independently. The
-canonical description shows the published tariff and the authored note.
-An identical note appears once with both sources acknowledged. Credit terms
-have their own section. Help descriptions have no operation tariff.
+`description` replaces operation prose. `pricing_description` adds billing
+terms alongside the published tariff. When a note starts with a copy of the
+published tariff, including a recognized legacy format, the description keeps
+one copy and preserves the rest of the note. A unitless tariff leaves the
+authored per-call price visible. An eligible per-request offer can still match
+a legacy offer note.
+
+Plain billing notes appear directly in the description. A separate configured
+dollar amount carries a `Configured pricing:` label alongside a published
+tariff, credit estimate, or sample offer.
+
+Use `description` to edit help text. Serving discards `pricing_description`
+on a help tool, and strict inspection rejects that override.
 
 ```toml
 [overrides.example_search]
@@ -1312,8 +1357,15 @@ targets. Serving reports unknown override fields and applies valid fields.
 Strict inspection rejects discarded edits even if a tool-name
 filter hides the compiled tool.
 
-`max_description_chars` limits the completed description, including authored
-text, with the visible truncation marker.
+Descriptions have no character limit by default. Set `max_description_chars`
+in TOML or `X402_MCP_GENERIC_MAX_DESCRIPTION_CHARS` for standalone serving.
+The limit counts Unicode scalar values across the final description,
+including authored text, help tool descriptions, and live pricing. A letter
+and a separate combining accent count as two values. If the limit is `N`
+and the description is longer, the renderer keeps the first `N` values and
+appends a newline and `[truncated by max_description_chars=N]`. The newline
+and marker are outside the limit. Compilation-time truncation logs a `WARN`
+with the tool name, setting, and character limit.
 
 ## Automatic discovery disk cache
 

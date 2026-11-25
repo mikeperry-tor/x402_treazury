@@ -20,9 +20,8 @@ responses.
   catalogs exceeding the structural work budget fail closed with a `WARN`
   naming the resource, setting, and numeric bound (speculative origin probes
   log byte rejections at `DEBUG`).
-- **Truncation:** `max_description_chars` appends an explicit truncation marker
-  and logs a `WARN`. Completed API tool outputs have no character-length
-  truncation (the obsolete `max_response_chars` setting fails config parsing).
+- **Truncation:** Completed API tool outputs have no character-length truncation
+  (the obsolete `max_response_chars` setting fails config parsing).
   Local JSON field omissions (`response_mappings`) disclose every removed path
   and count in the tool result advisory.
 - **Protobuf and gRPC codes:** `ResourceExhausted` and `OutOfRange` emit `WARN`
@@ -44,7 +43,7 @@ responses.
 | Catalog structural budget | Depth 64, 500,000 nodes, 64 MiB traversal and copy work | Shared across local, remote, cached, and relayed OpenAPI parsing; rejects whole with `WARN`. |
 | Dynamic management requests and catalogs | 64 KiB management request, 10,000 operations, 256 KiB per tool schema, 64-byte source name, 512-byte tool name, 128 MiB live documents, 256 MiB SQLite registry | Enforced in `src/discovery/`; rejects whole with `WARN` rather than truncating or loading partial registrations. |
 | MCP image attachments | 4 images, 4 MiB per image, 8 MiB total by default (`image_limits.max_images`, `max_image_bytes`, `max_total_bytes` in `src/output.rs`) | Rejects oversized or excess images with `WARN`; never silently drops or resizes. |
-| Tool descriptions | `max_description_chars` (optional) | Truncates generated and observed descriptions with an explicit marker and `WARN`. |
+| Tool descriptions | `max_description_chars` (default unset) | [Marks truncated descriptions and logs compile-time truncation](configuration.md#observed-prices-and-description-overrides). |
 | Base RPC response body | 16 MiB fixed (`src/rotation/base.rs`) | Rejects without retrying that endpoint; may fail over to a fresh view. |
 | NEAR JSON response body | 2,000,000 bytes fixed (`src/rotation/near.rs`) | Rejects with `WARN`; never parses truncated JSON. |
 | Protobuf and gRPC frames | Tonic default 4 MiB per decoded message and Zcash bounds | Rejects with `WARN` at unary and stream consumers. |

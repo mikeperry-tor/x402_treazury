@@ -24,8 +24,8 @@ Preserved invariants:
 - Metered, credit, dynamic and ambiguous tariffs remain display-only.
 - Shared adapters need independent uses with synthetic tests. No provider-ID
   dispatch, executable metadata or per-provider copying.
-- Existing concise `Cost:` presentation and authored `pricing_description`
-  precedence are preserved.
+- Adapters normalize tariff data for the renderer. Follow the configuration
+  guide's [pricing and override rules](../configuration.md#observed-prices-and-description-overrides).
 
 Owning guides: [configuration](../configuration.md#pricing-metadata-and-runtime-hints),
 [provider updates](../provider-updates.md#pricing-evidence-and-variation-review),
@@ -55,10 +55,10 @@ intentionally not a fixed estimate until a reviewed adapter exists.
 
 | Provider | Observed variation | Current result | Proposed shared response |
 | --- | --- | --- | --- |
-| `degenscan` | `x-price-usd` numeric scalar (`0.002`, `0.001`, ...) on 120 operations; configured key is `x-price-usd` with `payment-info` | `Pricing: 0.002 [spec]`, display-only | Add a catalog-only scalar USD format that accepts a finite nonnegative number or decimal string, preserves `Cost: ~$0.002/call [spec].`, and requires `usd_as_usdc` before selection |
+| `degenscan` | `x-price-usd` numeric scalar (`0.002`, `0.001`, ...) on 120 operations; configured key is `x-price-usd` with `payment-info` | `Pricing: 0.002 [spec]`, display-only | Add a catalog-only scalar USD format that accepts a finite nonnegative number or decimal string, preserves `Listed: ~$0.002/call [spec].`, and requires `usd_as_usdc` before selection |
 | `daedalus` | `x-price-usd` decimal strings (`"0.01"`, `"0.00"`) on 360 of 380 operations; only 250 also have `x-payment-info` | 86 tools unknown/missing, rest fixed | Same scalar format; migrate the provider to `x-price-usd` when the adapter is reviewed. Explicit `"0.00"` is free only under the existing explicit-zero rule |
 | `relayshield` | `x-price-usd` numeric scalars on 32 metered operations without `x-payment-info`; `x-payment-info` also has `x-billing-unit` | Some metered tools unknown | Same scalar format as a fallback key for operations without the primary key; keep metered units display-only |
-| `nansen` | `x-payment-info` is an object with a nested dollar-string `price` (`{"protocols":["x402","mpp"],"pricingMode":"fixed","price":"$0.05"}`); `x-credit-cost` carries credit tiers | 77 tools display-only as raw JSON | Accept a dollar-prefixed `price` string inside the payment-info object using the existing x402 string semantics (`$` stripped, USD implied) |
+| `nansen` | `x-payment-info` is an object with a nested dollar-string `price` (`{"protocols":["x402","mpp"],"pricingMode":"fixed","price":"$0.05"}`); `x-credit-cost` carries credit tiers | 77 tools display the dollar text without a structured estimate | Accept a dollar-prefixed `price` string inside the payment-info object using the existing x402 string semantics (`$` stripped, USD implied) |
 | `horizonpulse` | `x-payment-info` has `priceUsd` plus atomic `amount`/`decimals`, optional `networks`/`polygon`; premium operations use `x-premium-payment-info` | No `[pricing]`; 49 effective tools unknown; atomic amount must not display as major units | Read `priceUsd` when present; otherwise convert atomic `amount` with `decimals`; recognize one secondary operation key with first-present precedence; keep network alternatives display-only unless they are the same Base USDC rail |
 | `agent402` | Standard `x-payment-info.price` covers most operations; `x-price` appears separately, 26 operations have no `price.amount`, and 3 effective tools are unknown | 3 unknown | No adapter required unless the unknown operations publish a concrete amount; do not add a fallback solely for these |
 | `claw402` | `x-token-pricing` token schedules and `x-payment-info.price.min` dynamic tariffs | 12 display-only | No fixed-amount adapter. Keep metered/dynamic display-only; do not invent a per-call estimate |
@@ -75,9 +75,9 @@ intentionally not a fixed estimate until a reviewed adapter exists.
 Design review must choose names and exact semantics before implementation:
 
 1. **Scalar format name.** Prefer `format = "usd-scalar"` over overloading
-   `payment-info`. The scalar carries no currency, network or asset, so it must
-   require explicit `usd_as_usdc` for a selection amount and otherwise render
-   `Cost: ~$X/call [spec].` display-only. Only `source = "catalog"` is valid.
+   `payment-info`. The scalar carries no currency, network, or asset. Require
+   `usd_as_usdc` before using it as a wallet estimate. Follow the configured
+   billing unit when displaying it. Only `source = "catalog"` is valid.
 2. **Secondary keys.** Prefer an ordered `fallback_keys` list (first present wins)
    owned by the pricing configuration, rather than provider-specific dispatch or a
    second pricing table. Limit it to catalog keys and reject it for external
@@ -90,9 +90,9 @@ Design review must choose names and exact semantics before implementation:
 4. **Dollar strings.** Reuse the existing x402 dollar-string normalization for a
    nested payment-info `price` string. A bare number without a currency remains
    display-only unless a scalar format or `usd_as_usdc` explicitly interprets it.
-5. **Presentation.** Keep one compact `Cost:` suffix. Dynamic, range, metered and
-   credit shapes retain raw vendor detail. Authored `pricing_description` still
-   wins after generated fallback.
+5. **Presentation.** Supply compact tariff text and retain vendor details for
+   dynamic, range, metered, and credit shapes. The renderer owns composition
+   with authored notes and observed offers.
 6. **No provider recipes.** If a shape has only one provider and no likely second
    use, keep it authored in `pricing_description` or the owning caveat instead of
    adding code.

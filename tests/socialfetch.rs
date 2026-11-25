@@ -62,7 +62,18 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
     assert!(
         profile
             .description
-            .contains("1 credit per successful request")
+            .ends_with("Estimated cost: $0.014 on success.")
+    );
+    assert!(
+        !profile
+            .description
+            .contains("credit per successful request")
+    );
+    let videos = all.iter().find(|t| t.path == "/v1/youtube/videos").unwrap();
+    assert!(
+        videos
+            .description
+            .ends_with("Estimated cost: $0.014 on success; normalization-failure charge $0.014.")
     );
     assert_eq!(
         profile

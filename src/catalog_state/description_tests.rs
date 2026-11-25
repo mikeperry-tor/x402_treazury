@@ -70,7 +70,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
         let fallback = tools[0].tool.description.clone();
         assert_eq!(tools[0].description(), fallback);
         key.learn(U256::from(5000), received().unwrap());
-        let expected = "Read alpha records. Observed cost: ~$0.005/call.";
+        let expected = "Read alpha records. Sample offer: $0.005 for one request.";
         assert_eq!(tools[0].description(), expected);
         assert_eq!(tools[0].tool.description, fallback);
         assert_eq!(
@@ -116,7 +116,10 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
         v1.operation_key()
             .unwrap()
             .learn(U256::from(3000), received().unwrap());
-        assert!(v1.description().contains("Observed cost: ~$0.003/call."));
+        assert!(
+            v1.description()
+                .contains("Sample offer: $0.003 for one request.")
+        );
         assert_eq!(v2.description(), fallback);
         assert_eq!(tools[0].description(), expected);
         let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
@@ -177,7 +180,7 @@ async fn scoped_descriptions_refresh_expire_and_leave_search_cursors_canonical()
             assert_eq!(search(json!({"query":"observed"}))["total"], 0);
             assert_eq!(
                 search(json!({"limit":1}))["items"][0]["description"],
-                "Read alpha records. Observed cost: ~$0.007/call."
+                "Read alpha records. Sample offer: $0.007 for one request."
             );
         }
         let cursor = canonical_cursor.unwrap();

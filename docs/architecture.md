@@ -14,7 +14,7 @@ across these modules:
 | `src/config.rs` | Loads standalone TOML providers and deployment files, resolves relative paths, runs one-level `extends` inheritance, enforces strict schema validation, and validates `send_tools` rules, `response_mappings`, and `operation_url_extension`. |
 | `src/catalog.rs` | Parses OpenAPI JSON into typed tools, resolves local `$ref` targets within a structural work budget, generates deterministic names, flattens simple request bodies, extracts `in: header` parameters, and manages automatic `Idempotency-Key` headers. |
 | `src/discovery/` | Fetches remote specs and lazy help documents, manages endpoint-local dynamic providers, runs local BM25 tool and provider search, and handles remote directory queries. |
-| `src/pricing/` | Parses embedded (`payment-info`, `x402`) and external (`x402-resources`, `x402-discovery`) pricing metadata into per-operation hints and formats description suffixes. |
+| `src/pricing/` | Parses embedded (`payment-info`, `x402`) and external (`x402-resources`, `x402-discovery`) pricing metadata into per-operation hints and formats advertised tariff evidence. |
 | `src/deployment/` | Orchestrates multi-listener startup, `catalog_concurrency` Tor scope gating, source distribution (`routing.rs`), deferred catalog publication, and graceful shutdown. |
 | `src/server.rs`, `src/server/` | Serves stateless MCP Streamable HTTP and stdio, enforces bearer authentication (`auth.rs`), Host validation (`host.rs`), accepted-work draining (`work.rs`), and MCP tool inventories. |
 | `src/catalog_state.rs` | Owns live source snapshots, runtime publication, tool-name ambiguity suppression, and on-demand search cursors. |
@@ -104,10 +104,10 @@ and isolation policy, transport flags, timeouts, limits, and resource kind.
   TTLs govern retention regardless of upstream `Cache-Control` headers, and
   reads or price observations do not extend expiry. Validated bytes are staged
   and committed only after generation and `send_tools` validation succeed.
-- **Asynchronous pricing enrichment:** External pricing (`x402-resources` and
-  `x402-discovery`) loads asynchronously without delaying tool publication.
-  Parsed prices inherit the parent catalog's expiry. Fresh observed offers from
-  live calls take precedence over advertised hints.
+- **External pricing:** The server attaches external prices to the catalog
+  generation that requested them. See the configuration guide for
+  [advertised pricing](configuration.md#advertised-pricing-configuration) and
+  [how pricing appears in tool descriptions](configuration.md#observed-prices-and-description-overrides).
 - **Runtime source refresh:** A final unsigned target HTTP `404`, `405`, or
   `410` triggers a coalesced background refresh for that deployment or dynamic
   source. Existing tools stay callable while refresh runs; if refresh fails,

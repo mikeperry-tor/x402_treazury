@@ -17,11 +17,13 @@ pub(crate) mod expansion;
 #[cfg(test)]
 mod expansion_tests;
 mod sanitize;
+pub(crate) use contracts::rebind_schema_descriptions;
 pub use credit_pricing::CreditPricing;
 pub(crate) use overrides::{OVERRIDE_PARAMS_FIELD, OVERRIDE_TEXT_FIELDS};
 pub use overrides::{OverrideIssue, OverrideProblem};
 pub use presentation::DescriptionRendering;
 
+use crate::pricing::advertised::{NormalizedPrice, PricingConfig};
 use anyhow::{Context, Result, bail, ensure};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use regex::Regex;
@@ -93,7 +95,6 @@ impl std::fmt::Display for LocalCatalogFailure {
 }
 impl std::error::Error for LocalCatalogFailure {}
 
-const DEFAULT_PRICE: &str = "Cost: unknown.";
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'!')
@@ -1934,7 +1935,11 @@ fn build_catalog_inventory(
     root: &Value,
     prefix: &str,
 ) -> Result<(CatalogBuild, credit_pricing::Diagnostics)> {
-    cfg.effective_pricing()?;
+    let embedded_pricing = match cfg.effective_pricing()? {
+        Some(pricing) if pricing.catalog_key().is_some() => Some(pricing),
+        None if root.get("paths").is_none() => Some(PricingConfig::legacy("pricing")),
+        _ => None,
+    };
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
             error,
@@ -1944,7 +1949,14 @@ fn build_catalog_inventory(
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(cfg, root, prefix)?;
+    } = selected_operations(
+        cfg,
+        root,
+        prefix,
+        embedded_pricing
+            .as_ref()
+            .and_then(PricingConfig::catalog_key),
+    )?;
     // A help document cannot disguise the absence of every selected API contract.
     if selected.is_empty() && (!issues.is_empty() || cfg.allow_empty_selection) {
         let selection_notices = if issues.is_empty() {
@@ -1969,7 +1981,12 @@ fn build_catalog_inventory(
     let mut tools = selected
         .into_iter()
         .map(|(op, name, input)| {
-            operation_tool(cfg, root, &op, name, input, &mut credit_diagnostics)
+            let price = embedded_pricing
+                .as_ref()
+                .map_or_else(NormalizedPrice::unknown, |pricing| {
+                    NormalizedPrice::parse(pricing, &op["pricing"])
+                });
+            operation_tool(cfg, root, &op, name, input, price, &mut credit_diagnostics)
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
@@ -2125,10 +2142,16 @@ pub(crate) fn tool_names_before_filtering(
     root: &Value,
     prefix: &str,
 ) -> Result<Vec<String>> {
+    let pricing = cfg.effective_pricing()?;
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(cfg, root, prefix)?;
+    } = selected_operations(
+        cfg,
+        root,
+        prefix,
+        pricing.as_ref().and_then(PricingConfig::catalog_key),
+    )?;
     if !issues.is_empty() {
         return Err(IncompleteCatalog(issues).into());
     }
@@ -2146,12 +2169,15 @@ struct OperationSelection {
     issues: Vec<OperationIssue>,
 }
 
-fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<OperationSelection> {
+fn selected_operations(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+    pricing_key: Option<&str>,
+) -> Result<OperationSelection> {
     let mut ops = operations_with_credits(
         root,
-        cfg.effective_pricing()?
-            .as_ref()
-            .and_then(|p| p.catalog_key()),
+        pricing_key,
         cfg.credit_pricing
             .as_ref()
             .map(|c| c.credit_cost_key.as_str()),
@@ -2302,23 +2328,28 @@ fn operation_tool(
     op: &Value,
     name: String,
     input: input::OperationInput,
+    normalized: NormalizedPrice,
     credit_diagnostics: &mut credit_pricing::Diagnostics,
 ) -> Result<ToolSpec> {
     let method = op["method"].as_str().unwrap();
-    let credit_estimate = cfg.credit_pricing.as_ref().map(|credits| {
-        let (description, reason) = credits.describe(&op["credit_pricing"]);
-        credit_diagnostics.record(&name, reason);
-        description
+    let credit_estimate = cfg.credit_pricing.as_ref().and_then(|credits| {
+        match credits.describe(&op["credit_pricing"], &op["pricing"]) {
+            Ok(estimate) => Some(estimate),
+            Err(reason) => {
+                credit_diagnostics.record(&name, reason);
+                None
+            }
+        }
     });
-    let pricing = cfg.effective_pricing()?;
-    let normalized = crate::pricing::advertised::NormalizedPrice::parse(
-        &pricing
-            .clone()
-            .unwrap_or_else(|| crate::pricing::advertised::PricingConfig::legacy("")),
-        &op["pricing"],
+    let (credit_estimate, covered_credit_tariff) =
+        credit_estimate.map_or((None, false), |(text, covered)| (Some(text), covered));
+    let description_rendering = DescriptionRendering::operation(
+        cfg,
+        op,
+        credit_estimate,
+        &normalized,
+        covered_credit_tariff,
     );
-    let description_rendering =
-        DescriptionRendering::operation(cfg, op, credit_estimate, &normalized);
     let advertised_pricing = crate::pricing::advertised::AdvertisedPricing::new(
         normalized,
         cfg.spec.clone(),

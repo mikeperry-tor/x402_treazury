@@ -55,14 +55,20 @@ fn assert_observed_tariff(
     tariff: &str,
     retained: &[&str],
 ) {
+    tool.advertised_pricing.set_fresh_until(None);
     let fallback = tool.description.clone();
     assert!(fallback.contains(tariff), "{}: {fallback}", tool.name);
     let observed = Some(x402_treazury::output::ObservedPrice {
         amount: alloy_primitives::U256::from(5_000),
     });
     let rendered = tool.render_description(observed);
-    assert_eq!(rendered.matches("Observed cost: ~$0.005/call.").count(), 1);
-    assert!(!rendered.contains(tariff), "{}: {rendered}", tool.name);
+    assert_eq!(
+        rendered
+            .matches("Sample offer: $0.005 for one request.")
+            .count(),
+        1
+    );
+    assert!(rendered.contains(tariff), "{}: {rendered}", tool.name);
     for text in retained {
         assert!(rendered.contains(text), "{}: {rendered}", tool.name);
     }
@@ -308,7 +314,11 @@ async fn blockchainmoneymap_keeps_namespace_names_public_fallback_and_usdc_price
         .iter()
         .find(|t| t.name == "bmm_x402_failure_fact_classifier")
         .unwrap();
-    assert!(diagnostic.description.contains("Cost: ~$0.01/call [spec]."));
+    assert!(
+        diagnostic
+            .description
+            .contains("Listed: ~$0.01/call [spec].")
+    );
     let payload = json!({"address":"0x0000000000000000000000000000000000000001","chain":"base"});
     let route = wallet
         .route(cfg.base_url.as_ref().unwrap(), payload.as_object().unwrap())
@@ -2015,7 +2025,7 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
         .unwrap();
     assert_observed_tariff(
         ip_intel,
-        "Cost: ~$0.10/call [spec].",
+        "Listed: ~$0.10/call [spec].",
         &[
             "passive DNS resolution history",
             "Vendor bills successful calls.",
@@ -3120,7 +3130,7 @@ async fn horizonpulse_free_write_atomic_price_and_current_company_facts() {
     let http = tools.iter().find(|t| t.path == "/api/http").unwrap();
     assert!(http.description.contains("Price: $0.01 USDC"));
     assert!(http.description.ends_with("Cost: unknown."));
-    assert!(!http.description.contains("Cost: ~10000"));
+    assert!(!http.description.contains("Listed: ~10000"));
     assert!(http.response_mapping.is_none());
     assert!(!cfg.response_mappings.contains_key("GET /api/screenshot"));
     let jobs = tools.iter().find(|t| t.path == "/api/bls/jobs").unwrap();

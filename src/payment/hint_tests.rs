@@ -266,7 +266,11 @@ async fn challenge_observation_survives_later_external_pricing_completion() {
         Some(U256::from(1000))
     );
     assert_eq!(observed.get(), Some(U256::from(7000)));
-    assert!(bound.description().contains("Observed cost: ~$0.007/call."));
+    assert!(
+        bound
+            .description()
+            .contains("Sample offer: $0.007 for one request.")
+    );
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 1);
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
@@ -496,7 +500,7 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
     use rmcp::ServerHandler;
     assert_eq!(
         server.get_tool(&name).unwrap().description.as_deref(),
-        Some("Read item. Observed cost: ~$0.003/call.")
+        Some("Read item. Sample offer: $0.003 for one request.")
     );
     drop(server);
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
@@ -508,8 +512,14 @@ async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() 
     use crate::mcp_wire::McpResponse;
     let f = fixture().await;
     let mut tools = crate::catalog::build_tools(
-        &Default::default(),
-        &json!({"paths":{"/items":{"get":{}}}}),
+        &crate::catalog::Config {
+            pricing_key: Some("x-price".into()),
+            ..Default::default()
+        },
+        &json!({"paths":{"/items":{"get":{
+            "parameters":[{"name":"page","in":"query","schema":{"type":"integer"}}],
+            "x-price":{"min":"0.004","max":"0.081","currency":"USD","unit":"call"}
+        }}}}),
         "priced",
     )
     .unwrap();
@@ -555,9 +565,9 @@ async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() 
                 .unwrap()
                 .push_back(Reply::Challenge(challenge(&[amount])));
             let params = if discovered {
-                json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":"priced_items","arguments":{}}})
+                json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":"priced_items","arguments":{"page":mode}}})
             } else {
-                json!({"name":"priced_items","arguments":{}})
+                json!({"name":"priced_items","arguments":{"page":mode}})
             };
             let result: Value = http
                 .post(&endpoint)
@@ -637,7 +647,7 @@ async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() 
             assert_eq!(
                 description,
                 format!(
-                    "GET /items Observed cost: ~${}/call.",
+                    "GET /items Listed: ~$0.004–$0.081/call [spec]. Sample offer: ${} for one request.",
                     crate::output::ObservedPrice {
                         amount: U256::from(amount)
                     }
