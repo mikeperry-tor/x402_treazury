@@ -781,6 +781,130 @@ async fn serving_selection_distinguishes_empty_coverage_and_source_admission_fai
 }
 
 #[tokio::test]
+async fn reserved_builtin_names_only_fail_the_source_and_its_required_listener() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("invalid.json"),
+        r#"{"paths":{"/treazury_swap_status":{"get":{}},"/read":{"get":{}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("healthy.json"),
+        r#"{"paths":{"/read":{"get":{}}}}"#,
+    )
+    .unwrap();
+    let path = dir.path().join("deployment.toml");
+    let mut value = fixture();
+    value["sources"]["alias"]["prefix"] = json!("x402");
+    value["sources"]["alias"]["spec"] = json!("invalid.json");
+    value["sources"]["alias"]["send_tools"] =
+        json!([{"to":"one","tools":["read"]},{"to":"exclude"}]);
+    value["sources"]["healthy"] = json!({"spec":"healthy.json","base_url":"https://example.com",
+        "send_tools":[{"to":"two"}]});
+
+    for optional in [false, true] {
+        value["sources"]["alias"]["allow_catalog_failure"] = json!(optional);
+        std::fs::write(&path, toml::to_string(&config(&value)).unwrap()).unwrap();
+        let error = Deployment::load(&path).await.err().unwrap();
+        assert!(error.is::<startup::ReservedBuiltinNamespace>());
+        let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+        assert!(!deployment.sources.contains_key("alias"));
+        assert!(deployment.unavailable_sources.contains_key("alias"));
+        assert!(deployment.selected["one"].is_empty());
+        assert_eq!(
+            deployment.endpoint_readiness("one").unwrap().is_ok(),
+            optional
+        );
+        assert!(deployment.endpoint_readiness("two").unwrap().is_ok());
+        assert_eq!(deployment.selected["two"][0].1.name, "healthy_read");
+    }
+}
+
+#[tokio::test]
+async fn reserved_dynamic_names_isolate_offending_sources_at_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    // Both reserved sources expose only the colliding dyn_read tool so
+    // inventory.tools contains no dyn_* entries; symmetric collisions must still
+    // isolate both sources as unavailable rather than leaving them loaded.
+    std::fs::write(
+        dir.path().join("reserved.json"),
+        r#"{"paths":{"/read":{"get":{}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("healthy.json"),
+        r#"{"paths":{"/read":{"get":{}}}}"#,
+    )
+    .unwrap();
+    let path = dir.path().join("deployment.toml");
+    let mut value = fixture();
+    value["sources"]["alias"]["prefix"] = json!("dyn");
+    value["sources"]["alias"]["spec"] = json!("reserved.json");
+    value["sources"]["alias"]["send_tools"] = json!([{"to":"one"}]);
+    value["sources"]["second_reserved"] = json!({
+        "spec":"reserved.json",
+        "base_url":"https://example.com",
+        "prefix":"dyn",
+        "send_tools":[{"to":"one"}]
+    });
+    value["sources"]["sibling"] = json!({
+        "spec":"healthy.json",
+        "base_url":"https://example.com",
+        "send_tools":[{"to":"one"}]
+    });
+    value["sources"]["unrelated"] = json!({
+        "spec":"healthy.json",
+        "base_url":"https://example.com",
+        "send_tools":[{"to":"two"}]
+    });
+
+    let single_path = dir.path().join("single_reserved.toml");
+    let mut single = value.clone();
+    single["sources"]
+        .as_object_mut()
+        .unwrap()
+        .remove("second_reserved");
+    std::fs::write(&single_path, toml::to_string(&config(&single)).unwrap()).unwrap();
+    let single_error = Deployment::load(&single_path).await.err().unwrap();
+    assert!(
+        format!("{single_error:#}").contains("static tool uses reserved namespace"),
+        "{single_error:#}"
+    );
+
+    for optional in [false, true] {
+        value["sources"]["alias"]["allow_catalog_failure"] = json!(optional);
+        value["sources"]["second_reserved"]["allow_catalog_failure"] = json!(optional);
+        std::fs::write(&path, toml::to_string(&config(&value)).unwrap()).unwrap();
+        assert!(Deployment::load(&path).await.is_err());
+
+        let deployment = Deployment::load_for_unsigned_serving(&path).await.unwrap();
+        for bad in ["alias", "second_reserved"] {
+            assert!(!deployment.sources.contains_key(bad), "{bad}");
+            assert!(deployment.unavailable_sources.contains_key(bad), "{bad}");
+        }
+        assert_eq!(
+            deployment.selected["one"]
+                .iter()
+                .map(|(_, tool)| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sibling_read"]
+        );
+        assert_eq!(
+            deployment.endpoint_readiness("one").unwrap().is_ok(),
+            optional
+        );
+        assert!(deployment.endpoint_readiness("two").unwrap().is_ok());
+        assert_eq!(
+            deployment.selected["two"]
+                .iter()
+                .map(|(_, tool)| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unrelated_read"]
+        );
+    }
+}
+
+#[tokio::test]
 async fn serving_selection_preserves_cross_listener_cover_ownership() {
     if crate::test_log_capture::run_in_child(
         "deployment::routing_tests::serving_selection_preserves_cross_listener_cover_ownership",

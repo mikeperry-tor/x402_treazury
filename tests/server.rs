@@ -112,6 +112,41 @@ async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains(
 }
 
 #[tokio::test]
+async fn provider_json_is_not_promoted_by_a_builtin_looking_name() {
+    let (provider, provider_task) = serve_provider(
+        Router::new().route("/read", get(|| async { axum::Json(json!({"value":7})) })),
+    )
+    .await;
+    let tools = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/read":{"get":{}}}}),
+        "x402_treazury",
+    )
+    .unwrap();
+    let name = tools[0].name.clone();
+    let server = Server::new(tools, PaidClient::unsigned(), provider, None);
+    let (base, task) = serve(http_app(server, "token".into()).unwrap()).await;
+    let result: Value = reqwest::Client::new()
+        .post(format!("{base}/mcp"))
+        .bearer_auth("token")
+        .header("accept", "application/json, text/event-stream")
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name}}))
+        .send()
+        .await
+        .unwrap()
+        .mcp_json()
+        .await
+        .unwrap();
+    assert!(
+        result["result"].get("structuredContent").is_none(),
+        "{result}"
+    );
+    assert_eq!(result["result"]["content"][0]["text"], r#"{"value":7}"#);
+    task.abort();
+    provider_task.abort();
+}
+
+#[tokio::test]
 async fn direct_and_on_demand_calls_route_declared_headers_and_own_distinct_keys() {
     tls::install_trust();
     use axum::http::HeaderMap;

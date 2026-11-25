@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub const BUILTIN_TOOL_PREFIX: &str = "x402_treazury_";
+
 /// Fixed, content-free context for catalog failures. Retains the original error
 /// chain (including numeric HTTP status) without parsing human error messages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

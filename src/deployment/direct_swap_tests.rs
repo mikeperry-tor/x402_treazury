@@ -804,7 +804,7 @@ async fn late_history_recovery_rechecks_static_namespace_before_wallet_initializ
     super::initialization_tests::write_spec(dir.path());
     let path = dir.path().join("deployment.toml");
     let text = recovery_config("owner", true, false)
-        .replace("[sources.api]", "[sources.api]\nprefix='x402_treazury'");
+        .replace("[sources.api]", "[sources.api]\nprefix='dyn'");
     std::fs::write(&path, text).unwrap();
     let deployment = Deployment::load(&path).await.unwrap();
     assert_eq!(deployment.direct_history, None);

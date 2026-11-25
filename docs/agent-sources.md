@@ -63,8 +63,10 @@ Authority boundaries:
 
 ## Agent tools
 
-All built-in tools use the `x402_treazury_` prefix. This table shows their
-short names.
+All built-in tools use the `x402_treazury_` prefix. Generated provider tool
+names must use a different prefix. See the
+[reserved tool names](configuration.md#catalog-failures-and-strict-inspection)
+rules. This table shows the built-ins' short names.
 
 | Tool | Enabled by | Purpose |
 | --- | --- | --- |
@@ -214,8 +216,7 @@ directory's response directly and leaves any follow-up search to the caller.
   `__`, and must be unique on the endpoint across disabled registrations and
   effective static bindings (including pending `send_tools` targets;
   exclusion-only sources reserve no name). Registered tool names receive a
-  `dyn_<name>__` prefix (with numeric collision suffixes if needed), and
-  `x402_treazury_` and `dyn_` are reserved static tool namespaces. Listener
+  `dyn_<name>__` prefix (with numeric collision suffixes if needed). Listener
   `include_tools` allowlists still filter dynamically registered tools, so
   endpoints using `include_tools` must include `dyn_*` (or `dyn_<name>__*`) to
   expose dynamic registrations. Repeating a registration for the same

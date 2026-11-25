@@ -354,6 +354,14 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .unwrap_or(catalog::default_prefix(&base)?);
     x402_treazury::config::validate(&cfg)?;
     let built = catalog::build_catalog(&cfg, &root, &prefix)?;
+    ensure!(
+        built
+            .tools
+            .iter()
+            .all(|tool| !tool.name.starts_with(catalog::BUILTIN_TOOL_PREFIX)),
+        "Provider tool uses the reserved {} namespace. Configure a distinct provider prefix",
+        catalog::BUILTIN_TOOL_PREFIX
+    );
     let issues = built.issues.clone();
     let mut tools = match (inspecting_tools, built.tools.is_empty()) {
         (true, _) => built.complete_strict()?,
@@ -745,16 +753,13 @@ async fn print_deployment_inspection(
         );
         for server in deployment.inventory() {
             println!(
-                "{}: {} tools on {}",
+                "{}: {} provider tools on {}",
                 server.server,
                 server.tools.len(),
                 server.listen
             );
             if !server.management_tools.is_empty() {
-                println!(
-                    "  {} source-management/fallback tools",
-                    server.management_tools.len()
-                );
+                println!("  {} built-in tools", server.management_tools.len());
             }
             for (source, binding) in server.wallet_bindings {
                 println!("  {source}: wallet {} ({})", binding.wallet, binding.origin);

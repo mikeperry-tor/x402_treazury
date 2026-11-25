@@ -1,8 +1,12 @@
 use crate::catalog_state::{self, CatalogSnapshot, CatalogState};
-use crate::{catalog::ToolSpec, payment::PaidClient};
+use crate::{
+    catalog::{BUILTIN_TOOL_PREFIX, ToolSpec},
+    output::ToolOutput,
+    payment::PaidClient,
+};
 use anyhow::Result;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
-use serde_json::Map;
+use serde_json::{Map, Value};
 use std::{collections::BTreeMap, sync::Arc};
 mod auth;
 pub mod host;
@@ -32,6 +36,13 @@ pub struct Server {
     pub host_policy: host::HostPolicy,
     pub instructions: Option<String>,
 }
+
+enum Invocation {
+    Provider(ToolOutput),
+    BuiltinJson(Value),
+    BuiltinOutput(ToolOutput),
+}
+
 impl Server {
     pub fn new(
         tools: Vec<ToolSpec>,
@@ -89,12 +100,20 @@ impl Server {
         &self,
         name: &str,
         args: &Map<String, serde_json::Value>,
-    ) -> Result<crate::output::ToolOutput> {
+    ) -> Result<ToolOutput> {
+        Ok(match self.dispatch(name, args).await? {
+            Invocation::Provider(output) | Invocation::BuiltinOutput(output) => output,
+            Invocation::BuiltinJson(value) => ToolOutput::text(value.to_string()),
+        })
+    }
+
+    async fn dispatch(&self, name: &str, args: &Map<String, Value>) -> Result<Invocation> {
         let firstparty = self.direct_definitions();
         if firstparty.iter().any(|t| t.name == name) {
             return self
                 .invoke_direct(name, serde_json::Value::Object(args.clone()))
-                .await;
+                .await
+                .map(Invocation::BuiltinJson);
         }
         if self.discover_on_demand
             || self
@@ -124,9 +143,7 @@ impl Server {
                             &firstparty,
                         )?,
                     };
-                    return Ok(crate::output::ToolOutput::text(serde_json::to_string(
-                        &result,
-                    )?));
+                    return Ok(Invocation::BuiltinJson(result));
                 }
                 "x402_treazury_tool_call" => {
                     let call: crate::discovery::Call =
@@ -134,20 +151,24 @@ impl Server {
                     if firstparty.iter().any(|t| t.name.as_ref() == call.tool_id) {
                         return self
                             .invoke_direct(&call.tool_id, serde_json::Value::Object(call.arguments))
-                            .await;
+                            .await
+                            .map(Invocation::BuiltinJson);
                     }
                     let bound = crate::discovery::find_catalog_tool(
                         &self.catalog,
                         &self.catalog_server,
                         &call.tool_id,
                     )?;
-                    return bound.invoke_output(&call.arguments).await;
+                    return bound
+                        .invoke_output(&call.arguments)
+                        .await
+                        .map(Invocation::Provider);
                 }
                 _ => {}
             }
         }
         if let Some(manager) = &self.discovery
-            && name.starts_with("x402_treazury_")
+            && name.starts_with(BUILTIN_TOOL_PREFIX)
         {
             anyhow::ensure!(
                 self.management_tools().iter().any(|t| t.name == name),
@@ -156,39 +177,31 @@ impl Server {
             if name == "x402_treazury_providers_search_remote" {
                 return manager
                     .invoke_search_remote(&self.catalog_server, args)
-                    .await;
+                    .await
+                    .map(Invocation::BuiltinOutput);
             }
             if name == crate::discovery::source_details::NAME {
-                return Ok(crate::output::ToolOutput::text(serde_json::to_string(
-                    &manager
-                        .invoke_source_details(&self.catalog_server, args)
-                        .await?,
-                )?));
+                return manager
+                    .invoke_source_details(&self.catalog_server, args)
+                    .await
+                    .map(Invocation::BuiltinJson);
             }
             if name == crate::discovery::raw::NAME {
-                return manager.invoke_raw(&self.catalog_server, args).await;
+                return manager
+                    .invoke_raw(&self.catalog_server, args)
+                    .await
+                    .map(Invocation::BuiltinOutput);
             }
-            if name != "x402_treazury_tool_call" {
-                let output = crate::output::ToolOutput::text(serde_json::to_string(
-                    &manager
-                        .invoke(
-                            &self.catalog_server,
-                            name,
-                            serde_json::Value::Object(args.clone()),
-                        )
-                        .await?,
-                )?);
-                return Ok(output);
-            }
-            let call: crate::discovery::Call =
-                serde_json::from_value(serde_json::Value::Object(args.clone()))?;
-            let bound = manager.find_tool(&self.catalog_server, &call.tool_id)?;
-            return bound.invoke_output(&call.arguments).await;
+            return manager
+                .invoke(&self.catalog_server, name, Value::Object(args.clone()))
+                .await
+                .map(Invocation::BuiltinJson);
         }
         let snapshot = self.catalog.read();
         catalog_state::find(&snapshot, &self.catalog_server, name)?
             .invoke_output(args)
             .await
+            .map(Invocation::Provider)
     }
     fn direct_definitions(&self) -> Vec<Tool> {
         self.direct_swap
@@ -196,11 +209,7 @@ impl Server {
             .map(|(_, config)| crate::direct_swap::definitions(config))
             .unwrap_or_default()
     }
-    async fn invoke_direct(
-        &self,
-        name: &str,
-        args: serde_json::Value,
-    ) -> Result<crate::output::ToolOutput> {
+    async fn invoke_direct(&self, name: &str, args: serde_json::Value) -> Result<Value> {
         anyhow::ensure!(
             !crate::qualification::active(),
             "qualification forbids direct swaps"
@@ -209,12 +218,9 @@ impl Server {
             .direct_swap
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("unknown tool"))?;
-        let result = service
+        service
             .invoke(&self.catalog_server, config, name, args)
-            .await?;
-        Ok(crate::output::ToolOutput::text(serde_json::to_string(
-            &result,
-        )?))
+            .await
     }
     fn management_tools(&self) -> Vec<Tool> {
         let mut tools = crate::discovery::tools::listener_definitions(
@@ -357,7 +363,7 @@ impl Server {
                     None,
                 )
             })?;
-        let call = self.invoke_output(&request.name, &arguments);
+        let call = self.dispatch(&request.name, &arguments);
         let invocation = match &claim {
             Some(claim) => claim.invoke(call).await,
             None => call.await,
@@ -367,14 +373,10 @@ impl Server {
             .err()
             .map(crate::qualification::failure_category);
         let result = match invocation {
-            Ok(output) => {
-                let structured = if request.name.starts_with("x402_treazury_")
-                    && request.name != "x402_treazury_tool_call"
-                {
-                    serde_json::from_str(&output.text).ok()
-                } else {
-                    None
-                };
+            Ok(Invocation::Provider(output)) => CallToolResult::success(output.into_content()),
+            Ok(Invocation::BuiltinJson(value)) => CallToolResult::structured(value),
+            Ok(Invocation::BuiltinOutput(output)) => {
+                let structured = serde_json::from_str(&output.text).ok();
                 let mut result = CallToolResult::success(output.into_content());
                 result.structured_content = structured;
                 result

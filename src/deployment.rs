@@ -179,6 +179,24 @@ pub struct InventoryTool {
     #[serde(flatten)]
     pub tool: ToolSpec,
 }
+#[derive(Debug)]
+struct ReservedDynamicNamespace {
+    server: String,
+    sources: BTreeSet<String>,
+}
+
+impl std::fmt::Display for ReservedDynamicNamespace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "server {}: static tool uses reserved namespace",
+            self.server
+        )
+    }
+}
+
+impl std::error::Error for ReservedDynamicNamespace {}
+
 pub struct Deployment {
     direct_history: Option<bool>,
     listeners: BTreeMap<String, ListenerConfig>,
@@ -799,7 +817,11 @@ impl Deployment {
             deployment.unavailable_sources = unavailable_sources;
             deployment.pending_sources = pending_sources;
             deployment.sources = sources;
-            deployment.refresh_selection(purpose == startup::CatalogPurpose::Serving)?;
+            if purpose == startup::CatalogPurpose::Serving {
+                deployment.refresh_selection_isolating_reserved()?;
+            } else {
+                deployment.refresh_selection(false)?;
+            }
             selection_diagnostics::report_completed(
                 &deployment.listeners,
                 &deployment.sources,
@@ -1463,6 +1485,7 @@ impl Deployment {
                     ListenerInventory {
                         tools: Vec::new(),
                         conflicts: Vec::new(),
+                        reserved_sources: BTreeSet::new(),
                     }
                 }
                 Err(error) => return Err(error),
@@ -1473,12 +1496,15 @@ impl Deployment {
             if (crate::discovery::policy::enabled(&self.config)
                 || listener.discover_on_demand
                 || listener.swap_control.is_some())
-                && inventory.tools.iter().any(|(_, tool)| {
-                    tool.name.starts_with("dyn_") || tool.name.starts_with("x402_treazury_")
-                })
+                && !inventory.reserved_sources.is_empty()
             {
-                return Err(anyhow::anyhow!("server {name}: static tool uses reserved namespace")
-                    .context(catalog::diagnostics::Problem("Static tools use a reserved management namespace; configure a distinct source prefix or listener selection")));
+                return Err(anyhow::Error::new(ReservedDynamicNamespace {
+                    server: name.clone(),
+                    sources: inventory.reserved_sources,
+                })
+                .context(catalog::diagnostics::Problem(
+                    "Static tools use a reserved management namespace; configure a distinct source prefix or listener selection",
+                )));
             }
             selected.insert(name.clone(), inventory.tools);
             conflicts.insert(name.clone(), inventory.conflicts);
@@ -1496,6 +1522,41 @@ impl Deployment {
         self.conflicting_tools = conflicts;
         self.selection_errors = errors;
         Ok(())
+    }
+
+    fn refresh_selection_isolating_reserved(&mut self) -> Result<()> {
+        loop {
+            match self.refresh_selection(true) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    let Some(reserved) = error.downcast_ref::<ReservedDynamicNamespace>() else {
+                        return Err(error);
+                    };
+                    let failure = startup::catalog_failure(&error, "selection");
+                    let mut removed = false;
+                    for id in &reserved.sources {
+                        if let Some(source) = self.sources.remove(id) {
+                            let prefix = source.config.prefix.unwrap_or_else(|| id.clone());
+                            self.unavailable_sources.insert(id.clone(), prefix);
+                            tracing::warn!(
+                                target: "x402_treazury::startup",
+                                source = id,
+                                category = "catalog_unavailable",
+                                failure_stage = failure.stage,
+                                reason = failure.reason,
+                                "The provider catalog could not be admitted, so this source's tools are unavailable. {}",
+                                failure.reason
+                            );
+                            removed = true;
+                        }
+                    }
+                    if !removed {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
     }
 
     fn build_servers(&self, wallets: &BTreeMap<String, PaidClient>) -> BTreeMap<String, Server> {
@@ -1941,6 +2002,7 @@ fn select_listener_tools(
 struct ListenerInventory {
     tools: Vec<(String, ToolSpec)>,
     conflicts: Vec<String>,
+    reserved_sources: BTreeSet<String>,
 }
 
 impl Source {
@@ -1986,7 +2048,11 @@ fn listener_tool_inventory(
     unavailable: &BTreeMap<String, String>,
     omit_conflicts: bool,
 ) -> Result<ListenerInventory> {
-    let mut available = BTreeMap::new();
+    enum AvailableTool<'a> {
+        Single(String, &'a ToolSpec),
+        Conflict(BTreeSet<String>),
+    }
+    let mut available: BTreeMap<String, AvailableTool<'_>> = BTreeMap::new();
     let incomplete = server.sources.iter().any(|id| unavailable.contains_key(id));
     for source in &server.sources {
         if unavailable.contains_key(source) {
@@ -1995,7 +2061,7 @@ fn listener_tool_inventory(
         for tool in sources[source].listener_tools(name, server)? {
             match available.entry(tool.name.clone()) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(Some((source.clone(), tool.clone())));
+                    entry.insert(AvailableTool::Single(source.clone(), tool));
                 }
                 std::collections::btree_map::Entry::Occupied(mut entry) => {
                     ensure!(
@@ -2003,7 +2069,15 @@ fn listener_tool_inventory(
                         "server {name}: duplicate tool {}",
                         tool.name
                     );
-                    entry.insert(None);
+                    match entry.get_mut() {
+                        AvailableTool::Conflict(owners) => {
+                            owners.insert(source.clone());
+                        }
+                        AvailableTool::Single(first, _) => {
+                            let owners = BTreeSet::from([first.clone(), source.clone()]);
+                            entry.insert(AvailableTool::Conflict(owners));
+                        }
+                    }
                 }
             }
         }
@@ -2037,20 +2111,33 @@ fn listener_tool_inventory(
     };
     let include = compile(&server.include_tools, true)?;
     let exclude = compile(&server.exclude_tools, false)?;
-    let conflicts: Vec<_> = available
-        .iter()
-        .filter(|(_, binding)| binding.is_none())
-        .map(|(name, _)| name.clone())
-        .collect();
     let selected_name = |n: &str| {
         (include.is_empty() || include.iter().any(|p| p.is_match(n)))
             && !exclude.iter().any(|p| p.is_match(n))
     };
-    let tools: Vec<_> = available
-        .into_iter()
-        .filter(|(n, _)| selected_name(n))
-        .filter_map(|(_, t)| t)
-        .collect();
+    let mut conflicts = Vec::new();
+    let mut reserved_sources = BTreeSet::new();
+    let mut tools = Vec::new();
+    for (tool_name, binding) in available {
+        let selected = selected_name(&tool_name);
+        let reserved = selected && tool_name.starts_with("dyn_");
+        match binding {
+            AvailableTool::Single(source, tool) => {
+                if reserved {
+                    reserved_sources.insert(source.clone());
+                }
+                if selected {
+                    tools.push((source, tool.clone()));
+                }
+            }
+            AvailableTool::Conflict(owners) => {
+                if reserved {
+                    reserved_sources.extend(owners);
+                }
+                conflicts.push(tool_name);
+            }
+        }
+    }
     if !omit_conflicts
         && tools.is_empty()
         && !crate::discovery::policy::EndpointPolicy::from(server).any()
@@ -2062,7 +2149,11 @@ fn listener_tool_inventory(
         return Err(anyhow::anyhow!("server {name}: no tools selected")
             .context(catalog::diagnostics::Problem("The endpoint has no selected tools or discovery capabilities; review source assignments and listener filters")));
     }
-    Ok(ListenerInventory { tools, conflicts })
+    Ok(ListenerInventory {
+        tools,
+        conflicts,
+        reserved_sources,
+    })
 }
 
 fn required_secret(env: &BTreeMap<String, String>, key: &str) -> Result<String> {

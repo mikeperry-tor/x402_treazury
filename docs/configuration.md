@@ -197,9 +197,15 @@ covers its finite `max_api_payment_usdc`, serving logs one `INFO` line:
 - **Ambiguous tool names:** If two sources on the same listener publish the
   same tool name after tag selection, serving omits every binding of that name
   and reports the collision in MCP instructions. Calls already in flight finish
-  with their active binding. Reserved static tool namespaces (`x402_treazury_`
-  and `dyn_`) invalidate the offending source as a unit without harming healthy
-  siblings.
+  with their active binding.
+- **Reserved tool names:** A provider tool in the `x402_treazury_` namespace
+  makes its source unavailable before routing. The `dyn_` namespace is reserved
+  across the deployment when any listener enables provider management or raw URL
+  calls, and on any listener that enables on-demand discovery or configures swap
+  control. During serving, any source whose selected tools violate a reserved
+  namespace is marked unavailable as a unit (leaving unrelated listeners and
+  healthy siblings unaffected), and each dependent listener applies its catalog
+  readiness settings.
 - **Strict inspection:** `config check`, `catalog tools`, deployment
   `catalog tags`, and qualification require complete catalogs and reject
   missing exact names, empty inventories, duplicate names, and reserved

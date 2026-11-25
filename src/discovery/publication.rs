@@ -81,7 +81,10 @@ fn validate_static(
             ensure!(bound.source.is_none(), "static_source_binding_invalid");
             ensure!(
                 !bound.tool.name.starts_with("dyn_")
-                    && !bound.tool.name.starts_with("x402_treazury_"),
+                    && !bound
+                        .tool
+                        .name
+                        .starts_with(crate::catalog::BUILTIN_TOOL_PREFIX),
                 "static tool uses reserved namespace"
             );
             ensure!(names.insert(&bound.tool.name), "tool_name_collision");

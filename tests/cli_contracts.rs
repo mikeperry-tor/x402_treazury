@@ -1123,6 +1123,35 @@ async fn source_maintenance_has_explicit_operator_commands() {
 }
 
 #[tokio::test]
+async fn provider_only_catalogs_reject_builtin_tool_names() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("spec.json"),
+        r#"{"paths":{"/swap_status":{"get":{}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='spec.json'\nprefix='x402_treazury'\nbase_url='https://offline.invalid'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("deployment.toml"),
+        "version=1\n[sources.api]\nextends='provider.toml'\n[wallets.payer]\nmode='static'\nprivate_key_env='ABSENT_KEY'\nmax_api_payment_usdc='1'\n[servers.web]\nlisten='127.0.0.1:0'\nauth=false\nwallet='payer'\nsources=['api']\n",
+    )
+    .unwrap();
+    for flag in ["--provider", "--config"] {
+        let file = if flag == "--provider" {
+            "provider.toml"
+        } else {
+            "deployment.toml"
+        };
+        let error = bad(run(dir.path(), &["catalog", "tools", flag, file], &[]).await);
+        assert!(error.contains("reserved"), "{error}");
+    }
+}
+
+#[tokio::test]
 async fn standalone_tags_count_unsupported_operations_without_certifying_tools() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

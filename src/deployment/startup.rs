@@ -340,6 +340,15 @@ impl std::fmt::Display for RemoteCatalogUnavailable {
 }
 impl std::error::Error for RemoteCatalogUnavailable {}
 
+#[derive(Debug)]
+pub(super) struct ReservedBuiltinNamespace(String);
+impl std::fmt::Display for ReservedBuiltinNamespace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("provider tool uses a reserved built-in namespace")
+    }
+}
+impl std::error::Error for ReservedBuiltinNamespace {}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn load(
     config: &MetaConfig,
@@ -412,6 +421,11 @@ pub(super) async fn load(
                             unavailable.insert(source_id.clone(), source.config.prefix.clone().expect("resolved prefix"));
                             deferred.insert(source_id.clone(), source);
                             tracing::debug!(source=source_id, state="pending", "Catalog load retained for serving");
+                            continue;
+                        }
+                        Err(error) if purpose == CatalogPurpose::Serving && error.is::<ReservedBuiltinNamespace>() => {
+                            failures += 1;
+                            unavailable.insert(source_id.clone(), error.downcast_ref::<ReservedBuiltinNamespace>().expect("typed namespace failure").0.clone());
                             continue;
                         }
                         Err(error) if purpose == CatalogPurpose::Serving
@@ -648,6 +662,18 @@ impl Source {
                 .check_overrides()
                 .context(catalog::LoadStage::Generation)
                 .with_context(|| format!("source {id}: catalog generation"))?;
+        }
+        if built
+            .tools
+            .iter()
+            .any(|tool| tool.name.starts_with(catalog::BUILTIN_TOOL_PREFIX))
+        {
+            return Err(anyhow::Error::new(ReservedBuiltinNamespace(
+                cfg.prefix.clone().expect("resolved prefix"),
+            ))
+            .context(catalog::diagnostics::Problem("A provider tool uses the reserved x402_treazury_ namespace. Configure a distinct source prefix"))
+            .context(catalog::LoadStage::Generation)
+            .context(format!("source {id}: catalog generation")));
         }
         let mut tools = built.tools;
         let issues = built.issues;

@@ -213,6 +213,24 @@ async fn direct_discovery_dispatch_and_status_share_listener_authority() {
     )
     .unwrap();
     assert_eq!(own["operation"]["terms"]["private_terms"], "alice");
+    for (name, args) in [
+        ("x402_treazury_swap_status", call["arguments"].clone()),
+        ("x402_treazury_tool_call", call.clone()),
+    ] {
+        let request = serde_json::from_value(json!({"name":name,"arguments":args})).unwrap();
+        let result = server
+            .call_tool_owned(request, RequestId::Number(1))
+            .await
+            .unwrap();
+        let CallToolResponse::Complete(result) = result else {
+            panic!("expected completed swap status");
+        };
+        assert_eq!(result.is_error, Some(false));
+        let structured = result.structured_content.unwrap();
+        assert_eq!(structured["operation"]["terms"]["private_terms"], "alice");
+        let text = result.content[0].as_text().unwrap().text.as_str();
+        assert_eq!(serde_json::from_str::<Value>(text).unwrap(), structured);
+    }
     server.catalog_server = "bob".into();
     assert!(
         server

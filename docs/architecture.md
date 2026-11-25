@@ -164,6 +164,11 @@ sticky session required) and stdio for standalone providers.
   elements). When a mapping both extracts images and omits fields, image
   extraction runs first on the same parsed response. Result advisories disclose
   every omitted path and removal count.
+- **Structured results:** Built-in dispatch can return JSON in
+  `structuredContent` alongside the regular content blocks. Provider tools
+  return content blocks according to the requested API and its response mapping.
+  Direct swap tools return structured JSON both by name and through
+  `x402_treazury_tool_call`.
 - **Pricing metadata block:** Managed API results include a second MCP JSON
   text block carrying the latest validated offer for that call:
 
