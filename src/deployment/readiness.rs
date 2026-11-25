@@ -47,6 +47,27 @@ impl Deployment {
             .all(|id| !self.pending_sources.contains_key(id))
             .then_some(Ok(()))
     }
+
+    pub(super) fn report_completed_diagnostics(
+        &self,
+        mut diagnostics: BTreeMap<String, selection_diagnostics::Selection>,
+        previous_conflicts: &BTreeMap<String, Vec<String>>,
+        completed: Option<&str>,
+    ) {
+        diagnostics.retain(|name, _| {
+            !self.listeners[name].wait_for_catalogs
+                || !matches!(self.endpoint_readiness(name), Some(Err(_)))
+        });
+        selection_diagnostics::report_completed(
+            &self.listeners,
+            &self.sources,
+            &self.pending_sources,
+            &diagnostics,
+            &self.conflicting_tools,
+            previous_conflicts,
+            completed,
+        );
+    }
 }
 
 pub(super) fn funding_pools(

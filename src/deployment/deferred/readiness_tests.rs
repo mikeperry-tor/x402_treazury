@@ -124,6 +124,21 @@ async fn selector_warnings_wait_for_own_catalogs_and_do_not_repeat_on_unrelated_
         1,
         "{logs}"
     );
+    for selector in ["optional_read", "optional_missing*"] {
+        assert!(
+            logs.lines().any(|line| line.contains("WARN")
+                && line.contains("server=\"failed\"")
+                && line.contains("setting=\"include_tools\"")
+                && line.contains(&format!("selector=\"{selector}\""))),
+            "{logs}"
+        );
+    }
+    assert!(
+        !logs
+            .lines()
+            .any(|line| line.contains("ERROR") && line.contains("server=\"failed\"")),
+        "{logs}"
+    );
     assert!(!logs.contains("Tool pattern matches nothing"), "{logs}");
     fixtures.origin.abort();
 }
@@ -162,6 +177,9 @@ impl Fixture {
                 async move {
                     assert!(!headers.contains_key("payment-signature"));
                     assert!(!headers.contains_key("x-payment"));
+                    if uri.path() == "/other" {
+                        return "healthy tool response".into_response();
+                    }
                     arrived.add_permits(1);
                     gate.acquire().await.unwrap().forget();
                     if uri.path() == "/slow" {
@@ -643,8 +661,20 @@ async fn missing_remote_distribution_starts_empty_endpoint_without_upstream_pros
     assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
-        logs.lines()
-            .any(|line| line.contains("ERROR") && line.contains("missing_selections=1")),
+        logs.lines().any(|line| line.contains("WARN")
+            && line.contains("catalog_source_degraded")
+            && line.contains("missing_selections=1")),
+        "{logs}"
+    );
+    assert!(
+        logs.lines().any(|line| line.contains("WARN")
+            && line.contains("server=\"broken\"")
+            && line.contains("setting=\"tool_filters\"")),
+        "{logs}"
+    );
+    assert!(
+        !logs.lines().any(|line| line.contains("ERROR")
+            && (line.contains("catalog_source_degraded") || line.contains("server=\"broken\""))),
         "{logs}"
     );
     assert!(
@@ -803,6 +833,13 @@ async fn default_waits_for_own_catalog_publication_while_peers_serve() {
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["local_read", "slow_read"]);
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logs.lines().any(|line| line.contains("INFO")
+            && line.contains("source=\"slow\"")
+            && line.contains("category=\"catalog_ready\"")),
+        "{logs}"
+    );
     assert_eq!(
         fixtures.failure.available_permits(),
         0,
@@ -876,6 +913,14 @@ async fn required_failure_logs_error_and_closes_only_dependent_endpoint() {
     finish(stop, serving).await;
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(!logs.contains("private upstream credential text"));
+    for source in ["failure", "optional"] {
+        let field = format!("source=\"{source}\"");
+        let entry = logs
+            .lines()
+            .find(|line| line.contains("catalog_unavailable") && line.contains(&field))
+            .unwrap();
+        assert!(entry.contains("WARN "), "{entry}");
+    }
     assert!(logs.contains("failure_stage=\"headers\""));
     assert!(logs.contains("http_status=502"));
     assert!(logs.contains("The catalog server returned an unsuccessful HTTP status"));
@@ -1109,6 +1154,7 @@ async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert!(logs.contains("failure_stage=\"publication\""), "{logs}");
             assert!(logs.contains("previous tool inventory"), "{logs}");
+            assert!(!logs.contains("category=\"catalog_ready\""), "{logs}");
         }
         fixtures.origin.abort();
     }
@@ -1313,6 +1359,206 @@ async fn shared_prefix_sources_wait_for_all_required_catalogs_in_either_order() 
 }
 
 #[tokio::test]
+async fn published_collision_warns_only_where_the_tool_would_be_visible() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::published_collision_warns_only_where_the_tool_would_be_visible",
+    ) {
+        return;
+    }
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
+    let fixtures = Fixture::with_distribution(
+        &(listener("colliding", "[]", "")
+            + &listener("filtered", "[]", "exclude_tools=['api_read']")
+            + &listener("sibling", "[]", "")),
+        true,
+        Some(json!({"paths":{"/read":{"get":{}},"/other":{"get":{}}}})),
+        &BTreeMap::from([
+            ("slow", "[{to=['colliding','filtered']} ]\nprefix='api'"),
+            (
+                "failure",
+                "[{to=['colliding','filtered','sibling']} ]\nprefix='api'",
+            ),
+        ]),
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    fixtures.slow.add_permits(1);
+    fixtures.failure.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let colliding = rpc(addresses["colliding"], "initialize").await;
+        let instructions = colliding["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("api_read"), "{colliding}");
+        let filtered = rpc(addresses["filtered"], "initialize").await;
+        let instructions = filtered["result"]["instructions"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(!instructions.contains("api_read"), "{filtered}");
+        let listed = rpc(addresses["colliding"], "tools/list").await;
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "api_other");
+        let sibling = rpc_params(
+            addresses["sibling"],
+            "tools/call",
+            json!({"name":"api_other","arguments":{}}),
+        )
+        .await;
+        assert_eq!(
+            sibling["result"]["content"][0]["text"],
+            "healthy tool response"
+        );
+    })
+    .await
+    .unwrap();
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    let collisions: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("category=\"ambiguous_tool_names\""))
+        .collect();
+    assert_eq!(collisions.len(), 1, "{logs}");
+    for field in ["WARN", "server=\"colliding\"", "tool_names=[\"api_read\"]"] {
+        assert!(collisions[0].contains(field), "{logs}");
+    }
+    finish(stop, serving).await;
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn eager_listener_warns_when_collision_is_published_while_sibling_is_pending() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::eager_listener_warns_when_collision_is_published_while_sibling_is_pending",
+    ) {
+        return;
+    }
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
+    let fixtures = Fixture::with_distribution(
+        &(listener(
+            "eager",
+            "[]",
+            "wait_for_catalogs=false\ninclude_tools=['api_read','api_missing']",
+        ) + &listener("waiting", "[]", "")),
+        true,
+        Some(json!({"paths":{"/extra":{"get":{}}}})),
+        &BTreeMap::from([
+            ("local", "[{to=['eager','waiting']}]\nprefix='api'"),
+            ("slow", "[{to=['eager','waiting']}]\nprefix='api'"),
+            ("optional", "[{to=['eager','waiting']}]\nprefix='optional'"),
+        ]),
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    // Wait until both slow and optional requests reach the test origin before releasing only slow.
+    tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    fixtures.slow.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            if logs.lines().any(|line| {
+                line.contains("category=\"ambiguous_tool_names\"")
+                    && line.contains("server=\"eager\"")
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let eager_init = rpc(addresses["eager"], "initialize").await;
+    let instructions = eager_init["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("api_read"), "{eager_init}");
+    let listed = rpc(addresses["eager"], "tools/list").await;
+    assert!(listed["result"]["tools"].as_array().unwrap().is_empty());
+    let pending_logs = std::fs::read_to_string(log.path()).unwrap();
+    let eager_collisions: Vec<_> = pending_logs
+        .lines()
+        .filter(|line| {
+            line.contains("category=\"ambiguous_tool_names\"") && line.contains("server=\"eager\"")
+        })
+        .collect();
+    assert_eq!(eager_collisions.len(), 1, "{pending_logs}");
+    for field in ["WARN", "tool_names=[\"api_read\"]"] {
+        assert!(eager_collisions[0].contains(field), "{pending_logs}");
+    }
+    assert!(
+        !pending_logs
+            .lines()
+            .any(|line| line.contains("setting=\"include_tools\"")),
+        "{pending_logs}"
+    );
+    assert!(
+        !pending_logs.lines().any(|line| {
+            line.contains("category=\"ambiguous_tool_names\"")
+                && line.contains("server=\"waiting\"")
+        }),
+        "{pending_logs}"
+    );
+
+    // Settling the pending sibling must not duplicate eager's collision warning,
+    // must now emit eager's unmatched inclusion warning, and must emit waiting's collision warning.
+    fixtures.failure.add_permits(1);
+    let waiting_init = tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["waiting"], "initialize"),
+    )
+    .await
+    .unwrap();
+    assert!(
+        waiting_init["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("api_read"),
+        "{waiting_init}"
+    );
+    let final_logs = std::fs::read_to_string(log.path()).unwrap();
+    for server in ["server=\"eager\"", "server=\"waiting\""] {
+        let count = final_logs
+            .lines()
+            .filter(|line| {
+                line.contains("category=\"ambiguous_tool_names\"")
+                    && line.contains(server)
+                    && line.contains("WARN")
+                    && line.contains("tool_names=[\"api_read\"]")
+            })
+            .count();
+        assert_eq!(count, 1, "{server}: {final_logs}");
+    }
+    assert_eq!(
+        final_logs
+            .lines()
+            .filter(|line| {
+                line.contains("WARN")
+                    && line.contains("server=\"eager\"")
+                    && line.contains("setting=\"include_tools\"")
+                    && line.contains("selector=\"api_missing\"")
+            })
+            .count(),
+        1,
+        "{final_logs}"
+    );
+    finish(stop, serving).await;
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
 async fn optional_shared_prefix_failure_keeps_empty_exact_selection_ready() {
     let mut fixtures = Fixture::with_distribution(
         &(listener("wait", "[]", "include_tools=['api_missing']")
@@ -1414,4 +1660,59 @@ async fn shared_remote_tag_depletion_and_retagging_keep_empty_endpoint_and_sibli
         finish(stop, serving).await;
         fixtures.origin.abort();
     }
+}
+
+#[tokio::test]
+async fn failed_waiting_listener_skips_coverage_warnings() {
+    if crate::test_log_capture::run_in_child(
+        "deployment::deferred::readiness_tests::failed_waiting_listener_skips_coverage_warnings",
+    ) {
+        return;
+    }
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
+    let fixtures = Fixture::new(
+        &(listener(
+            "wait",
+            "['failure', 'slow']",
+            "include_tools=['failure_read']",
+        ) + &listener("healthy", "['slow']", "")),
+        true,
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    fixtures.failure.add_permits(1);
+    fixtures.slow.add_permits(1);
+    let listed = tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["healthy"], "tools/list"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed["result"]["tools"][0]["name"], "slow_read");
+    finish(stop, serving).await;
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logs.lines()
+            .any(|line| line.contains("ERROR") && line.contains("server=\"wait\"")),
+        "{logs}"
+    );
+    assert!(
+        !logs
+            .lines()
+            .any(|line| line.contains("WARN") && line.contains("server=\"wait\"")),
+        "{logs}"
+    );
+    fixtures.origin.abort();
 }

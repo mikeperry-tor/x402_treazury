@@ -195,7 +195,7 @@ Follow these rules when orchestrating `x402_treazury` from an outer framework:
   Filters and routing order stay intact, tool-name collisions still omit
   conflicting bindings, empty-inventory notices stay visible in MCP
   initialization instructions even when `instructions_text` is set, and
-  unmatched positive selectors or empty inventories emit `ERROR` diagnostics
+  unmatched positive selectors or empty inventories emit `WARN` diagnostics
   after catalogs settle and when a replacement catalog publishes.
   See [catalog startup](configuration.md#catalog-loading-and-listener-startup).
 - **Probe endpoints safely:** After starting `serve`, run authenticated MCP

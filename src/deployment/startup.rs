@@ -432,7 +432,6 @@ pub(super) async fn load(
                             && config.sources[source_id].allow_catalog_failure && error.is::<RemoteCatalogUnavailable>() => {
                             failures += 1;
                             unavailable.insert(source_id.clone(), error.downcast_ref::<RemoteCatalogUnavailable>().expect("typed remote failure").prefix.clone());
-                            tracing::warn!(source = source_id, state = "unavailable", "Optional source unavailable; required inventory remains complete");
                             continue;
                         }
                         Ok(SourceLoad::Ready(source)) => source,
@@ -492,11 +491,12 @@ async fn load_one(
         catalog_evidence::record(id, State::Failed, failure.stage, failure.http_status);
         if downloads.purpose != CatalogPurpose::Warming {
             tracing::warn!(target: "x402_treazury::startup", source = id, phase = progress.phase,
+            category = "catalog_unavailable",
             failure_stage = failure.stage, reason = failure.reason,
             http_status = failure.http_status,
             elapsed_ms = progress.started.elapsed().as_millis() as u64,
             collecting_independent_results = catalog_evidence::collecting(),
-            "Catalog load failed; complete inventory unavailable");
+            "The provider catalog could not load, so this source's tools are unavailable. {}", failure.reason);
         }
     } else if matches!(result, Ok(SourceLoad::Ready(_))) {
         catalog_evidence::record(id, State::Completed, "generation", None);
@@ -580,9 +580,10 @@ impl Source {
                 .iter()
                 .map(|issue| issue.reason.explanation())
                 .collect();
-            tracing::error!(source=id, omitted_operations=self.issues.len(),
+            tracing::warn!(source=id, category="catalog_source_degraded",
+                published_tools=self.tools.len(), omitted_operations=self.issues.len(),
                 missing_selections=self.config.selection_notices.len(), reasons=?reasons,
-                "Some selected provider capabilities are unavailable; remaining selected tools can be used; inspect catalog omissions and source selections");
+                "The provider source could not publish every expected tool. Review the catalog omissions and unmatched source filters");
         }
     }
     fn enrich_pricing(&mut self, gate: Option<Arc<crate::network::DiscoveryCapacity>>) {

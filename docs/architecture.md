@@ -75,18 +75,17 @@ loads and wallet funding.
 - **Endpoint readiness (`wait_for_catalogs`):** Defaults to `true`. Each
   endpoint accepts MCP HTTP requests only after its bound sources finish
   loading. Set `wait_for_catalogs = false` to serve available tools immediately
-  and publish remote catalogs as they arrive.
+  and publish remote catalogs as they arrive. Deferred loading logs
+  `Catalog ready` after the source reaches the published inventory.
 - **Catalog failures:** A required remote catalog failure closes its waiting
   endpoints and logs `ERROR`, leaving unrelated endpoints running. Setting
   `sources.NAME.allow_catalog_failure = true` (or `wait_for_catalogs = false`)
   omits the failed source as a unit and lets the endpoint serve healthy
   siblings with coverage notices in MCP instructions. Local configuration and
   parsing errors always fail startup.
-- **Ambiguous tool names:** If two sources on the same listener publish the
-  same tool name after tag selection and before tool-name filters, serving
-  omits every binding of that name and reports the collision in MCP
-  instructions. Calls already in flight finish with their active binding.
-  Strict inspection rejects duplicates.
+- **Ambiguous tool names:** Serving omits ambiguous names from the listener's
+  inventory. Strict inspection rejects duplicates.
+  [Catalog failures and strict inspection](configuration.md#catalog-failures-and-strict-inspection)
 - **Advisory startup announcement:** Once every endpoint is listening with its
   catalogs settled and every bound managed pool has at least one eligible payer
   whose saved USDC estimate covers a finite `max_api_payment_usdc`, startup

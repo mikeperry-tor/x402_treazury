@@ -279,7 +279,11 @@ impl Runtime {
         }
         Ok(())
     }
-    fn accept_source(&mut self, id: &str, source: Source) -> Result<()> {
+    fn accept_source(
+        &mut self,
+        id: &str,
+        source: Source,
+    ) -> Result<BTreeMap<String, selection_diagnostics::Selection>> {
         let prefix = self
             .deployment
             .unavailable_sources
@@ -288,7 +292,7 @@ impl Runtime {
             .clone();
         self.deployment.sources.insert(id.into(), source);
         match self.deployment.refresh_selection(true) {
-            Ok(()) => Ok(()),
+            Ok(diagnostics) => Ok(diagnostics),
             Err(error) => {
                 self.deployment.sources.remove(id);
                 self.deployment
@@ -328,37 +332,38 @@ impl Runtime {
             }
         };
         let previous_errors = self.deployment.selection_errors.clone();
+        let previous_conflicts = self.deployment.published_conflicts();
         let old = self
             .deployment
             .sources
             .insert(id.clone(), *source)
             .expect("existing refresh source");
         let publication = async {
-            self.deployment.refresh_selection(true)?;
+            let diagnostics = self.deployment.refresh_selection(true)?;
             self.refreshes
                 .insert(id.clone(), refresh_binding(&id, &self.refresh_send));
-            self.publish_retiring(Some(binding.clone())).await
+            self.publish_retiring(Some(binding.clone())).await?;
+            Ok(diagnostics)
         }
         .await;
-        if let Err(error) = publication {
-            self.deployment.sources.insert(id.clone(), old);
-            self.refreshes.insert(id.clone(), binding.clone());
-            let _ = self.deployment.refresh_selection(true);
-            refresh_failed(&id, &binding, &error);
-            return;
-        }
+        let diagnostics = match publication {
+            Ok(diagnostics) => diagnostics,
+            Err(error) => {
+                self.deployment.sources.insert(id.clone(), old);
+                self.refreshes.insert(id.clone(), binding.clone());
+                let _ = self.deployment.refresh_selection(true);
+                refresh_failed(&id, &binding, &error);
+                return;
+            }
+        };
         // Published clones already own enrichment; let it perform I/O only after
         // the old generation has lost its right to publish shared metadata.
         if let Some(pricing) = pricing {
             let _ = pricing.send(());
         }
         self.report_selection_failures(&previous_errors, true);
-        selection_diagnostics::report_completed(
-            &self.deployment.listeners,
-            &self.deployment.sources,
-            &self.deployment.pending_sources,
-            Some(&id),
-        );
+        self.deployment
+            .report_completed_diagnostics(diagnostics, &previous_conflicts, Some(&id));
         self.deployment.sources[&id].report_degradation(&id);
         self.signal_readiness();
         self.attach_observed_hints(&id, document).await;
@@ -477,7 +482,8 @@ impl Runtime {
                 _ => None,
             };
             let previous_selection_errors = self.deployment.selection_errors.clone();
-            let mut selection = Ok(());
+            let previous_conflicts = self.deployment.published_conflicts();
+            let mut selection = Ok(BTreeMap::new());
             match event {
                 Event::Refresh(id, binding, result) => {
                     self.complete_refresh(id, binding, result).await;
@@ -500,30 +506,23 @@ impl Runtime {
                             .context(crate::catalog::LoadStage::Selection)
                     });
                     match result {
-                        Ok(()) => {
-                            tracing::info!(source = id, "Catalog ready");
-                        }
+                        Ok(diagnostics) => selection = Ok(diagnostics),
                         Err(error) => {
                             // The removed pending owner no longer defers exact names.
                             // Recompute after acquisition failure or admission rollback.
                             selection = self.deployment.refresh_selection(true);
                             let failure = startup::catalog_failure(&error, "fetch_parse");
-                            tracing::error!(
+                            tracing::warn!(
                                 source = id,
                                 category = "catalog_unavailable",
                                 failure_stage = failure.stage,
                                 reason = failure.reason,
                                 http_status = failure.http_status,
-                                "Catalog could not be made available; this source's tools are unavailable; correct the cause and restart to retry"
+                                "The provider catalog could not load, so this source's tools are unavailable. {}. Restart to retry.",
+                                failure.reason
                             );
                         }
                     }
-                    selection_diagnostics::report_completed(
-                        &self.deployment.listeners,
-                        &self.deployment.sources,
-                        &self.deployment.pending_sources,
-                        Some(&id),
-                    );
                 }
             }
             // Do not abandon an accepted publication worker on cancellation.
@@ -531,25 +530,35 @@ impl Runtime {
                 break;
             }
             let publication = match selection {
-                Ok(()) => self.publish().await,
+                Ok(diagnostics) => self.publish().await.map(|()| diagnostics),
                 Err(error) => Err(error.context(catalog::LoadStage::Selection)),
             };
-            if let Err(error) = publication {
-                let failure = startup::catalog_failure(&error, "publication");
-                tracing::warn!(
-                    category = "catalog_publication_failed",
-                    failure_stage = failure.stage,
-                    reason = failure.reason,
-                    "Catalog publication stopped; existing tool inventory retained; endpoints still waiting for catalogs cannot start"
-                );
-                self.catalog.mark_publication_failed();
-                break;
-            }
+            let diagnostics = match publication {
+                Ok(diagnostics) => diagnostics,
+                Err(error) => {
+                    let failure = startup::catalog_failure(&error, "publication");
+                    tracing::warn!(
+                        category = "catalog_publication_failed",
+                        failure_stage = failure.stage,
+                        reason = failure.reason,
+                        "Catalog publication stopped. Existing tool inventories remain available, and listeners waiting for catalogs cannot start. {}.",
+                        failure.reason
+                    );
+                    self.catalog.mark_publication_failed();
+                    break;
+                }
+            };
             self.report_selection_failures(&previous_selection_errors, false);
-            if let Some(id) = completed_source
-                && let Some(source) = self.deployment.sources.get(&id)
-            {
-                source.report_degradation(&id);
+            if let Some(id) = completed_source {
+                self.deployment.report_completed_diagnostics(
+                    diagnostics,
+                    &previous_conflicts,
+                    Some(&id),
+                );
+                if let Some(source) = self.deployment.sources.get(&id) {
+                    tracing::info!(source = id, category = "catalog_ready", "Catalog ready");
+                    source.report_degradation(&id);
+                }
             }
             self.signal_readiness();
         }

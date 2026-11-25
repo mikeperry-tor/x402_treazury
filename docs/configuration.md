@@ -190,14 +190,18 @@ covers its finite `max_api_payment_usdc`, serving logs one `INFO` line:
   malformed local documents, and structural-safety violations fail startup.
 - **Permissive selection in serving:** Serving accepts empty source or listener
   selections (missing tool names, missing tags, contradictory filters, empty
-  opted-in `recommended_tools`, or all-unsupported operations), emits `ERROR`
-  coverage diagnostics after the listener's sources settle, and lists gaps in
-  MCP instructions without widening filters. Unmatched exclusions log at
-  `INFO`.
-- **Ambiguous tool names:** If two sources on the same listener publish the
-  same tool name after tag selection, serving omits every binding of that name
-  and reports the collision in MCP instructions. Calls already in flight finish
-  with their active binding.
+  opted-in `recommended_tools`, or all-unsupported operations) and lists gaps
+  in MCP instructions without widening filters. Source gaps emit `WARN`.
+  Once a listener's catalogs settle, the initial selection and later published
+  replacements log unmatched inclusions and an empty static inventory at
+  `WARN`. The inventory accounts for filters and tool-name collisions.
+  Unmatched exclusions log at `INFO`.
+- **Ambiguous tool names:** If two sources on the same listener provide the
+  same name and that name passes the listener's filters, serving omits every
+  binding of the name. The listener lists the names in MCP instructions and
+  logs a `WARN` when the omission is published (immediately on listeners with
+  `wait_for_catalogs = false`, or once catalogs settle on waiting listeners).
+  Calls already in flight finish with their active binding.
 - **Reserved tool names:** A provider tool in the `x402_treazury_` namespace
   makes its source unavailable before routing. The `dyn_` namespace is reserved
   across the deployment when any listener enables provider management or raw URL

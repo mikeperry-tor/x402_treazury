@@ -901,7 +901,7 @@ async fn refresh_missing_exact_selector_reports_endpoint_removal_after_publicati
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
-        .with_max_level(tracing::Level::ERROR)
+        .with_max_level(tracing::Level::WARN)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _logging = tracing::subscriber::set_default(subscriber);
@@ -917,7 +917,10 @@ async fn refresh_missing_exact_selector_reports_endpoint_removal_after_publicati
         if seen.fetch_add(1, Ordering::SeqCst) == 0 {
             let logs = std::fs::read_to_string(&log_path).unwrap();
             assert!(
-                !logs.contains("A configured tool selection matches no available tools"),
+                !logs
+                    .lines()
+                    .any(|line| line.contains("setting=\"include_tools\"")
+                        && line.contains("selector=\"api_read\"")),
                 "{logs}"
             );
         }
@@ -959,11 +962,10 @@ async fn refresh_missing_exact_selector_reports_endpoint_removal_after_publicati
     fixture.assert_unrelated_usable().await;
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
-        logs.lines().any(|line| line.contains("ERROR")
+        logs.lines().any(|line| line.contains("WARN")
             && line.contains("server=\"affected\"")
             && line.contains("setting=\"include_tools\"")
-            && line.contains("selector=\"api_read\"")
-            && line.contains("A configured tool selection matches no available tools")),
+            && line.contains("selector=\"api_read\"")),
         "{logs}"
     );
     assert!(

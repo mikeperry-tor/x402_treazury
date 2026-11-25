@@ -817,17 +817,12 @@ impl Deployment {
             deployment.unavailable_sources = unavailable_sources;
             deployment.pending_sources = pending_sources;
             deployment.sources = sources;
-            if purpose == startup::CatalogPurpose::Serving {
-                deployment.refresh_selection_isolating_reserved()?;
+            let diagnostics = if purpose == startup::CatalogPurpose::Serving {
+                deployment.refresh_selection_isolating_reserved()?
             } else {
-                deployment.refresh_selection(false)?;
-            }
-            selection_diagnostics::report_completed(
-                &deployment.listeners,
-                &deployment.sources,
-                &deployment.pending_sources,
-                None,
-            );
+                deployment.refresh_selection(false)?
+            };
+            deployment.report_completed_diagnostics(diagnostics, &BTreeMap::new(), None);
             Ok(())
         }
         .await;
@@ -1460,7 +1455,10 @@ impl Deployment {
 
     // Catalogs belong to sources; selection failures belong to endpoints. Keep
     // successful acquisition even when one destination has invalid narrowing.
-    fn refresh_selection(&mut self, serving: bool) -> Result<()> {
+    fn refresh_selection(
+        &mut self,
+        serving: bool,
+    ) -> Result<BTreeMap<String, selection_diagnostics::Selection>> {
         // A loaded source is published even when its selected API inventory is
         // empty. Only absent acquisition/admission owners remain unavailable.
         for id in self.sources.keys() {
@@ -1469,6 +1467,7 @@ impl Deployment {
         let mut selected = BTreeMap::new();
         let mut conflicts = BTreeMap::new();
         let mut errors = BTreeMap::new();
+        let mut diagnostics = BTreeMap::new();
         for (name, listener) in &self.listeners {
             let inventory = listener_tool_inventory(
                 name,
@@ -1478,7 +1477,16 @@ impl Deployment {
                 serving,
             );
             let inventory = match inventory {
-                Ok(inventory) => inventory,
+                Ok(mut inventory) => {
+                    diagnostics.insert(
+                        name.clone(),
+                        selection_diagnostics::Selection {
+                            unmatched: std::mem::take(&mut inventory.unmatched),
+                            empty: inventory.tools.is_empty(),
+                        },
+                    );
+                    inventory
+                }
                 Err(error) if serving => {
                     let failure = startup::catalog_failure(&error, "selection");
                     errors.insert(name.clone(), failure.reason);
@@ -1486,6 +1494,7 @@ impl Deployment {
                         tools: Vec::new(),
                         conflicts: Vec::new(),
                         reserved_sources: BTreeSet::new(),
+                        unmatched: Vec::new(),
                     }
                 }
                 Err(error) => return Err(error),
@@ -1518,13 +1527,15 @@ impl Deployment {
         self.selected = selected;
         self.conflicting_tools = conflicts;
         self.selection_errors = errors;
-        Ok(())
+        Ok(diagnostics)
     }
 
-    fn refresh_selection_isolating_reserved(&mut self) -> Result<()> {
+    fn refresh_selection_isolating_reserved(
+        &mut self,
+    ) -> Result<BTreeMap<String, selection_diagnostics::Selection>> {
         loop {
             match self.refresh_selection(true) {
-                Ok(()) => return Ok(()),
+                Ok(diagnostics) => return Ok(diagnostics),
                 Err(error) => {
                     let Some(reserved) = error.downcast_ref::<ReservedDynamicNamespace>() else {
                         return Err(error);
@@ -1554,6 +1565,20 @@ impl Deployment {
             }
         }
     }
+
+    fn published_conflicts(&self) -> BTreeMap<String, Vec<String>> {
+        self.conflicting_tools
+            .iter()
+            .filter(|(name, names)| {
+                !names.is_empty()
+                    && (!self.listeners[*name].wait_for_catalogs
+                        || !self.listeners[*name]
+                            .sources
+                            .iter()
+                            .any(|id| self.pending_sources.contains_key(id)))
+            })
+            .map(|(name, names)| (name.clone(), names.clone()))
+            .collect()
     }
 
     fn build_servers(&self, wallets: &BTreeMap<String, PaidClient>) -> BTreeMap<String, Server> {
@@ -1616,10 +1641,11 @@ impl Deployment {
                 instructions.push_str(&format!("\n\nUNAVAILABLE endpoint tool selection: {reason}. Correct the endpoint/source selections and restart."));
             }
             for selector in &cfg.include_tools {
-                if !selected
-                    .iter()
-                    .any(|(_, tool)| pattern(selector).is_ok_and(|p| p.is_match(&tool.name)))
-                {
+                if !pattern(selector).is_ok_and(|pattern| {
+                    selected
+                        .iter()
+                        .any(|(_, tool)| pattern.is_match(&tool.name))
+                }) {
                     instructions.push_str("\n\nA configured tool selection matches no available tools. Remaining selected tools are available; inspect source availability and tool selections.");
                     break;
                 }
@@ -2000,6 +2026,7 @@ struct ListenerInventory {
     tools: Vec<(String, ToolSpec)>,
     conflicts: Vec<String>,
     reserved_sources: BTreeSet<String>,
+    unmatched: Vec<selection_diagnostics::UnmatchedSelector>,
 }
 
 impl Source {
@@ -2079,53 +2106,49 @@ fn listener_tool_inventory(
             }
         }
     }
-    let compile = |selectors: &[String], require_match: bool| -> Result<Vec<Regex>> {
+    let mut unmatched = Vec::new();
+    let mut compile = |selectors: &[String], setting| -> Result<Vec<Regex>> {
         selectors
             .iter()
             .map(|text| {
                 let re = pattern(text)?;
-                if require_match && !omit_conflicts && !incomplete
-                    && !available.keys().any(|n| re.is_match(n))
-                    && !text.contains(['*', '?'])
-                {
-                    let removals =
-                        selection_diagnostics::selection_removals(name, server, sources)?;
-                    let causes = selection_diagnostics::removal_causes(&removals, &re);
-                    let detail = if causes.is_empty() {
-                        String::new()
-                    } else {
-                        format!(
-                            "; matching tools were removed before listener name filtering: {}",
-                            causes.join("; ")
-                        )
-                    };
-                    return Err(anyhow::anyhow!("server {name}: unknown tool selector {text}{detail}")
-                        .context(catalog::diagnostics::Problem("A listener tool selector matches no assigned tools; inspect source send_tools rules and listener filters")));
+                if !available.keys().any(|n| re.is_match(n)) {
+                    if setting == "include_tools"
+                        && !omit_conflicts
+                        && !incomplete
+                        && !text.contains(['*', '?'])
+                    {
+                        return Err(selection_diagnostics::unknown_selector(
+                            name, server, sources, text, &re,
+                        ));
+                    }
+                    unmatched.push(selection_diagnostics::UnmatchedSelector {
+                        setting,
+                        selector: text.clone(),
+                        pattern: re.clone(),
+                    });
                 }
                 Ok(re)
             })
             .collect()
     };
-    let include = compile(&server.include_tools, true)?;
-    let exclude = compile(&server.exclude_tools, false)?;
-    let selected_name = |n: &str| {
-        (include.is_empty() || include.iter().any(|p| p.is_match(n)))
-            && !exclude.iter().any(|p| p.is_match(n))
-    };
+    let include = compile(&server.include_tools, "include_tools")?;
+    let exclude = compile(&server.exclude_tools, "exclude_tools")?;
+    available.retain(|name, _| {
+        (include.is_empty() || include.iter().any(|p| p.is_match(name)))
+            && !exclude.iter().any(|p| p.is_match(name))
+    });
     let mut conflicts = Vec::new();
     let mut reserved_sources = BTreeSet::new();
     let mut tools = Vec::new();
     for (tool_name, binding) in available {
-        let selected = selected_name(&tool_name);
-        let reserved = selected && tool_name.starts_with("dyn_");
+        let reserved = tool_name.starts_with("dyn_");
         match binding {
             AvailableTool::Single(source, tool) => {
                 if reserved {
                     reserved_sources.insert(source.clone());
                 }
-                if selected {
-                    tools.push((source, tool.clone()));
-                }
+                tools.push((source, tool.clone()));
             }
             AvailableTool::Conflict(owners) => {
                 if reserved {
@@ -2141,7 +2164,6 @@ fn listener_tool_inventory(
         && !server.discover_on_demand
         && server.swap_control.is_none()
         && !incomplete
-        && conflicts.is_empty()
     {
         return Err(anyhow::anyhow!("server {name}: no tools selected")
             .context(catalog::diagnostics::Problem("The endpoint has no selected tools or discovery capabilities; review source assignments and listener filters")));
@@ -2150,6 +2172,7 @@ fn listener_tool_inventory(
         tools,
         conflicts,
         reserved_sources,
+        unmatched,
     })
 }
 

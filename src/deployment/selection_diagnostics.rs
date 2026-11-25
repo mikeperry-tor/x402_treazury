@@ -1,45 +1,67 @@
-//! Report listener selection only when its own source loads have settled.
+//! Report listener collisions on publication and filter gaps once sources settle.
 use super::*;
+
+#[derive(Debug)]
+pub(super) struct Selection {
+    pub(super) unmatched: Vec<UnmatchedSelector>,
+    pub(super) empty: bool,
+}
+
+#[derive(Debug)]
+pub(super) struct UnmatchedSelector {
+    pub(super) setting: &'static str,
+    pub(super) selector: String,
+    pub(super) pattern: Regex,
+}
 
 pub(super) fn report_completed(
     listeners: &BTreeMap<String, ListenerConfig>,
     sources: &BTreeMap<String, Source>,
     pending: &BTreeMap<String, startup::PendingSource>,
+    selections: &BTreeMap<String, Selection>,
+    conflicts: &BTreeMap<String, Vec<String>>,
+    previous_conflicts: &BTreeMap<String, Vec<String>>,
     completed: Option<&str>,
 ) {
-    for (name, server) in listeners {
-        if completed.is_some_and(|id| !server.sources.iter().any(|source| source == id))
-            || server.sources.iter().any(|id| pending.contains_key(id))
-        {
+    for (name, selection) in selections {
+        let server = &listeners[name];
+        if completed.is_some_and(|id| !server.sources.iter().any(|source| source == id)) {
             continue;
         }
-        // Diagnostics cannot change catalog acceptance or publication.
-        match warnings(name, server, sources) {
-            Ok(warnings) => {
-                for warning in warnings {
-                    if warning.setting != "exclude_tools" {
-                        tracing::error!(
-                            server = name,
-                            setting = warning.setting,
-                            selector = warning.selector,
-                            "{}",
-                            warning.explanation
-                        );
-                    } else {
-                        tracing::info!(
-                            server = name,
-                            setting = warning.setting,
-                            selector = warning.selector,
-                            "{}",
-                            warning.explanation
-                        );
-                    }
-                }
-            }
-            Err(_) => tracing::debug!(
+        let settled = !server.sources.iter().any(|id| pending.contains_key(id));
+        if (settled || !server.wait_for_catalogs)
+            && let Some(names) = conflicts.get(name).filter(|names| !names.is_empty())
+            && previous_conflicts.get(name) != Some(names)
+        {
+            tracing::warn!(
                 server = name,
-                "Listener selection diagnostics could not be generated"
-            ),
+                category = "ambiguous_tool_names",
+                tool_names = ?names,
+                "Listener {name:?} omitted these tools because multiple configured sources define them: {}. \
+                 Configure distinct prefixes or source selections and restart.",
+                names.join(", ")
+            );
+        }
+        if !settled {
+            continue;
+        }
+        for warning in warnings(name, server, sources, selection) {
+            match warning.setting {
+                "exclude_tools" => tracing::info!(
+                    server = name,
+                    setting = warning.setting,
+                    selector = warning.selector,
+                    "{}",
+                    warning.explanation
+                ),
+                _ => tracing::warn!(
+                    server = name,
+                    setting = warning.setting,
+                    selector = warning.selector,
+                    "{}",
+                    warning.explanation
+                ),
+            }
         }
     }
 }
@@ -55,84 +77,70 @@ fn warnings(
     name: &str,
     server: &ListenerConfig,
     sources: &BTreeMap<String, Source>,
-) -> Result<Vec<Warning>> {
-    let mut available = BTreeSet::new();
-    for source in server.sources.iter().filter_map(|id| sources.get(id)) {
-        available.extend(
-            source
-                .listener_tools(name, server)?
-                .into_iter()
-                .map(|tool| tool.name.as_str()),
-        );
-    }
+    selection: &Selection,
+) -> Vec<Warning> {
     let unavailable: Vec<_> = server
         .sources
         .iter()
         .filter(|id| !sources.contains_key(*id))
         .collect();
-    let mut unmatched = Vec::new();
-    for (setting, selectors) in [
-        ("include_tools", &server.include_tools),
-        ("exclude_tools", &server.exclude_tools),
-    ] {
-        for selector in selectors {
-            let pattern = pattern(selector)?;
-            if !available.iter().any(|name| pattern.is_match(name)) {
-                unmatched.push((setting, selector, pattern));
-            }
-        }
-    }
     // Optional removal evidence must not suppress known selection failures when
     // a partially compatible catalog cannot reconstruct its complete inventory.
     // One temporary witness per filter explains the cause when available.
-    let removals = if unmatched.is_empty() {
+    let removals = if selection.unmatched.is_empty() {
         BTreeMap::new()
     } else {
         selection_removals(name, server, sources).unwrap_or_default()
     };
-    let mut warnings: Vec<_> = unmatched.into_iter().map(|(setting, selector, pattern)| {
-        let causes = removal_causes(&removals, &pattern);
-        let subject = if setting == "exclude_tools" {
-            "Listener exclusion selector matches no available tools; exclusion has no current effect"
+    let mut warnings: Vec<_> = selection.unmatched.iter().map(|miss| {
+        let causes = removal_causes(&removals, &miss.pattern);
+        let subject = if miss.setting == "exclude_tools" {
+            format!("Listener {name:?} exclusion {:?} matches no available tools", miss.selector)
         } else {
-            "A configured tool selection matches no available tools; remaining selected endpoint tools are available"
+            format!("Listener {name:?} inclusion {:?} matches no available tools", miss.selector)
         };
         let explanation = if causes.is_empty() {
-            format!("{subject}; check the selector, source availability and source/listener filters. Unavailable sources: {unavailable:?}")
+            format!("{subject}. Check the selector, source availability, and filters. Unavailable sources: {unavailable:?}")
         } else {
-            format!("{subject}; matching tools were already removed before listener name filtering: {}. Listener filters cannot restore source tools", causes.join("; "))
+            format!("{subject}. Earlier filters removed matching tools. {}", causes.join(". "))
         };
-        Warning { setting, selector: selector.clone(), explanation }
+        Warning { setting: miss.setting, selector: miss.selector.clone(), explanation }
     }).collect();
-    let include = server
-        .include_tools
-        .iter()
-        .map(|p| pattern(p))
-        .collect::<Result<Vec<_>>>()?;
-    let exclude = server
-        .exclude_tools
-        .iter()
-        .map(|p| pattern(p))
-        .collect::<Result<Vec<_>>>()?;
-    if !server.sources.is_empty()
-        && !available.iter().any(|name| {
-            (include.is_empty() || include.iter().any(|p| p.is_match(name)))
-                && !exclude.iter().any(|p| p.is_match(name))
-        })
-    {
+    if !server.sources.is_empty() && selection.empty {
         warnings.push(Warning {
             setting: "tool_filters",
             selector: "*".into(),
-            explanation: "No static API tools are selected for this endpoint; check source availability, routing, tags and tool filters; configured management capabilities remain available".into(),
+            explanation: format!("No static API tools are selected for listener {name:?}. Check source availability, routing, tags, tool filters, and duplicate tool names"),
         });
     }
-    Ok(warnings)
+    warnings
 }
 
-pub(super) fn removal_causes(
-    removals: &BTreeMap<String, Vec<String>>,
+pub(super) fn unknown_selector(
+    name: &str,
+    server: &ListenerConfig,
+    sources: &BTreeMap<String, Source>,
+    selector: &str,
     pattern: &Regex,
-) -> Vec<String> {
+) -> anyhow::Error {
+    let removals = match selection_removals(name, server, sources) {
+        Ok(removals) => removals,
+        Err(error) => return error,
+    };
+    let causes = removal_causes(&removals, pattern);
+    let detail = if causes.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; matching tools were removed before listener name filtering: {}",
+            causes.join("; ")
+        )
+    };
+    anyhow::anyhow!("server {name}: unknown tool selector {selector}{detail}")
+        .context(catalog::diagnostics::Problem("A listener tool selector matches no assigned tools; inspect source send_tools rules and listener filters"))
+}
+
+fn removal_causes(removals: &BTreeMap<String, Vec<String>>, pattern: &Regex) -> Vec<String> {
     removals
         .iter()
         .filter_map(|(reason, names)| {
@@ -144,7 +152,7 @@ pub(super) fn removal_causes(
         .collect()
 }
 
-pub(super) fn selection_removals(
+fn selection_removals(
     name: &str,
     listener: &ListenerConfig,
     sources: &BTreeMap<String, Source>,
@@ -266,6 +274,47 @@ mod tests {
         .unwrap()
     }
 
+    fn selection(
+        name: &str,
+        server: &ListenerConfig,
+        sources: &BTreeMap<String, Source>,
+    ) -> Selection {
+        let inventory =
+            listener_tool_inventory(name, server, sources, &BTreeMap::new(), true).unwrap();
+        Selection {
+            unmatched: inventory.unmatched,
+            empty: inventory.tools.is_empty(),
+        }
+    }
+
+    fn test_warnings(
+        name: &str,
+        server: &ListenerConfig,
+        sources: &BTreeMap<String, Source>,
+    ) -> Vec<Warning> {
+        warnings(name, server, sources, &selection(name, server, sources))
+    }
+
+    fn report_test_selection(
+        listeners: &BTreeMap<String, ListenerConfig>,
+        sources: &BTreeMap<String, Source>,
+        completed: Option<&str>,
+    ) {
+        let selections = listeners
+            .iter()
+            .map(|(name, server)| (name.clone(), selection(name, server, sources)))
+            .collect();
+        report_completed(
+            listeners,
+            sources,
+            &BTreeMap::new(),
+            &selections,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            completed,
+        );
+    }
+
     #[test]
     fn source_filter_warnings_identify_resolved_settings_with_one_witness() {
         for (settings, expected) in [
@@ -285,16 +334,16 @@ mod tests {
             let sources = BTreeMap::from([("alias".into(), source(settings))]);
             let mut server = listener();
             server.exclude_tools = server.include_tools.clone();
-            let actual = warnings("main", &server, &sources).unwrap();
+            let actual = test_warnings("main", &server, &sources);
             assert_eq!(actual.len(), 3);
             assert_eq!(actual[2].setting, "tool_filters");
             assert_eq!(actual[0].setting, "include_tools");
             assert_eq!(actual[1].setting, "exclude_tools");
             for warning in &actual[..2] {
+                assert_eq!(warning.selector, "vendor_hidden*");
                 assert!(warning.explanation.contains(expected), "{warning:?}");
                 assert!(warning.explanation.contains("removes vendor_hidden"));
                 assert_eq!(warning.explanation.matches("(removes ").count(), 1);
-                assert!(warning.explanation.contains("cannot restore source tools"));
             }
         }
     }
@@ -304,9 +353,9 @@ mod tests {
         let sources =
             BTreeMap::from([("alias".into(), source("recommended_tools=['vendor_read']"))]);
         let mut server = listener();
-        assert!(warnings("main", &server, &sources).unwrap().is_empty());
+        assert!(test_warnings("main", &server, &sources).is_empty());
         server.tags = vec!["visible".into()];
-        let actual = warnings("main", &server, &sources).unwrap();
+        let actual = test_warnings("main", &server, &sources);
         assert_eq!(actual.len(), 2);
         assert!(
             !actual[0]
@@ -324,12 +373,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["/read"]
         );
-        assert_eq!(warnings("main", &server, &sources).unwrap().len(), 2);
+        assert_eq!(test_warnings("main", &server, &sources).len(), 2);
         let sources = BTreeMap::from([("alias".into(), source("exclude=['/hidden']"))]);
         server.exclude_tags.clear();
         // The sibling remains selected, so narrow the listener to the removed path.
         server.include_tools = vec!["vendor_hidde?".into()];
-        let actual = warnings("main", &server, &sources).unwrap();
+        let actual = test_warnings("main", &server, &sources);
         assert_eq!(actual.len(), 2);
         assert!(
             !actual[0]
@@ -371,7 +420,7 @@ mod tests {
         let sources = BTreeMap::from([("alias".into(), source)]);
         let mut server = listener();
         server.include_tools = vec!["vendor_help*".into()];
-        let actual = warnings("main", &server, &sources).unwrap();
+        let actual = test_warnings("main", &server, &sources);
         assert!(actual[0].explanation.contains(
             "sources.alias.exclude_tools contains \"vendor_help\" (removes vendor_help)"
         ));
@@ -403,12 +452,7 @@ mod tests {
                     .tools
                     .is_empty()
             );
-            report_completed(
-                &BTreeMap::from([("main".into(), server)]),
-                &sources,
-                &BTreeMap::new(),
-                None,
-            );
+            report_test_selection(&BTreeMap::from([("main".into(), server)]), &sources, None);
         })
         .await;
         for message in [
@@ -423,21 +467,56 @@ mod tests {
         }
         assert!(
             logs.lines()
-                .any(|line| line.contains("ERROR") && line.contains("setting=\"include_tools\"")),
+                .any(|line| line.contains("WARN") && line.contains("setting=\"include_tools\"")),
             "{logs}"
         );
         assert!(
             logs.lines()
-                .any(|line| line.contains("ERROR") && line.contains("No static API tools")),
+                .any(|line| line.contains("WARN") && line.contains("setting=\"tool_filters\"")),
             "{logs}"
         );
-        assert!(!logs.contains("WARN") && !logs.contains("INFO"), "{logs}");
+        assert!(!logs.contains("INFO"), "{logs}");
     }
 
     #[tokio::test]
-    async fn partial_catalog_removal_evidence_does_not_suppress_endpoint_coverage_errors() {
+    async fn collision_omission_reports_empty_listener_coverage() {
         if crate::test_log_capture::run_in_child(
-            "deployment::selection_diagnostics::tests::partial_catalog_removal_evidence_does_not_suppress_endpoint_coverage_errors",
+            "deployment::selection_diagnostics::tests::collision_omission_reports_empty_listener_coverage",
+        ) {
+            return;
+        }
+        let (_, logs) = crate::limits::tests::capture(async {
+            let sources =
+                BTreeMap::from([("alias".into(), source("")), ("other".into(), source(""))]);
+            let mut server = listener();
+            server.sources.push("other".into());
+            let selection = selection("main", &server, &sources);
+            assert!(selection.empty);
+            assert!(selection.unmatched.is_empty());
+            report_completed(
+                &BTreeMap::from([("main".into(), server)]),
+                &sources,
+                &BTreeMap::new(),
+                &BTreeMap::from([("main".into(), selection)]),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                Some("other"),
+            );
+        })
+        .await;
+        assert!(
+            logs.lines().any(|line| line.contains("WARN")
+                && line.contains("server=\"main\"")
+                && line.contains("setting=\"tool_filters\"")),
+            "{logs}"
+        );
+        assert!(!logs.contains("setting=\"include_tools\""), "{logs}");
+    }
+
+    #[tokio::test]
+    async fn partial_catalog_removal_evidence_does_not_suppress_endpoint_coverage_warnings() {
+        if crate::test_log_capture::run_in_child(
+            "deployment::selection_diagnostics::tests::partial_catalog_removal_evidence_does_not_suppress_endpoint_coverage_warnings",
         ) {
             return;
         }
@@ -464,30 +543,28 @@ mod tests {
             let mut server = listener();
             server.include_tools = vec!["vendor_missing*".into()];
             assert!(selection_removals("main", &server, &sources).is_err());
-            let actual = warnings("main", &server, &sources).unwrap();
+            let actual = test_warnings("main", &server, &sources);
             assert_eq!(actual.len(), 2);
             assert_eq!(actual[0].setting, "include_tools");
             assert_eq!(actual[0].selector, "vendor_missing*");
             assert_eq!(actual[1].setting, "tool_filters");
-            report_completed(
+            report_test_selection(
                 &BTreeMap::from([("main".into(), server)]),
                 &sources,
-                &BTreeMap::new(),
                 Some("alias"),
             );
         })
         .await;
-        for expected in ["setting=\"include_tools\"", "No static API tools"] {
+        for (severity, setting) in [
+            ("WARN", "setting=\"include_tools\""),
+            ("WARN", "setting=\"tool_filters\""),
+        ] {
             assert!(
                 logs.lines()
-                    .any(|line| line.contains("ERROR") && line.contains(expected)),
+                    .any(|line| line.contains(severity) && line.contains(setting)),
                 "{logs}"
             );
         }
-        assert!(
-            !logs.contains("Listener selection diagnostics could not be generated"),
-            "{logs}"
-        );
     }
 
     #[tokio::test]
@@ -522,17 +599,20 @@ mod tests {
             assert_eq!(inventory.tools[0].1.name, "vendor_read");
             let listeners = BTreeMap::from([("main".into(), server)]);
             // Unrelated completions must not repeat a listener's diagnostics.
-            report_completed(&listeners, &sources, &BTreeMap::new(), Some("unrelated"));
-            report_completed(&listeners, &sources, &BTreeMap::new(), Some("alias"));
-            report_completed(&listeners, &sources, &BTreeMap::new(), Some("unrelated"));
+            report_test_selection(&listeners, &sources, Some("unrelated"));
+            report_test_selection(&listeners, &sources, Some("alias"));
+            report_test_selection(&listeners, &sources, Some("unrelated"));
         })
         .await;
-        for (message, count) in [
-            ("Provider exclusion selector", 2),
-            ("Source exclusion selector", 2),
-            ("Listener exclusion selector", 3),
+        for (target, field, count) in [
+            ("::catalog:", "setting=\"exclude_tools\"", 2),
+            ("::routing:", "rule=0", 2),
+            ("::selection_diagnostics:", "setting=\"exclude_tools\"", 3),
         ] {
-            let lines: Vec<_> = logs.lines().filter(|line| line.contains(message)).collect();
+            let lines: Vec<_> = logs
+                .lines()
+                .filter(|line| line.contains(target) && line.contains(field))
+                .collect();
             assert_eq!(lines.len(), count, "{logs}");
             assert!(lines.iter().all(|line| line.contains("INFO")), "{logs}");
         }
@@ -555,7 +635,7 @@ mod tests {
                 .unwrap();
             let sources = BTreeMap::from([("alias".into(), routed)]);
             let mut server = listener();
-            let actual = warnings("main", &server, &sources).unwrap();
+            let actual = test_warnings("main", &server, &sources);
             assert_eq!(actual.len(), 2);
             assert_eq!(actual[1].setting, "tool_filters");
             assert!(
@@ -581,7 +661,7 @@ mod tests {
                 if exclude {
                     let selected = selected.unwrap();
                     assert_eq!(selected.tools.len(), 1);
-                    let diagnostic = warnings("main", &server, &sources).unwrap();
+                    let diagnostic = test_warnings("main", &server, &sources);
                     assert_eq!(diagnostic[0].setting, "exclude_tools");
                     assert!(diagnostic[0].explanation.contains(expected));
                 } else {
@@ -623,7 +703,7 @@ mod tests {
                 .with_send_tools("alias", Some(send_tools))
                 .unwrap();
             let sources = BTreeMap::from([("alias".into(), routed)]);
-            let actual = warnings("main", &listener(), &sources).unwrap();
+            let actual = test_warnings("main", &listener(), &sources);
             assert_eq!(actual.len(), 2);
             assert_eq!(actual[1].setting, "tool_filters");
             assert!(
@@ -642,21 +722,19 @@ mod tests {
                     .contains("removes vendor_hidden_extra")
             );
             assert!(actual[0].explanation.contains("removes vendor_hidden)"));
-            report_completed(
+            report_test_selection(
                 &BTreeMap::from([("main".into(), listener())]),
                 &sources,
-                &BTreeMap::new(),
                 Some("alias"),
             );
         })
         .await;
         let diagnostic = logs
             .lines()
-            .find(|line| line.contains("ERROR") && line.contains("setting=\"include_tools\""))
-            .expect("missing selection must emit an ERROR diagnostic");
+            .find(|line| line.contains("WARN") && line.contains("setting=\"include_tools\""))
+            .expect("missing selection must warn");
         for expected in [
             "selector=\"vendor_hidden*\"",
-            "remaining selected endpoint tools are available",
             "sources.alias.exclude_tools",
             "removes vendor_hidden_extra",
             "sources.alias.send_tools[0] assigns matching tools to sibling",
@@ -677,7 +755,15 @@ mod tests {
             let inventory =
                 listener_tool_inventory("one", &server, &sources, &unavailable, true).unwrap();
             assert!(inventory.tools.is_empty());
-            let actual = warnings("main", &server, &sources).unwrap();
+            let actual = warnings(
+                "one",
+                &server,
+                &sources,
+                &Selection {
+                    unmatched: inventory.unmatched,
+                    empty: inventory.tools.is_empty(),
+                },
+            );
             assert_eq!(actual.len(), 2);
             assert_eq!(actual[0].setting, "include_tools");
             assert!(

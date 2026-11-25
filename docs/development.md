@@ -226,7 +226,7 @@ retry and fallback paths finish:
 
 | Level | Use for | Examples |
 | --- | --- | --- |
-| `ERROR` | Required service or endpoint functionality is unavailable with no recovery remaining in the current lifecycle | Program failure; endpoint cannot bind or load required catalogs; deployment catalog finishes with unavailable capabilities; unreachable Tor SOCKS on serving startup; fatal Store worker or funding owner death |
+| `ERROR` | Required service or endpoint functionality is unavailable with no recovery remaining in the current lifecycle | Program failure; endpoint cannot bind or load required catalogs; degraded catalog warming; unreachable Tor SOCKS on serving startup; fatal Store worker or funding owner death |
 | `WARN` | A requested operation fails after exhausting recovery, or functionality is unexpectedly lost | Document retrieval fails with no fallback; potentially chargeable payment fails; one-pass CLI command fails; unexpected catalog omissions; oversized resource rejection; `tools/list` above 500 tools |
 | `INFO` | Meaningful user-visible lifecycle, progress, delay, or recovery changes | Startup, catalog ready, endpoint ready, warming progress, funding progress, entering relay fallback, Tor SOCKS reachability recovery, dependency recovery, unmatched exclusions |
 | `DEBUG` | Routine outcomes, expected negative results, individual attempts, and troubleshooting detail | Successful calls, speculative probe misses, search misses, routine auth rejections, background polling, cache activity, capacity waits, LRU eviction |
@@ -248,9 +248,10 @@ Core severity rules:
   or URLs).
 - **Expected vs. unexpected catalog omissions:** Explicit `exclude_operations`,
   `exclude`, and `exclude_tags` suppress expected incompatibilities without
-  warning. Unexpected unsupported operations warn at the public catalog
-  builder; deployment serving and warming emit `ERROR` for unavailable
-  capabilities or degraded warming without duplicating the builder warning.
+  warning. The public catalog builder warns when unsupported operations are
+  omitted. During deployment serving, the source emits a `WARN` for missing
+  tools or failed acquisition. A listener blocked by an acquisition failure
+  emits its own `ERROR`. Catalog warming reports degraded results at `ERROR`.
   Frameworks must follow [framework integration](framework-integration.md)
   rather than treating `ERROR` logs as process crashes.
 - **Store and funding supervision:** Fatal Store worker death emits one

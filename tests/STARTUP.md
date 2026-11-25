@@ -28,9 +28,9 @@ live providers, live settlement, or live Tor.
 - **Deferred serving and readiness (`deployment::deferred::tests`,
   `readiness_tests`):** Covers incremental serving (`wait_for_catalogs = false`),
   default per-endpoint waiting (`wait_for_catalogs = true`), publication before
-  MCP `initialize` and `tools/list`, independent local peers, optional source
-  failures (`allow_catalog_failure = true`), `ERROR` plus socket closure for
-  required failures, runtime refresh resolving readiness immediately,
+  MCP `initialize`, `tools/list`, and readiness logs. Covers independent local
+  peers, optional source failures (`allow_catalog_failure = true`), `ERROR`
+  plus socket closure for required failures, runtime refresh resolving readiness immediately,
   cached-generation diagnostics (in an isolated child process), and
   discovery-help teardown waiting for final `Manager` drop before registry
   unlock.
@@ -45,7 +45,8 @@ live providers, live settlement, or live Tor.
 - **Selectors, collisions, and `send_tools` (`deployment::selection_diagnostics`,
   `tests/deployment.rs`):** Covers missing selectors, empty inventories,
   unmatched exclusions, collision omission in opposite completion orders,
-  `send_tools` fanout, exclusions, shadowed rules, reserved-namespace source
+  warnings for selected collisions, calls to healthy siblings, `send_tools`
+  fanout, exclusions, shadowed rules, reserved-namespace source
   isolation, shared-payer cover conflict checks, and Store cleanup on early
   bind failure. See
   [source tool distribution](../docs/configuration.md#source-tool-distribution).
