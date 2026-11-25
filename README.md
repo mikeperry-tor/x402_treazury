@@ -378,7 +378,7 @@ These projects explore related approaches to private API access:
 | [SecretPay](https://github.com/DVB-ANRS/SecretPay) | Hackathon prototype using Unlink privacy pools and single-use wallets for Base Sepolia x402 payments. | Uses a similar gateway and wallet model. Its funding mechanism has a direct-transfer fallback that can expose the funding link. |
 | [Galactica aztec-x402](https://github.com/Galactica-corp/aztec-x402) | Client and server tooling for private x402 settlement on Aztec, with a public-testnet demo. | API providers must integrate Aztec. `x402_treazury` keeps standard Base USDC settlement and reduces linkability through funding, rotation, and network isolation. |
 | [PrivAgent](https://github.com/Himess/privagent) | Shielded-pool payment protocol on Base with x402 middleware and client tooling. | Providers must adopt its custom settlement protocol. `x402_treazury` keeps standard public Base USDC payments. |
-| [zkAPI](https://blog.ethereum.org/2026/10/01/introducing-zkapi) | Private usage credits backed by zero-knowledge proofs, with temporary capped API keys for metered usage. | Uses credits and sessions to separate payment identity from API usage. `x402_treazury` uses wallet rotation and optional Tor isolation. Network anonymity and request-content correlation remain separate concerns for zkAPI. |
+| [zkAPI](https://blog.ethereum.org/2026/10/01/introducing-zkapi) | Private usage credits backed by zero-knowledge proofs, with temporary capped API keys for metered usage. Network anonymity and request-content correlation remain separate concerns for zkAPI. | zkAPI separates payment identity from API usage through credits and sessions. `x402_treazury` uses the provider's per-request x402 challenge. |
 
 ## License
 
