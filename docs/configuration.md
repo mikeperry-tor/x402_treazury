@@ -737,8 +737,9 @@ send_tools = [
 - **Validation and diagnostics:** Strict inspection rejects missing exact
   assignment selectors and empty inventories (unmatched wildcards log at
   `DEBUG`). Serving and warming accept missing selectors and empty inventories
-  with `ERROR` coverage diagnostics (unmatched `exclude` selectors log at
-  `INFO`, and fully shadowed rules log at `DEBUG`).
+  with `WARN` coverage diagnostics. Unmatched `exclude` selectors log at
+  `INFO`, and fully shadowed rules log at `DEBUG`. See
+  [warming diagnostics](framework-integration.md#warming-diagnostics).
 - **Inspection:** `config show` prints configured rules and effective bindings
   with origins such as `sources.vaaya.send_tools[1].to`.
   `config check --explain-routing` prints one JSON object (`wallet_summary`,
@@ -1445,11 +1446,11 @@ x402_treazury catalog warm --config deployment.toml --source provider_id
 x402_treazury catalog warm --config deployment.toml --source provider_id --direct
 ```
 
-- `--source` takes deployment source IDs (repeatable or comma-separated; omit
-  for all sources). Selected remote catalogs and external pricing documents
-  download unconditionally, requiring an existing `treasury.state_dir` and
-  rejecting `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on
-  selected sources.
+- `--source` takes deployment source IDs. Repeat the flag, separate IDs with
+  commas, or omit it for all sources. Warming refreshes selected remote
+  catalogs and any configured external pricing for their selected API tools.
+  It requires an existing `treasury.state_dir` and rejects selected sources
+  with `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0`.
 - Warming starts no listeners or funding workers and opens discovery wallets
   only when paid relay warming is enabled. A running server keeps its in-memory
   snapshot until runtime refresh or restart.

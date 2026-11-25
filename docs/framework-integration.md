@@ -24,7 +24,7 @@ pricing fails, valid API tools remain available with unknown prices.
 | Result | Exit status | Stdout JSON |
 | --- | --- | --- |
 | Every selected source is ready with no degradation | `0` | `outcome: "ok"` |
-| Attempts finished with unavailable sources, omitted operations, unmatched selectors, missing pricing, or incomplete cache writes | `0` | `outcome: "degraded"` |
+| Attempts finished with unavailable sources, omitted operations, unmatched selectors, discarded overrides, optional pricing acquisition failure, or incomplete cache writes | `0` | `outcome: "degraded"` |
 | Invalid local config, failed required initialization, cancellation, internal worker failure, or JSON write failure | Nonzero | None |
 
 A run where every remote source is unreachable still exits `0` with
@@ -37,10 +37,15 @@ qualification keep their completeness checks and fail on missing tools.
 Preflight rejects malformed configuration, including unknown tool override
 fields and invalid override value types. It also rejects malformed selectors,
 unknown source IDs, cache opt-outs on selected sources, invalid network
-settings, and missing required state or wallet configuration. During execution:
+settings, and missing required state or wallet configuration.
 
 - **Unsupported operations** are recorded as per-source omissions for both
   local and remote catalogs.
+- **Discarded overrides:** When an override on a compiled tool cannot be
+  applied, warming logs a warning and includes the issue in the source's JSON
+  entry. A source with remaining tools reports `partial`. A completed pass
+  returns exit `0` and `outcome: "degraded"` with either setting of
+  `allow_catalog_failure`, which controls listener startup.
 - **Local fatal errors** (unreadable local files, malformed local documents,
   structural-safety violations, and invalid config) fail the command after
   draining any sibling work already in flight.
@@ -52,15 +57,29 @@ remote catalogs: missing tool names, missing tags, contradictory name filters,
 and empty opted-in `recommended_tools` report reduced coverage without
 broadening filters. Selector syntax and field types are still validated.
 
+### Warming diagnostics
+
+Each source in the JSON summary has one completion event on stderr with
+`category = "catalog_warm_source"`, source status, and progress counts.
+Severity describes the result for that source. The exit status describes
+whether the command completed.
+
+| Level | Source result |
+| --- | --- |
+| `ERROR` | Warming cannot acquire or accept a selected remote catalog. The source entry includes a failure reason. |
+| `WARN` | The catalog is accepted with reduced or empty tool coverage, discarded overrides, unavailable optional pricing, or incomplete cache storage. |
+| `INFO` | The source finishes with no degradation in the summary. |
+
+The command also logs start and completion at `INFO`. Completion follows
+paid relay draining and wallet cleanup. `RUST_LOG` controls visibility.
+
 ## Warming JSON
 
 Stdout emits one JSON document and stderr carries logs. The top-level fields
 are `direct` (boolean), `outcome` (`"ok"` or `"degraded"`), and `sources` (one
 entry per selected source ID, sorted by ID).
 
-Default `INFO` logs report warming start, per-source outcomes, and completion
-(after paid relay calls drain and wallet cleanup finishes). `RUST_LOG`
-overrides the default filter; fetch and cache details log at `DEBUG`.
+See [warming diagnostics](#warming-diagnostics) for stderr events.
 
 ```json
 {
@@ -89,16 +108,17 @@ overrides the default filter; fetch and cache details log at `DEBUG`.
 ### Source entry fields
 
 Every source entry includes `source` and `status`. Optional fields appear only
-when populated (empty `omissions` and `selection_notices` arrays are omitted):
+when populated.
 
 | Field | Meaning |
 | --- | --- |
-| `status: "ready"` | Source is ready with no omitted operations or unmatched selectors. Pricing or cache issues can still make the overall `outcome` degraded. |
-| `status: "partial"` | Source has callable tools alongside `omissions` or `selection_notices`. |
-| `status: "unavailable"` | Fetch failed or filtering left zero tools. Failed fetches include `failure` and omit `catalog_cache` and `pricing`. |
+| `status: "ready"` | Source is ready with no omitted operations, unmatched selectors, or discarded overrides. Pricing or cache issues can still degrade the overall outcome. |
+| `status: "partial"` | Source has callable tools alongside `omissions`, `selection_notices`, or `override_issues`. |
+| `status: "unavailable"` | Acquisition or acceptance failed, or the catalog produced no selected tools. Failed acquisitions or rejections include `failure` and omit `catalog_cache` and `pricing`. |
 | `catalog_cache` | Storage state after the pass: `fresh`, `fresh_via_relay`, `requires_revalidation`, `not_stored`, or `local_file`. An unavailable source may still have an older cached snapshot on disk. |
-| `omissions` | Objects with `method`, `path`, and `reason` for each unsupported operation that matched selection. Unavailable sources can also report omissions when rejecting an invalid replacement. |
+| `omissions` | Objects with `method`, `path`, and `reason` for each unsupported operation that matched selection. A catalog with zero compatible tools can still report omissions. |
 | `selection_notices` | Objects with `setting` and unmatched `selector`. |
+| `override_issues` | Discarded edits with `tool`, `field`, `target`, and `problem`. `selected` is the retained schema path for competing notes, or `null`. |
 | `failure` | Sanitized fetch or processing failure object. |
 | `pricing` | Pricing result with `status` and optional `failure` or `catalog_cache`. |
 
@@ -177,9 +197,9 @@ alongside their `message` rather than rejecting the JSON summary.
 Follow these rules when orchestrating `x402_treazury` from an outer framework:
 
 - **Accept degraded warming:** Treat exit `0` with valid `ok` or `degraded` JSON
-  as completed catalog preparation. Surface unavailable sources, omissions, and
-  pricing or cache warnings to the user instead of requiring 100% ready sources
-  or a minimum tool count. Treat invalid JSON as a protocol failure.
+  as completed catalog preparation. Surface unavailable sources, omissions,
+  discarded overrides, and pricing or cache warnings to the user. Treat
+  invalid JSON as a protocol failure.
 - **Keep financial bootstrap separate:** Catalog degradation never resets
   completed bootstrap state, changes wallet identities, reopens funding claims,
   or invalidates pending financial work.
@@ -206,10 +226,9 @@ Follow these rules when orchestrating `x402_treazury` from an outer framework:
   rather than treating every `ERROR` log line as a fatal endpoint crash.
 - **Recognize terminal endpoint-failure logs:** Because `serve` stays alive
   when one endpoint fails catalog startup or publishes invalid tool selections,
-  process exit status alone does not report single-endpoint failures. Non-fatal
-  `ERROR` logs (such as permissive-selection notices or transient Tor SOCKS
-  waits) keep serving, whereas these two `ERROR` messages identify terminal
-  endpoint unavailability requiring configuration repair and a restart:
+  process exit status alone does not report single-endpoint failures. These
+  two `ERROR` messages identify terminal endpoint unavailability that requires
+  configuration repair and a restart.
   - `MCP endpoint unavailable; catalog startup failed; correct the reported cause and restart`
   - `MCP endpoint tools are unavailable because its tool selection is invalid; correct the configuration and restart`
 - **Never auto-retry financial or network changes on failure:** On an

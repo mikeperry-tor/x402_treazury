@@ -171,15 +171,15 @@ async fn catalog_capacity_child() {
             let cfg = toml::from_str(&text).unwrap();
             let path = path.clone();
             tokio::spawn(async move {
-                startup::warm(
+                let sources = super::super::cache_warm::resolve_sources(
                     &cfg,
                     &path,
-                    &BTreeSet::from(["a".into(), "b".into(), "z".into()]),
-                    false,
-                    Default::default(),
+                    BTreeSet::from(["a".into(), "b".into(), "z".into()]),
                 )
-                .await
-                .map(|_| ())
+                .await?;
+                startup::warm(&cfg, sources, false, Default::default())
+                    .await
+                    .map(|_| ())
             })
         };
         state.seen(&format!("/{mode}/z")).await;

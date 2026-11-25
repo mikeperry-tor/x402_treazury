@@ -2,6 +2,17 @@ use super::*;
 use crate::http_cache::{Entry, Metadata, Slot};
 use std::sync::atomic::Ordering;
 
+async fn warm(
+    config: &MetaConfig,
+    path: &Path,
+    selected: &std::collections::BTreeSet<String>,
+    direct: bool,
+    relay: crate::discovery_relay::Relays,
+) -> Result<Vec<super::super::cache_warm::CacheWarmSource>> {
+    let sources = super::super::cache_warm::resolve_sources(config, path, selected.clone()).await?;
+    super::warm(config, sources, direct, relay).await
+}
+
 #[tokio::test]
 async fn warm_bypasses_fresh_origin_and_relay_catalogs() {
     if crate::test_log_capture::run_in_child(
@@ -1169,9 +1180,11 @@ async fn warming_reports_info_progress_and_only_completed_outcomes() {
     partial["paths"]["/unsupported"] = serde_json::json!({"get":{
         "parameters":[{"name":"session","in":"cookie","schema":{"type":"string"}}]
     }});
+    let empty = serde_json::json!({"paths":{"/unsupported":partial["paths"]["/unsupported"]}});
     for (document, expected) in [
         (healthy.to_string(), Some(("ok", "ready"))),
         (partial.to_string(), Some(("degraded", "partial"))),
+        (empty.to_string(), Some(("degraded", "unavailable"))),
         ("not JSON".to_owned(), None),
     ] {
         std::fs::write(dir.path().join("private-catalog.json"), document).unwrap();
@@ -1183,7 +1196,9 @@ async fn warming_reports_info_progress_and_only_completed_outcomes() {
         let text = std::fs::read_to_string(log.path()).unwrap();
         let text = &text[offset..];
         assert!(
-            text.contains("INFO") && text.contains("Warming selected catalogs"),
+            text.lines()
+                .any(|line| line.contains("INFO")
+                    && line.contains("category=\"catalog_warm_start\"")),
             "{text}"
         );
         if let Some((outcome, status)) = expected {
@@ -1191,22 +1206,39 @@ async fn warming_reports_info_progress_and_only_completed_outcomes() {
             assert_eq!(summary.outcome, outcome);
             assert_eq!(summary.sources.len(), 1);
             assert_eq!(summary.sources[0].status, status);
-            assert!(text.contains("Catalog warming source finished"), "{text}");
-            assert!(text.contains("completed=1 total=1"), "{text}");
-            let completion = text
+            let source_events: Vec<_> = text
                 .lines()
-                .find(|line| line.contains("Catalog warming finished sources="))
-                .unwrap();
+                .filter(|line| line.contains("category=\"catalog_warm_source\""))
+                .collect();
+            assert_eq!(source_events.len(), 1, "{text}");
+            let source_event = source_events[0];
+            assert!(source_event.contains("completed=1 total=1"), "{text}");
+            assert!(
+                source_event.contains(&format!("status=\"{status}\"")),
+                "{text}"
+            );
+            let level = if outcome == "degraded" {
+                "WARN"
+            } else {
+                "INFO"
+            };
+            assert!(source_event.contains(level), "{text}");
+            let completions: Vec<_> = text
+                .lines()
+                .filter(|line| line.contains("category=\"catalog_warm_complete\""))
+                .collect();
+            assert_eq!(completions.len(), 1, "{text}");
+            let completion = completions[0];
             assert!(
                 completion.contains("INFO")
                     && completion.contains(&format!("outcome=\"{outcome}\"")),
                 "{text}"
             );
-            assert_eq!(text.contains("ERROR"), outcome == "degraded", "{text}");
+            assert!(!text.contains("ERROR"), "{text}");
         } else {
             assert!(result.is_err());
             assert!(
-                !text.contains("Catalog warming finished sources="),
+                !text.contains("category=\"catalog_warm_complete\""),
                 "{text}"
             );
         }

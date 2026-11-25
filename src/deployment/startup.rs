@@ -190,10 +190,19 @@ impl Downloads {
         path: &Path,
         warn: bool,
     ) -> Result<catalog::Config> {
-        let mut cfg = crate::config::resolve(source.provider.clone(), path)
+        let cfg = crate::config::resolve(source.provider.clone(), path)
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        self.configure_resolved(id, cfg, warn).await
+    }
+
+    async fn configure_resolved(
+        &self,
+        id: &str,
+        mut cfg: catalog::Config,
+        warn: bool,
+    ) -> Result<catalog::Config> {
         cfg.allow_empty_selection = matches!(
             self.purpose.for_current_operation(),
             CatalogPurpose::Serving | CatalogPurpose::Warming
@@ -202,8 +211,6 @@ impl Downloads {
         if self.all_tools {
             cfg.use_recommended_tools = false;
         }
-        catalog::validate_tool_selection(&cfg)
-            .with_context(|| format!("source {id}: invalid tool selections"))?;
         cfg.discovery_source = Some(id.to_owned());
         cfg.relay_fallback = self.relay.get(id).cloned();
         cfg.http_cache_directory = self.cache_directory.clone();
@@ -571,6 +578,11 @@ impl Source {
         Ok(SourceLoad::Ready(source))
     }
     pub(super) fn report_degradation(&self, id: &str) {
+        catalog::report_discarded(
+            Some(id),
+            self.config.prefix.as_deref().expect("resolved prefix"),
+            &self.override_issues,
+        );
         if !self.issues.is_empty()
             || !self.config.selection_notices.is_empty()
             || self.tools.is_empty()
@@ -691,6 +703,7 @@ impl Source {
             send_tools: None,
             tools,
             issues,
+            override_issues: built.override_issues,
             base_url,
             instructions: cfg.instructions_text.clone(),
             config: cfg,
@@ -725,8 +738,7 @@ async fn catalog_cache_status(cfg: &catalog::Config) -> &'static str {
 
 pub(super) async fn warm(
     config: &MetaConfig,
-    path: &Path,
-    selected: &std::collections::BTreeSet<String>,
+    sources: BTreeMap<String, catalog::Config>,
     direct: bool,
     relay: crate::discovery_relay::Relays,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
@@ -747,63 +759,51 @@ pub(super) async fn warm(
         force_refresh: true,
     };
     // Finish all locally detectable configuration checks before starting acquisition.
-    let mut configured = Vec::with_capacity(selected.len());
-    for id in selected {
-        let source = config
-            .sources
-            .get(id)
-            .with_context(|| format!("unknown cache-warming source {id}"))?;
-        let cfg = downloads.configure(id, source, path, false).await?;
+    let total = sources.len();
+    let mut configured = Vec::with_capacity(total);
+    for (id, cfg) in sources {
+        let cfg = downloads.configure_resolved(&id, cfg, false).await?;
         configured.push((id, cfg));
     }
     let mut loads = Vec::with_capacity(configured.len());
-    tracing::info!(target: "x402_treazury::startup", total = selected.len(),
+    tracing::info!(target: "x402_treazury::startup", category = "catalog_warm_start", total,
         "Warming selected catalogs");
     for (id, cfg) in configured {
         let downloads = &downloads;
         loads.push(async move {
             let remote = cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://");
-            let result = warm_source(id, &config.sources[id], cfg, downloads).await;
+            let result = warm_source(&id, &config.sources[&id], cfg, downloads).await;
             (id, remote, result)
         });
     }
-    let mut pending = stream::iter(loads).buffer_unordered(selected.len().max(1));
+    let mut pending = stream::iter(loads).buffer_unordered(total.max(1));
     let mut results = Vec::new();
     let mut local_error = None;
     while let Some((id, remote, result)) = pending.next().await {
-        match result {
-            Ok(result) => {
-                tracing::info!(target: "x402_treazury::startup", source = id,
-                    status = result.status, degraded = result.degraded(),
-                    completed = results.len() + 1, total = selected.len(),
-                    "Catalog warming source finished");
-                results.push(result);
-            }
+        let result = match result {
+            Ok(result) => result,
             Err(error) if remote && warm_remote_failure(&error) => {
                 let failure = catalog_failure(&error, "acquisition");
-                tracing::error!(
-                    source = id,
-                    failure_stage = failure.stage,
-                    reason = failure.code(),
-                    http_status = failure.http_status,
-                    "Catalog warming could not acquire this source; its API tools are unavailable"
-                );
-                results.push(super::cache_warm::CacheWarmSource {
-                    source: id.clone(),
+                super::cache_warm::CacheWarmSource {
+                    source: id,
                     status: "unavailable",
                     catalog_cache: None,
                     omissions: Vec::new(),
                     selection_notices: Vec::new(),
+                    override_issues: Vec::new(),
                     failure: Some(failure.into()),
                     pricing: None,
-                });
+                }
             }
             Err(error) => {
                 if local_error.is_none() {
                     local_error = Some(error);
                 }
+                continue;
             }
-        }
+        };
+        result.report(results.len() + 1, total);
+        results.push(result);
     }
     if let Some(error) = local_error {
         return Err(error);
@@ -875,34 +875,29 @@ async fn warm_source(
         pricing.catalog_cache = Some(catalog_cache_status(&cfg).await);
     }
     let catalog_cache = catalog_cache_status(&source.config).await;
+    source
+        .override_issues
+        .retain(catalog::OverrideIssue::discarded);
     let status = if source.tools.is_empty() {
         "unavailable"
-    } else if !source.issues.is_empty() || !source.config.selection_notices.is_empty() {
+    } else if !source.issues.is_empty()
+        || !source.config.selection_notices.is_empty()
+        || !source.override_issues.is_empty()
+    {
         "partial"
     } else {
         "ready"
     };
-    let result = CacheWarmSource {
+    Ok(CacheWarmSource {
         source: id.to_owned(),
         status,
         catalog_cache: Some(catalog_cache),
         omissions: source.issues,
         selection_notices: source.config.selection_notices,
+        override_issues: source.override_issues,
         failure: None,
         pricing: Some(pricing),
-    };
-    if result.degraded() {
-        tracing::error!(
-            source = id,
-            status,
-            catalog_cache,
-            omitted_operations = result.omissions.len(),
-            missing_selections = result.selection_notices.len(),
-            pricing_status = result.pricing.as_ref().map(|p| p.status),
-            "Catalog warming finished with reduced coverage, unavailable prices or incomplete cache storage; inspect the source result"
-        );
-    }
-    Ok(result)
+    })
 }
 
 #[cfg(test)]

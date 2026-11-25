@@ -27,7 +27,7 @@ pub enum OverrideProblem {
 }
 
 impl OverrideIssue {
-    pub(super) fn discarded(&self) -> bool {
+    pub(crate) fn discarded(&self) -> bool {
         self.problem != OverrideProblem::Ambiguous
     }
 }
@@ -246,9 +246,10 @@ fn apply_notes(
     }
 }
 
-pub(super) fn report_discarded(prefix: &str, issues: &[OverrideIssue]) {
+pub(crate) fn report_discarded(source: Option<&str>, prefix: &str, issues: &[OverrideIssue]) {
     for issue in issues.iter().filter(|issue| issue.discarded()) {
         tracing::warn!(
+            source,
             prefix,
             tool = issue.tool.as_deref(),
             field = issue.field,

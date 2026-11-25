@@ -154,6 +154,7 @@ struct Source {
     document: std::sync::Arc<serde_json::Value>,
     tools: Vec<ToolSpec>,
     issues: Vec<catalog::OperationIssue>,
+    override_issues: Vec<catalog::OverrideIssue>,
     base_url: String,
     instructions: Option<String>,
 }

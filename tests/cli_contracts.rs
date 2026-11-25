@@ -1621,6 +1621,83 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
 }
 
 #[tokio::test]
+async fn catalog_warm_reports_discarded_optional_overrides_and_exits_successfully() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("state")).unwrap();
+    std::fs::write(
+        dir.path().join("catalog.json"),
+        r#"{"paths":{"/read":{"get":{}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("deployment.toml"),
+        r#"
+version = 1
+[treasury]
+state_dir = "state"
+[wallets.w]
+mode = "static"
+private_key_env = "UNUSED"
+[sources.optional]
+spec = "catalog.json"
+base_url = "https://example.com"
+allow_catalog_failure = true
+[sources.optional.overrides.optional_read.params]
+removed_parameter = "A parameter from an older catalog."
+[sources.healthy]
+spec = "catalog.json"
+base_url = "https://example.com"
+[servers.one]
+listen = "127.0.0.1:0"
+auth = false
+wallet = "w"
+sources = ["optional", "healthy"]
+"#,
+    )
+    .unwrap();
+    let output = run(
+        dir.path(),
+        &["catalog", "warm", "--config", "deployment.toml"],
+        &[("RUST_LOG", "warn"), ("NO_COLOR", "1")],
+    )
+    .await;
+    let logs = String::from_utf8_lossy(&output.stderr);
+    let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warnings.len(), 1, "{logs}");
+    for field in [
+        "category=\"catalog_warm_source\"",
+        "source=\"optional\"",
+        "discarded_overrides=1",
+        "optional_read",
+        "removed_parameter",
+    ] {
+        assert!(warnings[0].contains(field), "{logs}");
+    }
+    assert!(!logs.lines().any(|line| line.contains("ERROR")), "{logs}");
+    let summary = good(output);
+    assert_eq!(summary["outcome"], "degraded");
+    assert_eq!(summary["sources"][0]["source"], "healthy");
+    assert_eq!(summary["sources"][0]["status"], "ready");
+    assert!(summary["sources"][0].get("override_issues").is_none());
+    let optional = &summary["sources"][1];
+    assert_eq!(optional["source"], "optional");
+    assert_eq!(optional["status"], "partial");
+    assert_eq!(optional["catalog_cache"], "local_file");
+    assert!(optional.get("failure").is_none());
+    assert_eq!(
+        optional["override_issues"],
+        json!([{"tool":"optional_read", "field":"params", "target":"removed_parameter", "problem":"missing", "selected":null}])
+    );
+    let diagnostic = bad(run(
+        dir.path(),
+        &["config", "check", "--config", "deployment.toml"],
+        &[],
+    )
+    .await);
+    assert!(diagnostic.contains("removed_parameter"), "{diagnostic}");
+}
+
+#[tokio::test]
 async fn catalog_warm_all_remote_sources_unavailable_returns_degraded_json() {
     use std::{
         collections::BTreeMap,
@@ -1685,7 +1762,7 @@ trusted_ca_files=[{:?}]
     let output = run(
         dir.path(),
         &["catalog", "warm", "--config", "deployment.toml"],
-        &[],
+        &[("NO_COLOR", "1")],
     )
     .await;
     server.abort();
@@ -1713,11 +1790,26 @@ trusted_ca_files=[{:?}]
     assert_eq!(paths, ["/alpha", "/zeta"]);
     // Independent catalog requests may share the origin's pooled connection.
     assert!(proxy.accepted.load(Ordering::SeqCst) > 0);
-    assert!(stderr.contains("ERROR"), "{stderr}");
-    assert!(
-        stderr.contains("Catalog warming could not acquire this source"),
-        "{stderr}"
-    );
+    let events: Vec<_> = stderr
+        .lines()
+        .filter(|line| line.contains("category=\"catalog_warm_source\""))
+        .collect();
+    assert_eq!(events.len(), 2, "{stderr}");
+    for (index, event) in events.iter().enumerate() {
+        for field in [
+            "ERROR",
+            "status=\"unavailable\"",
+            "reason=\"http_status\"",
+            "http_status=502",
+            "total=2",
+        ] {
+            assert!(event.contains(field), "{stderr}");
+        }
+        assert!(
+            event.contains(&format!("completed={}", index + 1)),
+            "{stderr}"
+        );
+    }
     for forbidden in [
         "PRIVATE_UPSTREAM_RESPONSE_SENTINEL",
         "stack backtrace",

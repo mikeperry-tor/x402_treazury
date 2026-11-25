@@ -19,6 +19,7 @@ mod expansion_tests;
 mod sanitize;
 pub(crate) use contracts::rebind_schema_descriptions;
 pub use credit_pricing::CreditPricing;
+pub(crate) use overrides::report_discarded;
 pub(crate) use overrides::{OVERRIDE_PARAMS_FIELD, OVERRIDE_TEXT_FIELDS};
 pub use overrides::{OverrideIssue, OverrideProblem};
 pub use presentation::DescriptionRendering;
@@ -1910,7 +1911,14 @@ pub fn compare_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
 pub(crate) fn compile_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
     let result = build_catalog_inner(cfg, root, prefix);
     match &result {
-        Ok(built) => diagnostics::report_omissions(&built.issues),
+        Ok(built) => {
+            diagnostics::report_omissions(&built.issues);
+            report_discarded(
+                cfg.discovery_source.as_deref(),
+                prefix,
+                &built.override_issues,
+            );
+        }
         // The structural guard already owns its unconditional rejection WARN.
         Err(error) if !error.is::<expansion::ComplexityLimit>() => {
             diagnostics::report_build_failure(error);
@@ -1949,7 +1957,6 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
     if let Some(credits) = &cfg.credit_pricing {
         credit_diagnostics.report(prefix, credits, &built.tools);
     }
-    overrides::report_discarded(prefix, &built.override_issues);
     Ok(built)
 }
 
