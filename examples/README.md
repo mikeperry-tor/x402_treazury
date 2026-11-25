@@ -123,9 +123,9 @@ connectivity, payment, and response boundaries live in
 ### Web
 
 - **Search and answers:** Exa is the primary general and news search source.
-  Exa mode selection is advisory: `lite` ($0.004) uses indexed search with
-  restricted inputs and no live fetching, while `auto` ($0.007) remains the
-  default. Content options add charges.
+  Use `lite` for indexed search when its restricted inputs fit the task.
+  `auto` is the general-search default. Content options can add charges.
+  [Exa pricing and limits](../providers/CAVEATS.md#exatoml--exa-search-and-contents)
 - **Page retrieval and rendering:** StableEnrich Firecrawl handles rendered
   pages and PDFs, APEX `page_markdown` is the cheaper JavaScript fallback,
   AGProxy provides raw residential fetches for non-JavaScript pages, and Exa

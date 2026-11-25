@@ -1296,6 +1296,18 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
     assert_eq!(routed.body, Some(args));
     assert!(routed.query.is_empty());
     let search = &tools[1];
+    assert!(search.description.contains("$0.007"));
+    assert!(search.description.contains("$0.015"));
+    assert!(
+        search
+            .description
+            .contains("Lite and legacy instant start at $0.004 per request")
+    );
+    assert!(
+        search
+            .description
+            .contains("$0.001 per requested result, up to 10")
+    );
     assert_eq!(body_schema(search)["required"], json!(["query"]));
     assert!(
         body_schema(search)["properties"]["stream"]["description"]
@@ -3363,5 +3375,85 @@ async fn straits_preserves_paged_ticks_export_resolution_and_input_cadence() {
         "/api/premium/webhooks/{id}",
     ] {
         assert!(!tools.iter().any(|tool| tool.path == path));
+    }
+}
+
+#[tokio::test]
+async fn migrated_fastaf_and_api_direct_tariffs_survive_a_request_sample() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config, output::ObservedPrice};
+
+    // The price fields and method twins come from the frozen provider comparison.
+    // The test uses only the selected operations, with no provider requests.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (id, operation, method, pricing, tariff, amount) in [
+        (
+            "fastaf",
+            "/x402/v1/youtube",
+            "post",
+            json!({"price":{"amount":"0.005000","currency":"USD","mode":"fixed"}}),
+            "Listed: ~$0.005/call [spec].",
+            5000u64,
+        ),
+        (
+            "apidirect",
+            "/v1/bluesky/posts",
+            "get",
+            json!({"price":{"min":"0.004","max":"0.081","currency":"USD","mode":"dynamic"}}),
+            "Listed: ~$0.004–$0.081/call [spec, dynamic].",
+            4000,
+        ),
+        (
+            "apidirect",
+            "/v1/truthsocial/user/posts",
+            "get",
+            json!({"price":{"min":"0.007","max":"0.141","currency":"USD","mode":"dynamic"}}),
+            "Listed: ~$0.007–$0.141/call [spec, dynamic].",
+            7000,
+        ),
+    ] {
+        let cfg = config::load(&root.join("providers").join(format!("{id}.toml")))
+            .await
+            .unwrap()
+            .settings;
+        let mut document = json!({"paths":{operation:{method:{"x-payment-info":pricing}}}});
+        if id == "fastaf" {
+            document["paths"][operation]["get"] = document["paths"][operation][method].clone();
+        } else {
+            document["paths"][operation][method]["parameters"] = json!([{
+                "name":"get_sentiment", "in":"query", "schema":{"type":"boolean"}
+            }]);
+        }
+        let tool = catalog::build_tools(&cfg, &document, id).unwrap().remove(0);
+        assert_eq!(tool.method, method.to_ascii_uppercase());
+        assert!(tool.description.ends_with(tariff));
+        if id == "apidirect" {
+            assert!(
+                tool.description
+                    .contains("Request one page when using exact x402 payments.")
+            );
+            let sentiment = &tool.input_schema["properties"]["get_sentiment"];
+            assert_eq!(sentiment["type"], "boolean");
+            assert!(
+                sentiment["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains("quoted price")
+            );
+        }
+        tool.advertised_pricing.set_fresh_until(None);
+        let amount = alloy_primitives::U256::from(amount);
+        assert_eq!(
+            tool.advertised_pricing.amount(),
+            (id == "fastaf").then_some(amount)
+        );
+        let sample = ObservedPrice { amount };
+        assert_eq!(
+            tool.render_description(Some(sample)),
+            format!(
+                "{} Sample offer: ${sample} for one request.",
+                tool.description
+            )
+        );
     }
 }

@@ -13,15 +13,12 @@ instructions_text = "Domain availability is probabilistic; health scores summari
 
 [overrides.ipintel_satellite]
 description = "Retrieve satellite observations for lat/lon, optional radius_m, mode and date. Null date selects the latest suitable scene; fallback=true (default) may select a nearby date. Preserve scene timestamps, fulfillment status, warnings and Copernicus attribution. Image links remain metadata."
-pricing_description = "Cost: ~$0.09/call [spec]."
 
 [overrides.ipintel_jwt_decode]
 description = "Decode JWT header, claims and timestamp hints without verifying the signature. Send only tokens suitable for vendor disclosure."
-pricing_description = "Cost: ~$0.001/call [spec]."
 
 [overrides.ipintel_http_latency]
 description = "Measure HTTP latency and status for url from the handling Cloudflare Worker edge. Defaults to HEAD; GET is also supported. Returns response time and redirect details. This is not ICMP ping or the caller’s network latency."
-pricing_description = "Cost: ~$0.001/call [spec]."
 
 [pricing]
 source = "catalog"

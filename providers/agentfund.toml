@@ -37,7 +37,6 @@ body = "Pass an empty object when no filters are needed to send a JSON request b
 
 [overrides.agentfund_macro_retail_sales]
 description = "Retrieve a U.S. monthly retail/food-services sales summary with salesMillions, month-over-month/year-over-year changes and source. Vendor labels it ex-autos, but figures can match the auto-inclusive headline; verify aggregation before use."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.agentfund_macro_retail_sales.params]
 body = "Pass an empty object when no filters are needed to send a JSON request body."

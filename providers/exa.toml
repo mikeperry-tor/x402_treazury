@@ -15,8 +15,8 @@ help_url = "https://exa.ai/docs/integrations/payments/x402/quickstart.md"
 instructions_text = "Use exa_search to discover URLs and exa_contents for known URLs. Prices scale with search type, result/page counts and content options."
 
 [overrides.exa_search]
-description = "Search the web and optionally retrieve result contents. Use contents.highlights for concise excerpts. Summaries add a per-result charge; search type and requested result count affect price."
-pricing_description = "Base per search [vendor guide]: lite/instant $0.004; auto/fast $0.007; deep-lite/deep $0.012; deep-reasoning $0.015. Summaries add $0.001 per result."
+description = "Search the web and optionally retrieve result contents. Use contents.highlights for concise excerpts."
+pricing_description = "Lite and legacy instant start at $0.004 per request, below the catalog range. Summaries add $0.001 per requested result, up to 10 results."
 
 [overrides.exa_search.params]
 type = "Use auto for general search, lite for lower-cost indexed search without live fetching, or deep-lite/deep for research. Lite accepts a restricted argument set; omit summaries and live-fetch controls. instant/fast/deep-reasoning are legacy."
@@ -28,8 +28,8 @@ endCrawlDate = "Ignored by Exa; omit. Use publication-date filters for publicati
 context = "Deprecated; request contents.highlights or contents.text instead."
 
 [overrides.exa_contents]
-description = "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids. Choose text, highlights or summary as needed. maxAgeHours controls freshness; snapshotAsOf selects historical content. Each requested content type adds a per-page charge; omitted content types default to text."
-pricing_description = "Cost: $0.001 per page for each requested content type (text, highlights or summary) [vendor guide]."
+description = "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids. maxAgeHours controls freshness; snapshotAsOf selects historical content. Omitted content types default to text."
+pricing_description = "$0.001 per page per requested content type (text, highlights, or summary)."
 
 [overrides.exa_contents.params]
 urls = "URLs to retrieve. Supply this or ids, never both. Pricing scales with requested pages and content options."

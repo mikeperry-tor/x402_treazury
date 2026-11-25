@@ -16,7 +16,6 @@ description = "Read Otto's consolidated API guide, fetched on demand and cached 
 
 [overrides.otto_web_extract]
 description = "Extract a public page as Markdown with title and source metadata. Inspect content: JavaScript pages and bot challenges can return incomplete or irrelevant text despite success."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [pricing]
 source = "catalog"

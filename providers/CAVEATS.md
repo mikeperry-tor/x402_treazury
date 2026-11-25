@@ -470,10 +470,17 @@ Exa's [API spec](https://api.exa.ai/openapi.json) and
 [x402 guide](https://exa.ai/docs/integrations/payments/x402/quickstart.md)) plus
 lazy `exa_help`. No API key is needed; both operations are untagged.
 
-- **Pricing:** `lite` and `instant` $0.004 (indexed, restricted inputs),
-  `auto` and `fast` $0.007, `deep-lite` and `deep` $0.012, `deep-reasoning`
-  $0.015; search summaries +$0.001 per result; Contents $0.001 per page per
-  requested type (10-result x402 search max).
+- **Pricing:** The catalog advertises a dynamic Search range of $0.007 to
+  $0.015. The vendor guide lists `lite` and legacy `instant` at $0.004.
+  Base USDC exact offers for both modes match that price for five results
+  with no add-ons.
+  The search description shows this mode-specific exception beside the
+  published range. Summaries add $0.001 per requested result, with at most
+  10 results. Contents bills each requested content type per page. Use
+  `exa_help` for the full tariff. The challenge for the exact request governs
+  payment. Recheck that mode's Base USDC offer before changing the exception
+  when the catalog or guide changes.
+  [Exa x402 pricing](https://exa.ai/docs/integrations/payments/x402/quickstart.md#pricing)
 - **Schema notes:** Recursive `JsonValue` union normalizes cleanly for static
   loading (dynamic remote import still rejects whole-document cycles). Contents
   preserves root `oneOf` (`ids` vs. `urls`).
@@ -1015,7 +1022,8 @@ FastAF's Base x402 catalog includes `fastaf_patents` as an optional keyword
 search. Quote an exact title for precise lookup. Result counts can differ from
 the requested page size. Use a separate details endpoint for full claims or
 patent families. The definition excludes the Base Sepolia demo because it
-uses testnet USDC. It also excludes scrape submission and polling because a
+uses testnet USDC. Fixed tariffs for the selected research operations come
+from the catalog. FastAF also excludes scrape submission and polling because a
 slow scrape can return an accepted job with a private polling token only in
 the response headers. The hosted MCP API uses account credentials.
 
@@ -1097,8 +1105,9 @@ European day-ahead price route uses Energy-Charts.
 
 Public reads use the `/v1` catalog. Google AI Mode uses its POST twin, which
 accepts long prompts and the optional conversation token in a JSON body.
-Catalog price hints include the x402 surcharge. Some vendor descriptions
-still show the base price and API-key free tier.
+The catalog publishes x402 tariffs with the surcharge, including the
+argument-dependent ranges. Vendor prose can describe the separate base
+price and API-key free tier. Tool descriptions use the x402 pricing fields.
 
 The provider publishes the `upto` scheme for multipage requests. Request
 one page to use `exact` payments, including from managed wallets.

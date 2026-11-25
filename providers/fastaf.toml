@@ -16,7 +16,6 @@ usd_as_usdc = true
 
 [overrides.fastaf_patents]
 description = "Search Google Patents for publication links, patent IDs, and bibliographic results. Filter by inventor, assignee, office, status, or date. Use a patent detail API for claims."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.fastaf_patents.params]
 query = "Patent search keywords. Quote a known title or phrase for a tighter match."
@@ -24,19 +23,15 @@ num = "Requested page size. The upstream search can return a different number of
 
 [overrides.fastaf_youtube]
 description = "YouTube video search by keyword, including Shorts. Set resource to search and pass search_query. Transcript mode takes a video ID and caption language and can return no captions."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.fastaf_linkedin_jobs]
 description = "Search LinkedIn public job listings by keyword. Filter by location, company, job type, work arrangement, or experience. Returns job titles, companies, locations, posting dates, and job links when available."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.fastaf_scholar]
 description = "Search Google Scholar by title or keywords, or use a citation or version cluster ID. Returns titles, authors, snippets, and citation and version links when available."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.fastaf_flights]
 description = "Search Google Flights for one-way and round-trip itineraries using airport IATA codes and travel dates. Returns fares, flight legs, and available price history."
-pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.fastaf_help]
 description = "Read FastAF's route and usage guide. Use its x402 routes for pay-per-call access."

@@ -114,11 +114,9 @@ before = "Exclusive ISO date or timestamp ending an index-history page; omit for
 
 [overrides.straits_export]
 description = "Download selected historical feeds as JSON or multi-section CSV. stranded and ais-gaps retain up to a year; transits retains full history. Index ticks cover only the latest seven days, with older daily aggregates; use the history tool and before for older tick-level data."
-pricing_description = "Cost: ~$0.25/call [spec]."
 
 [overrides.straits_risk_premium]
 description = "Read a modeled war-risk transit insurance multiple with drivers, confidence and a separately labeled static insurance reference. Recomputed every ten minutes, but its weekly IMF throughput input can lag by more than a week. Preserve input dates and model/source distinctions."
-pricing_description = "Cost: ~$0.05/call [spec]."
 
 [pricing]
 source = "catalog"

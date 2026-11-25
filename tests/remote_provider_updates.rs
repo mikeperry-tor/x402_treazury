@@ -224,14 +224,6 @@ async fn exa_mode_guidance_keeps_lite_advisory_and_preserves_explicit_request_ty
     }});
     let selected = tools(&cfg, &spec);
     let search = selected.iter().find(|t| t.path == "/search").unwrap();
-    for tariff in [
-        "lite/instant $0.004",
-        "auto/fast $0.007",
-        "deep-lite/deep $0.012",
-        "deep-reasoning $0.015",
-    ] {
-        assert!(search.description.contains(tariff));
-    }
     assert!(
         search.input_schema["properties"]["type"]["description"]
             .as_str()

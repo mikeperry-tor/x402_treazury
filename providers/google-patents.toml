@@ -13,7 +13,6 @@ omit = ["/results/*/figures"]
 
 [overrides.google_patents_search]
 description = "Search Google Patents by phrase or field. Filter by patent litigation status, filing date, office, or assignee. Returns patent IDs, snippets, dates, and links. Empty results are valid. Use court-record tools for dockets and opinions."
-pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_search.params]
 q = 'Prefer "exact phrase" AND "another phrase". Narrow with TI=(...), AB=(...), CL=(...), or CPC=CODE/low using a verified code; broad text can rank noisily.'
@@ -23,7 +22,6 @@ sort = "Date order: new or old by filing date. Omit for relevance; changing date
 
 [overrides.google_patents_patent]
 description = "Retrieve a patent by patent_id returned from search, including abstract, claims, inventors, assignees, dates, classifications, family applications and PDF link. Preserve missing fields and verify legal conclusions against original records."
-pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_help]
 description = "Read this Atlas bridge's request and pricing guide."

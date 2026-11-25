@@ -127,8 +127,16 @@ always govern payment. See
    unknown rather than guessing or summing alternatives.
 5. Keep hints advisory: unknown is not free, and stale hints never block
    authorized calls.
-6. Update `[pricing]`, `evidence.toml`, `pricing_description`, and
-   [provider caveats](../providers/CAVEATS.md) together.
+6. Compile the same captured operation with and without the copied tariff
+   before removing it. Compare the amount or range, currency, unit, billing
+   conditions, and access method. Keep authored terms that supply details the
+   generated description omits. When a guide lists a mode-specific price
+   outside the catalog range, keep the published range. Describe the
+   exception separately if an unsigned challenge for the same mode and
+   options confirms the guide's Base USDC price. Record the presentation
+   decision in the provider caveat. When pricing sources or billing terms change,
+   update `[pricing]`, `tools/providers/evidence.toml`, `pricing_description`,
+   and the [provider caveats](../providers/CAVEATS.md) together.
 7. For full-manifest sweeps (omitting `--provider`), report per-provider
    outcomes (unchanged, updated, relocation unresolved, no authority captured,
    missing metadata) separately from accepted edits.
