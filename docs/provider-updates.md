@@ -188,10 +188,9 @@ Acceptance workflow:
    intervening edits are never overwritten.
 5. **Reconcile deployment consumers:** Update every dependent deployment under
    `examples/deployments/`, checking catch-all `send_tools` rules and retiring
-   removed exact selectors instead of masking them with wildcards. Search
-   bundled providers for replacements when APIs disappear, compare coverage and
-   quality before price, and leave adjacent reversible comments when displacing
-   a tool.
+   removed exact selectors instead of masking them with wildcards. Follow the
+   [deployment tool selection workflow](#compare-and-select-deployment-tools)
+   when adding or displacing tools.
 6. **Verify:** Run matching config, routing, bundle, and authored-contract
    tests (never regenerating fixtures solely to pass assertions).
 7. **Commit and review:** Commit coherent changes, have a fresh independent
@@ -202,6 +201,33 @@ Acceptance workflow:
 Multi-authority examples: AgentUtility joins schema and registry; CoinMarketCap
 combines two schemas and a guide; News Gurus uses its Bazaar catalog; Banking
 Compliance also needs manual public MCP `tools/list` capture below.
+
+### Compare and select deployment tools
+
+1. **Find the current coverage.** Inspect the destination's effective catalog
+   and search bundled providers for alternatives. Compare supported operations,
+   filters, response fields, source coverage, and freshness. Use the configured
+   toolbox to register and inspect remote candidates on demand.
+2. **Compare matched calls when authorized.** Use the same query, filters,
+   result budget, and period where the APIs allow it. Compare stable IDs,
+   ordering, fields, timestamps, partial results, and downstream handoffs.
+   Record observed offers with their input shape, keeping fixed, variable, and
+   metered pricing distinct. Compare coverage and quality before price.
+3. **Route the selected tools.** Put new reusable catalogs, pricing, and
+   compatibility guidance in [provider definitions](../providers/README.md#provider-policy).
+   Import them with `extends` and keep deployment selections in
+   [`send_tools`](configuration.md#source-tool-distribution). Add distinct
+   coverage or a useful alternate and keep tools that serve a separate task.
+   When replacing a provider tool in a deployment such as Research Desk,
+   leave its exact route commented beside the active rules. Name the
+   replacement and explain the specific reason for the switch, such as a
+   lower price for comparable results. Say when the old route is worth
+   restoring. Scope the reason to the modes and cases you compared.
+4. **Check discovery and routing.** Inspect `config check --explain-routing`
+   for the changed sources and test representative search queries against
+   the destination's inventory. Follow the
+   [endpoint search hint guidance](agent-sources.md#endpoint-instruction-placement)
+   when adding terms for new capabilities.
 
 ## Manual public MCP schema evidence
 

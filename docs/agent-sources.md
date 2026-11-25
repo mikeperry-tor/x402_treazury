@@ -358,8 +358,18 @@ behavior:
   `providers_search_remote_tool_instructions_text` (appended to
   `x402_treazury_providers_search_remote`'s description).
 - Neither `*_tool_instructions_text` setting enables discovery or provider
-  management on its own. Refresh endpoint summaries and search keywords
+  management on its own. Review endpoint summaries and search keywords
   whenever routed sources or capabilities change.
+
+Choose short query phrases for capabilities that existing hints do not cover.
+Use terms a caller would use for the task or data source, such as `Suez Canal`
+or `day-ahead spot prices`. Prefer phrases found verbatim in the intended
+tool's name or canonical description for literal priority, or use distinctive
+tokens from the name, description, or top-level parameter names for BM25.
+Avoid adding API vendor names as search hints. The hint text helps clients
+formulate queries and is outside the ranked fields. Try the phrases with
+`x402_treazury_tools_search` against the destination inventory and inspect the
+first results for competing matches.
 
 ## Tool documentation
 

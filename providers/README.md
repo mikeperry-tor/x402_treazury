@@ -58,6 +58,7 @@ treasury, funding, and source-management settings.
 | AgentUtility | `agentutility/provider.toml` | Full supported aliases and catalog; advisory research recommendations; enriched provenance |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | AGProxy | `agproxy.toml` | Pinned `agproxy-openapi.json`; residential fetch and proxy packs |
+| API Direct | `apidirect.toml` | Public social, web, places, news, Amazon, and Trustpilot reads |
 | APEX Faucet | `apexfaucet.toml` | Authored full catalog with query-input repairs; persistent identity and owned purchases excluded |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
 | AX1 Verdict | `ax1/provider.toml` | External request projection; token Verdict submission and free public receipt |
@@ -117,6 +118,7 @@ treasury, funding, and source-management settings.
 | SiteCheck Company Records | `companyrecords.toml` | Full public company, government, B2B, and healthcare-directory catalog |
 | SiteCheck Health & Travel | `healthtravel.toml` | Full public health, travel, transport, and vehicle catalog |
 | SiteCheck Shop & Social | `shopsocial.toml` | Full public social and shopping catalog |
+| SiteCheck Trade & Energy | `tradenergy.toml` | Electricity, commodity, carbon, logistics, and customs reads |
 | SiteCheck Web Intel | `webintel.toml` | Full news, web, scholarly, and security catalog |
 | SmartPerps (AgentGate) | `smartperps.toml` | Read-only Hyperliquid cohort analytics and public wallet data; POST twins |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |

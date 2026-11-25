@@ -1,0 +1,30 @@
+description = "Public social posts and profiles, web and local search, news, Amazon catalog data, and Trustpilot reviews."
+name = "API Direct"
+spec = "https://x402.apidirect.io/openapi.json"
+base_url = "https://x402.apidirect.io"
+include = ["/v1"]
+prefix = "apidirect"
+help_url = "https://x402.apidirect.io/llms.txt"
+instructions_text = "Request one page for exact x402 payments. The vendor's Price and Free tier lines describe API-key access. Use the x402 offer for the requested page."
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true
+
+[overrides.apidirect_bluesky_posts]
+description = "Search Bluesky posts by keyword, date window, and sort order. Returns post text, authors, links, media, and engagement counts. Request one page when using exact x402 payments."
+pricing_description = "Cost: ~$0.004–$0.081/call [spec]."
+
+[overrides.apidirect_substack_publication_posts]
+description = "List or search a Substack publication's posts by slug, host, or URL. Returns titles, authors, links, dates, engagement, and paywall status. Request one page when using exact x402 payments."
+pricing_description = "Cost: ~$0.004–$0.401/call [spec]."
+
+[overrides.apidirect_truthsocial_user_posts]
+description = "Read recent Truth Social posts by username. Returns post text, timestamps, links, media, and engagement counts. Request one page when using exact x402 payments."
+pricing_description = "Cost: ~$0.007–$0.141/call [spec]."
+
+[overrides.apidirect_linkedin_person]
+description = "Look up a public LinkedIn profile by URL, slug, or member URN. Returns headline, location, experience, education, and other public profile fields."
+pricing_description = "Cost: ~$0.007/call [spec]."

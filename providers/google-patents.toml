@@ -12,11 +12,12 @@ instructions_text = "Prefer precise quoted phrases joined with AND and assignee,
 omit = ["/results/*/figures"]
 
 [overrides.google_patents_search]
-description = "Search Google Patents with precise phrase/field queries and optional assignee, office or date filters. Broad free text can rank noisily. Returns patent IDs, snippets, dates and links; figure inventories are omitted. Empty results are valid."
+description = "Search Google Patents by phrase or field. Filter by patent litigation status, filing date, office, or assignee. Returns patent IDs, snippets, dates, and links. Empty results are valid. Use court-record tools for dockets and opinions."
 pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_search.params]
 q = 'Prefer "exact phrase" AND "another phrase". Narrow with TI=(...), AB=(...), CL=(...), or CPC=CODE/low using a verified code; broad text can rank noisily.'
+litigation = "Filter to patents marked as litigated (YES) or not litigated (NO). Omit for either status."
 num = "Start at 10 and inspect relevance before requesting more. Range 10-100."
 sort = "Date order: new or old by filing date. Omit for relevance; changing date order does not narrow the query."
 

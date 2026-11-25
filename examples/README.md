@@ -151,7 +151,8 @@ connectivity, payment, and response boundaries live in
 
 - **Literature and references:** 2s supplies scholarly search, citations,
   PubMed metadata (without abstracts), and Crossref and OpenAlex references;
-  APEX adds OpenAlex search. Additional tools cover biomedical grants, medRxiv
+  APEX adds OpenAlex search. FastAF searches Google Scholar by keyword or
+  citation cluster. Additional tools cover biomedical grants, medRxiv
   preprints (not peer-reviewed), and NCBI, UniProt, GBIF, and PubChem
   references.
 - **Limits:** Coverage is not a full OpenAlex author or work API and does not
@@ -181,6 +182,9 @@ connectivity, payment, and response boundaries live in
 - **Physical world:** Additional tools cover energy, agriculture, satellites,
   disasters, and FCC geographies. Preserve observation timestamps and separate
   current observations from historical baselines.
+- **Trade and energy:** SiteCheck covers U.S. and European power grids, EIA
+  petroleum reports, WTI and Brent history, Suez and Panama canal traffic,
+  Rhine water levels, and ACR and Verra carbon registries.
 
 ### Social
 
@@ -188,9 +192,16 @@ connectivity, payment, and response boundaries live in
   metadata (Glim follower listing is unqualified). Botsmith adds account
   dossiers, watchlist polling, sentiment pulse, an audience read, and Kalshi
   prediction-market reads. 2s covers Hacker News items, feeds, and users.
+  API Direct adds Bluesky and Truth Social posts, Substack publication posts,
+  and public LinkedIn profiles. See the
+  [API Direct paging and pricing caveats](../providers/CAVEATS.md#apidirecttoml--api-direct).
+- **YouTube:** FastAF provides keyword search, including Shorts. ShopSocial
+  provides channel videos, transcripts, and comments. The
+  [deployment file](deployments/research_desk.toml) explains the pricing choice
+  and shows how to restore AgData search for its richer video metadata.
 - **Company and contact reads:** AgData and ShopSocial cover narrow LinkedIn
-  company, Instagram, TikTok, YouTube, and Facebook reads (comments,
-  transcripts, and personal profiles are separate and less tested).
+  company, Instagram, TikTok, and Facebook reads. AgData's comments,
+  transcripts, and personal profile modes have less test coverage.
   CompanyRecords adds LinkedIn company facts, alongside person and contact
   providers for profiles, work email, and phone lookups.
 - **Limits:** SocialFetch's long tail and Vaaya remain unselected on `social`
@@ -217,6 +228,8 @@ connectivity, payment, and response boundaries live in
   FlightAware offers operational links and geographic fields, 2s adds country
   and scheduled-service filters, and OpenVerbs offers a kilometer-radius
   alternative with a smaller result cap and fewer operational fields.
+- **Fare search:** FastAF covers one-way and round-trip fares. StableTravel
+  also supports multi-city itineraries and additional filters.
 - **Stays, transit, and local guides:** HealthTravel adds hotel prices, Google
   Flights fare observations, Wikivoyage discovery, and Amtrak; ShopSocial adds
   OpenStreetMap hiking trails (not user reviews) and FlixBus and FlixTrain
@@ -260,10 +273,12 @@ connectivity, payment, and response boundaries live in
   domain-scoped Trustpilot details and reviews (company-name search is excluded
   due to entity ambiguity), Google Play listings, reviews, install and rating
   counts, and top charts (use repeated totals rather than chart ranks for
-  adoption trends), plus JSearch and Glassdoor employer data. Atlas Google
-  Patents, 2s USPTO and EPO tools, and Maxwell cached search cover patents
-  (document indexes and legal-event lists are not full document retrieval or
-  current legal status). GenuineGood and Atlas cover federal and NIH biomedical
+  adoption trends), plus JSearch and Glassdoor employer data. FastAF adds
+  public LinkedIn job listings and Google Patents keyword search. Atlas Google
+  Patents adds details, claims, and filters. 2s covers USPTO and EPO, and
+  Maxwell supplies cached patent search. Document indexes list filings.
+  Retrieve the documents for their full text and check filing records for
+  current legal status. GenuineGood and Atlas cover federal and NIH biomedical
   grants.
 - **Limits:** Resolve entity identity before enrichment and compare metrics by
   their start and end periods.

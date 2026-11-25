@@ -1,0 +1,13 @@
+description = "Electricity grids and prices, energy benchmarks, carbon registries, shipping, logistics, and customs data."
+name = "SiteCheck Trade & Energy"
+spec = "https://api.tradeenergy-api.workers.dev/openapi.json"
+base_url = "https://api.tradeenergy-api.workers.dev"
+include = ["/api"]
+prefix = "tradenergy"
+help_url = "https://api.tradeenergy-api.workers.dev/llms.txt"
+
+[pricing]
+source = "catalog"
+format = "payment-info"
+unit = "call"
+usd_as_usdc = true

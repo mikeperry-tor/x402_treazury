@@ -27,6 +27,14 @@ intent = "vendor-copy"
 guidance = "providers/CAVEATS.md#pinned-relay-contracts"
 sources = [{ url = "https://agproxy.shveik.dev/openapi.json", purpose = "schema" }]
 
+[apidirect]
+intent = "authored"
+guidance = "providers/CAVEATS.md#apidirecttoml--api-direct"
+
+[tradenergy]
+intent = "authored"
+guidance = "providers/CAVEATS.md#tradenergytoml--sitecheck-trade--energy"
+
 [horizonpulse]
 intent = "vendor-copy"
 guidance = "providers/CAVEATS.md#pinned-relay-contracts"

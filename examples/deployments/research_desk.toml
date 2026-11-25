@@ -745,9 +745,8 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Relevance-ranked keyword search plus original claims; 2s supplies cheap EPO
-# bibliography/family/legal records and the US file wrapper rather than another
-# keyword search.
+# Atlas adds filing-date and patent litigation filters alongside FastAF's
+# lower-cost keyword search. Atlas also supplies original claims and details.
 [sources.google_patents]
 allow_catalog_failure = true
 extends = "../../providers/google-patents.toml"
@@ -756,11 +755,19 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Optional Google Patents keyword and exact-title search on business.
-# [sources.fastaf]
-# allow_catalog_failure = true
-# extends = "../../providers/fastaf.toml"
-# send_tools = [{ to = "business", tools = ["patents"] }, { to = "exclude" }]
+[sources.fastaf]
+allow_catalog_failure = true
+extends = "../../providers/fastaf.toml"
+send_tools = [
+  { to = "business", tools = ["patents", "linkedin_jobs"] },
+  { to = "science", tools = ["scholar"] },
+  # SiteCheck supplies channel videos, transcripts, and comments.
+  { to = "social", tools = ["youtube"] },
+  # FastAF covers one-way and round-trip fare searches. StableTravel adds
+  # multi-city itineraries and more filters.
+  { to = "travel", tools = ["flights"] },
+  { to = "exclude" },
+]
 
 # Market families and project trend feeds are available on the finance endpoint.
 # Entity, funding and ecosystem/category research is available on business.
@@ -1100,8 +1107,10 @@ send_tools = [
     "security_http_headers",      # NetIntel already supplies structured header checks.
     "security_ip_*",              # IPIntel supplies IP enrichment; NetIntel supplies reputation and blacklist checks.
     "law_sanctions_check",        # AgOSINT covers OFAC, EU and UK lists; this lookup covers OFAC only.
-    "law_case_search", # CompanyRecords gov_justia_case_law matched all 20 sampled court records, added snippets and advertised a lower price. Keep 2s as a backup in its reusable provider.
-    "patents_search", # Loosely matches every word: "solid state battery electrolyte" returned ball-screw, solid-state lighting and 5G records. Google Patents is the precision search; 2s EPO search remains the worldwide alternative.
+    # CompanyRecords provides court records with snippets. The reusable 2s
+    # provider retains this route as an alternative.
+    "law_case_search",
+    "patents_search", # Broad queries can match only part of the phrase. FastAF supplies Google Patents keyword search, and 2s EPO search covers worldwide filings.
   ] },
   { to = "security", tools = ["security_*"] },
   { to = "property", tools = ["property_*", "soil_*", "geo_flood_zone", "gov_epa_facilities", "gov_fair_market_rent", "gov_income_limits", "gov_nfip_claims", "gov_risk_index", "gov_uk_crime"] },
@@ -1121,7 +1130,7 @@ send_tools = [
   { to = "world", tools = ["aviation_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # HN search returned dated story links and discussion counts; GitHub failed upstream authentication.
   { to = "social", tools = ["news_hn_search", "news_hn_item", "news_hn_top", "news_hn_user"] },
-  # Google Patents supplies relevance-ranked search and full claims; 2s adds the US
+  # FastAF and Atlas supply keyword search and Atlas supplies claims. 2s adds the US
   # file wrapper, EPO worldwide search, family and legal events. USPTO keyword search
   # is excluded above. Documents are an index; EPO legal rows are historical events,
   # not a complete current-status verdict. Legal, political and occupational records
@@ -1251,14 +1260,51 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Company enrichment and four one-record NASA platform reads delivered data.
-# Separate comments/transcripts/personal-profile modes remain unqualified.
+# AgData covers company enrichment and NASA platform reads. Qualification
+# covers single-record NASA requests. The comment, transcript, and personal
+# profile modes still need qualification.
 [sources.agdata]
 allow_catalog_failure = true
 extends = "../../providers/agdata.toml"
 send_tools = [
   { to = ["business", "social"], tools = ["linkedin_company"] },
-  { to = "social", tools = ["instagram", "tiktok", "youtube", "facebook_page"] },
+  { to = "social", tools = ["instagram", "tiktok", "facebook_page"] },
+  # FastAF charges a fixed price for keyword search. AgData charges by result
+  # count. Restore AgData when a task needs its richer video metadata or when
+  # FastAF search is unavailable.
+  # { to = "social", tools = ["youtube"] },
+  { to = "exclude" },
+]
+
+[sources.apidirect]
+allow_catalog_failure = true
+extends = "../../providers/apidirect.toml"
+send_tools = [
+  { to = "social", tools = [
+    "bluesky_posts", "substack_publication_posts", "truthsocial_user_posts", "linkedin_person",
+  ] },
+  { to = "exclude" },
+]
+
+[sources.tradenergy]
+allow_catalog_failure = true
+extends = "../../providers/tradenergy.toml"
+send_tools = [
+  { to = "world", tools = [
+    "energy_caiso_california_iso",
+    "energy_ercot_texas_grid_status",
+    "energy_us_electric_grid_monitor",
+    "energy_eia_weekly_petroleum",
+    "energy_entsoe_transparency_eu",
+    # Trade & Energy returns WTI and Brent history in one request. The 2s
+    # route covers more benchmarks, and LoneStar supplies stress signals.
+    "energy_crude_oil_brent_wti",
+    "logistics_suez_canal_telemetry",
+    "logistics_panama_canal_transits",
+    "logistics_rhine_river_water_levels",
+    "energy_american_carbon_registry",
+    "energy_verra_vcs_registry",
+  ] },
   { to = "exclude" },
 ]
 
@@ -1436,7 +1482,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "general"
 discover_on_demand = true
 instructions_text = "Scientific literature and reference data. See the discovery tool's keyword list for full capabilities. Preserve publication dates and identifiers; PubMed metadata lacks abstracts, and preprints are not peer-reviewed."
-discovery_search_tool_instructions_text = "Science endpoint keywords: research literature, scientific reference data, biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, arXiv, PubMed, PubMed E-utilities, PMID, medRxiv, preprint, date-window preprint listing, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics."
+discovery_search_tool_instructions_text = "Science endpoint keywords: research literature, scientific reference data, biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, Google Scholar, DOI, Crossref, OpenAlex, Semantic Scholar, arXiv, PubMed, PubMed E-utilities, PMID, medRxiv, preprint, date-window preprint listing, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics."
 
 [servers.shopping]
 listen = "127.0.0.1:3013"
@@ -1454,7 +1500,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "general"
 discover_on_demand = true
 instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research. See the discovery tool's keyword list for full capabilities. Preserve observation timestamps and distinguish current observations from historical baselines."
-discovery_search_tool_instructions_text = "World endpoint keywords: Manifold, Kalshi, Polymarket, geopolitical prediction markets, historical shipping index, tick history, time series, historical vessel counts, tick-level history, Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hurricane, tropical cyclone, tropical storm, NHC, storm track, forecast cone, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, NOAA, GHCN, historical daily station weather, water, maritime, space, geocoding, HS, customs, dangerous goods."
+discovery_search_tool_instructions_text = "World endpoint keywords: Manifold, Kalshi, Polymarket, geopolitical prediction markets, historical shipping index, tick history, time series, historical vessel counts, tick-level history, Hormuz, strait, shipping, vessel, Suez Canal, Panama Canal, Rhine river, oil, Brent, WTI, Weekly Petroleum Status Report, energy, grid, CAISO, ERCOT, Hourly Electric Grid Monitor, power, day-ahead spot prices, American Carbon Registry, Verified Carbon Standard, weather, hurricane, tropical cyclone, tropical storm, NHC, storm track, forecast cone, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, NOAA, GHCN, historical daily station weather, water, maritime, space, geocoding, HS, customs, dangerous goods."
 
 [servers.social]
 listen = "127.0.0.1:3015"
@@ -1463,7 +1509,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "personal"
 discover_on_demand = true
 instructions_text = "Social-platform, GitHub and person/contact research. See the discovery tool's keyword list for full capabilities. Preserve platform, date and partial-result markers; missing posts do not prove absence."
-discovery_search_tool_instructions_text = "Social endpoint keywords: Reddit search and comments, GitHub repository search, code search, issues, pull requests, discussions and metadata, Hacker News, social research search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, posts and profiles, lists, followers, mentions, curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, contact phone, company phone, LinkedIn company enrichment, Threads profiles and posts, Pinterest pins, Telegram public channels, YouTube transcripts and comments."
+discovery_search_tool_instructions_text = "Social endpoint keywords: Reddit search and comments, GitHub repository search, code search, issues, pull requests, discussions and metadata, Hacker News, social research search, stories, comments, feeds and users, Instagram posts, TikTok videos, Bluesky posts, Substack publication, Truth Social posts, YouTube video search, YouTube Shorts search, YouTube channel videos, Facebook page details, Twitter, X, posts and profiles, lists, followers, mentions, curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, contact phone, company phone, public LinkedIn profile, LinkedIn company enrichment, Threads profiles and posts, Pinterest pins, Telegram public channels, YouTube transcripts and comments."
 
 [servers.property]
 listen = "127.0.0.1:3016"
@@ -1499,7 +1545,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financial"
 discover_on_demand = true
 instructions_text = "Business, public-record, patent, funding, jobs, grants and filing research. See the discovery tool's keyword list for full capabilities. Resolve entity identity before enrichment; compare facts by their start/end periods, where interim flows may be fiscal year-to-date while balances are point-in-time, and missing records do not prove absence."
-discovery_search_tool_instructions_text = "Business endpoint keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, Google Play app charts, app installs, app ratings, mobile app reviews, app adoption, app store ranking, GLEIF, LEI, accounting-consolidation parent companies, company profiles, firmographics, employee count, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, EPO, USPTO, patents, registry, CNPJ, VAT, sanctions, funding, investors, financial statements, earnings calendar, analyst ratings, insider trades, institutional holdings, jobs, job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, MiCA, CASP, ESMA authorized providers, non-compliant register, crypto ecosystem, crypto project investors, congressional stock trades, activist filings, material events, occupations, education, licensing, international company registries, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+discovery_search_tool_instructions_text = "Business endpoint keywords: SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Canadian federal corporations, Swiss Zefix, Slovak RPO, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, Google Play app charts, app installs, app ratings, mobile app reviews, app adoption, app store ranking, GLEIF, LEI, accounting-consolidation parent companies, company profiles, firmographics, employee count, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent litigation, patent claims, Google Patents, EPO, USPTO, patents, registry, CNPJ, VAT, sanctions, funding, investors, financial statements, earnings calendar, analyst ratings, insider trades, institutional holdings, jobs, job listings, LinkedIn public job listings, JSearch, Glassdoor, employer reviews, salary, interview, personnel changes, job change, employment, decision maker, roles, seniority, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, Form D, private offerings, private placements, crypto regulation, MiCA, CASP, ESMA authorized providers, non-compliant register, crypto ecosystem, crypto project investors, congressional stock trades, activist filings, material events, occupations, education, licensing, international company registries, SEC press releases, SEC statements, SEC speeches, CFTC, White House, presidential actions, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3020"

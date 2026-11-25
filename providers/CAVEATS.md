@@ -1029,6 +1029,9 @@ Google-operated). Pass `patent_id` from search into details (`num >= 10`).
   patent (`TI=`, `AB=`, `CL=` per
   [Google's guide](https://support.google.com/faqs/answer/7049475?hl=en);
   distinct from EPO CQL).
+- Combine a keyword query with `litigation = "YES"` or `"NO"` to filter
+  patent records by litigation status. Use a court-record search for case
+  dockets, filings, and opinions.
 - `response_mappings."GET /search"` omits `/results/*/figures` locally and
   discloses omissions in the result advisory (use an unmapped raw call if
   figures are needed). `_atlas` response metadata is untrusted discovery data.
@@ -1080,6 +1083,25 @@ recipient (not independent operators).
   succeed (preserve per-engine status); GDELT Context lacks volume and tone
   timelines. Overrides strip unverified free-failure and retry claims from
   Instagram, transcript, and cached SSL Labs descriptions.
+
+## tradenergy.toml | SiteCheck Trade & Energy
+
+The catalog wraps public data and calculators with per-operation
+`x-payment-info` prices. Preserve observation timestamps and upstream
+attribution. EIA grid demand and generation can have different reporting
+hours. PortWatch reports historical AIS transit counts with a publication lag.
+EPEX auction and battery-arbitrage reads can return `503`; the separate
+European day-ahead price route uses Energy-Charts.
+
+## apidirect.toml | API Direct
+
+Public reads use the `/v1` catalog. Google AI Mode uses its POST twin, which
+accepts long prompts and the optional conversation token in a JSON body.
+Catalog price hints include the x402 surcharge. Some vendor descriptions
+still show the base price and API-key free tier.
+
+The provider publishes the `upto` scheme for multipage requests. Request
+one page to use `exact` payments, including from managed wallets.
 
 ## FindMyDirectDoctor
 
