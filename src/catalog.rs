@@ -2132,10 +2132,13 @@ fn filter_tool_names(
                 if exclusion {
                     tracing::info!(source=cfg.discovery_source.as_deref(), prefix, selector, setting="exclude_tools",
                         "Provider exclusion selector matches no compatible tools; exclusion has no current effect");
-                } else if cfg.allow_empty_selection && !advisory {
+                } else if advisory {
+                    tracing::info!(source=cfg.discovery_source.as_deref(), prefix, selector, setting, advisory,
+                        "Unused provider recommendation matches no compatible tools; recommendation has no current effect");
+                } else if cfg.allow_empty_selection {
                     notices.push(SelectionNotice {setting, selector: selector.clone()});
-                } else if advisory || selector.contains(['*', '?']) {
-                    tracing::warn!(source=cfg.discovery_source.as_deref(), prefix, selector, advisory, "Provider tool selector matches nothing");
+                } else if selector.contains(['*', '?']) {
+                    tracing::warn!(source=cfg.discovery_source.as_deref(), prefix, selector, setting, "Provider tool selector matches nothing");
                 } else {
                     if partial {bail!("provider tool selector {selector} matches no compatible tools; inspect omitted operations and operation selections");}
                     bail!("unknown provider tool selector {selector}; check path, operation and tag filters");

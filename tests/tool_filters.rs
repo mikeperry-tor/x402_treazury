@@ -175,6 +175,7 @@ fn unmatched_wildcards_warn_while_other_matches_remain_usable() {
         discovery_source: Some("filter-fixture".into()),
         include_tools: vec!["api_person".into(), "missing_*".into()],
         exclude_tools: vec!["absent_*".into(), "api_missing".into()],
+        recommended_tools: vec!["stale_recommended".into()],
         ..Default::default()
     };
     assert_eq!(
@@ -182,17 +183,22 @@ fn unmatched_wildcards_warn_while_other_matches_remain_usable() {
         "api_person"
     );
     let evidence = std::fs::read_to_string(log.path()).unwrap();
-    assert!(evidence.contains("Provider tool selector matches nothing"));
     assert!(evidence.contains("missing_*"));
     assert!(evidence.contains("absent_*"));
-    for selector in ["absent_*", "api_missing"] {
+    for (selector, setting) in [
+        ("absent_*", "setting=\"exclude_tools\""),
+        ("api_missing", "setting=\"exclude_tools\""),
+        ("stale_recommended", "setting=\"recommended_tools\""),
+    ] {
         let lines: Vec<_> = evidence
             .lines()
             .filter(|line| line.contains(selector))
             .collect();
         assert_eq!(lines.len(), 1, "{evidence}");
         assert!(
-            lines[0].contains("source=\"filter-fixture\"") && lines[0].contains("prefix=\"api\""),
+            lines[0].contains("source=\"filter-fixture\"")
+                && lines[0].contains("prefix=\"api\"")
+                && lines[0].contains(setting),
             "{evidence}"
         );
         assert!(

@@ -1519,11 +1519,19 @@ async fn recommendation_inspection_is_explicit_typed_and_never_widens_ordinary_f
     let unused = run(
         dir,
         &["catalog", "tools", "--provider", "provider.toml"],
-        &[],
+        &[("NO_COLOR", "1")],
     )
     .await;
+    let stderr = String::from_utf8_lossy(&unused.stderr);
     assert!(
-        String::from_utf8_lossy(&unused.stderr).contains("Provider tool selector matches nothing")
+        stderr.lines().any(|line| {
+            line.contains("INFO")
+                && !line.contains("WARN")
+                && line.contains("selector=\"stale_name\"")
+                && line.contains("setting=\"recommended_tools\"")
+                && line.contains("advisory=true")
+        }),
+        "{stderr}"
     );
     assert_eq!(good(unused).as_array().unwrap().len(), 2);
 }

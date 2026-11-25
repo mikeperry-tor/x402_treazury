@@ -228,7 +228,7 @@ retry and fallback paths finish:
 | --- | --- | --- |
 | `ERROR` | Required service or endpoint functionality is unavailable with no recovery remaining in the current lifecycle | Program failure, required catalog unavailable, catalog warming acquisition failure, unreachable Tor SOCKS at startup, fatal Store worker or funding owner failure |
 | `WARN` | A requested operation fails after exhausting recovery, or functionality is unexpectedly lost | Document retrieval fails with no fallback; potentially chargeable payment fails; one-pass CLI command fails; unexpected catalog omissions; oversized resource rejection; `tools/list` above 500 tools |
-| `INFO` | Meaningful user-visible lifecycle, progress, delay, or recovery changes | Startup, catalog ready, endpoint ready, warming progress, funding progress, entering relay fallback, Tor SOCKS reachability recovery, dependency recovery, unmatched exclusions |
+| `INFO` | Meaningful user-visible lifecycle, progress, delay, or recovery changes | Startup, catalog ready, endpoint ready, warming progress, funding progress, entering relay fallback, Tor SOCKS reachability recovery, dependency recovery, unmatched exclusions, unused recommendations |
 | `DEBUG` | Routine outcomes, expected negative results, individual attempts, and troubleshooting detail | Successful calls, speculative probe misses, search misses, routine auth rejections, background polling, cache activity, capacity waits, LRU eviction |
 | `TRACE` | Fine-grained protocol or execution detail | Internal transitions and transport sequencing under the same sanitization rules |
 
@@ -278,10 +278,11 @@ Core severity rules:
 
 - **Catalogs, caches, and filters:** File reads, origin fetches, cache hits and
   writes, shared loads, and shadowed `send_tools` rules log at `DEBUG`.
-  Per-source readiness, startup loading summaries, warming progress, and
-  unmatched exclusion selectors log at `INFO`. Catalog failures report source
-  ID, `failure_stage`, fixed plain-language `reason`, and numeric `http_status`
-  without URLs or schemas. See [catalog startup](configuration.md#catalog-failures-and-strict-inspection)
+  Per-source readiness, startup loading summaries, warming progress, unmatched
+  exclusion selectors, and unused recommendations log at `INFO`. Catalog
+  failures report source ID, `failure_stage`, fixed plain-language `reason`,
+  and numeric `http_status` without URLs or schemas. See
+  [catalog startup](configuration.md#catalog-failures-and-strict-inspection)
   for listener selection warnings. Disk cache I/O failures log `WARN` with
   safe OS or SQLite codes while preserving origin responses.
 - **Acquisition and relay fallback:** Unsigned document fetches carry an

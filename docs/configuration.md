@@ -316,8 +316,8 @@ use_recommended_tools = true
   each tool with `recommended: true` or `false` without changing MCP schemas,
   and `catalog tools --all-tools` bypasses only `use_recommended_tools` while
   keeping path, operation, tag, name, and listener filters intact. Unused stale
-  recommendations warn without hiding compatible tools; malformed selector
-  syntax always fails validation.
+  recommendations log at `INFO` without hiding compatible tools; malformed
+  selector syntax always fails validation.
 
 ### Listener settings, host validation, and authentication
 
