@@ -147,6 +147,7 @@ async fn disabled_swap_control_keeps_saved_status_without_sdk_base_or_near_crede
 
 async fn saved_status_with_unavailable_sdk(receive: bool) {
     use crate::rotation::store::Store;
+    use rmcp::ServerHandler;
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(
         &dir.path().join("state"),
@@ -171,7 +172,7 @@ async fn saved_status_with_unavailable_sdk(receive: bool) {
         text = text.replace("[funding]", "[funding]\nnear_api_key_env='MISSING_NEAR'");
     }
     text.push_str(&format!(
-        "\n[servers.one.swap_control]\nreceive={receive}\n"
+        "\n[servers.one.swap_control]\nreceive={receive}\nsend={receive}\n"
     ));
     text.push_str(STATIC_LISTENER);
     let path = dir.path().join("deployment.toml");
@@ -203,6 +204,40 @@ async fn saved_status_with_unavailable_sdk(receive: bool) {
         .await
         .unwrap();
     assert_eq!(status["operation"]["terms"]["original"], true);
+    let mut server = Server::from_bindings(vec![], None);
+    server.catalog_server = "one".into();
+    server.discover_on_demand = true;
+    server.direct_swap = Some((
+        service.clone(),
+        deployment.listeners["one"].swap_control.clone().unwrap(),
+    ));
+    assert!(server.get_tool("x402_treazury_swap_status").is_some());
+    for name in [
+        "x402_treazury_payment_request_create",
+        "x402_treazury_swap_preview",
+        "x402_treazury_swap_send",
+        "x402_treazury_swap_assets",
+    ] {
+        assert!(server.get_tool(name).is_none(), "{name}");
+        assert!(server.invoke(name, &Default::default()).await.is_err());
+    }
+    let found: serde_json::Value = serde_json::from_str(
+        &server
+            .invoke("x402_treazury_tools_search", &Default::default())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(found["available"], 1);
+    assert_eq!(found["items"][0]["tool_id"], "x402_treazury_swap_status");
+    assert!(
+        server
+            .get_info()
+            .instructions
+            .unwrap()
+            .contains("x402_treazury_swap_status")
+    );
+    drop(server);
     let error = service.invoke("one", &crate::direct_swap::Config {receive:true,send:false,..Default::default()}, "x402_treazury_payment_request_create", serde_json::json!({"asset_id":"source","chain":"source_chain","amount":"1","refund_address":"refund","request_id":"denied"})).await.unwrap_err();
     assert!(error.to_string().contains("unavailable"));
     let store = initialized.runtime.store().unwrap();
@@ -547,6 +582,7 @@ fn recovery_config(listener: &str, auth: bool, funding: bool) -> String {
 
 #[tokio::test]
 async fn native_sdk_remains_available_without_usable_near_configuration() {
+    use rmcp::ServerHandler as _;
     let dir = tempfile::tempdir().unwrap();
     let owner = crate::treasury::Treasury::create(dir.path().join("state"),dir.path().join("key"),2_000_000,Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
     owner.close().await.unwrap();
@@ -581,6 +617,24 @@ async fn native_sdk_remains_available_without_usable_near_configuration() {
         assert!(matches!(initialized.runtime, ManagedRuntime::Direct(_)));
         assert!(!initialized.runtime.funding_available());
         let service = initialized.runtime.direct_service().unwrap();
+        let mut server = Server::from_bindings(vec![], None);
+        server.direct_swap = Some((
+            service.clone(),
+            deployment.listeners["native"].swap_control.clone().unwrap(),
+        ));
+        for name in [
+            "x402_treazury_payment_request_create",
+            "x402_treazury_swap_preview",
+            "x402_treazury_swap_send",
+        ] {
+            let tool = server.get_tool(name).unwrap();
+            let fields = &tool.input_schema["properties"];
+            assert_eq!(fields["asset_id"]["const"], crate::direct_swap::route::ZEC);
+            assert_eq!(fields["chain"]["const"], "zec");
+            assert!(fields.get("refund_address").is_none());
+            assert!(fields.get("refund_after_seconds").is_none());
+        }
+        drop(server);
         let assets = service
             .invoke(
                 "native",

@@ -781,7 +781,10 @@ send = true
   even after `swap_control` is disabled or removed, and background observation
   continues even after listener removal. Keep `receive = false` and
   `send = false` in TOML if you need strict inspection to see a status-only
-  inventory.
+  inventory. If the treasury SDK is unavailable at startup, MCP advertises
+  saved status only. If the SDK starts without a valid NEAR configuration,
+  MCP advertises native ZEC inputs for enabled sends and receives. Inspection
+  reports the configured tools.
 - **Principal and isolation:** The authenticated listener owns its requests;
   all callers sharing its token share that principal. `auto_fund`, raw calls,
   and provider management never grant swap permissions.

@@ -29,7 +29,22 @@ pub struct Config {
     #[serde(default)]
     pub max_send_zec: Option<String>,
 }
+const STATUS: &str = "x402_treazury_swap_status";
+const ASSETS: &str = "x402_treazury_swap_assets";
+const RECEIVE: &str = "x402_treazury_payment_request_create";
+const PREVIEW: &str = "x402_treazury_swap_preview";
+const SEND: &str = "x402_treazury_swap_send";
+
 impl Config {
+    pub(crate) fn allows_tool(&self, name: &str) -> bool {
+        match name {
+            STATUS => true,
+            ASSETS => self.enabled(),
+            RECEIVE => self.receive,
+            PREVIEW | SEND => self.send,
+            _ => false,
+        }
+    }
     pub(crate) fn max_debit_zatoshis(&self) -> Result<Option<u64>> {
         match self.max_send_zec.as_deref() {
             None | Some("none") => Ok(None),
@@ -81,24 +96,87 @@ struct Assets {
 }
 
 pub fn definitions(config: &Config) -> Vec<rmcp::model::Tool> {
+    definitions_for(config, true)
+}
+
+fn definitions_for(config: &Config, foreign: bool) -> Vec<rmcp::model::Tool> {
     let text = |description: &str| json!({"type":"string","minLength":1,"description":description});
     let mut specs = vec![(
-        "x402_treazury_swap_status",
+        STATUS,
         "Inspect saved Zcash (ZEC) sends or receive requests, delivery/receipt evidence and receive instructions. Includes current UTC time and available expiry/refund-start countdowns; expiry does not prove refund. Recover lost responses using kind and request_id. Creates no payment.",
         json!({"operation_id":text("Saved operation ID; omit when using kind and request_id."),"kind":{"type":"string","enum":["receive","send"],"description":"Operation kind when looking up request_id."},"request_id":text("Original caller request ID; requires kind and no operation_id.")}),
         vec![],
     )];
-    if config.enabled() {
-        specs.push(("x402_treazury_swap_assets", "Search native Ironwood Zcash (ZEC) and supported foreign assets by symbol, chain, asset ID or available names. Case-insensitive literal matches rank before BM25 keyword matches; token support does not guarantee liquidity.", json!({"query":text("Symbol, chain, asset ID or available name keywords; separate words with spaces."),"offset":{"type":"integer","minimum":0,"description":"Result offset; keep the same query."},"limit":{"type":"integer","minimum":1,"default":25,"description":"Number of assets to return."}}), vec![]));
+    if config.allows_tool(ASSETS) {
+        specs.push((ASSETS, if foreign { "Search native Ironwood Zcash (ZEC) and supported foreign assets by symbol, chain, asset ID or available names. Case-insensitive literal matches rank before BM25 keyword matches; token support does not guarantee liquidity." } else { "Search the native Ironwood Zcash (ZEC) asset by symbol, chain, asset ID, or name. This listener serves native ZEC." }, json!({"query":text("Symbol, chain, asset ID or available name keywords; separate words with spaces."),"offset":{"type":"integer","minimum":0,"description":"Result offset; keep the same query."},"limit":{"type":"integer","minimum":1,"default":25,"description":"Number of assets to return."}}), vec![]));
     }
-    if config.receive {
-        specs.push(("x402_treazury_payment_request_create", "Receive native Ironwood Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh shielded address per new request_id, without NEAR. Tell foreign payers to send the exact atomic amount once, paying network fees separately and including the required memo; a different amount can fail or refund. Swap receive addresses must never be reused: another payment requires a new request_id and fresh quote/address. Native ZEC addresses may be reused. Identical retries retrieve the original request only.", json!({"asset_id":text("Full source assetId from swap_assets."),"chain":text("Exact source blockchain from swap_assets."),"amount":text("Positive atomic amount as decimal digits; native ZEC uses zatoshis. Foreign payer must deliver exactly this amount, with network fees additional."),"refund_address":text("Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported."),"refund_after_seconds":{"type":"integer","minimum":1,"default":7200,"description":"Foreign only: request refund handling after this many seconds (default two hours, not a NEAR maximum or refund-completion guarantee). Status shows actual deposit-address expiry separately."},"request_id":text("Unique caller request ID for these exact terms.")}), vec!["asset_id","chain","amount","request_id"]));
+    let asset_fields = || {
+        if foreign {
+            json!({
+                "asset_id": text("Full asset ID from swap_assets."),
+                "chain": text("Exact blockchain from swap_assets."),
+                "amount": text("Positive atomic amount as decimal digits. Native ZEC uses zatoshis."),
+            })
+        } else {
+            json!({
+                "asset_id": {"type":"string","const":route::ZEC},
+                "chain": {"type":"string","const":"zec"},
+                "amount": text("Positive amount in zatoshis as decimal digits."),
+            })
+        }
+    };
+    if config.allows_tool(RECEIVE) {
+        let mut properties = asset_fields();
+        properties["request_id"] = text("Unique caller request ID for these exact terms.");
+        if foreign {
+            properties["refund_address"] = text(
+                "Required for foreign assets: payer-owned source-chain refund address. Omit for native ZEC; destination tags are unsupported.",
+            );
+            properties["refund_after_seconds"] = json!({
+                "type":"integer","minimum":1,"default":7200,
+                "description":"Foreign only: request refund handling after this many seconds (default two hours, not a NEAR maximum or refund-completion guarantee). Status shows actual deposit-address expiry separately."
+            });
+        }
+        specs.push((
+            RECEIVE,
+            if foreign { "Receive native Ironwood Zcash (ZEC) or foreign assets into this treasury. Native ZEC gets a fresh shielded address per new request_id, without NEAR. Tell foreign payers to send the exact atomic amount once, paying network fees separately and including the required memo; a different amount can fail or refund. Swap receive addresses must never be reused: another payment requires a new request_id and fresh quote/address. Native ZEC addresses may be reused. Identical retries retrieve the original request only." } else { "Receive native Ironwood Zcash (ZEC) at a fresh shielded address. Identical request_id retries retrieve the original request. Native addresses may be reused." },
+            properties,
+            vec!["asset_id", "chain", "amount", "request_id"],
+        ));
     }
-    if config.send {
-        specs.push(("x402_treazury_swap_preview", "Preview a native Ironwood Zcash (ZEC) payment or an exact-output foreign swap. Creates no payment authority. Report whether the payment fits the smaller of the optional send limit and spendable ZEC balance, including estimated network fees. Foreign fees estimate a standard NEAR deposit output; actual fees are checked during preparation.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported.")}), vec!["asset_id","chain","amount","recipient"]));
-        specs.push(("x402_treazury_swap_send", "Send native Ironwood Zcash or swap treasury ZEC for an exact foreign amount. Accepted work continues after disconnect. Identical request_id retries return the original operation; inspect swap_status for settlement.", json!({"asset_id":text("Full destination assetId from swap_assets."),"chain":text("Exact destination blockchain from swap_assets."),"amount":text("Positive destination atomic amount; native ZEC uses zatoshis."),"recipient":text("Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported."),"request_id":text("Unique caller request ID for these exact terms; reuse only for identical retries.")}), vec!["asset_id","chain","amount","recipient","request_id"]));
+    if config.allows_tool(SEND) {
+        let mut properties = asset_fields();
+        properties["recipient"] = text(
+            "Destination address; native ZEC requires an Ironwood-capable unified address without a transparent receiver. Memos and destination tags are unsupported.",
+        );
+        let mut required = vec!["asset_id", "chain", "amount", "recipient"];
+        specs.push((
+            PREVIEW,
+            if foreign { "Preview a native Ironwood Zcash (ZEC) payment or an exact-output foreign swap. Creates no payment authority. Report whether the payment fits the smaller of the optional send limit and spendable ZEC balance, including estimated network fees. Foreign fees estimate a standard NEAR deposit output; actual fees are checked during preparation." } else { "Preview a native Ironwood Zcash (ZEC) payment. Shows estimated network fees and whether the total fits the spendable balance and configured send limit. Creates no payment authority." },
+            properties.clone(),
+            required.clone(),
+        ));
+        properties["request_id"] = text(
+            "Unique caller request ID for these exact terms; reuse only for identical retries.",
+        );
+        required.push("request_id");
+        specs.push((
+            SEND,
+            if foreign { "Send native Ironwood Zcash or swap treasury ZEC for an exact foreign amount. Accepted work continues after disconnect. Identical request_id retries return the original operation; inspect swap_status for settlement." } else { "Send native Ironwood Zcash (ZEC) to a shielded address. Accepted work continues after disconnect. Identical request_id retries return the original operation. Inspect x402_treazury_swap_status for settlement." },
+            properties,
+            required,
+        ));
     }
-    specs.into_iter().map(|(name,description,properties,required)| rmcp::model::Tool::new(name,description,Arc::new(json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone()))).collect()
+    specs
+        .into_iter()
+        .map(|(name, description, properties, required)| {
+            rmcp::model::Tool::new(
+                name,
+                description,
+                Arc::new(json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone()),
+            )
+        })
+        .collect()
 }
 
 impl Service {
@@ -142,6 +220,28 @@ impl Service {
             wake,
         }
     }
+    pub(crate) fn definitions(&self, config: &Config) -> Vec<rmcp::model::Tool> {
+        definitions_for(self.available_config(config), self.supports_foreign())
+    }
+
+    pub(crate) fn supports_foreign(&self) -> bool {
+        self.backend
+            .as_ref()
+            .is_some_and(|backend| backend.near.is_some())
+    }
+
+    pub(crate) fn available_config<'a>(&self, config: &'a Config) -> &'a Config {
+        static STATUS_ONLY: Config = Config {
+            receive: false,
+            send: false,
+            max_send_zec: None,
+        };
+        if self.backend.is_some() {
+            config
+        } else {
+            &STATUS_ONLY
+        }
+    }
     fn backend(&self) -> Result<&Backend> {
         self.backend.as_deref().context("Direct payment admission unavailable; treasury SDK requires correction and restart. Saved status remains available")
     }
@@ -160,14 +260,14 @@ impl Service {
         args: Value,
     ) -> Result<Value> {
         ensure!(
-            definitions(config).iter().any(|tool| tool.name == name),
+            config.allows_tool(name),
             "swap capability disabled or unknown tool"
         );
-        if name != "x402_treazury_swap_status" {
+        if name != STATUS {
             self.backend()?;
         }
         match name {
-            "x402_treazury_swap_assets" => {
+            ASSETS => {
                 let args: Assets = serde_json::from_value(args)?;
                 let mut assets = vec![native_asset()];
                 let mut foreign_available = false;
@@ -191,18 +291,16 @@ impl Service {
                     json!({"assets":&assets[offset..end],"next_offset":(end<assets.len()).then_some(end),"total":assets.len(),"complete":foreign_available,"foreign_assets_available":foreign_available}),
                 )
             }
-            "x402_treazury_payment_request_create" => {
-                self.receive(owner, serde_json::from_value(args)?).await
-            }
-            "x402_treazury_swap_preview" => {
+            RECEIVE => self.receive(owner, serde_json::from_value(args)?).await,
+            PREVIEW => {
                 self.preview(owner, config, serde_json::from_value(args)?)
                     .await
             }
-            "x402_treazury_swap_send" => {
+            SEND => {
                 self.send(owner, config, serde_json::from_value(args)?)
                     .await
             }
-            "x402_treazury_swap_status" => {
+            STATUS => {
                 let args: Status = serde_json::from_value(args)?;
                 self.status_reference(owner, args).await
             }

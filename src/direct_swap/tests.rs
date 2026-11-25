@@ -1,6 +1,50 @@
 use super::*;
 use futures_util::FutureExt;
 
+#[test]
+fn swap_definitions_share_destination_inputs_and_scope_refunds_to_foreign_receives() {
+    let config = Config {
+        receive: true,
+        send: true,
+        ..Default::default()
+    };
+    for foreign in [false, true] {
+        let tools = definitions_for(&config, foreign);
+        let schema = |name| {
+            &tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap()
+                .input_schema
+        };
+        let preview = schema(PREVIEW);
+        let send = schema(SEND);
+        let receive = schema(RECEIVE);
+        let mut send_fields = send["properties"].as_object().unwrap().clone();
+        assert!(send_fields.remove("request_id").is_some());
+        assert_eq!(&send_fields, preview["properties"].as_object().unwrap());
+        assert_eq!(
+            preview["required"],
+            json!(["asset_id", "chain", "amount", "recipient"])
+        );
+        assert_eq!(
+            send["required"],
+            json!(["asset_id", "chain", "amount", "recipient", "request_id"])
+        );
+        assert_eq!(
+            receive["required"],
+            json!(["asset_id", "chain", "amount", "request_id"])
+        );
+        let refund = receive["properties"].get("refund_address");
+        assert_eq!(refund.is_some(), foreign);
+        assert_eq!(
+            receive["properties"].get("refund_after_seconds").is_some(),
+            foreign
+        );
+        assert!(preview["properties"].get("refund_address").is_none());
+    }
+}
+
 #[tokio::test]
 async fn asset_search_ranks_before_paging_and_exposes_native_currency_name() {
     let dir = tempfile::tempdir().unwrap();

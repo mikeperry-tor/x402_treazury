@@ -1490,9 +1490,6 @@ impl Deployment {
                 }
                 Err(error) => return Err(error),
             };
-            // Reserved identities invalidate source admission, rather than the
-            // endpoint's narrowing. A late invalid source must not withdraw
-            // healthy tools already published on this listener.
             if (crate::discovery::policy::enabled(&self.config)
                 || listener.discover_on_demand
                 || listener.swap_control.is_some())

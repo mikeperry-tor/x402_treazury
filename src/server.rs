@@ -108,8 +108,7 @@ impl Server {
     }
 
     async fn dispatch(&self, name: &str, args: &Map<String, Value>) -> Result<Invocation> {
-        let firstparty = self.direct_definitions();
-        if firstparty.iter().any(|t| t.name == name) {
+        if self.configured_direct_tool(name) {
             return self
                 .invoke_direct(name, serde_json::Value::Object(args.clone()))
                 .await
@@ -124,6 +123,7 @@ impl Server {
             match name {
                 "x402_treazury_tools_search" => {
                     let args = serde_json::Value::Object(args.clone());
+                    let firstparty = self.direct_definitions();
                     let result = match self
                         .discovery
                         .as_ref()
@@ -148,7 +148,7 @@ impl Server {
                 "x402_treazury_tool_call" => {
                     let call: crate::discovery::Call =
                         serde_json::from_value(serde_json::Value::Object(args.clone()))?;
-                    if firstparty.iter().any(|t| t.name.as_ref() == call.tool_id) {
+                    if self.configured_direct_tool(&call.tool_id) {
                         return self
                             .invoke_direct(&call.tool_id, serde_json::Value::Object(call.arguments))
                             .await
@@ -206,8 +206,13 @@ impl Server {
     fn direct_definitions(&self) -> Vec<Tool> {
         self.direct_swap
             .as_ref()
-            .map(|(_, config)| crate::direct_swap::definitions(config))
+            .map(|(service, config)| service.definitions(config))
             .unwrap_or_default()
+    }
+    fn configured_direct_tool(&self, name: &str) -> bool {
+        self.direct_swap
+            .as_ref()
+            .is_some_and(|(_, config)| config.allows_tool(name))
     }
     async fn invoke_direct(&self, name: &str, args: serde_json::Value) -> Result<Value> {
         anyhow::ensure!(
@@ -249,15 +254,24 @@ impl ServerHandler for Server {
         if self.discover_on_demand {
             instructions.push_str("\n\nProvider API tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a limit (default 25) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call.");
         }
-        if let Some((_, config)) = &self.direct_swap {
+        if let Some((service, config)) = &self.direct_swap {
+            let config = service.available_config(config);
             if config.receive {
-                instructions.push_str("\n\nReceive native ZEC directly at an Ironwood-capable shielded Zcash address, or request a foreign asset payment converted into this treasury. Native receiving needs no swap provider. Keep payment instructions and operation IDs; status separates provider progress from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
+                instructions.push_str("\n\nReceive native ZEC at an Ironwood-capable shielded address. Native receiving needs no swap provider. Keep payment instructions and operation IDs. Disclosed payment routes may receive late payments.");
+                if service.supports_foreign() {
+                    instructions.push_str(" You can also request a foreign asset payment converted into the treasury. Status separates provider progress from Zcash receipt and spendability.");
+                }
             }
             if config.send {
-                instructions.push_str("\n\nPreview or send native shielded Zcash (ZEC) through Ironwood, or swap treasury ZEC to a foreign asset. Preview grants no payment authority. Send binds the exact recipient and amount; retain its operation ID and inspect status before considering a retry. Native sending needs no swap provider.");
+                instructions.push_str("\n\nPreview or send native shielded Zcash (ZEC) through Ironwood. Native sending needs no swap provider. Preview grants no payment authority. Send binds the exact recipient and amount. Retain its operation ID and inspect status before considering a retry.");
+                if service.supports_foreign() {
+                    instructions.push_str(
+                        " You can also swap treasury ZEC to an exact foreign asset amount.",
+                    );
+                }
             }
             if !config.enabled() {
-                instructions.push_str("\n\nInspect saved Zcash payments with swap_status. Status separates provider progress from Zcash receipt and spendability; disclosed payment routes may receive late payments.");
+                instructions.push_str("\n\nInspect saved Zcash payments with x402_treazury_swap_status. Status separates provider progress from Zcash receipt and spendability. Disclosed payment routes may receive late payments.");
             }
         }
         if self.catalog.publication_failed() {
