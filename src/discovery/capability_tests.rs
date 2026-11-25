@@ -145,9 +145,20 @@ async fn directory_subsets_control_search_and_id_schema_without_gating_url_detai
                     RemoteDirectory::Coinbase | RemoteDirectory::CoinbaseCurated
                 )
             });
+            let agents_trust_only = selected == [RemoteDirectory::AgentsTrust];
+            let max_length = match (agents_trust_only, has_coinbase) {
+                (true, _) => Some(300),
+                (false, true) => Some(400),
+                (false, false) => None,
+            };
+            let query = &schema["properties"]["q"];
+            assert_eq!(query["maxLength"].as_u64(), max_length);
+            assert_eq!(query["minLength"].as_u64(), agents_trust_only.then_some(2));
             assert_eq!(
-                schema["properties"]["q"]["maxLength"].is_number(),
-                has_coinbase
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|keys| keys.iter().any(|key| key == "q")),
+                agents_trust_only
             );
             assert_eq!(schema["properties"].as_object().unwrap().len(), 3);
         }

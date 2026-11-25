@@ -38,8 +38,9 @@ pub fn listener_definitions(
             .directories
             .contains(&super::policy::RemoteDirectory::AgentsTrust)
         {
-            description
-                .push_str(" Agents Trust requires search text and usually charges 0.01 USDC.");
+            description.push_str(
+                " Agents Trust requires a query with at least two letters or digits and up to 300 characters. It requests up to five results and usually costs 0.01 USDC.",
+            );
         }
         if policy.has_x402_list() {
             description.push_str(" Cite x402-list.com for its CC BY 4.0 data.");
@@ -47,7 +48,7 @@ pub fn listener_definitions(
         definitions.push((
             super::directory::SEARCH,
             description,
-            super::directory::search_schema(policy.has_coinbase()),
+            super::directory::search_schema((&policy).into()),
         ));
     }
     if policy.remote {

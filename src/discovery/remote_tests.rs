@@ -2,6 +2,42 @@ use super::*;
 use crate::discovery::policy::RemoteDirectory;
 
 #[tokio::test]
+async fn agents_trust_only_advertises_and_checks_query_and_result_limit() {
+    let mut config = listeners(false);
+    config
+        .get_mut("writer")
+        .unwrap()
+        .remote_provider_directories = vec![RemoteDirectory::AgentsTrust];
+    let manager = manager_with(config).await;
+    let policy = manager.policy("writer");
+    let search = crate::discovery::tools::listener_definitions(policy.clone(), false, None, None)
+        .into_iter()
+        .find(|tool| tool.name == directory::SEARCH)
+        .unwrap();
+    assert_eq!(search.input_schema["required"], json!(["q"]));
+    assert_eq!(search.input_schema["properties"]["q"]["minLength"], 2);
+    assert_eq!(search.input_schema["properties"]["q"]["maxLength"], 300);
+    assert_eq!(search.input_schema["properties"]["limit"]["maximum"], 5);
+    assert_eq!(search.input_schema["properties"]["limit"]["default"], 5);
+    for args in [json!({}), json!({"q":"a!"}), json!({"q":"é".repeat(301)})] {
+        let error = manager
+            .invoke_search_remote("writer", args.as_object().unwrap())
+            .await
+            .unwrap_err();
+        assert!(error.is::<crate::catalog::diagnostics::Problem>());
+    }
+    let too_many = json!({"q":"patents","limit":6});
+    let error = manager
+        .invoke_search_remote("writer", too_many.as_object().unwrap())
+        .await
+        .unwrap_err();
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("limit") && diagnostic.contains("5"));
+    let valid = json!({"q":"é".repeat(300),"limit":5});
+    assert!(directory::validate_search(valid.as_object().unwrap(), (&policy).into()).is_ok());
+}
+
+#[tokio::test]
 async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_path() {
     use axum::{
         http::{HeaderMap, StatusCode, Uri},
@@ -75,6 +111,11 @@ async fn agents_trust_search_validates_its_query_and_uses_the_listener_payment_p
         vec![RemoteDirectory::AgentsTrust, RemoteDirectory::X402List];
     let manager = manager_with(config).await;
     *manager.fixture_directory.lock().unwrap() = Some(DirectoryFixture::LocalTls(base));
+    let policy = manager.policy("writer");
+    assert_eq!(
+        directory::search_schema((&policy).into())["properties"]["limit"]["maximum"],
+        20
+    );
 
     for args in [json!({}), json!({"q":"a!"}), json!({"q":"é".repeat(301)})] {
         let output = manager

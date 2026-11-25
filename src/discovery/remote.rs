@@ -13,7 +13,7 @@ impl Manager {
     ) -> Result<ToolOutput> {
         let policy = self.policy(owner);
         ensure!(policy.remote_search(), "remote_provider_search_disabled");
-        directory::validate_search(args, policy.has_coinbase())?;
+        directory::validate_search(args, (&policy).into())?;
         let client = self.source_client(owner)?;
         let (manager, owner, args) = (self.clone(), owner.to_owned(), args.clone());
         client

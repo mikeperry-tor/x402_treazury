@@ -180,7 +180,13 @@ fn malformed_top_level_is_failure_without_invented_empty_results() {
 #[test]
 fn flat_schema_uses_only_shared_arguments_and_endpoint_specific_query_bound() {
     for coinbase in [false, true] {
-        let schema = super::super::directory::search_schema(coinbase);
+        use super::super::directory::{QueryRules, search_schema, validate_search};
+        let rules = if coinbase {
+            QueryRules::Coinbase
+        } else {
+            QueryRules::Optional
+        };
+        let schema = search_schema(rules);
         let properties = schema["properties"].as_object().unwrap();
         assert_eq!(
             properties
@@ -201,10 +207,7 @@ fn flat_schema_uses_only_shared_arguments_and_endpoint_specific_query_bound() {
         assert_eq!(properties["limit"]["minimum"], 1);
         assert_eq!(properties["limit"]["maximum"], 20);
         let long_query = args(json!({"q":"é".repeat(401)}));
-        assert_eq!(
-            super::super::directory::validate_search(&long_query, coinbase).is_err(),
-            coinbase
-        );
+        assert_eq!(validate_search(&long_query, rules).is_err(), coinbase);
     }
     for curated in [false, true] {
         let url = request(&Map::new(), curated).unwrap();

@@ -12,14 +12,7 @@ pub(super) const SEARCH_URL: &str =
 
 /// Validate the exact branch before acquiring identities or making requests.
 pub(super) fn request(args: &Map<String, Value>, curated: bool) -> Result<reqwest::Url> {
-    let schema = super::directory::search_schema(true);
-    let properties = schema["properties"].as_object().unwrap();
-    for (name, value) in args {
-        let field = properties.get(name).with_context(|| {
-            format!("coinbase_search argument {name} is unsupported in curated search")
-        })?;
-        validate(name, value, field)?;
-    }
+    super::directory::validate_search(args, super::directory::QueryRules::Coinbase)?;
     let mut url = reqwest::Url::parse(SEARCH_URL)?;
     let mut query = url.query_pairs_mut();
     if let Some(value) = args.get("q") {
@@ -34,7 +27,8 @@ pub(super) fn request(args: &Map<String, Value>, curated: bool) -> Result<reqwes
         "limit",
         &args
             .get("limit")
-            .unwrap_or(&schema["properties"]["limit"]["default"])
+            .and_then(Value::as_u64)
+            .unwrap_or(super::directory::DEFAULT_SEARCH_LIMIT)
             .to_string(),
     );
     query.append_pair("network", "eip155:8453");
@@ -42,40 +36,6 @@ pub(super) fn request(args: &Map<String, Value>, curated: bool) -> Result<reqwes
     query.append_pair("scheme", "exact");
     drop(query);
     Ok(url)
-}
-
-pub(super) fn validate(name: &str, value: &Value, field: &Value) -> Result<()> {
-    if let Some(expected) = field.get("const") {
-        ensure!(
-            value == expected,
-            "coinbase_search argument {name} must be {expected}"
-        );
-        return Ok(());
-    }
-    let kind = field["type"].as_str().unwrap();
-    let valid = match kind {
-        "string" => value.is_string(),
-        "number" => value.is_number(),
-        "integer" => value.as_u64().is_some(),
-        _ => false,
-    };
-    ensure!(valid, "coinbase_search argument {name} must be {kind}");
-    if let Some(text) = value.as_str() {
-        let length = text.chars().count() as u64;
-        ensure!(
-            field["minLength"].as_u64().is_none_or(|min| length >= min)
-                && field["maxLength"].as_u64().is_none_or(|max| length <= max),
-            "coinbase_search argument {name} is outside documented character bounds"
-        );
-    }
-    if let Some(number) = value.as_f64() {
-        ensure!(
-            field["minimum"].as_f64().is_none_or(|min| number >= min)
-                && field["maximum"].as_f64().is_none_or(|max| number <= max),
-            "coinbase_search argument {name} is outside documented bounds"
-        );
-    }
-    Ok(())
 }
 
 pub(super) fn parse_response(bytes: &[u8]) -> Result<Value> {

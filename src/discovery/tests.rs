@@ -2074,7 +2074,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
         2,
         "invalid arguments made upstream requests"
     );
-    let schema = directory::search_schema(false);
+    let schema = directory::search_schema(directory::QueryRules::Optional);
     assert_eq!(schema["properties"].as_object().unwrap().len(), 3);
     assert!(schema["properties"]["q"].get("maxLength").is_none());
     task.abort();

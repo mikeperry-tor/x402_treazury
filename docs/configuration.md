@@ -919,8 +919,8 @@ omit = ["/results/*/figures"]
   inventory in one response without `nextCursor`. `tools_search` defaults to 25
   per page (any positive `limit` accepted), with cursors bound to the listener
   and catalog snapshot. Local bundled-provider browse defaults to 25 per page
-  with no local ceiling; remote directory search defaults to 5 per directory
-  (range 1-20).
+  with no local ceiling. See the
+  [remote directory search limits](agent-sources.md#external-directory-matching).
 
 ## Operation URL extensions
 

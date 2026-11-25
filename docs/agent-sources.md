@@ -162,23 +162,27 @@ Configured `relay_fallback` applies `source_discovery` to directory lookups and
 ## External directory matching
 
 `x402_treazury_providers_search_remote` queries every configured directory
-concurrently with `q`, `limit` (default 5, range 1-20 per directory), and
-optional `max_price_usd`:
+concurrently with `q`, `limit` (default 5), and optional `max_price_usd`.
+The search accepts limits from 1 to 20, or from 1 to 5 when Agents Trust is
+the only configured directory. When a Coinbase directory is configured, the
+shared query limit is 400 characters.
 
 - **Coinbase (`coinbase` and `coinbase_curated`):** Queries Coinbase's public
-  resource directory unsigned, constrained to Base mainnet USDC `exact` offers
-  and enforcing Coinbase's 400-character query limit. `max_price_usd` filters
-  resource prices. Coinbase origin `402` challenges are never signed and
-  stop acquisition, as do HTTP `206` and `Content-Range`. A complete origin
+  resource directory unsigned for Base mainnet USDC `exact` offers.
+  `max_price_usd` filters resource prices. An origin `402` or `206`, or a
+  `Content-Range` header, ends the unsigned acquisition. A complete origin
   response with invalid JSON can trigger configured relay fallback.
 - **x402 List (`x402-list`):** Queries `/best` for Base services with
   `prefer=balanced` and `require_verified=false`, filtering by minimum service
-  price. Has no 400-character query limit when used alone. Directory data from
-  `x402-list.com` carries a CC BY 4.0 attribution requirement.
+  price. Directory data from `x402-list.com` carries a CC BY 4.0 attribution
+  requirement.
 - **Agents Trust (`agents-trust`):** Queries `/recommend` for Base API offers
   with compact results. Requires a query of up to 300 characters containing at
-  least two letters or digits. Missing or invalid queries skip this directory
-  and return a local error. Requests up to five results. `max_price_usd`
+  least two letters or digits. An Agents Trust-only listener rejects missing
+  or invalid queries before dispatch. In a mixed search that passes shared
+  input validation, an Agents Trust query error affects only its own entry.
+  In a search across multiple directories, the Agents Trust request caps
+  `limit` at five. `max_price_usd`
   filters recommended offers. A recommendation normally costs 0.01 USDC
   separately, under the listener's payment cap. A paid answer can arrive
   before settlement. See the
