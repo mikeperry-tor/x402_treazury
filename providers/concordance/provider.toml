@@ -7,7 +7,7 @@ base_url = "https://concordancehq.duckdns.org"
 prefix = "concordance"
 include = ["/tools", ""]
 additional_properties = false
-instructions_text = "Use concordance_catalog to discover current sources and series IDs. Company briefs may contain partial sections; corroboration counts distinct sources, not independently verified truth."
+instructions_text = "Company briefs may contain partial sections; corroboration counts distinct sources, not independently verified truth."
 help_url = "https://concordancehq.duckdns.org/llms.txt"
 
 [overrides]
@@ -17,12 +17,12 @@ description = "Search aggregated news, filings, court opinions, papers, governme
 pricing_description = "$0.01/call."
 
 [overrides.concordance_series]
-description = "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. Use concordance_catalog for current source and series IDs."
+description = "Tabular time-series lookup by source and series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub, twelvedata, and polygon). Optional start and end date range; returns [{observed_at, value}] points."
 pricing_description = "$0.01 per call."
 
 [overrides.concordance_series.params]
 source = "Catalog source slug: arxiv, core, courtlistener, defillama, finnhub, gdelt, govinfo, hackernews, open_meteo, polygon, regulations_gov, sec_edgar, stackexchange, twelvedata, un_comtrade, wikipedia, world_bank, fred."
-series_id = "Vendor series id, e.g. fred: GDP, CPIAUCSL, UNRATE, FEDFUNDS, DGS10; world_bank: US-NY.GDP.MKTP.CD (<COUNTRY>-<indicator>). Use concordance_catalog for current series IDs."
+series_id = "Vendor series ID, such as GDP for FRED or US-NY.GDP.MKTP.CD for the World Bank. Check the source catalog for current IDs."
 
 [overrides.concordance_company_brief]
 description = "Combine market quotes, SEC filings and news, academic, legal or developer mentions for a company. Sections can be missing; inspect coverage before drawing conclusions."
@@ -31,13 +31,13 @@ description = "Combine market quotes, SEC filings and news, academic, legal or d
 company = "Ticker (AAPL) or company name (Apple). Coverage is a bounded vendor watchlist."
 
 [overrides.concordance_digest]
-description = "Aggregate cited search hits across source categories for a topic. Returns structured category groups, not a generated summary. Use concordance_search for a filtered search within selected sources/categories."
+description = "Aggregate cited search hits across source categories for a topic. Returns structured category groups, not a generated summary."
 
 [overrides.concordance_corroboration]
-description = "Find matches for a claim grouped by source. Source counts help trace coverage but do not establish independent verification or truth. Use concordance_digest for category groups."
+description = "Find matches for a claim grouped by source. Source counts help trace coverage but do not establish independent verification or truth."
 
 [overrides.concordance_timeline]
-description = "Track topic coverage chronologically across aggregated sources, oldest first. Use concordance_search for relevance-ranked results and concordance_digest for category groups."
+description = "Track topic coverage chronologically across aggregated sources, oldest first."
 
 [pricing]
 source = "catalog"

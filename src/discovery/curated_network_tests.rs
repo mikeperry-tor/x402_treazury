@@ -159,9 +159,22 @@ async fn fixture() {
     assert_eq!(image.source, Some((id, 1)));
     assert_eq!(image.base, "https://api.example.com");
     assert_eq!(image.tool.path, "/v1/image");
-    let output = image
+    let mut endpoint = server(&m, "writer");
+    endpoint.discover_on_demand = true;
+    let found = endpoint
+        .invoke(
+            "x402_treazury_tools_search",
+            json!({"query":"fixture image"}).as_object().unwrap(),
+        )
+        .await
+        .unwrap();
+    let found: Value = serde_json::from_str(&found).unwrap();
+    let tool_id = &found["items"][0]["tool_id"];
+    assert_eq!(tool_id, image.tool.name.as_str());
+    let output = endpoint
         .invoke_output(
-            json!({"body":{"prompt":"a map"},"format":"png"})
+            "x402_treazury_tool_call",
+            json!({"tool_id":tool_id,"arguments":{"body":{"prompt":"a map"},"format":"png"}})
                 .as_object()
                 .unwrap(),
         )

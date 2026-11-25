@@ -100,13 +100,6 @@ impl DescriptionRendering {
         truncate_description(&rendered, self.max_chars)
     }
 
-    pub(crate) fn rebind(&mut self, rebind: impl Fn(&str) -> String) {
-        self.prose = rebind(&self.prose);
-        if let Some(note) = &mut self.authored_price {
-            *note = rebind(note);
-        }
-    }
-
     fn compose(
         &self,
         tariff: Option<&TariffText>,

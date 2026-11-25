@@ -14,7 +14,7 @@
     "/v1/metrics/{category}/{metric}": {
       "get": {
         "summary": "Glassnode metric time series",
-        "description": "Fetch any Glassnode metric time series ($0.05 USDC on Base per call). The x402 gateway mirrors api.glassnode.com metric paths one-to-one. Discover metric paths with glassnode_metadata_metrics (returned without the /v1/metrics prefix, e.g. /distribution/balance_exchanges), then pass category = the first path segment and metric = the second segment (two-segment paths; deeper sub-path variants are not addressable here). a (asset, e.g. BTC) is required. Check a metric's exact allowed parameters, intervals and defaults with glassnode_metadata_metric before paying.",
+        "description": "Fetch a Glassnode metric time series for an asset. Pass the two segments of the metric path as category and metric. Check the metric metadata for supported assets, parameters, intervals, and defaults.",
         "parameters": [
           {
             "name": "category",
@@ -38,7 +38,7 @@
             "name": "a",
             "in": "query",
             "required": true,
-            "description": "Asset symbol, e.g. BTC, ETH, USDT (supported assets via glassnode_metadata_assets).",
+            "description": "Asset symbol, such as BTC, ETH, or USDT.",
             "schema": {
               "type": "string"
             }
@@ -218,7 +218,7 @@
     "/v1/metadata/metrics": {
       "get": {
         "summary": "List all available Glassnode metric paths",
-        "description": "List all available Glassnode metric paths ($0.01 USDC on Base per call), returned without the /v1/metrics prefix (e.g. /addresses/count). Feed a path to glassnode_metadata_metric for its allowed parameters and to glassnode_metrics_category_metric for the data. Optional filters narrow the list: a (asset, repeatable: a=BTC&a=ETH), c currency, e exchange, f format, i interval, from_exchange, to_exchange, miner, maturity, network, period, quote_symbol.",
+        "description": "List available Glassnode metric paths without the /v1/metrics prefix, such as /addresses/count. Optional filters narrow the list.",
         "parameters": [
           {
             "name": "a",

@@ -5,6 +5,6 @@ name = "Glassnode x402"
 base_url = "https://x402.glassnode.com"
 prefix = "glassnode"
 include = ["/v1", ""]
-instructions_text = "Discover metric paths with glassnode_metadata_metrics, inspect allowed parameters with glassnode_metadata_metric, then fetch with glassnode_metrics_category_metric. category and metric are the first two path segments; a is the asset symbol. Time-series fields t, v and optional o mean Unix timestamp, value and multi-value object."
+instructions_text = "Time-series fields t, v, and optional o mean Unix timestamp, value, and multi-value object."
 help_url = "https://docs.glassnode.com/basic-api/x402.md"
 pricing_key = "x-payment-info"

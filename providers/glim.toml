@@ -12,3 +12,12 @@ source = "catalog"
 format = "payment-info"
 unit = "call"
 usd_as_usdc = true
+
+[overrides.glim_amazon_get.params]
+asin = "10-character Amazon product ID (ASIN). Obtain a verified ASIN from Amazon search results rather than inventing or reusing example ASINs."
+
+[overrides.glim_twitter_search.params]
+expand_urls = "When true, auto-crawl entity URLs and attach crawled_content to tweets. Off by default because responses can grow by up to 4 KB per expanded URL; use a web crawl tool for targeted crawls instead."
+
+[overrides.glim_twitter_get.params]
+expand_urls = "When true, auto-crawl entity URLs and attach crawled_content to tweets. Off by default because responses can grow by up to 4 KB per expanded URL; use a web crawl tool for targeted crawls instead."

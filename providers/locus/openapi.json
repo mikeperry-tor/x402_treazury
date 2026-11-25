@@ -8893,11 +8893,11 @@
               "schema": {
                 "properties": {
                   "arguments": {
-                    "description": "That free tool's input object; per-tool input schemas come from the locus_list catalog.",
+                    "description": "The arguments for the selected free read. Get its input schema from the free Locus catalog.",
                     "type": "object"
                   },
                   "name": {
-                    "description": "Supported free read to call; discover its input schema through locus_list. Feedback and coverage-demand writes are unsupported.",
+                    "description": "Name of a supported free read from the Locus catalog.",
                     "enum": [
                       "locus_3dep_availability",
                       "locus_acs_living_arrangements_series",

@@ -8,19 +8,19 @@ instructions_text = "Use a concise seed keyword. Country and time-window default
 help_url = "https://google-trends.use.x402atlas.com/llms.txt"
 
 [overrides.google_trends_trend]
-description = "Retrieve keyword interest over time, defaulting to 2004_present. For explicit bucket granularity use google_trends_trend_over_time. Values are relative interest (0–100), not search counts. Check data_source, notice and the returned geo/timeframe: fallback data may cover only worldwide, all-time monthly interest."
+description = "Retrieve keyword interest over time, defaulting to 2004_present. Values are relative interest (0-100), not search counts. Check data_source, notice, and the returned geo and timeframe: fallback data may cover only worldwide, all-time monthly interest."
 
 [overrides.google_trends_trend_over_time]
-description = "Retrieve a keyword interest timeline and bucket granularity; defaults to past_12_months. Set timeframe=2004_present for all-time monthly data. Values are relative interest (0–100), not search counts. Check data_source, notice and returned geo/timeframe: fallback data may cover only worldwide, all-time monthly interest. Low-volume keywords may return no series."
+description = "Retrieve a keyword interest timeline and bucket granularity; defaults to past_12_months. Set timeframe=2004_present for all-time monthly data. Values are relative interest (0-100), not search counts. Check data_source, notice, and returned geo and timeframe: fallback data may cover only worldwide, all-time monthly interest. Low-volume keywords may return no series."
 
 [overrides.google_trends_interest_by_region]
-description = "Compare keyword interest across a country's subregions; geo defaults to US. Values are relative popularity (0–100), not search counts. Low-volume keywords may return no regions."
+description = "Compare keyword interest across a country's subregions; geo defaults to US. Values are relative popularity (0-100), not search counts. Low-volume keywords may return no regions."
 
 [overrides.google_trends_related_queries]
-description = "Find search phrases related to keyword (US, past_12_months by default). Returns top relative-interest scores and rising growth percentages. Inspect relevance: either list can include unrelated terms. Check data_source, notice and returned timeframe; fallback may cover only past_12_months. Use google_trends_related_topics for subjects/entities."
+description = "Find search phrases related to keyword (US, past_12_months by default). Returns top relative-interest scores and rising growth percentages. Inspect relevance: either list can include unrelated terms. Check data_source, notice, and returned timeframe; fallback may cover only past_12_months."
 
 [overrides.google_trends_related_topics]
-description = "Find subjects/entities related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0–100) and rising percentage growth. Check data_source, notice and returned timeframe: fallback data may cover only past_12_months. Use google_trends_related_queries for search phrases."
+description = "Find subjects and entities related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0-100) and rising percentage growth. Check data_source, notice, and returned timeframe: fallback data may cover only past_12_months."
 
 [pricing]
 source = "catalog"

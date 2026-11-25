@@ -14,7 +14,7 @@ help_url = "https://regimeshift.xyz/api/quickstart.txt"
 [overrides]
 
 [overrides.regimeshift_intent_lend]
-description = "Submit a lender intent to the order book (wallet, USDC amount, min rate, max duration); matching runs synchronously on each new intent and a matched quote payload becomes available via regimeshift_matches_recent."
+description = "Submit a lender intent with a wallet, USDC amount, minimum rate, and maximum duration. Matching runs when each intent arrives. The recent matches tool returns the matched quote."
 pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_intent_borrow]

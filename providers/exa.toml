@@ -12,7 +12,6 @@ include_operations = ["POST /search", "POST /contents"]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://exa.ai/docs/integrations/payments/x402/quickstart.md"
-instructions_text = "Use exa_search to discover URLs and exa_contents for known URLs. Prices scale with search type, result/page counts and content options."
 
 [overrides.exa_search]
 description = "Search the web and optionally retrieve result contents. Use contents.highlights for concise excerpts."

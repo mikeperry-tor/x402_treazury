@@ -458,10 +458,8 @@ origins.
 
 Hand-authored `providers/glassnode/openapi.json` (vendor publishes no OpenAPI)
 covering three $0.01 metadata discovery routes (`assets`, `metrics`, `metric`)
-and one $0.05 templated metric route (`/v1/metrics/{category}/{metric}`), with
-lazy help and a discover -> metadata -> fetch workflow in `instructions_text`.
-Deeper subpaths such as `/bulk` are not addressable through the two-segment
-template.
+and one $0.05 metric route (`/v1/metrics/{category}/{metric}`). The metric
+route accepts two-segment paths. The help tool loads the vendor guide on demand.
 
 ## exa.toml | Exa Search and Contents
 

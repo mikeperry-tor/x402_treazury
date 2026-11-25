@@ -9,10 +9,10 @@ base_url = "https://api.locus.report"
 prefix = "locus"
 include = ["/api", "/tools", ""]
 help_url = "https://api.locus.report/llms.txt"
-instructions_text = "For US public-record research, start with locus_list(compact=true), then obtain category schemas with compact=false before locus_call(name=..., arguments={...}). Use free coverage/lane checks before paid reports; many paid atoms duplicate free calls. Preserve dates, provenance and unknowns. The gateway supports public reads; feedback and coverage-demand writes are unsupported. Omit delivery webhook options; report headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
+instructions_text = "Use free coverage and lane checks before paid reports; many paid atoms duplicate free calls. Preserve dates, provenance, and unknowns. The gateway supports public reads; feedback and coverage-demand writes are unsupported. Omit delivery webhook options; report headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing, or safe or unsafe labels."
 
 [overrides.locus_list]
-description = "Discover the vendor's free Locus catalog. Start with compact=true for names/categories; use category with compact=false for input schemas before locus_call. Vendor-listed feedback and coverage-demand writes are not supported by locus_call."
+description = "List free Locus reads. Set compact=true for names and categories, or select a category with compact=false for input schemas."
 pricing_description = "No payment required."
 
 [overrides.locus_call]
@@ -65,10 +65,10 @@ description = "Retrieve EPA NEI facility/pollutant inventory near address or coo
 description = "Find cited official development, permit and capital-project records for data-center or crypto-mining activity near a US place. News/social leads remain unverified; preserve source dates and coverage."
 
 [overrides.locus_locus_development_cases]
-description = "Read planning/zoning cases near an address with status and official links. Free locus_development_cases via locus_call returns the same records."
+description = "Read planning and zoning cases near an address with status and official links. The free gateway read locus_development_cases returns the same records."
 
 [overrides.locus_locus_zoning]
-description = "Read zoning districts and overlays for address from covered municipal/county layers. Free locus_zoning via locus_call returns the same records; verify current rules with the authority."
+description = "Read zoning districts and overlays for address from covered municipal and county layers. The free gateway read locus_zoning returns the same records. Verify current rules with the authority."
 
 [overrides.locus_locus_permit_closeout_check.params]
 delivery = "Unsupported in this integration: omit this webhook/status-token delivery option; use the direct response."

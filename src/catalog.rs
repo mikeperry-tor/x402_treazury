@@ -17,7 +17,6 @@ pub(crate) mod expansion;
 #[cfg(test)]
 mod expansion_tests;
 mod sanitize;
-pub(crate) use contracts::rebind_schema_descriptions;
 pub use credit_pricing::CreditPricing;
 pub(crate) use overrides::report_discarded;
 pub(crate) use overrides::{OVERRIDE_PARAMS_FIELD, OVERRIDE_TEXT_FIELDS};
@@ -1907,7 +1906,7 @@ pub fn compare_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
     })
 }
 
-/// Compile named tools so callers can rebind references before rendering.
+/// Compile tools so registrations can assign their final names before rendering.
 pub(crate) fn compile_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
     let result = build_catalog_inner(cfg, root, prefix);
     match &result {
@@ -2041,10 +2040,30 @@ fn build_catalog_inventory(
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { advertised_pricing: Default::default(), catalog_hints: None, response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: String::new(), description_rendering: Some(DescriptionRendering::help(cfg, format!(
-            "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."))),
-            method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
-            param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), wire_names:BTreeMap::new(),whole_body:None,body_closed:false,json_media_type:None });
+        tools.push(ToolSpec {
+            advertised_pricing: Default::default(),
+            catalog_hints: None,
+            response_mapping: None,
+            image_limits: cfg.image_limits.clone(),
+            name: format!("{prefix}_help"),
+            description: String::new(),
+            description_rendering: Some(DescriptionRendering::help(
+                cfg,
+                "Read the provider's guide to API usage, pricing, and workflows.".into(),
+            )),
+            method: "GET".into(),
+            path: url.clone(),
+            request_url: None,
+            input_schema: json!({"type":"object","properties":{}}),
+            param_routes: BTreeMap::new(),
+            header_params: BTreeMap::new(),
+            has_body: false,
+            help_url: Some(url.clone()),
+            wire_names: BTreeMap::new(),
+            whole_body: None,
+            body_closed: false,
+            json_media_type: None,
+        });
     }
     if let Some(allowed) = cfg.additional_properties {
         for tool in &mut tools {

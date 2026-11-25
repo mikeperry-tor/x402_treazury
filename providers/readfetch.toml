@@ -15,7 +15,7 @@ exclude_operations = [
   "POST /v1/feedback",
 ]
 help_url = "https://readfetch.com/llms.txt"
-instructions_text = "Use fetch for raw status, headers and bytes; text for readable articles; probe before paying. Use scrape for JavaScript-rendered content and scrape_residential when a site rejects datacentre addresses. Crawl is asynchronous: start it, then poll its status. Batch and crawl prices scale with requested pages; undelivered pages are credited, not billed. Check billed and provenance truncation before treating content as complete."
+instructions_text = "Check billed and provenance truncation before treating content as complete."
 
 [overrides.readfetch_fetch]
 description = "Raw HTTP through readfetch egress: returns target status, headers and body as text or base64. Use for JSON APIs, GraphQL, PDFs and byte ranges; the direct tool supports GET, POST, PUT, PATCH, DELETE or HEAD with headers and a string or JSON body. Relay fallback uses GET, HEAD or POST. Follows redirects but reports only the final URL."
@@ -29,23 +29,29 @@ pricing_description = "Cost: ~$0.005/call [spec]."
 description = "Render a public page in Chromium and extract Markdown or text, including JavaScript content. Use advanced for browser options and auth for authenticated access. Check billed and the returned status."
 
 [overrides.readfetch_scrape_residential]
-description = "Render and extract a public page through a residential address pool when a site rejects datacentre addresses. Uses the same advanced browser options and auth inputs as readfetch_scrape. Check billed and the returned status."
+description = "Render and extract a public page through a residential address pool when a site rejects datacentre addresses. Check billed and the returned status."
 
 [overrides.readfetch_map]
 description = "Discover a site's crawlable surface without fetching page bodies: robots.txt rules, sitemaps, RSS/Atom/JSON feeds and homepage link counts. Use the result to plan batch or crawl."
 pricing_description = "Cost: ~$0.005/call [spec]."
 
 [overrides.readfetch_crawl]
-description = "Start a bounded asynchronous crawl from one seed URL and return a job id, quoted page count and price. Poll readfetch_crawl_id for status and per-page Markdown. Cap scope with max_pages and max_depth."
+description = "Start a bounded asynchronous crawl from one seed URL and return a job id, quoted page count and price. Poll the job for status and per-page Markdown. Cap scope with max_pages and max_depth."
 pricing_description = "Cost: ~$0.003/page, minimum 10 pages; the quote scales with max_pages [spec]."
 
 [overrides.readfetch_crawl_id]
 description = "Poll a readfetch crawl job by id: returns status, completed page count and per-page Markdown as it lands."
 pricing_description = "Free polling [spec]."
 
+[overrides.readfetch_crawl_id.params]
+id = "The job_id returned when starting the crawl. Stop polling when status is complete or failed. Results remain available for about one hour."
+
 [overrides.readfetch_batch]
 description = "Read up to 50 public HTML pages in one payment using the same article extraction as text. Results stay in input order; undelivered pages are credited rather than billed."
 pricing_description = "Cost: ~$0.0015/page, minimum 10 pages; undelivered pages are not billed [spec]."
+
+[overrides.readfetch_batch.params]
+pipeline = "Use text for HTTP extraction or render for pages that require JavaScript. Render uses scrape pricing."
 
 [overrides.readfetch_pdf]
 description = "Extract per-page text plus one Markdown body from a public PDF URL or a base64 upload. Scanned or image-only PDFs may return empty text without billing."
@@ -59,6 +65,10 @@ pricing_description = "Cost: ~$0.003/call [spec]."
 description = "Stateless change detection against a caller-held hash or previous content: returns changed/unchanged and an optional bounded line diff. A no-change answer is still billable when text was delivered."
 pricing_description = "Cost: ~$0.003/call [spec]."
 
+[overrides.readfetch_diff.params]
+previous_content = "Full text from the prior read. Required for added, removed, and diff output."
+previous_hash = "Use a SHA-256 hash of the previous text. A diff response returns hash, and a preview returns content_sha256. Pass bare hex or include the sha256: prefix. Omit on the first poll to establish a baseline."
+
 [overrides.readfetch_screenshot]
 description = "Render a page and return a PNG or JPEG in JSON as image_base64: viewport, full page or one CSS-selected element, with optional delay, width and height."
 pricing_description = "Cost: ~$0.003/call [spec]."
@@ -70,3 +80,6 @@ pricing_description = "Cost: ~$0.005/call [spec]."
 [overrides.readfetch_probe]
 description = "Free preflight for a URL: metadata and an optional short preview before paying for the full read."
 pricing_description = "Free; no wallet or payment [spec]."
+
+[overrides.readfetch_probe.params]
+timeout_s = "Total budget in seconds across redirects. Defaults to 10 and allows up to 60."

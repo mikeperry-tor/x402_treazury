@@ -36,30 +36,11 @@ fn authored() -> AcceptedProvider {
         include: vec!["/v1".into()],
         exclude_operations: vec!["GET /v1/skip".into()],
         help_url: Some("https://api.example.com/help".into()),
-        instructions_text: Some(concat!(
-            "Use original_read and original_*; original_missing is unsupported. https://docs.example.com/original_read\n\n",
-            "[original_read][original_help] [original_help] [ORIGINAL_HELP][] [original_help](relative) [original_read]\n\n",
-            "[guide]: original_read.md\n[original_help]:\r\n  original_read.md\n",
-            "\n> [nested]: original_read\n> [GUIDE]: original_help.md\n\n",
-            "[original_read][nested] [**original_read**](relative \"original_read\") `original_read`\n",
-            "https://docs.example.com/?a=1&amp;tool=original_read\n",
-            "Call:original_read. Contact <original_read@example.com>."
-        ).into()),
-        overrides: json!({"original_read":{"description":concat!(
-            "Call original_read, then original_help; preserve original_missing. ",
-            "https://docs.example.com/original_read [original_read](https://docs.example.com/original_read) ",
-            "/v1/original_read [original_read](original_read.md#original_read) [original_read](#original_read) ",
-            "https://docs.example.com/v1/(guide)original_read [original_read](<original_read folder/guide.md>) ",
-            "https://docs.example.com/guide'original_read ",
-            "http://[2001:db8::1]?original_read#original_read ",
-            "[original_read](folder/it's/bracket]/original_read) [original_read](<folder/\\>original_read>) ",
-            "[original_read](folder/\u{a0}original_read) ",
-            "[original_read](folder/(guide(nested))original_read) Call original_read. ",
-            "Use original_read/original_help or original_*/original_help. ",
-            "Use `original_read`/`original_help` or `original_read`/original_help. ",
-            "Use **original_read**/original_help or ***original_read***/**original_help**. ",
-            "Use _original_read_/original_help. See /guide/original_help."
-        ), "pricing_description":"Cost: $0.01/call. See original_help."}}),
+        instructions_text: Some("Read records. [Guide](https://docs.example.com/original_read)".into()),
+        overrides: json!({"original_read":{
+            "description":"Read records with the `original_read` field.",
+            "pricing_description":"Billed per record."
+        }}),
         response_mappings: serde_json::from_value(json!({"POST /v1/read":{"images":[{"pointer":"/image_url","encoding":"data_uri"}]}})).unwrap(),
         read_timeout_seconds: Some(93.0),
         allow_http1: true,
@@ -72,8 +53,7 @@ fn authored() -> AcceptedProvider {
 
 fn document() -> Value {
     json!({"openapi":"3.0.3","servers":[{"url":"https://broken.example.com/v1"}],"paths":{
-        "/v1/read":{"get":{"summary":"Read query"},"post":{"summary":"Read body","requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"symbol":{"type":"string","description":"original_read","default":"https://docs.example.com/original_read",
-            "examples":[{"description":"original_read"}]}}}}}}}},
+        "/v1/read":{"get":{"summary":"Read query"},"post":{"summary":"Read body","requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"symbol":{"type":"string","description":"The `original_read` field."}}}}}}}},
         "/v1/skip":{"get":{"summary":"Skip"}}
     }})
 }
@@ -326,9 +306,9 @@ pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
 }
 
 #[test]
-fn curated_description_limit_reports_only_final_alias_truncation() {
+fn curated_description_limit_reports_final_tool_id() {
     if crate::test_log_capture::run_in_child(
-        "discovery::tests::curated_tests::curated_description_limit_reports_only_final_alias_truncation",
+        "discovery::tests::curated_tests::curated_description_limit_reports_final_tool_id",
     ) {
         return;
     }
@@ -342,8 +322,8 @@ fn curated_description_limit_reports_only_final_alias_truncation() {
     let _guard = tracing::subscriber::set_default(subscriber);
     let mut provider = authored();
     provider.settings.help_url = None;
-    provider.settings.overrides = json!({"original_read":{"description":"Call original_read."}});
-    let expected = "Call dyn_x__read. Cost: unknown.";
+    provider.settings.overrides = json!({"original_read":{"description":"Read records."}});
+    let expected = "Read records. Cost: unknown.";
     let limit = expected.chars().count();
     provider.settings.max_description_chars = Some(limit);
     let (built, _) = curated::build(&provider, "x", &document()).unwrap();
@@ -369,44 +349,7 @@ fn curated_description_limit_reports_only_final_alias_truncation() {
 }
 
 #[test]
-fn curated_names_preserve_literals_in_generated_billing_terms() {
-    let mut provider = authored();
-    provider.settings.pricing_key = Some("x-price".into());
-    provider.settings.credit_pricing = Some(catalog::CreditPricing {
-        credit_cost_key: "x-credit".into(),
-        usdc_per_credit: "0.014".into(),
-    });
-    let mut root = document();
-    let operation = &mut root["paths"]["/v1/read"]["post"];
-    operation["x-price"] = json!({
-        "amount":"0.01","currency":"USDC","unit":"call",
-        "conditions":"Return field original_help is billable."
-    });
-    operation["x-credit"] = json!({
-        "version":1,"baseCredits":1,"maxCredits":2,"normalizationFailureCredits":0,
-        "surcharges":[{"credits":1,"queryParam":"original_help","when":"includes",
-            "value":"original_read","label":"original_help"}]
-    });
-    let (built, _) = curated::build(&provider, "x", &root).unwrap();
-    let tool = built
-        .tools
-        .iter()
-        .find(|tool| tool.name == "dyn_x__read")
-        .unwrap();
-    for text in [
-        tool.description.clone(),
-        tool.render_description(Some(crate::output::ObservedPrice {
-            amount: alloy_primitives::U256::from(5_000),
-        })),
-    ] {
-        assert!(text.contains("Return field original_help is billable."));
-        assert!(text.contains("when original_help includes original_read (original_help)"));
-        assert!(text.contains("Cost: $0.01/call. See dyn_x__help."));
-    }
-}
-
-#[test]
-fn canonical_curated_configuration_applies_before_dynamic_renaming() {
+fn curated_registration_uses_provider_settings_and_publishes_registered_ids() {
     let candidate = curated_candidate("custom");
     let built = import::build(&candidate, document().to_string().as_bytes()).unwrap();
     assert_eq!(built.base, "https://api.example.com");
@@ -426,91 +369,23 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
     assert_eq!(read.method, "POST");
     assert_eq!(read.path, "/v1/read");
     assert!(read.response_mapping.is_some());
-    assert!(read.description.contains("dyn_custom__read"));
-    assert!(read.description.contains("dyn_custom__help"));
-    assert!(read.description.contains("original_missing"));
-    assert!(
-        read.description
-            .contains("https://docs.example.com/original_read")
-    );
-    assert!(
-        read.description
-            .ends_with("Cost: $0.01/call. See dyn_custom__help.")
-    );
-    assert!(
-        read.description
-            .contains("[dyn_custom__read](https://docs.example.com/original_read)")
-    );
-    assert!(read.description.contains("/v1/original_read"));
-    for expected in [
-        "[dyn_custom__read](original_read.md#original_read)",
-        "`dyn_custom__read`/`dyn_custom__help` or `dyn_custom__read`/dyn_custom__help",
-        "**dyn_custom__read**/dyn_custom__help or ***dyn_custom__read***/**dyn_custom__help**",
-        "_dyn_custom__read_/dyn_custom__help. See /guide/original_help.",
-        "[dyn_custom__read](#original_read)",
-        "https://docs.example.com/v1/(guide)original_read",
-        "https://docs.example.com/guide'original_read",
-        "http://[2001:db8::1]?original_read#original_read",
-        "[dyn_custom__read](<original_read folder/guide.md>)",
-        "[dyn_custom__read](folder/it's/bracket]/original_read)",
-        "[dyn_custom__read](<folder/\\>original_read>)",
-        "[dyn_custom__read](folder/\u{a0}original_read)",
-        "[dyn_custom__read](folder/(guide(nested))original_read) Call dyn_custom__read.",
-        "Use dyn_custom__read/dyn_custom__help or dyn_custom__*/dyn_custom__help.",
-    ] {
-        assert!(
-            read.description.contains(expected),
-            "missing {expected:?} in {}",
-            read.description
-        );
-    }
-    let observed = Some(crate::output::ObservedPrice {
-        amount: alloy_primitives::U256::from(5_000),
-    });
-    let rendered = read.render_description(observed);
-    assert!(rendered.contains("Call dyn_custom__read, then dyn_custom__help"));
-    assert!(rendered.contains("https://docs.example.com/original_read"));
-    assert!(rendered.ends_with("Sample offer: $0.005 for one request."));
-    assert!(rendered.contains("Cost: $0.01/call. See dyn_custom__help."));
-    let saved = import::saved_tools(&candidate, document().to_string().as_bytes()).unwrap();
     assert_eq!(
-        saved
-            .tools
-            .iter()
-            .find(|tool| tool.name == read.name)
-            .unwrap()
-            .render_description(observed),
-        rendered
+        read.description,
+        "Read records with the `original_read` field. Billed per record."
     );
     assert_eq!(
         read.input_schema["properties"]["body"]["properties"]["symbol"]["description"],
-        "dyn_custom__read"
+        "The `original_read` field."
     );
     assert_eq!(
-        read.input_schema["properties"]["body"]["properties"]["symbol"]["default"],
-        "https://docs.example.com/original_read"
+        built.instructions,
+        candidate
+            .provider
+            .as_ref()
+            .unwrap()
+            .settings
+            .instructions_text
     );
-    assert_eq!(
-        read.input_schema["properties"]["body"]["properties"]["symbol"]["examples"][0]["description"],
-        "original_read"
-    );
-    let guidance = built.instructions.unwrap();
-    assert!(guidance.contains("dyn_custom__read"));
-    assert!(guidance.contains("dyn_custom__*"));
-    assert!(guidance.contains("original_missing is unsupported"));
-    assert!(guidance.contains("https://docs.example.com/original_read"));
-    assert!(guidance.contains("[guide]: original_read.md"));
-    assert!(guidance.contains("[original_help]:\r\n  original_read.md"));
-    assert!(guidance.contains("> [nested]: original_read\n> [GUIDE]: original_help.md"));
-    assert!(guidance.contains(
-        "[dyn_custom__read][nested] [**dyn_custom__read**](relative \"original_read\") `dyn_custom__read`"
-    ));
-    assert!(guidance.contains("https://docs.example.com/?a=1&amp;tool=original_read"));
-    assert!(guidance.contains(
-        "[dyn_custom__read][original_help] [original_help] [ORIGINAL_HELP][] [dyn_custom__help](relative) [dyn_custom__read]"
-    ));
-    assert!(guidance.contains("Call:dyn_custom__read."));
-    assert!(guidance.contains("<original_read@example.com>"));
     assert_eq!(
         import::saved_tools(&candidate, document().to_string().as_bytes())
             .unwrap()
@@ -778,7 +653,7 @@ async fn dynamic_guidance_recomposes_from_static_base_without_duplicates() {
     let m = manager(None).await;
     commit_curated(&m, "custom").await;
     let text = m.catalog.read().instructions["writer"].clone().unwrap();
-    assert!(text.contains("dyn_custom__read"));
+    assert!(text.contains("https://docs.example.com/original_read"));
     let mut base = m.static_snapshot().await.unwrap();
     base.instructions
         .insert("writer".into(), Some("Static guidance".into()));
@@ -827,7 +702,7 @@ async fn operator_removal_clears_curated_guidance_and_saved_catalog() {
         m.catalog.read().instructions["writer"]
             .as_ref()
             .unwrap()
-            .contains("dyn_custom__read")
+            .contains("https://docs.example.com/original_read")
     );
     drop(m);
     maintain_cli(&deployment, "writer", &id, false)

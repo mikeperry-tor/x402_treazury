@@ -135,11 +135,12 @@ async fn authored_tariffs_preserve_unmatched_billing_and_other_tool_prices() {
         .iter()
         .find(|tool| tool.name == "kronos_track_record")
         .unwrap();
-    assert_observed_tariff(
-        record,
-        "Free.",
-        &["Brier score", "kronos_forecast_ledger", "$0.02/call"],
-    );
+    assert_observed_tariff(record, "Free.", &["Brier score"]);
+    let ledger = tools
+        .iter()
+        .find(|tool| tool.path == "/api/v1/forecast-ledger")
+        .unwrap();
+    assert!(ledger.description.contains("$0.02/call"));
 }
 
 #[tokio::test]
@@ -655,8 +656,9 @@ async fn coinmarketcap_projects_keyless_paths_without_losing_dex_request_contrac
     );
     let tools = catalog::build_tools(&cfg, &doc, "coinmarketcap").unwrap();
     for tool in tools.iter().filter(|tool| tool.path.starts_with("/x402/")) {
-        assert!(tool.description.contains("paid x402 route"));
-        assert!(tool.description.contains("coinmarketcap_public_api_"));
+        assert!(tool.description.contains("$0.01"));
+        let public_path = tool.path.replacen("/x402/", "/public-api/", 1);
+        assert!(tools.iter().any(|public| public.path == public_path));
         assert!(!tool.description.contains("Plan credit use"));
         assert!(!tool.description.contains("API plans"));
     }
