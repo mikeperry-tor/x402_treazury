@@ -69,9 +69,10 @@ new candidate so stale proposals never linger.
 - **Raw and compiled diffs:** Packets contain recursive JSON diffs (ignoring
   only object key order), atomic array diffs, exact text and hash diffs for
   non-JSON files, and production catalog projections. The comparison uses the
-  same compiled inventory for unoverridden and effective tools. Incomplete
-  catalogs report a compiler error in both views, with operation omissions and
-  available targets shown in the diagnostic inventory. The comparison reports
+  same operation projection for pricing coverage, unoverridden tools, and
+  effective tools. Incomplete catalogs report a compiler error in both tool
+  views. The diagnostic inventory lists operation omissions and available
+  targets. The comparison reports
   malformed override tables even if the catalog cannot compile. Parameter
   diagnostics include the target and the selected path when legacy spellings
   overlap.
@@ -106,6 +107,9 @@ always govern payment. See
   external source), and `pricing.signals` (bounded sorted JSON pointers whose
   keys match pricing terms across remote documents, excluding local files and
   values).
+- Tool projections include embedded pricing. The packet records external
+  prices as evidence, while serving matches them to operations after loading
+  the catalog.
 - Vendor generation timestamps (`generatedAt`, `lastUpdated`) can change on
   every read; inspect structural and amount fields separately. Pricing evidence
   never stages a schema candidate.

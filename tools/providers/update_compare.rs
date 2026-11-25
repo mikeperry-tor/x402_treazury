@@ -61,9 +61,11 @@ fn index_tools(items: &[catalog::ToolSpec]) -> BTreeMap<&str, &catalog::ToolSpec
 }
 
 fn projection(cfg: &Config, root: &Value) -> Result<Value> {
-    let pricing = cfg.effective_pricing()?;
-    let catalog_key = pricing.as_ref().and_then(|pricing| pricing.catalog_key());
-    let operations: serde_json::Map<String, Value> = catalog::operations(root, catalog_key)?
+    let prefix = cfg.prefix.clone().map(Ok).unwrap_or_else(|| {
+        catalog::default_prefix(cfg.base_url.as_deref().context("missing base_url/prefix")?)
+    })?;
+    let mut comparison = catalog::compare_catalog(cfg, root, &prefix)?;
+    let operations: serde_json::Map<String, Value> = std::mem::take(&mut comparison.operations)
         .into_iter()
         .map(|op| {
             (
@@ -77,16 +79,11 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
         })
         .collect();
     let total_operations = operations.len();
-    // Metadata presence is not an estimate: an operation may carry auth flags or
-    // a shape the adapter leaves display-only/unknown.
+    // Count the metadata that the compiler reads, including display-only shapes.
     let pricing_metadata_operations = operations
         .values()
-        .filter(|operation| !operation["pricing"].is_null())
+        .filter(|operation| comparison.catalog_key.is_some() && !operation["pricing"].is_null())
         .count();
-    let prefix = cfg.prefix.clone().map(Ok).unwrap_or_else(|| {
-        catalog::default_prefix(cfg.base_url.as_deref().context("missing base_url/prefix")?)
-    })?;
-    let comparison = catalog::compare_catalog(cfg, root, &prefix);
     let diagnostic = comparison
         .baseline
         .as_ref()
@@ -156,7 +153,7 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
     let plain = effective.and(diagnostic);
     Ok(json!({
         "operations":operations,
-        "pricing":{"catalog_key":catalog_key,"pricing_metadata_operations":pricing_metadata_operations,"total_operations":total_operations},
+        "pricing":{"catalog_key":comparison.catalog_key,"pricing_metadata_operations":pricing_metadata_operations,"total_operations":total_operations},
         "effective":tool_view(effective, &recommended, |_| true)?,
         "unoverridden":tool_view(plain, &recommended, |tool| effective_tools.contains_key(tool.name.as_str()))?,
         "override_diagnostic_inventory":tool_view(diagnostic, &recommended, |_| true)?,
@@ -405,7 +402,9 @@ fn pricing_section(
     let previous = prior
         .and_then(|(_, provider)| provider.config.as_ref())
         .and_then(|cfg| cfg.effective_pricing().ok().flatten());
-    let catalog_key = current.as_ref().and_then(|pricing| pricing.catalog_key());
+    let catalog_key = runtime["pricing"]["catalog_key"]
+        .as_str()
+        .or_else(|| current.as_ref().and_then(|pricing| pricing.catalog_key()));
     let external_source = current
         .as_ref()
         .filter(|pricing| pricing.source != "catalog")
@@ -647,6 +646,64 @@ mod tests {
     fn spec() -> Value {
         json!({"openapi":"3.0.0","paths":{"/one":{"get":{"description":"old prose","parameters":[{"name":"q","in":"query","schema":{"type":"string"}}],"responses":{}}}}})
     }
+    #[test]
+    fn digest_projection_reports_the_pricing_key_used_by_the_compiler() {
+        let root = json!({"operations":[{
+            "method":"GET", "path":"/one",
+            "pricing":{"amount":"0.01", "currency":"USDC", "unit":"call"}
+        }]});
+        let view = projection(&cfg(), &root).unwrap();
+        assert_eq!(view["pricing"]["catalog_key"], "pricing");
+        assert_eq!(view["pricing"]["pricing_metadata_operations"], 1);
+        assert_eq!(
+            view["operations"]["GET /one"]["pricing"],
+            root["operations"][0]["pricing"]
+        );
+        assert!(
+            view["effective"]["GET /one"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("$0.01/call")
+        );
+
+        let legacy = Config {
+            pricing_key: Some("x-openapi-price".into()),
+            ..cfg()
+        };
+        let view = projection(&legacy, &root).unwrap();
+        assert_eq!(view["pricing"]["catalog_key"], "pricing");
+        assert_eq!(view["pricing"]["pricing_metadata_operations"], 1);
+
+        let mut external = cfg();
+        external.pricing = Some(
+            toml::from_str("source='https://example.com/prices.json'\nformat='x402-discovery'")
+                .unwrap(),
+        );
+        let view = projection(&external, &root).unwrap();
+        assert!(view["pricing"]["catalog_key"].is_null());
+        assert_eq!(view["pricing"]["pricing_metadata_operations"], 0);
+        assert_eq!(
+            view["operations"]["GET /one"]["pricing"],
+            root["operations"][0]["pricing"]
+        );
+    }
+
+    #[test]
+    fn invalid_credit_config_keeps_the_operation_projection() {
+        let mut cfg = cfg();
+        cfg.credit_pricing = Some(catalog::CreditPricing {
+            credit_cost_key: "x-credit-cost".into(),
+            usdc_per_credit: "0".into(),
+        });
+        cfg.overrides = json!({"demo_one":{"params":{"q":false}}});
+        let view = projection(&cfg, &spec()).unwrap();
+        assert_eq!(view["pricing"]["total_operations"], 1);
+        assert_eq!(view["operations"]["GET /one"]["path"], "/one");
+        assert!(view["effective"]["compiler_error"].is_string());
+        assert_eq!(view["overrides"][0]["issues"][0]["problem"], "malformed");
+        assert!(view["overrides"][0]["missing_tool"].is_null());
+    }
+
     #[test]
     fn masked_prose_removed_notes_and_help_remain_visible() {
         let mut cfg = cfg();

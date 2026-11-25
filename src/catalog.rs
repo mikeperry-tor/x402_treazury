@@ -1831,6 +1831,8 @@ pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<Catalog
 /// Compare authored edits against the same compiled inventory before and after name filtering.
 pub struct CatalogComparison {
     pub baseline: Result<CatalogBuild>,
+    pub operations: Vec<Value>,
+    pub catalog_key: Option<String>,
     pub override_issues: Vec<OverrideIssue>,
     effective_check: Result<()>,
     tools: Vec<ToolSpec>,
@@ -1845,39 +1847,61 @@ impl CatalogComparison {
     }
 }
 
-pub fn compare_catalog(cfg: &Config, root: &Value, prefix: &str) -> CatalogComparison {
+pub fn compare_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogComparison> {
     let mut effective_check = validate_catalog_selectors(cfg);
+    let pricing = embedded_pricing(cfg, root)?;
+    let operations = project_operations(cfg, root, pricing.as_ref())?;
+    let catalog_key = pricing
+        .as_ref()
+        .and_then(PricingConfig::catalog_key)
+        .map(|key| {
+            if root.get("paths").is_some() {
+                key
+            } else {
+                "pricing"
+            }
+        })
+        .map(str::to_owned);
     let mut tools = Vec::new();
     let mut override_issues = Vec::new();
-    let baseline = build_catalog_inventory(cfg, root, prefix).map(|(mut baseline, _)| {
-        tools = baseline.tools.clone();
-        override_issues = apply_tool_overrides(cfg, &mut tools);
-        if effective_check.is_ok() {
-            effective_check =
-                select_catalog_tools(cfg, prefix, &mut tools, &baseline.issues, &mut Vec::new())
-                    .and_then(|()| {
-                        if baseline.issues.is_empty() {
-                            Ok(())
-                        } else {
-                            Err(IncompleteCatalog(baseline.issues.clone()).into())
-                        }
-                    });
+    let baseline = validate_credit_pricing(cfg)
+        .and_then(|()| build_catalog_inventory(cfg, root, prefix, &operations, pricing.as_ref()))
+        .map(|(mut baseline, _)| {
+            tools = baseline.tools.clone();
+            override_issues = apply_tool_overrides(cfg, &mut tools);
             if effective_check.is_ok() {
-                contracts::render_descriptions(&mut tools);
+                effective_check = select_catalog_tools(
+                    cfg,
+                    prefix,
+                    &mut tools,
+                    &baseline.issues,
+                    &mut Vec::new(),
+                )
+                .and_then(|()| {
+                    if baseline.issues.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(IncompleteCatalog(baseline.issues.clone()).into())
+                    }
+                });
+                if effective_check.is_ok() {
+                    contracts::render_descriptions(&mut tools);
+                }
             }
-        }
-        baseline.render_descriptions();
-        baseline
-    });
+            baseline.render_descriptions();
+            baseline
+        });
     if baseline.is_err() {
         override_issues = cfg.override_container_issues();
     }
-    CatalogComparison {
+    Ok(CatalogComparison {
         baseline,
+        operations,
+        catalog_key,
         override_issues,
         effective_check,
         tools,
-    }
+    })
 }
 
 /// Compile named tools so callers can rebind references before rendering.
@@ -1907,7 +1931,11 @@ pub(crate) fn build_catalog_unreported(
 
 fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
     validate_catalog_selectors(cfg)?;
-    let (mut built, credit_diagnostics) = build_catalog_inventory(cfg, root, prefix)?;
+    let pricing = embedded_pricing(cfg, root)?;
+    validate_credit_pricing(cfg)?;
+    let operations = project_operations(cfg, root, pricing.as_ref())?;
+    let (mut built, credit_diagnostics) =
+        build_catalog_inventory(cfg, root, prefix, &operations, pricing.as_ref())?;
     built.override_issues = apply_tool_overrides(cfg, &mut built.tools);
     select_catalog_tools(
         cfg,
@@ -1930,33 +1958,49 @@ fn validate_catalog_selectors(cfg: &Config) -> Result<()> {
     }.into())
 }
 
-fn build_catalog_inventory(
-    cfg: &Config,
-    root: &Value,
-    prefix: &str,
-) -> Result<(CatalogBuild, credit_pricing::Diagnostics)> {
-    let embedded_pricing = match cfg.effective_pricing()? {
+fn embedded_pricing(cfg: &Config, root: &Value) -> Result<Option<PricingConfig>> {
+    Ok(match cfg.effective_pricing()? {
         Some(pricing) if pricing.catalog_key().is_some() => Some(pricing),
         None if root.get("paths").is_none() => Some(PricingConfig::legacy("pricing")),
         _ => None,
-    };
+    })
+}
+
+fn project_operations(
+    cfg: &Config,
+    root: &Value,
+    pricing: Option<&PricingConfig>,
+) -> Result<Vec<Value>> {
+    operations_with_credits(
+        root,
+        pricing.and_then(PricingConfig::catalog_key),
+        cfg.credit_pricing
+            .as_ref()
+            .map(|credits| credits.credit_cost_key.as_str()),
+    )
+}
+
+fn validate_credit_pricing(cfg: &Config) -> Result<()> {
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
             error,
             reason: "Provider credit-pricing settings are invalid",
         })?;
     }
+    Ok(())
+}
+
+fn build_catalog_inventory(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+    operations: &[Value],
+    embedded_pricing: Option<&PricingConfig>,
+) -> Result<(CatalogBuild, credit_pricing::Diagnostics)> {
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(
-        cfg,
-        root,
-        prefix,
-        embedded_pricing
-            .as_ref()
-            .and_then(PricingConfig::catalog_key),
-    )?;
+    } = selected_operations(cfg, operations, prefix)?;
     // A help document cannot disguise the absence of every selected API contract.
     if selected.is_empty() && (!issues.is_empty() || cfg.allow_empty_selection) {
         let selection_notices = if issues.is_empty() {
@@ -1981,12 +2025,10 @@ fn build_catalog_inventory(
     let mut tools = selected
         .into_iter()
         .map(|(op, name, input)| {
-            let price = embedded_pricing
-                .as_ref()
-                .map_or_else(NormalizedPrice::unknown, |pricing| {
-                    NormalizedPrice::parse(pricing, &op["pricing"])
-                });
-            operation_tool(cfg, root, &op, name, input, price, &mut credit_diagnostics)
+            let price = embedded_pricing.map_or_else(NormalizedPrice::unknown, |pricing| {
+                NormalizedPrice::parse(pricing, &op["pricing"])
+            });
+            operation_tool(cfg, root, op, name, input, price, &mut credit_diagnostics)
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
@@ -2142,16 +2184,12 @@ pub(crate) fn tool_names_before_filtering(
     root: &Value,
     prefix: &str,
 ) -> Result<Vec<String>> {
-    let pricing = cfg.effective_pricing()?;
+    let pricing = embedded_pricing(cfg, root)?;
+    let operations = project_operations(cfg, root, pricing.as_ref())?;
     let OperationSelection {
         operations: selected,
         issues,
-    } = selected_operations(
-        cfg,
-        root,
-        prefix,
-        pricing.as_ref().and_then(PricingConfig::catalog_key),
-    )?;
+    } = selected_operations(cfg, &operations, prefix)?;
     if !issues.is_empty() {
         return Err(IncompleteCatalog(issues).into());
     }
@@ -2164,40 +2202,28 @@ pub(crate) fn tool_names_before_filtering(
 
 // Selection and collision naming depend on the entire sorted inventory.
 // Compatible named operations and their omissions belong to the same selection.
-struct OperationSelection {
-    operations: Vec<(Value, String, input::OperationInput)>,
+struct OperationSelection<'a> {
+    operations: Vec<(&'a Value, String, input::OperationInput)>,
     issues: Vec<OperationIssue>,
 }
 
-fn selected_operations(
+fn selected_operations<'a>(
     cfg: &Config,
-    root: &Value,
+    operations: &'a [Value],
     prefix: &str,
-    pricing_key: Option<&str>,
-) -> Result<OperationSelection> {
-    let mut ops = operations_with_credits(
-        root,
-        pricing_key,
-        cfg.credit_pricing
-            .as_ref()
-            .map(|c| c.credit_cost_key.as_str()),
-    )?;
-    for op in &ops {
+) -> Result<OperationSelection<'a>> {
+    for op in operations {
         ensure!(
             op["path"].is_string() && op["method"].is_string(),
             "invalid operation"
         );
     }
-    ops.sort_by_key(|o| {
-        (
-            o["path"].as_str().unwrap().to_owned(),
-            o["method"].as_str().unwrap().to_owned(),
-        )
-    });
+    let mut ops: Vec<_> = operations.iter().collect();
+    ops.sort_by_key(|&o| (o["path"].as_str().unwrap(), o["method"].as_str().unwrap()));
     let mut selected = Vec::new();
     let had_operations = !ops.is_empty();
     for op in ops {
-        if let Some(base) = selected_operation_base(cfg, &op, prefix) {
+        if let Some(base) = selected_operation_base(cfg, op, prefix) {
             selected.push((op, base));
         }
     }
@@ -2216,7 +2242,7 @@ fn selected_operations(
     let mut issues = Vec::new();
     let mut compatible = Vec::new();
     for (op, base) in selected {
-        match input::prepare(&op) {
+        match input::prepare(op) {
             Ok(input) => compatible.push((op, base, input)),
             Err(error) => {
                 let Some(reason) = error.downcast_ref::<Unsupported>() else {
@@ -2297,10 +2323,10 @@ fn selected_operation_base(cfg: &Config, op: &Value, prefix: &str) -> Option<Str
     Some(base)
 }
 
-fn name_selected_operations(
-    selected: Vec<(Value, String, input::OperationInput)>,
+fn name_selected_operations<'a>(
+    selected: Vec<(&'a Value, String, input::OperationInput)>,
     counts: &BTreeMap<String, usize>,
-) -> Vec<(Value, String, input::OperationInput)> {
+) -> Vec<(&'a Value, String, input::OperationInput)> {
     let mut seen = BTreeMap::<String, usize>::new();
     let mut named = Vec::new();
     for (op, base, input) in selected {
