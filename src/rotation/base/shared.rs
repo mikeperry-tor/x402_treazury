@@ -240,9 +240,8 @@ mod tests {
         .await
         .unwrap();
         first.abort();
-        let _ = first.await;
-        let joined = launch(query.clone());
-        let mut changed = query;
+        assert!(matches!(first.await, Err(error) if error.is_cancelled()));
+        let mut changed = query.clone();
         changed.captures.get_mut(&job.wallet_id).unwrap().generation += 1;
         let independent = launch(changed);
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -251,18 +250,23 @@ mod tests {
             }
         })
         .await
-        .unwrap();
-        // The two owners remain blocked; a cancelled first waiter did not spawn a third.
-        tokio::task::yield_now().await;
-        assert_eq!(chains.load(Ordering::SeqCst), 2);
+        .expect("the changed capture must start while the first request is blocked");
+        let rpc = BaseRpc::new(&url).unwrap();
+        let mut joined = Box::pin(rpc.shared_balance_view(query, store.clone()));
+        assert!(futures_util::poll!(joined.as_mut()).is_pending());
         held.store(false, Ordering::SeqCst);
         release.notify_waiters();
-        let joined = joined.await.unwrap().unwrap();
+        let joined = joined.await.unwrap();
         let independent = independent.await.unwrap().unwrap();
 
         assert_eq!(joined.observations, independent.observations);
         drop(store);
         owner.await.unwrap();
+        assert_eq!(
+            chains.load(Ordering::SeqCst),
+            2,
+            "the duplicate must share the first request"
+        );
         server.abort();
     }
 

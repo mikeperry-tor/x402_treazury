@@ -92,19 +92,14 @@ async fn canceled_direct_waiter_retains_exact_signed_dispatch_and_body_drain() {
     .await
     .unwrap();
     assert!(progress.possible());
-    let drain = tokio::spawn({
-        let client = client.clone();
-        async move { client.drain().await }
-    });
-    tokio::task::yield_now().await;
+    let mut drain = std::pin::pin!(client.drain());
     assert!(
-        !drain.is_finished(),
+        futures_util::poll!(drain.as_mut()).is_pending(),
         "retained owner includes response body conversion"
     );
     seller.release_body.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(10), drain)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(seller.unsigned.load(Ordering::SeqCst), 1);
     assert_eq!(seller.signed.load(Ordering::SeqCst), 1);
@@ -158,13 +153,12 @@ async fn retained_outer_owner_reuses_task_and_inner_owner_tracks_drain() {
     });
     entered.notified().await;
     waiter.abort();
-    let drain = tokio::spawn(async move { inner.drain().await });
-    tokio::task::yield_now().await;
-    assert!(!drain.is_finished());
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    let mut drain = std::pin::pin!(inner.drain());
+    assert!(futures_util::poll!(drain.as_mut()).is_pending());
     release.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(10), drain)
         .await
-        .unwrap()
         .unwrap();
 }
 
@@ -210,22 +204,18 @@ async fn accepted_work_reenters_same_owner_during_drain_but_not_a_closed_other_o
     entered.notified().await;
     waiter.abort();
     assert!(waiter.await.unwrap_err().is_cancelled());
-    owner.close();
     other.close();
-    let drain = tokio::spawn({
-        let owner = owner.clone();
-        async move { owner.drain().await }
-    });
+    let mut drain = std::pin::pin!(owner.drain());
+    assert!(futures_util::poll!(drain.as_mut()).is_pending());
     resume.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(5), nested_entered.notified())
         .await
         .unwrap();
-    assert!(!drain.is_finished());
+    assert!(futures_util::poll!(drain.as_mut()).is_pending());
     finish.notify_one();
     assert_eq!(result_rx.await.unwrap().unwrap(), 7);
     tokio::time::timeout(std::time::Duration::from_secs(5), drain)
         .await
-        .unwrap()
         .unwrap();
     assert!(
         ownership::run(&owner, async { panic!("new work ran") })

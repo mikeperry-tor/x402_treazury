@@ -130,6 +130,8 @@ async fn pending_addition_owns_registration_across_eviction_payer_change_and_can
     assert_eq!(added["name"], "held");
     assert_eq!(m.inner.lock().unwrap().state.records.len(), 2);
     assert_eq!(m.catalog.read().generation, 2);
+    // The duplicate can acquire the lock before the first guard finishes dropping.
+    m.source_client("writer").unwrap().drain().await;
     assert!(
         m.additions
             .lock()

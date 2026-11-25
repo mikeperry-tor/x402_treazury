@@ -723,13 +723,10 @@ mod tests {
             held_schema(&manager, r#"{"openapi":"3.0.3","servers":[{"url":"https://api.example.com"}],"paths":{"/replacement":{"get":{}}}}"#).await;
         binding.trigger();
         entered.notified().await;
-        // This handle is retained independently of any static publisher task.
-        let drain_owner = manager.clone();
-        let drain = tokio::spawn(async move { drain_owner.drain_owned_work().await });
-        tokio::task::yield_now().await;
-        assert!(!drain.is_finished());
+        let mut drain = std::pin::pin!(manager.drain_owned_work());
+        assert!(futures_util::poll!(drain.as_mut()).is_pending());
         release.notify_one();
-        drain.await.unwrap();
+        drain.await;
         assert_eq!(manager.inner.lock().unwrap().state.records[&id].revision, 2);
         assert!(!binding.refreshing());
         task.abort();

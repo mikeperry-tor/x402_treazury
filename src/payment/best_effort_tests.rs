@@ -514,13 +514,11 @@ async fn run_private(
         .await
         .unwrap();
         waiter.abort();
-        let _ = waiter.await;
-        let draining = client.clone();
-        let drain = tokio::spawn(async move { draining.drain().await });
-        tokio::task::yield_now().await;
-        assert!(!drain.is_finished());
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        let mut drain = std::pin::pin!(client.drain());
+        assert!(futures_util::poll!(drain.as_mut()).is_pending());
         f.release.notify_waiters();
-        drain.await.unwrap();
+        drain.await;
         None
     } else if let Some((_, claim, _)) = &authority {
         Some(claim.invoke(client.execute(route)).await)
