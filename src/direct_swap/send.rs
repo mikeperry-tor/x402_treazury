@@ -4,6 +4,8 @@ use crate::rotation::store::direct_swap::{
     DirectSendAction, DirectSendAuthority, DirectSourceCondition,
 };
 use crate::treasury::{FeePreview, FeePreviewUnavailable, FeeTarget};
+use alloy_primitives::U256;
+use zcash_primitives::transaction::fees::zip317::MINIMUM_FEE;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,8 +25,24 @@ pub(super) struct Send {
     request_id: String,
 }
 
+fn minimum_debit(principal: u64) -> u64 {
+    principal.saturating_add(MINIMUM_FEE.into_u64())
+}
+
+fn validate_known_send_cap(maximum: Option<u64>, principal: U256) -> Result<()> {
+    ensure!(maximum != Some(0), "direct send total-debit limit is zero");
+    ensure!(
+        maximum.is_none_or(
+            |limit| principal.saturating_add(U256::from(MINIMUM_FEE.into_u64()))
+                <= U256::from(limit)
+        ),
+        "direct send total-debit limit is below the minimum principal and network fee"
+    );
+    Ok(())
+}
+
 impl Service {
-    async fn validate_destination(&self, destination: &Destination) -> Result<bool> {
+    async fn validate_destination(&self, destination: &Destination) -> Result<Option<u64>> {
         ensure!(
             route::atomic(&destination.amount)? > alloy_primitives::U256::ZERO,
             "amount must be positive"
@@ -33,16 +51,16 @@ impl Service {
             !destination.recipient.trim().is_empty(),
             "recipient is required"
         );
-        let native = destination.asset_id == route::ZEC;
-        if native {
+        if destination.asset_id == route::ZEC {
             ensure!(destination.chain == "zec", "native ZEC requires chain zec");
-            native_amount(&destination.amount)?;
+            let amount = native_amount(&destination.amount)?;
             let chain = self.store.call(|s| Ok(s.network().chain())).await?;
             crate::treasury::native_recipient(&chain, &destination.recipient)?;
+            Ok(Some(amount))
         } else {
             self.near()?;
+            Ok(None)
         }
-        Ok(native)
     }
     pub(super) async fn preview(
         &self,
@@ -50,10 +68,9 @@ impl Service {
         config: &Config,
         destination: Destination,
     ) -> Result<Value> {
-        let native = self.validate_destination(&destination).await?;
+        let native_principal = self.validate_destination(&destination).await?;
         let cap = config.max_debit_zatoshis()?;
-        if native {
-            let principal = native_amount(&destination.amount)?;
+        if let Some(principal) = native_principal {
             let estimate = self
                 .fee_estimate(
                     FeeTarget::Native(destination.recipient.clone()),
@@ -103,52 +120,69 @@ impl Service {
             amount: request.amount.clone(),
             recipient: request.recipient.clone(),
         };
-        let native = self.validate_destination(&destination).await?;
+        let native_principal = self.validate_destination(&destination).await?;
+        let maximum = config.max_debit_zatoshis();
+        let route = if native_principal.is_some() {
+            DirectRoute::Native
+        } else {
+            DirectRoute::Near
+        };
         let owner_owned = owner.to_owned();
         let request_id = request.request_id.clone();
         let terms = serde_json::to_value(&request)?;
-        let (operation, created) = self
+        let (id, foreign_authority) = self
             .store
             .call(move |s| {
-                if native {
-                    s.reserve_native(&owner_owned, "send", &request_id, terms)
-                } else {
-                    s.reserve_direct(&owner_owned, "send", &request_id, terms)
+                let (operation, _, authority) = s.reserve_direct_route(
+                    &owner_owned,
+                    "send",
+                    &request_id,
+                    terms,
+                    route,
+                    |saved| {
+                        if saved
+                            .is_some_and(|op| op.authority.is_some() || route == DirectRoute::Near)
+                        {
+                            return Ok(None);
+                        }
+                        let max_debit_zatoshis = maximum?;
+                        validate_known_send_cap(
+                            max_debit_zatoshis,
+                            U256::from(native_principal.unwrap_or(1)),
+                        )?;
+                        Ok(Some(DirectSendAuthority { max_debit_zatoshis }))
+                    },
+                )?;
+                match (route, authority) {
+                    (DirectRoute::Native, Some(authority)) => {
+                        s.accept_direct_send(&operation.id, None, authority)?;
+                        Ok((operation.id, None))
+                    }
+                    (_, authority) => Ok((operation.id, authority)),
                 }
             })
             .await?;
-        if operation.authority.is_some() || (!native && !created) {
-            return self.status(owner, &operation.id).await;
-        }
-        let maximum = config.max_debit_zatoshis()?;
-        ensure!(maximum != Some(0), "direct send total-debit limit is zero");
-        let quote = if native {
-            let principal = native_amount(&request.amount)?;
-            ensure!(
-                maximum.is_none_or(|limit| principal <= limit),
-                "native principal exceeds direct send total-debit limit"
-            );
-            None
-        } else {
-            let refund = self
-                .backend()?
-                .treasury
-                .direct_address(operation.id.clone())
+        if let Some(authority) = foreign_authority {
+            let refund = self.backend()?.treasury.direct_address(id.clone()).await?;
+            let identity = self.identity(&id).await?;
+            let quote = self
+                .output_quote(&destination, &refund, &identity, false)
                 .await?;
-            let identity = self.identity(&operation.id).await?;
-            Some(serde_json::to_value(
-                self.output_quote(&destination, &refund, &identity, false)
-                    .await?,
-            )?)
-        };
-        let authority = DirectSendAuthority {
-            max_debit_zatoshis: maximum,
-        };
-        let id = operation.id.clone();
-        self.store
-            .call(move |s| s.accept_direct_send(&id, quote, authority))
-            .await?;
-        self.status(owner, &operation.id).await
+            let principal = route::atomic(&quote.input)?;
+            if let Err(error) = validate_known_send_cap(authority.max_debit_zatoshis, principal) {
+                self.store
+                    .call(move |s| s.reject_direct_send_debit(&id))
+                    .await
+                    .context("could not save the direct-send debit rejection")?;
+                return Err(error);
+            }
+            let quote = serde_json::to_value(quote)?;
+            let operation_id = id.clone();
+            self.store
+                .call(move |s| s.accept_direct_send(&operation_id, Some(quote), authority))
+                .await?;
+        }
+        self.status(owner, &id).await
     }
     async fn output_quote(
         &self,
@@ -304,7 +338,7 @@ fn advisory_fee(
     let fee = observation.fee.as_ref().ok().copied();
     let reason = observation.fee.err();
     let total = fee.and_then(|fee| principal.checked_add(fee));
-    let known_debit = total.unwrap_or(principal);
+    let known_debit = total.unwrap_or_else(|| minimum_debit(principal));
     let fits = if reason == Some(FeePreviewUnavailable::InsufficientFunds)
         || cap.is_some_and(|limit| known_debit > limit)
         || available.is_some_and(|limit| known_debit > limit)
@@ -386,6 +420,17 @@ mod preview_tests {
         );
         assert!(missing["fits"].is_null());
         assert_eq!(missing["unavailable_reason"], "scan_required");
+        for (cap, fits) in [(109_999, json!(false)), (110_000, Value::Null)] {
+            let result = advisory_fee(
+                observation(None, Err(FeePreviewUnavailable::ScanRequired)),
+                100_000,
+                Some(cap),
+                "native_transaction",
+            );
+            assert_eq!(result["fits"], fits);
+            assert!(result["network_fee_zatoshis"].is_null());
+            assert!(result["total_debit_zatoshis"].is_null());
+        }
         let unexpected = advisory_fee(
             Err(anyhow::anyhow!("private upstream diagnostic")),
             100_000,

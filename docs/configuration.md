@@ -821,10 +821,11 @@ send = true
   reserves no inputs, creates no proof). Reports principal, `max_send_zec`, and
   `fee_estimate` (advisory spendable Ironwood balance, ZIP-317 fee, total,
   `available_debit_zatoshis = min(spendable_balance, max_send_zec)`, and
-  `fits`). When balance or fee data is unknown, `fits` is `null` (never
-  treating an unknown balance as zero) unless a known limit already proves
-  `fits = false`. Foreign previews run a dry `EXACT_OUTPUT` quote against an
-  existing shielded refund receiver with fee basis `near_deposit_output_shape`.
+  `fits`). When balance or fee data is unknown, `fits` is `null` unless the
+  SDK reports insufficient funds or the debit already exceeds a known limit.
+  The minimum SDK fee provides a lower bound when the estimated fee is unknown.
+  Foreign previews run a dry `EXACT_OUTPUT` quote against an existing
+  shielded refund receiver with fee basis `near_deposit_output_shape`.
 - **`x402_treazury_swap_send`:** Sends native ZEC to a shielded-only recipient
   or runs an internal `EXACT_OUTPUT` NEAR quote for a foreign amount (no
   destination memos or tags). `swap_control.max_send_zec` caps principal plus

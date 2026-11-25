@@ -160,14 +160,20 @@ impl Store {
         terms: Value,
         validate_new: impl FnOnce() -> Result<()>,
     ) -> Result<(DirectOperation, bool)> {
-        self.reserve_direct_route(
+        let (record, created, ()) = self.reserve_direct_route(
             owner,
             kind,
             request_id,
             terms,
             DirectRoute::Near,
-            validate_new,
-        )
+            |saved| {
+                if saved.is_none() {
+                    validate_new()?;
+                }
+                Ok(())
+            },
+        )?;
+        Ok((record, created))
     }
     pub fn reserve_native(
         &mut self,
@@ -176,20 +182,25 @@ impl Store {
         request_id: &str,
         terms: Value,
     ) -> Result<(DirectOperation, bool)> {
-        native_amount(&terms)?;
-        self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Native, || {
-            Ok(())
-        })
+        let (record, created, ()) =
+            self.reserve_direct_route(owner, kind, request_id, terms, DirectRoute::Native, |_| {
+                Ok(())
+            })?;
+        Ok((record, created))
     }
-    fn reserve_direct_route(
+    /// Resolve matching saved terms before admission and insert only after fresh admission succeeds.
+    pub(crate) fn reserve_direct_route<T>(
         &mut self,
         owner: &str,
         kind: &str,
         request_id: &str,
         terms: Value,
         route: DirectRoute,
-        validate_new: impl FnOnce() -> Result<()>,
-    ) -> Result<(DirectOperation, bool)> {
+        admit: impl FnOnce(Option<&DirectOperation>) -> Result<T>,
+    ) -> Result<(DirectOperation, bool, T)> {
+        if route == DirectRoute::Native {
+            native_amount(&terms)?;
+        }
         ensure!(
             !owner.is_empty() && !request_id.is_empty(),
             "direct operation owner and request ID are required"
@@ -212,9 +223,10 @@ impl Store {
                 record.terms == terms && record.route == route,
                 "request ID already used with different terms"
             );
-            return Ok((record, false));
+            let admission = admit(Some(&record))?;
+            return Ok((record, false, admission));
         }
-        validate_new()?;
+        let admission = admit(None)?;
         let record = DirectOperation {
             id: Uuid::new_v4().to_string(),
             route,
@@ -240,7 +252,7 @@ impl Store {
             &serde_json::to_vec(&record)?,
         )?;
         self.db.execute("INSERT INTO direct_operations(id,owner,kind,request_id,payload) VALUES (?1,?2,?3,?4,?5)", params![record.id, owner, kind, request_id, payload])?;
-        Ok((record, true))
+        Ok((record, true, admission))
     }
     fn save_direct(&mut self, record: &DirectOperation) -> Result<()> {
         let payload = seal(

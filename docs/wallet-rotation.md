@@ -94,8 +94,13 @@ signed-byte journal with managed funding.
 - **Spending cap (`max_send_zec`):** Optional per-send total debit (principal
   plus SDK-calculated ZIP-317 network fee) saved with acceptance, verified
   against the proposal and final transaction, and preserved across restarts
-  (omitted or `"none"` is unlimited; `"0"` denies new sends). Applies only to
-  direct sends, never managed funding.
+  (omitted or `"none"` is unlimited). Before reserving a new request, the
+  service checks that the cap can cover a positive principal and the minimum
+  SDK fee. It uses the requested principal for native sends. For foreign sends,
+  it checks the quoted principal before accepting the send. A quote that
+  exceeds the cap with the minimum fee leaves a saved rejection without a
+  deposit quote or spending authority. Status and identical retries report
+  the rejection. Applies only to direct sends, never managed funding.
 - **Non-executable previews (`swap_preview`):** Request advisory Ironwood
   spendability and ZIP-317 fee via the treasury actor using an unsigned
   proposal (for foreign sends, an internal transparent-output shape and an

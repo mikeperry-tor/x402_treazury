@@ -62,8 +62,12 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
                 calls.fetch_add(1,Ordering::SeqCst);
                 assert_eq!(request["swapType"],"EXACT_OUTPUT");
                 assert_eq!(request["amount"],"5000000");
-                assert_eq!(request["recipient"],"customer-destination");
-                let mut response=json!({"quoteRequest":request,"quote":{"amountIn":"50000","minAmountIn":"49500","amountOut":"5000000","minAmountOut":"5000000"}});
+                let input = match request["recipient"].as_str().unwrap() {
+                    "customer-destination" => "50000".into(),
+                    "oversized-quote" => alloy_primitives::U256::MAX.to_string(),
+                    _ => panic!("unexpected quote recipient"),
+                };
+                let mut response=json!({"quoteRequest":request,"quote":{"amountIn":input,"minAmountIn":"49500","amountOut":"5000000","minAmountOut":"5000000"}});
                 if response["quoteRequest"]["dry"]==false {
                     response["quote"]["depositAddress"]=json!(DEPOSIT);
                     response["quote"]["deadline"]=response["quoteRequest"]["deadline"].clone();
@@ -152,16 +156,63 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
     denied["request_id"] = json!("too-small");
     let denied_config = Config {
         send: true,
-        max_send_zec: Some("0.00049999".into()),
+        max_send_zec: Some("0.00059999".into()),
         ..Default::default()
     };
     assert!(
         service
-            .invoke("owner", &denied_config, "x402_treazury_swap_send", denied)
+            .invoke(
+                "owner",
+                &denied_config,
+                "x402_treazury_swap_send",
+                denied.clone()
+            )
             .await
             .is_err()
     );
-    assert_eq!(quote_calls.load(Ordering::SeqCst), 3);
+    let rejected = service
+        .invoke("owner", &config, "x402_treazury_swap_send", denied.clone())
+        .await
+        .unwrap();
+    assert_eq!(rejected["operation"]["state"], "rejected_debit_limit");
+    assert!(rejected["operation"]["quote"].is_null());
+    assert!(rejected["operation"]["authority"].is_null());
+    assert!(rejected["source"]["source_error"].is_string());
+    assert_eq!(rejected["source"]["preparation_accepted"], false);
+    let rejected_id = rejected["operation"]["id"].as_str().unwrap().to_owned();
+    denied["recipient"] = json!("different-recipient");
+    assert!(
+        service
+            .invoke("owner", &config, "x402_treazury_swap_send", denied)
+            .await
+            .is_err()
+    );
+    let mut oversized = destination;
+    oversized["recipient"] = json!("oversized-quote");
+    oversized["request_id"] = json!("oversized-quote");
+    assert!(
+        service
+            .invoke(
+                "owner",
+                &config,
+                "x402_treazury_swap_send",
+                oversized.clone()
+            )
+            .await
+            .is_err()
+    );
+    let oversized_rejection = service
+        .invoke("owner", &config, "x402_treazury_swap_send", oversized)
+        .await
+        .unwrap();
+    assert_eq!(
+        oversized_rejection["operation"]["state"],
+        "rejected_debit_limit"
+    );
+    assert!(oversized_rejection["operation"]["quote"].is_null());
+    assert!(oversized_rejection["operation"]["authority"].is_null());
+    assert_eq!(oversized_rejection["source"]["preparation_accepted"], false);
+    assert_eq!(quote_calls.load(Ordering::SeqCst), 4);
     store
         .call(|s| {
             assert!(
@@ -205,6 +256,22 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
     let actor_stop = CancellationToken::new();
     let actor = tokio::spawn(owner.run_commands(commands, sender, actor_stop.clone()));
     let source_only = Service::native(store.clone(), treasury.clone(), 1);
+    for (request_id, rejection) in [
+        ("too-small", rejected),
+        ("oversized-quote", oversized_rejection),
+    ] {
+        let saved = source_only
+            .invoke(
+                "owner",
+                &config,
+                "x402_treazury_swap_status",
+                json!({"kind":"send","request_id":request_id}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved["operation"], rejection["operation"]);
+        assert!(saved["source"]["operation"].is_null());
+    }
     let service_stop = CancellationToken::new();
     let progress = tokio::spawn({
         let service = source_only.clone();
@@ -222,7 +289,7 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
         broadcast.try_recv().is_err(),
         "source owner must not duplicate submission"
     );
-    assert_eq!(quote_calls.load(Ordering::SeqCst), 3);
+    assert_eq!(quote_calls.load(Ordering::SeqCst), 4);
     assert_eq!(
         status_calls.load(Ordering::SeqCst),
         0,
@@ -239,6 +306,11 @@ async fn foreign_preview_acceptance_and_native_only_source_recovery_preserve_bou
             assert_eq!(prepared.facts().unwrap().amount_zatoshis, 50_000);
             assert_eq!(s.direct_send_binding(&saved)?.unwrap().recipient, DEPOSIT);
             assert_eq!(s.operation(&saved)?.submission, "BROADCAST");
+            assert!(matches!(
+                s.direct_send_action(&rejected_id, None)?,
+                crate::rotation::store::direct_swap::DirectSendAction::NoAutomaticAction
+            ));
+            assert!(s.operation(&rejected_id).is_err());
             assert!(s.funding_jobs()?.is_empty());
             assert!(s.status()?.pools.is_empty());
             Ok(())

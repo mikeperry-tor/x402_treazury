@@ -237,6 +237,139 @@ fn direct_send_total_debit_configuration_is_optional_and_exact() {
 }
 
 #[tokio::test]
+async fn known_send_caps_leave_new_request_ids_available_and_preserve_saved_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = crate::rotation::store::Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"wallet",
+    )
+    .unwrap();
+    let recipient = crate::rotation::near::test_shielded_refund(&state.network().chain());
+    let (store, worker) = StoreHandle::spawn(state);
+    let (treasury, commands) = crate::treasury::actor::channel();
+    let service = Service::new(
+        store.clone(),
+        treasury,
+        NearClient::test_at("http://127.0.0.1:1").unwrap(),
+        serde_json::from_value(json!({})).unwrap(),
+    );
+    let mut native = json!({"asset_id":route::ZEC,"chain":"zec","amount":"200",
+        "recipient":recipient,"request_id":"new-native"});
+    let mut foreign = json!({"asset_id":"token:base-usdc","chain":"base","amount":"100",
+        "recipient":"fixture-recipient","request_id":"new-foreign"});
+    let mut config = Config {
+        send: true,
+        max_send_zec: Some("0".into()),
+        ..Default::default()
+    };
+    assert!(
+        service
+            .invoke("owner", &config, SEND, foreign.clone())
+            .await
+            .is_err()
+    );
+    config.max_send_zec = Some("0.0001".into());
+    assert!(
+        service
+            .invoke("owner", &config, SEND, foreign.clone())
+            .await
+            .is_err()
+    );
+    config.max_send_zec = Some("0.000101".into());
+    assert!(
+        service
+            .invoke("owner", &config, SEND, native.clone())
+            .await
+            .is_err()
+    );
+    store
+        .call(|s| {
+            for id in ["new-native", "new-foreign"] {
+                assert!(s.direct_request("owner", "send", id).is_err(), "{id}");
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(commands.test_is_empty());
+
+    let mut previously_reserved = native.clone();
+    previously_reserved["request_id"] = json!("previous-native");
+    let terms = previously_reserved.clone();
+    store
+        .call(move |s| {
+            s.reserve_native("owner", "send", "previous-native", terms)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        service
+            .invoke("owner", &config, SEND, previously_reserved.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .call(|s| Ok(s
+                .direct_request("owner", "send", "previous-native")?
+                .authority
+                .is_none()))
+            .await
+            .unwrap()
+    );
+
+    native["amount"] = json!("100");
+    let accepted = service
+        .invoke("owner", &config, SEND, native.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted["operation"]["authority"]["max_debit_zatoshis"],
+        10_100
+    );
+    config.max_send_zec = Some("0.000102".into());
+    let recovered = service
+        .invoke("owner", &config, SEND, previously_reserved)
+        .await
+        .unwrap();
+    assert_eq!(recovered["operation"]["request_id"], "previous-native");
+    assert_eq!(
+        recovered["operation"]["authority"]["max_debit_zatoshis"],
+        10_200
+    );
+    foreign["request_id"] = json!("previous-foreign");
+    let terms = foreign.clone();
+    let previous = store
+        .call(move |s| {
+            Ok(
+                s.reserve_direct("owner", "send", "previous-foreign", terms)?
+                    .0,
+            )
+        })
+        .await
+        .unwrap();
+    for maximum in ["0", "malformed"] {
+        config.max_send_zec = Some(maximum.into());
+        for (request, saved) in [
+            (&native, accepted["operation"].clone()),
+            (&foreign, serde_json::to_value(&previous).unwrap()),
+        ] {
+            let retry = service
+                .invoke("owner", &config, SEND, request.clone())
+                .await
+                .unwrap();
+            assert_eq!(retry["operation"], saved);
+        }
+    }
+    assert!(commands.test_is_empty());
+    drop((service, store, commands));
+    worker.await.unwrap();
+}
+
+#[tokio::test]
 async fn native_receipt_reuses_snapshot_evidence_without_occupying_sdk_owner() {
     let dir = tempfile::tempdir().unwrap();
     let state = crate::rotation::store::Store::create(

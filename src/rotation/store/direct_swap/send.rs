@@ -2,6 +2,8 @@
 use super::*;
 use crate::rotation::transaction::PrepareRequest;
 
+const REJECTED_DEBIT_LIMIT: &str = "rejected_debit_limit";
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DirectSendAuthority {
     pub max_debit_zatoshis: Option<u64>,
@@ -46,6 +48,23 @@ impl Store {
         )?;
         exists.then(|| self.direct_by_id(id)).transpose()
     }
+
+    pub(crate) fn reject_direct_send_debit(&mut self, id: &str) -> Result<()> {
+        let mut record = self.direct_by_id(id)?;
+        ensure!(
+            record.kind == "send"
+                && record.route == DirectRoute::Near
+                && record.state == "unknown_create"
+                && record.authority.is_none()
+                && record.quote.is_none(),
+            "operation is not an unaccepted foreign send"
+        );
+        record.state = REJECTED_DEBIT_LIMIT.into();
+        record.source_error =
+            Some("Quoted ZEC principal and the minimum network fee exceed the send limit".into());
+        self.save_direct(&record)
+    }
+
     pub fn accept_direct_send(
         &mut self,
         id: &str,
@@ -57,6 +76,10 @@ impl Store {
         if record.authority.is_some() {
             return Ok(record);
         }
+        ensure!(
+            record.state != REJECTED_DEBIT_LIMIT,
+            "direct send was rejected by the debit limit"
+        );
         self.require_direct_spending_policy()?;
         ensure!(
             record.quote.is_none(),
