@@ -853,3 +853,29 @@ async fn curated_cli_refresh_missing_provider_preserves_entire_accepted_state() 
     );
     assert!(restored.fetches.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn accepted_provider_persists_resolved_override_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='catalog.json'\nprefix='original'\n[overrides.original_read]\ndescription='Read records.'\n",
+    ).unwrap();
+    let local = toml::from_str(
+        "extends='provider.toml'\n[overrides_patch.original_read]\npricing_description='Billed per record.'\n",
+    ).unwrap();
+    let settings = crate::config::resolve(local, &dir.path().join("source.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let accepted = super::curated::AcceptedProvider::new("fixture", settings);
+    let persisted = serde_json::to_value(&accepted).unwrap();
+    assert!(persisted["settings"].get("overrides_patch").is_none());
+    let restored = serde_json::from_value(persisted).unwrap();
+    let document = serde_json::json!({"paths":{"/read":{"get":{"summary":"Original summary."}}}});
+    let (catalog, _) = super::curated::build(&restored, "alias", &document).unwrap();
+    assert_eq!(
+        catalog.tools[0].description,
+        "Read records. Configured pricing: Billed per record."
+    );
+}

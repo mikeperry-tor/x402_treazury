@@ -473,7 +473,12 @@ fn aliases_persist_and_parameter_metadata_targets_existing_body_properties() {
     let mut cfg = Config::default();
     let name = build_tools(&cfg, &document, "api").unwrap()[0].name.clone();
     cfg.overrides[name.as_str()] = json!({"params":{"ident":"URL identifier","ident_body":"JSON identifier","not_a_field":"ignored"}});
-    let tool = build_tools(&cfg, &document, "api").unwrap().remove(0);
+    let built = build_catalog(&cfg, &document, "api").unwrap();
+    assert!(built.check_overrides().is_err());
+    assert!(built.override_issues.iter().any(|issue| {
+        issue.target.as_deref() == Some("not_a_field") && issue.problem == OverrideProblem::Missing
+    }));
+    let tool = built.complete().unwrap().remove(0);
     assert_eq!(
         tool.input_schema["properties"]["ident"]["description"],
         "URL identifier"

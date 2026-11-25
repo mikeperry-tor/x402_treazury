@@ -7,6 +7,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod patch;
+
 #[derive(Serialize)]
 pub struct ResolvedProvider {
     pub settings: Config,
@@ -152,9 +154,11 @@ pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<Resolve
         origins.remove("pricing");
         origins.remove("pricing_key");
     }
-    // Top-level fields replace in full; arrays and override maps never concatenate.
+    let declaring = declaring.display().to_string();
+    patch::compose(&mut inherited, &mut local, &mut origins, &declaring)?;
+    // Whole fields retain their replacement behavior.
     for (key, value) in local {
-        origins.insert(key.clone(), declaring.display().to_string());
+        origins.insert(key.clone(), declaring.clone());
         inherited.insert(key, value);
     }
     let settings: Config = toml::Value::Table(inherited)

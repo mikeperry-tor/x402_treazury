@@ -75,6 +75,7 @@ pub struct CatalogBuild {
     pub tools: Vec<ToolSpec>,
     pub issues: Vec<OperationIssue>,
     pub selection_notices: Vec<SelectionNotice>,
+    pub override_issues: Vec<super::OverrideIssue>,
 }
 /// An authored selector that matches no tools in the current selected inventory.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -99,11 +100,33 @@ impl std::fmt::Display for IncompleteCatalog {
 }
 impl std::error::Error for IncompleteCatalog {}
 impl CatalogBuild {
+    pub(crate) fn render_descriptions(&mut self) {
+        render_descriptions(&mut self.tools);
+    }
+
+    pub fn check_overrides(&self) -> Result<()> {
+        super::overrides::check_issues(&self.override_issues)
+    }
+
     pub fn complete(self) -> Result<Vec<ToolSpec>> {
         if !self.issues.is_empty() {
             return Err(IncompleteCatalog(self.issues).into());
         }
         Ok(self.tools)
+    }
+
+    /// Reject omitted operations and discarded override fields.
+    pub fn complete_strict(self) -> Result<Vec<ToolSpec>> {
+        self.check_overrides()?;
+        self.complete()
+    }
+}
+
+pub(super) fn render_descriptions(tools: &mut [ToolSpec]) {
+    for tool in tools {
+        if let Some(rendering) = &tool.description_rendering {
+            tool.description = rendering.canonical();
+        }
     }
 }
 pub fn omission_instructions(issues: &[OperationIssue]) -> Option<String> {

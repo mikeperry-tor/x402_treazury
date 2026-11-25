@@ -793,27 +793,9 @@ async fn managed_starter_exposes_exa_and_provider_capabilities_without_financial
     assert!(shown.get("provider_management_remote").is_none());
     assert!(!dir.path().join("state").exists());
 
-    // Exercise deployment composition offline; provider-specific schema contracts
-    // are covered separately by the Exa regression in provider_catalogs.
-    let spec = serde_json::json!({
-        "openapi": "3.0.3", "info": {"title": "Search fixture", "version": "1"},
-        "paths": {
-            "/search": {"post": {"summary": "Search", "requestBody": {"content": {
-                "application/json": {"schema": {"type": "object", "properties": {
-                    "query": {"type": "string"}, "stream": {"type": "boolean"}
-                }}}
-            }}}},
-            "/contents": {"post": {"summary": "Contents", "requestBody": {"content": {
-                "application/json": {"schema": {"type": "object", "properties": {
-                    "urls": {"type": "array", "items": {"type": "string"}},
-                    "ids": {"type": "array", "items": {"type": "string"}}
-                }}}
-            }}}}
-        }
-    });
     std::fs::write(
         dir.path().join("spec.json"),
-        serde_json::to_vec(&spec).unwrap(),
+        include_bytes!("fixtures/exa_openapi.json"),
     )
     .unwrap();
     config["sources"]["exa"]

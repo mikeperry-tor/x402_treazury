@@ -27,7 +27,10 @@ fn local_catalog_normalizes_once_for_description_and_initial_hint() {
     overrides.overrides =
         json!({"api_read":{"description":"Authored.","pricing_description":"Cost: $9/record."}});
     let authored = build_tools(&overrides, &root, "api").unwrap().remove(0);
-    assert_eq!(authored.description, "Authored. Cost: $9/record.");
+    assert_eq!(
+        authored.description,
+        "Authored. Cost: ~$0.015/call [spec]. Configured pricing: Cost: $9/record."
+    );
     let bound = crate::catalog_state::bind(vec![(
         authored.clone(),
         crate::payment::PaidClient::unsigned(),

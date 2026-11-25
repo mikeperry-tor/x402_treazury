@@ -302,14 +302,14 @@ instructions_text = "Search the web and retrieve answers."
         let name = selected[0].name.clone();
         cfg.overrides = json!({name.clone():{"description":"Operator description."}});
         let overridden = catalog::build_tools(&cfg, &document, "socialfetch").unwrap();
-        assert_eq!(
-            overridden
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap()
-                .description,
-            "Operator description."
-        );
+        let revised = &overridden
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap()
+            .description;
+        assert!(revised.starts_with("Operator description."));
+        assert!(revised.contains("Estimated cost:"));
+        assert!(revised.contains("0.014"));
     }
 }
 

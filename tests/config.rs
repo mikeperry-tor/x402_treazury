@@ -3,6 +3,50 @@ use std::path::Path;
 use x402_treazury::{config, deployment::Deployment};
 
 #[tokio::test]
+async fn exact_parameter_patch_wins_over_an_inherited_alias_for_the_same_field() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='catalog.json'\n[overrides.api_read.params]\nquery_body='Inherited note.'\n",
+    )
+    .unwrap();
+    let local = "extends='provider.toml'\n[overrides_patch.api_read.params]\nquery='Local note.'\n";
+    let declaring = dir.path().join("local.toml");
+    let root = json!({"paths":{"/read":{"post":{"requestBody":{"content":{"application/json":{"schema":{
+        "type":"object","properties":{"query":{"type":"string"},"child":{"type":"object"}}
+    }}}}}}}});
+    let compile = |settings: &x402_treazury::catalog::Config| {
+        x402_treazury::catalog::build_catalog(settings, &root, "api").unwrap()
+    };
+    let resolved = config::resolve(toml::from_str(local).unwrap(), &declaring)
+        .await
+        .unwrap();
+    let built = compile(&resolved.settings);
+    let query = "/properties/body/properties/query";
+    assert_eq!(
+        built.tools[0].input_schema.pointer(query).unwrap()["description"],
+        "Local note."
+    );
+    assert_eq!(
+        built.override_issues[0].problem,
+        x402_treazury::catalog::OverrideProblem::DuplicateTarget
+    );
+    assert_eq!(built.override_issues[0].selected.as_deref(), Some(query));
+    assert!(built.check_overrides().is_err());
+
+    let corrected = format!("{local}query_body=false\n");
+    let resolved = config::resolve(toml::from_str(&corrected).unwrap(), &declaring)
+        .await
+        .unwrap();
+    let built = compile(&resolved.settings);
+    assert!(built.check_overrides().is_ok());
+    assert_eq!(
+        built.tools[0].input_schema.pointer(query).unwrap()["description"],
+        "Local note."
+    );
+}
+
+#[tokio::test]
 async fn composition_replaces_fields_and_resolves_paths_at_their_declaration() {
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("provider.toml");
@@ -836,7 +880,10 @@ shared_header = 'Exact quote identifier'
         assert_eq!(cfg.max_help_bytes, 42);
         assert!(!cfg.prefer_post);
         let tool = build_tools(&cfg, &document, "fixture").unwrap().remove(0);
-        assert_eq!(tool.description, "Purchase with an authored description");
+        assert_eq!(
+            tool.description,
+            "Purchase with an authored description Cost: unknown."
+        );
         assert_eq!(
             tool.input_schema["properties"]["shared_header"]["description"],
             "Exact quote identifier"
@@ -955,5 +1002,182 @@ fn catalog_lifetime_accepts_indefinite_seconds_and_zero() {
         "catalog_cache_ttl_seconds=1.5",
     ] {
         assert!(toml::from_str::<Config>(text).is_err());
+    }
+}
+
+#[tokio::test]
+async fn source_patches_compose_named_fields_and_keep_operation_mappings_atomic() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = dir.path().join("provider.toml");
+    let source = dir.path().join("deployment.toml");
+    std::fs::write(
+        &provider,
+        r#"
+spec = 'catalog.json'
+prefix = 'api'
+base_url = 'https://example.com'
+
+[overrides.api_one]
+description = 'Inherited first tool'
+pricing_description = 'Billed per request.'
+
+[overrides.api_one.params]
+'q/r' = 'Inherited first input'
+keep = 'Inherited second input'
+removed = 'Inherited third input'
+
+[overrides.api_two]
+description = 'Inherited second tool'
+
+[response_mappings.'GET /one']
+images = [{pointer = '/image', mime_type = 'image/png'}]
+omit = ['/before']
+
+[response_mappings.'GET /two']
+omit = ['/two']
+"#,
+    )
+    .unwrap();
+
+    let patch = r#"
+extends = 'provider.toml'
+
+[overrides_patch.api_one]
+description = false
+
+[overrides_patch.api_one.params]
+'q/r' = 'Local first input'
+removed = false
+
+[overrides_patch.never_created.params]
+missing = false
+
+[response_mappings_patch.'GET /one']
+omit = ['/local', '/ordered']
+"#;
+    let local = toml::from_str(patch).unwrap();
+    let resolved = config::resolve(local, &source).await.unwrap();
+    assert_eq!(
+        resolved.settings.overrides,
+        json!({
+            "api_one":{"pricing_description":"Billed per request.","params":{
+                "q/r":"Local first input","keep":"Inherited second input"
+            }},
+            "api_two":{"description":"Inherited second tool"}
+        })
+    );
+    let settings = serde_json::to_value(&resolved.settings).unwrap();
+    assert_eq!(
+        settings["response_mappings"],
+        json!({"GET /one":{"omit":["/local","/ordered"]},"GET /two":{"omit":["/two"]}})
+    );
+    assert_eq!(resolved.origins["overrides"], "mixed");
+    assert_eq!(resolved.origins["response_mappings"], "mixed");
+    for (pointer, owner) in [
+        ("/overrides/api_one/params/q~1r", &source),
+        ("/overrides/api_one/params/keep", &provider),
+        ("/overrides/api_two/description", &provider),
+        ("/response_mappings/GET ~1one", &source),
+        ("/response_mappings/GET ~1two", &provider),
+    ] {
+        assert_eq!(resolved.origins[pointer], owner.display().to_string());
+    }
+    assert!(
+        !resolved
+            .origins
+            .contains_key("/overrides/api_one/description")
+    );
+    assert!(
+        !resolved
+            .origins
+            .contains_key("/overrides/api_one/params/removed")
+    );
+
+    let body = patch
+        .lines()
+        .map(|line| {
+            if line.starts_with('[') {
+                line.replacen('[', "[sources.api.", 1)
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let deployment = format!(
+        "version=1\n[sources.api]\n{body}\n[wallets.primary]\nmode='static'\nprivate_key_env='FIXTURE_KEY'\n[servers.api]\nlisten='127.0.0.1:19092'\nwallet='primary'\nsources=['api']\nbearer_token_env='FIXTURE_TOKEN'\n"
+    );
+    std::fs::write(&source, deployment).unwrap();
+    let shown = Deployment::show_config(&source).await.unwrap();
+    assert_eq!(
+        shown["sources"]["api"]["settings"]["overrides"],
+        settings["overrides"]
+    );
+    assert_eq!(
+        shown["sources"]["api"]["origins"]["/overrides/api_one/params/q~1r"],
+        source.display().to_string()
+    );
+
+    let schema = json!({"paths":{
+        "/one":{"get":{"description":"Catalog prose.","parameters":[
+            {"name":"q/r","in":"query","schema":{"type":"string"}},
+            {"name":"keep","in":"query","schema":{"type":"integer"}}
+        ]}},
+        "/two":{"get":{"summary":"Second operation."}}
+    }});
+    std::fs::write(dir.path().join("catalog.json"), schema.to_string()).unwrap();
+    let tools = Deployment::load(&source)
+        .await
+        .unwrap()
+        .inventory()
+        .remove(0)
+        .tools;
+    assert_eq!(
+        tools[0].tool.description,
+        "Catalog prose. Configured pricing: Billed per request."
+    );
+    assert_eq!(
+        tools[0].tool.input_schema["properties"]["q/r"]["description"],
+        "Local first input"
+    );
+    assert_eq!(
+        tools[1].tool.description,
+        "Inherited second tool Cost: unknown."
+    );
+
+    for (patch, overrides_expected) in [
+        ("overrides_patch = {}", true),
+        ("overrides = {}", false),
+        (
+            "overrides_patch = { api_one = false, api_two = false }",
+            false,
+        ),
+    ] {
+        let local = toml::from_str(&format!("extends='provider.toml'\n{patch}")).unwrap();
+        let effective = config::resolve(local, &source).await.unwrap();
+        assert_eq!(
+            !effective.settings.overrides.as_object().unwrap().is_empty(),
+            overrides_expected
+        );
+    }
+    let removed = config::resolve(
+        toml::from_str("extends='provider.toml'\noverrides_patch = { api_one = false }").unwrap(),
+        &source,
+    )
+    .await
+    .unwrap();
+    assert_eq!(removed.origins["overrides"], provider.display().to_string());
+    assert_eq!(
+        removed.settings.overrides,
+        json!({"api_two":{"description":"Inherited second tool"}})
+    );
+
+    for patch in [
+        "overrides = {}\noverrides_patch = {}",
+        "overrides_patch = { api_one = { description = true } }",
+        "overrides_patch = { api_one = { unknown = false } }",
+    ] {
+        let local = toml::from_str(&format!("extends='provider.toml'\n{patch}")).unwrap();
+        assert!(config::resolve(local, &source).await.is_err());
     }
 }

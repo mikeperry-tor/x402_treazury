@@ -314,7 +314,8 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         None
     };
     let mut cfg = standalone_config(&args, &env).await?;
-    if !args.list_tools && !args.list_tags && !args.check && args.route_tool.is_none() {
+    let inspecting_tools = args.list_tools || args.check || args.route_tool.is_some();
+    if !inspecting_tools && !args.list_tags {
         x402_treazury::provider_status::warn(cfg.name.as_deref().unwrap_or("standalone"), &cfg);
     }
     ensure!(
@@ -354,14 +355,10 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     x402_treazury::config::validate(&cfg)?;
     let built = catalog::build_catalog(&cfg, &root, &prefix)?;
     let issues = built.issues.clone();
-    let mut tools = if args.list_tools
-        || args.check
-        || args.route_tool.is_some()
-        || built.tools.is_empty() && !built.issues.is_empty()
-    {
-        built.complete()?
-    } else {
-        built.tools
+    let mut tools = match (inspecting_tools, built.tools.is_empty()) {
+        (true, _) => built.complete_strict()?,
+        (false, true) => built.complete()?,
+        (false, false) => built.tools,
     };
     catalog::append_omissions(&mut cfg.instructions_text, "standalone", &issues);
     root.commit().await;
@@ -824,7 +821,10 @@ async fn standalone_config(args: &Args, env: &BTreeMap<String, String>) -> Resul
     string_field!(base_url, "X402_MCP_GENERIC_BASE_URL");
     string_field!(prefix, "X402_MCP_GENERIC_PREFIX");
     string_field!(name, "X402_MCP_GENERIC_NAME");
-    string_field!(pricing_key, "X402_MCP_GENERIC_PRICING_KEY");
+    if let Some(key) = env.get("X402_MCP_GENERIC_PRICING_KEY") {
+        cfg.pricing = None;
+        cfg.pricing_key = Some(key.clone());
+    }
     if let Some(value) = env.get("X402_MCP_GENERIC_MAX_DESCRIPTION_CHARS") {
         cfg.max_description_chars = Some(value.parse().context("invalid max_description_chars")?);
     }

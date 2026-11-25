@@ -34,9 +34,10 @@ qualification keep their completeness checks and fail on missing tools.
 
 ### Preflight and error handling
 
-Preflight rejects malformed configuration or selectors, unknown source IDs,
-cache opt-outs on selected sources, invalid network settings, and missing
-required state or wallet configuration. During execution:
+Preflight rejects malformed configuration, including unknown tool override
+fields and invalid override value types. It also rejects malformed selectors,
+unknown source IDs, cache opt-outs on selected sources, invalid network
+settings, and missing required state or wallet configuration. During execution:
 
 - **Unsupported operations** are recorded as per-source omissions for both
   local and remote catalogs.

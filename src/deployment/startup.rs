@@ -643,6 +643,12 @@ impl Source {
             })
             .context(catalog::LoadStage::Generation)
             .with_context(|| format!("source {id}: catalog generation"))?;
+        if !cfg.allow_empty_selection {
+            built
+                .check_overrides()
+                .context(catalog::LoadStage::Generation)
+                .with_context(|| format!("source {id}: catalog generation"))?;
+        }
         let mut tools = built.tools;
         let issues = built.issues;
         cfg.selection_notices = built.selection_notices;

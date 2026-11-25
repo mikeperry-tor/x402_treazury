@@ -143,6 +143,8 @@ pub async fn warm_cache_with_network(
             .settings;
         crate::catalog::validate_tool_selection(&cfg)
             .with_context(|| format!("source {id}: invalid tool selections"))?;
+        cfg.check_override_container()
+            .with_context(|| format!("source {id}: invalid tool overrides"))?;
         ensure!(
             !cfg.catalog_cache_ttl_seconds.disabled(),
             "source {id}: cache warming is disabled by catalog_cache_ttl_seconds=0"
@@ -175,8 +177,7 @@ pub async fn warm_cache_with_network(
             && !direct
             && (p.sources.is_empty() || selected.iter().any(|id| p.sources.contains(id)))
     });
-    let mut owner = None;
-    let relay = if let Some(policy) = policy {
+    let (relay, owner) = if let Some(policy) = policy {
         crate::discovery_relay::SearchRelay::load(&policy, path).await?;
         if let Some(funding) = &mut config.funding {
             funding.auto_fund = false;
@@ -222,10 +223,9 @@ pub async fn warm_cache_with_network(
         let relay =
             crate::discovery_relay::build(&policy, path, &bindings, &initialized.wallets).await?;
         config = deployment.config;
-        owner = Some(initialized);
-        relay
+        (relay, Some(initialized))
     } else {
-        Default::default()
+        (Default::default(), None)
     };
     let stop = CancellationToken::new();
     let _cancel_on_drop = stop.clone().drop_guard();
@@ -253,13 +253,8 @@ pub async fn warm_cache_with_network(
         if cancelled && cleanup.is_ok() {
             tracing::info!("Catalog warming stopped; accepted relay work has finished");
         }
-        let sources = match result {
-            Err(error) => return Err(error),
-            Ok(sources) => {
-                cleanup?;
-                sources
-            }
-        };
+        let sources = result?;
+        cleanup?;
         let outcome = if sources.iter().any(CacheWarmSource::degraded) {
             "degraded"
         } else {

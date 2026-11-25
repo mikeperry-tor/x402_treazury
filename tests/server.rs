@@ -782,7 +782,7 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
         ..Default::default()
     };
     let tools = x402_treazury::catalog::build_tools(&cfg, &doc, "t").unwrap();
-    assert_eq!(tools[0].description, "Authored instructions");
+    assert_eq!(tools[0].description, "Authored instructions Cost: unknown.");
     let route = tools[0]
         .route(
             "https://example.com",

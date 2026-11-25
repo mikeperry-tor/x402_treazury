@@ -46,6 +46,10 @@ treasury, funding, and source-management settings.
   or inspection, or `--config FILE` for a deployment. Add `config show` to
   inspect resolved composition offline without fetching specs or reading keys.
 
+Use source-local patch tables for a deployment that changes individual tool
+fields or operation mappings. Full `overrides` and `response_mappings` tables
+replace their inherited map. [Edit inherited tool metadata](../docs/configuration.md#edit-inherited-tool-metadata)
+
 ## Provider catalog
 
 | Provider | Definition | Catalog summary |

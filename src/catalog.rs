@@ -4,6 +4,8 @@ mod contracts;
 mod credit_pricing;
 mod input;
 pub(crate) mod media;
+mod overrides;
+mod presentation;
 #[cfg(test)]
 pub(crate) use contracts::omission_instructions;
 pub use contracts::{
@@ -16,6 +18,9 @@ pub(crate) mod expansion;
 mod expansion_tests;
 mod sanitize;
 pub use credit_pricing::CreditPricing;
+pub(crate) use overrides::{OVERRIDE_PARAMS_FIELD, OVERRIDE_TEXT_FIELDS};
+pub use overrides::{OverrideIssue, OverrideProblem};
+pub use presentation::DescriptionRendering;
 
 use anyhow::{Context, Result, bail, ensure};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
@@ -278,6 +283,15 @@ pub struct Config {
 }
 
 impl Config {
+    /// Inspect override tables and value types without loading a catalog.
+    pub fn override_container_issues(&self) -> Vec<OverrideIssue> {
+        overrides::container_issues(&self.overrides)
+    }
+
+    pub(crate) fn check_override_container(&self) -> Result<()> {
+        overrides::check_issues(&self.override_container_issues())
+    }
+
     pub fn effective_pricing(&self) -> Result<Option<crate::pricing::advertised::PricingConfig>> {
         use crate::pricing::advertised::PricingConfig;
         if let Some(pricing) = &self.pricing {
@@ -390,12 +404,6 @@ pub struct HeaderParameter {
 
 pub(crate) mod headers;
 
-#[derive(Clone, Debug)]
-pub struct DescriptionRendering {
-    pub base: String,
-    pub max_chars: Option<usize>,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
     #[serde(skip)]
@@ -447,54 +455,6 @@ pub struct RoutedRequest {
 }
 
 impl ToolSpec {
-    /// Resolve an existing parameter-description target for compilation and tooling.
-    pub fn parameter_note_pointer(&self, key: &str) -> Option<String> {
-        let escape = |name: &str| name.replace('~', "~0").replace('/', "~1");
-        let properties = self.input_schema.get("properties")?.as_object()?;
-        if properties.get(key).is_some_and(Value::is_object) {
-            return Some(format!("/properties/{}", escape(key)));
-        }
-        let body = self.whole_body.as_ref()?;
-        let nested = properties.get(&body.name)?.get("properties")?.as_object()?;
-        let wire = if nested.contains_key(key) {
-            key
-        } else {
-            key.strip_suffix("_body")
-                .filter(|wire| nested.contains_key(*wire))?
-        };
-        nested.get(wire)?.is_object().then(|| {
-            format!(
-                "/properties/{}/properties/{}",
-                escape(&body.name),
-                escape(wire)
-            )
-        })
-    }
-
-    /// Present a current scoped observation without changing canonical catalog text.
-    pub fn render_description(&self, observed: Option<crate::output::ObservedPrice>) -> String {
-        if self.advertised_pricing.invalidated() {
-            return self.description_rendering.as_ref().map_or_else(
-                || self.description.clone(),
-                |rendering| truncate_description(&rendering.base, rendering.max_chars),
-            );
-        }
-        let fragment = observed
-            .map(|observed| format!("Observed cost: ~${observed}/call."))
-            .or_else(|| self.advertised_pricing.external_description());
-        let Some(fragment) = fragment else {
-            return self.description.clone();
-        };
-        let (base, max) = self
-            .description_rendering
-            .as_ref()
-            .map_or((self.description.as_str(), None), |rendering| {
-                (rendering.base.as_str(), rendering.max_chars)
-            });
-        let separator = if base.is_empty() { "" } else { " " };
-        truncate_description(&format!("{base}{separator}{fragment}"), max)
-    }
-
     pub fn route(&self, base_url: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
         let mut path = self.request_url.as_ref().unwrap_or(&self.path).clone();
         let mut query = BTreeMap::new();
@@ -1862,6 +1822,65 @@ pub fn enrich_pricing(
 }
 
 pub fn build_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
+    let mut built = compile_catalog(cfg, root, prefix)?;
+    built.render_descriptions();
+    Ok(built)
+}
+
+/// Compare authored edits against the same compiled inventory before and after name filtering.
+pub struct CatalogComparison {
+    pub baseline: Result<CatalogBuild>,
+    pub override_issues: Vec<OverrideIssue>,
+    effective_check: Result<()>,
+    tools: Vec<ToolSpec>,
+}
+
+impl CatalogComparison {
+    /// Match production error precedence and keep the unfiltered view independent.
+    pub fn effective(&self) -> std::result::Result<&[ToolSpec], &anyhow::Error> {
+        self.effective_check.as_ref()?;
+        self.baseline.as_ref()?;
+        Ok(&self.tools)
+    }
+}
+
+pub fn compare_catalog(cfg: &Config, root: &Value, prefix: &str) -> CatalogComparison {
+    let mut effective_check = validate_catalog_selectors(cfg);
+    let mut tools = Vec::new();
+    let mut override_issues = Vec::new();
+    let baseline = build_catalog_inventory(cfg, root, prefix).map(|(mut baseline, _)| {
+        tools = baseline.tools.clone();
+        override_issues = apply_tool_overrides(cfg, &mut tools);
+        if effective_check.is_ok() {
+            effective_check =
+                select_catalog_tools(cfg, prefix, &mut tools, &baseline.issues, &mut Vec::new())
+                    .and_then(|()| {
+                        if baseline.issues.is_empty() {
+                            Ok(())
+                        } else {
+                            Err(IncompleteCatalog(baseline.issues.clone()).into())
+                        }
+                    });
+            if effective_check.is_ok() {
+                contracts::render_descriptions(&mut tools);
+            }
+        }
+        baseline.render_descriptions();
+        baseline
+    });
+    if baseline.is_err() {
+        override_issues = cfg.override_container_issues();
+    }
+    CatalogComparison {
+        baseline,
+        override_issues,
+        effective_check,
+        tools,
+    }
+}
+
+/// Compile named tools so callers can rebind references before rendering.
+pub(crate) fn compile_catalog(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
     let result = build_catalog_inner(cfg, root, prefix);
     match &result {
         Ok(built) => diagnostics::report_omissions(&built.issues),
@@ -1880,14 +1899,41 @@ pub(crate) fn build_catalog_unreported(
     root: &Value,
     prefix: &str,
 ) -> Result<CatalogBuild> {
-    build_catalog_inner(cfg, root, prefix)
+    let mut built = build_catalog_inner(cfg, root, prefix)?;
+    built.render_descriptions();
+    Ok(built)
 }
 
 fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<CatalogBuild> {
+    validate_catalog_selectors(cfg)?;
+    let (mut built, credit_diagnostics) = build_catalog_inventory(cfg, root, prefix)?;
+    built.override_issues = apply_tool_overrides(cfg, &mut built.tools);
+    select_catalog_tools(
+        cfg,
+        prefix,
+        &mut built.tools,
+        &built.issues,
+        &mut built.selection_notices,
+    )?;
+    if let Some(credits) = &cfg.credit_pricing {
+        credit_diagnostics.report(prefix, credits, &built.tools);
+    }
+    overrides::report_discarded(prefix, &built.override_issues);
+    Ok(built)
+}
+
+fn validate_catalog_selectors(cfg: &Config) -> Result<()> {
     validate_tool_selection(cfg).map_err(|error| ToolConfigurationError {
         error,
         reason: "Provider tool-name selector syntax is invalid; review inclusions, exclusions and recommendations",
-    })?;
+    }.into())
+}
+
+fn build_catalog_inventory(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+) -> Result<(CatalogBuild, credit_pricing::Diagnostics)> {
     cfg.effective_pricing()?;
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(|error| ToolConfigurationError {
@@ -1899,31 +1945,25 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
         operations: selected,
         issues,
     } = selected_operations(cfg, root, prefix)?;
-    let mut selection_notices = Vec::new();
     // A help document cannot disguise the absence of every selected API contract.
-    // Active inclusion/recommendation selectors require a compatible inventory.
-    if selected.is_empty() && !issues.is_empty() {
-        if !cfg.include_tools.is_empty() || cfg.use_recommended_tools {
-            filter_tool_names(cfg, &mut Vec::new(), prefix, true, &mut selection_notices).map_err(|error| ToolConfigurationError {
-                error: error.context(IncompleteCatalog(issues.clone())),
-                reason: "Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections",
-            })?;
-        }
-        return Ok(CatalogBuild {
-            tools: Vec::new(),
-            issues,
-            selection_notices,
-        });
-    }
-    if selected.is_empty() && cfg.allow_empty_selection {
-        return Ok(CatalogBuild {
-            tools: Vec::new(),
-            issues,
-            selection_notices: vec![SelectionNotice {
+    if selected.is_empty() && (!issues.is_empty() || cfg.allow_empty_selection) {
+        let selection_notices = if issues.is_empty() {
+            vec![SelectionNotice {
                 setting: "operation_filters",
                 selector: "*".into(),
-            }],
-        });
+            }]
+        } else {
+            Vec::new()
+        };
+        return Ok((
+            CatalogBuild {
+                tools: Vec::new(),
+                issues,
+                selection_notices,
+                override_issues: Vec::new(),
+            },
+            credit_pricing::Diagnostics::default(),
+        ));
     }
     let mut credit_diagnostics = credit_pricing::Diagnostics::default();
     let mut tools = selected
@@ -1933,34 +1973,57 @@ fn build_catalog_inner(cfg: &Config, root: &Value, prefix: &str) -> Result<Catal
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { advertised_pricing: Default::default(), catalog_hints: None, response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
-            "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
+        tools.push(ToolSpec { advertised_pricing: Default::default(), catalog_hints: None, response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: String::new(), description_rendering: Some(DescriptionRendering::help(cfg, format!(
+            "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."))),
             method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
             param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), wire_names:BTreeMap::new(),whole_body:None,body_closed:false,json_media_type:None });
     }
-    // Authored overrides also apply to help and always follow generated text/schema.
-    for tool in &mut tools {
-        apply_overrides(cfg, tool).map_err(|error| ToolConfigurationError {
-            error,
-            reason: "Provider pricing-description overrides are invalid",
-        })?;
+    if let Some(allowed) = cfg.additional_properties {
+        for tool in &mut tools {
+            let accepts_extra =
+                tool.whole_body.is_none() && !tool.body_closed && tool.help_url.is_none();
+            tool.input_schema["additionalProperties"] = json!(allowed && accepts_extra);
+        }
     }
     let names: BTreeSet<_> = tools.iter().map(|t| &t.name).collect();
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
-    filter_tool_names(cfg, &mut tools, prefix, !issues.is_empty(), &mut selection_notices).map_err(|error| ToolConfigurationError {
-        error: if issues.is_empty() {error} else {error.context(IncompleteCatalog(issues.clone()))},
-        reason: if issues.is_empty() {"Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings"} else {"Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections"},
-    })?;
-    if let Some(credits) = &cfg.credit_pricing {
-        credit_diagnostics.report(prefix, credits, &tools);
+    Ok((
+        CatalogBuild {
+            tools,
+            issues,
+            selection_notices: Vec::new(),
+            override_issues: Vec::new(),
+        },
+        credit_diagnostics,
+    ))
+}
+
+fn apply_tool_overrides(cfg: &Config, tools: &mut [ToolSpec]) -> Vec<OverrideIssue> {
+    let mut issues = cfg.override_container_issues();
+    for tool in tools {
+        overrides::apply(&cfg.overrides, tool, &mut issues);
     }
-    Ok(CatalogBuild {
-        tools,
-        issues,
-        selection_notices,
-    })
+    issues
+}
+
+fn select_catalog_tools(
+    cfg: &Config,
+    prefix: &str,
+    tools: &mut Vec<ToolSpec>,
+    issues: &[OperationIssue],
+    notices: &mut Vec<SelectionNotice>,
+) -> Result<()> {
+    if tools.is_empty()
+        && (issues.is_empty() || cfg.include_tools.is_empty() && !cfg.use_recommended_tools)
+    {
+        return Ok(());
+    }
+    filter_tool_names(cfg, tools, prefix, !issues.is_empty(), notices).map_err(|error| ToolConfigurationError {
+        error: if issues.is_empty() {error} else {error.context(IncompleteCatalog(issues.to_vec()))},
+        reason: if issues.is_empty() {"Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings"} else {"Provider tool-name selector matches no compatible tools; inspect omitted operations and operation selections"},
+    }.into())
 }
 
 fn filter_tool_names(
@@ -2233,64 +2296,6 @@ fn name_selected_operations(
     named
 }
 
-fn operation_description(
-    cfg: &Config,
-    op: &Value,
-    credit_estimate: Option<String>,
-    advertised_price: &crate::pricing::advertised::NormalizedPrice,
-) -> (String, DescriptionRendering) {
-    let method = op["method"].as_str().unwrap();
-    let text = op["description"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .or_else(|| op["summary"].as_str().filter(|s| !s.is_empty()))
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("{} {}", method.to_uppercase(), op["path"].as_str().unwrap()));
-    let mut price = advertised_price.description().to_owned();
-    if let Some(estimate) = credit_estimate {
-        price = if price == DEFAULT_PRICE {
-            estimate
-        } else {
-            format!("{price} {estimate}")
-        };
-    }
-    // Dollar amounts elsewhere in vendor prose do not establish price provenance.
-    // Only omit a suffix that is already present verbatim.
-    let base = text
-        .strip_suffix(&price)
-        .map_or_else(|| text.clone(), |base| base.trim_end().to_owned());
-    let description = if text.ends_with(&price) {
-        text
-    } else {
-        format!("{text} {price}")
-    };
-    if let Some(max) = cfg.max_description_chars
-        && description.chars().count() > max
-    {
-        tracing::warn!(
-            limit_chars = max,
-            "tool description truncated by max_description_chars"
-        );
-    }
-    (
-        truncate_description(&description, cfg.max_description_chars),
-        DescriptionRendering {
-            base,
-            max_chars: cfg.max_description_chars,
-        },
-    )
-}
-
-fn truncate_description(description: &str, max: Option<usize>) -> String {
-    match max {
-        Some(max) if description.chars().count() > max => format!(
-            "{}\n[truncated by max_description_chars={max}]",
-            description.chars().take(max).collect::<String>()
-        ),
-        _ => description.to_owned(),
-    }
-}
-
 fn operation_tool(
     cfg: &Config,
     root: &Value,
@@ -2312,8 +2317,8 @@ fn operation_tool(
             .unwrap_or_else(|| crate::pricing::advertised::PricingConfig::legacy("")),
         &op["pricing"],
     );
-    let (description, description_rendering) =
-        operation_description(cfg, op, credit_estimate, &normalized);
+    let description_rendering =
+        DescriptionRendering::operation(cfg, op, credit_estimate, &normalized);
     let advertised_pricing = crate::pricing::advertised::AdvertisedPricing::new(
         normalized,
         cfg.spec.clone(),
@@ -2333,7 +2338,7 @@ fn operation_tool(
             .cloned(),
         image_limits: cfg.image_limits.clone(),
         name,
-        description,
+        description: String::new(),
         description_rendering: Some(description_rendering),
         method: method.to_uppercase(),
         path: op["path"].as_str().unwrap().into(),
@@ -2377,46 +2382,6 @@ fn operation_request_url(cfg: &Config, root: &Value, op: &Value) -> Result<Optio
 mod operation_url_tests;
 #[cfg(test)]
 mod selection_tests;
-
-fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) -> Result<()> {
-    if let Some(ap) = cfg.additional_properties {
-        tool.input_schema["additionalProperties"] = json!(ap && tool.whole_body.is_none());
-    }
-    if let Some(patch) = cfg.overrides.get(&tool.name) {
-        let pricing = patch
-            .get("pricing_description")
-            .map(|pricing| {
-                ensure!(
-                    patch["description"].is_string(),
-                    "pricing_description requires a description override for {}",
-                    tool.name
-                );
-                pricing.as_str().with_context(|| {
-                    format!("pricing_description must be a string for {}", tool.name)
-                })
-            })
-            .transpose()?;
-        if let Some(desc) = patch["description"].as_str() {
-            tool.description =
-                pricing.map_or_else(|| desc.to_owned(), |price| format!("{desc} {price}"));
-            tool.description_rendering = Some(DescriptionRendering {
-                base: desc.into(),
-                max_chars: cfg.max_description_chars,
-            });
-        }
-        for (key, value) in patch["params"].as_object().into_iter().flatten() {
-            if !value.is_string() {
-                continue;
-            }
-            if let Some(pointer) = tool.parameter_note_pointer(key) {
-                tool.input_schema
-                    .pointer_mut(&pointer)
-                    .expect("resolved parameter-description target")["description"] = value.clone();
-            }
-        }
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 #[path = "catalog/advertised_tests.rs"]

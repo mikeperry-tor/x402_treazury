@@ -29,11 +29,15 @@ fn document(raw: &[u8]) -> Value {
     serde_json::from_slice(raw)
         .unwrap_or_else(|_| json!({"text": String::from_utf8_lossy(raw), "sha256": hash(raw)}))
 }
-fn tool_view(cfg: &Config, items: &Result<Vec<catalog::ToolSpec>>) -> Result<Value> {
-    let recommended = cfg.recommendation_matcher()?;
+fn tool_view(
+    items: std::result::Result<&[catalog::ToolSpec], &anyhow::Error>,
+    recommended: &impl Fn(&str) -> bool,
+    include: impl Fn(&catalog::ToolSpec) -> bool,
+) -> Result<Value> {
     match items {
         Ok(items) => items
             .iter()
+            .filter(|tool| include(tool))
             .map(|tool| {
                 Ok((
                     format!("{} {}", tool.method.to_uppercase(), tool.path),
@@ -48,6 +52,14 @@ fn tool_view(cfg: &Config, items: &Result<Vec<catalog::ToolSpec>>) -> Result<Val
         Err(error) => Ok(json!({"compiler_error":error.to_string()})),
     }
 }
+
+fn index_tools(items: &[catalog::ToolSpec]) -> BTreeMap<&str, &catalog::ToolSpec> {
+    items
+        .iter()
+        .map(|tool| (tool.name.as_str(), tool))
+        .collect()
+}
+
 fn projection(cfg: &Config, root: &Value) -> Result<Value> {
     let pricing = cfg.effective_pricing()?;
     let catalog_key = pricing.as_ref().and_then(|pricing| pricing.catalog_key());
@@ -74,29 +86,85 @@ fn projection(cfg: &Config, root: &Value) -> Result<Value> {
     let prefix = cfg.prefix.clone().map(Ok).unwrap_or_else(|| {
         catalog::default_prefix(cfg.base_url.as_deref().context("missing base_url/prefix")?)
     })?;
-    let effective = catalog::build_tools(cfg, root, &prefix);
-    let mut plain_cfg = cfg.clone();
-    plain_cfg.overrides = json!({});
-    let plain = catalog::build_tools(&plain_cfg, root, &prefix);
-    // A failing tool-name selector must not hide its vanished override targets.
-    // This auxiliary inventory preserves operation/path/tag/method selection.
-    plain_cfg.include_tools.clear();
-    plain_cfg.exclude_tools.clear();
-    plain_cfg.use_recommended_tools = false;
-    let diagnostic = match &plain {
-        Ok(items) => Ok(items.clone()),
-        Err(_) => catalog::build_tools(&plain_cfg, root, &prefix),
+    let comparison = catalog::compare_catalog(cfg, root, &prefix);
+    let diagnostic = comparison
+        .baseline
+        .as_ref()
+        .map(|view| view.tools.as_slice());
+    let effective = comparison.effective();
+    let omissions = comparison.baseline.as_ref().ok().map(|view| &view.issues);
+    let mut issues_by_tool: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    for issue in &comparison.override_issues {
+        issues_by_tool
+            .entry(issue.tool.as_deref())
+            .or_default()
+            .push(issue);
+    }
+    let baseline_tools = index_tools(diagnostic.unwrap_or_default());
+    let effective_tools = index_tools(effective.unwrap_or_default());
+    let diagnostics = cfg
+        .overrides
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, patch)| {
+            let tool = baseline_tools.get(name.as_str()).copied();
+            let missing = if tool.is_some() {
+                Some(false)
+            } else {
+                omissions
+                    .filter(|issues| issues.is_empty())
+                    .map(|_| true)
+                    .or_else(|| operations.is_empty().then_some(true))
+            };
+            let published = effective_tools.get(name.as_str()).copied();
+            let masked = tool.is_some() && effective.is_ok() && published.is_none();
+            let issues = issues_by_tool
+                .get(&Some(name.as_str()))
+                .map_or(&[][..], Vec::as_slice);
+            let missing_params: Vec<_> = if missing == Some(true) {
+                patch["params"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|notes| notes.keys().map(String::as_str))
+                    .collect()
+            } else {
+                issues
+                    .iter()
+                    .filter(|issue| issue.problem == catalog::OverrideProblem::Missing)
+                    .filter_map(|issue| issue.target.as_deref())
+                    .collect()
+            };
+            json!({
+                "name": name,
+                "authored_override": patch,
+                "missing_tool": missing,
+                "masked_tool": masked,
+                "missing_parameter_notes": missing_params,
+                "issues": issues,
+                "unoverridden": tool,
+                "effective": published,
+            })
+        })
+        .collect::<Vec<_>>();
+    let recommendations = cfg.recommendation_matcher().ok();
+    let recommended = |name: &str| {
+        recommendations
+            .as_ref()
+            .is_some_and(|matches| matches(name))
     };
-    let diagnostics = cfg.overrides.as_object().into_iter().flatten().map(|(name,patch)| {
-        let inventory = plain.as_ref().ok().or_else(||diagnostic.as_ref().ok());
-        let tool = inventory.and_then(|items|items.iter().find(|t|&t.name==name));
-        let missing = inventory.map(|_|tool.is_none()).or_else(||operations.is_empty().then_some(true));
-        let missing_params: Vec<_> = patch["params"].as_object().into_iter().flatten().filter(|(key,_)|tool.is_some_and(|t|t.parameter_note_pointer(key).is_none()) || missing==Some(true)).map(|(key,_)|key).collect();
-        json!({"name":name,"authored_override":patch,"missing_tool":missing,"missing_parameter_notes":missing_params,"unoverridden":tool,"effective":effective.as_ref().ok().and_then(|items|items.iter().find(|t|&t.name==name))})
-    }).collect::<Vec<_>>();
-    Ok(
-        json!({"operations":operations,"pricing":{"catalog_key":catalog_key,"pricing_metadata_operations":pricing_metadata_operations,"total_operations":total_operations},"effective":tool_view(cfg,&effective)?,"unoverridden":tool_view(cfg,&plain)?,"override_diagnostic_inventory":tool_view(cfg,&diagnostic)?,"overrides":diagnostics,"config":cfg}),
-    )
+    let plain = effective.and(diagnostic);
+    Ok(json!({
+        "operations":operations,
+        "pricing":{"catalog_key":catalog_key,"pricing_metadata_operations":pricing_metadata_operations,"total_operations":total_operations},
+        "effective":tool_view(effective, &recommended, |_| true)?,
+        "unoverridden":tool_view(plain, &recommended, |tool| effective_tools.contains_key(tool.name.as_str()))?,
+        "override_diagnostic_inventory":tool_view(diagnostic, &recommended, |_| true)?,
+        "omitted_operations":omissions,
+        "override_map_issues":issues_by_tool.get(&None).map_or(&[][..], Vec::as_slice),
+        "overrides":diagnostics,
+        "config":cfg,
+    }))
 }
 fn projected(cfg: &Config, raw: &[u8]) -> Value {
     match serde_json::from_slice(raw)
@@ -104,7 +172,14 @@ fn projected(cfg: &Config, raw: &[u8]) -> Value {
         .and_then(|root| projection(cfg, &root))
     {
         Ok(value) => value,
-        Err(error) => json!({"compiler_error":error.to_string()}),
+        Err(error) => {
+            let mut report = json!({"compiler_error":error.to_string()});
+            let issues = cfg.override_container_issues();
+            if !issues.is_empty() {
+                report["override_container_issues"] = json!(issues);
+            }
+            report
+        }
     }
 }
 fn schema(provider: &Provider) -> Option<&Read> {
@@ -125,6 +200,21 @@ fn projected_input(run: &Path, provider: &Provider, read: Option<&Read>) -> Resu
 fn runtime_input(provider: &Provider) -> Option<&Read> {
     provider.asset.as_ref().or_else(|| schema(provider))
 }
+
+fn runtime_and_upstream(run: &Path, provider: &Provider) -> Result<(Value, Value)> {
+    let runtime_read = runtime_input(provider);
+    let upstream_read = schema(provider);
+    let runtime = projected_input(run, provider, runtime_read)?;
+    let upstream = if runtime_read.and_then(|read| read.hash.as_ref())
+        == upstream_read.and_then(|read| read.hash.as_ref())
+    {
+        runtime.clone()
+    } else {
+        projected_input(run, provider, upstream_read)?
+    };
+    Ok((runtime, upstream))
+}
+
 fn asset_document(run: &Path, provider: &Provider) -> Result<Value> {
     provider
         .asset
@@ -355,7 +445,6 @@ fn compare_provider(
     provider: &Provider,
     prior: Option<(&Path, &Provider)>,
 ) -> Result<Value> {
-    let current_schema = schema(provider).filter(|r| r.hash.is_some());
     let multiple_schemas = provider
         .inputs
         .iter()
@@ -431,16 +520,11 @@ fn compare_provider(
         .collect();
     // Runtime history and authority history answer different questions. An authored
     // asset is runtime evidence, never a substitute for historical upstream input.
-    let runtime = projected_input(run, provider, runtime_input(provider))?;
-    let upstream = projected_input(run, provider, current_schema)?;
-    let previous_runtime = prior
-        .map(|(path, p)| projected_input(path, p, runtime_input(p)))
+    let (runtime, upstream) = runtime_and_upstream(run, provider)?;
+    let (previous_runtime, previous_upstream) = prior
+        .map(|(path, p)| runtime_and_upstream(path, p))
         .transpose()?
-        .unwrap_or(Value::Null);
-    let previous_upstream = prior
-        .map(|(path, p)| projected_input(path, p, schema(p)))
-        .transpose()?
-        .unwrap_or(Value::Null);
+        .unwrap_or_default();
     let (previous, tool_basis) = if !previous_upstream.is_null() {
         (previous_upstream, "prior capture")
     } else if provider
@@ -573,7 +657,9 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        cfg.overrides = json!({name.clone():{"description":"authored","params":{"q":"query hint"}},"demo_help":{"description":"help override"}});
+        cfg.overrides = json!({name.clone():{"description":"authored","params":{
+            "q":"query hint","invalid":false
+        }},"demo_help":{"description":"help override"}});
         let before = projection(&cfg, &old).unwrap();
         let mut new = old.clone();
         new["paths"]["/one"]["get"]["description"] = json!("new charged-error prose");
@@ -584,13 +670,14 @@ mod tests {
             after["effective"]["GET /one"]["description"]
         );
         assert!(!diff(&before["unoverridden"], &after["unoverridden"]).is_empty());
-        assert!(
-            after["overrides"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|v| v["missing_parameter_notes"] == json!(["q"]))
-        );
+        assert!(after["overrides"].as_array().unwrap().iter().any(|v| {
+            v["missing_parameter_notes"] == json!(["q"])
+                && v["issues"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["target"] == "invalid" && issue["problem"] == "malformed")
+        }));
         assert!(
             after["overrides"]
                 .as_array()
@@ -618,7 +705,8 @@ mod tests {
             "requestBody":{"required":false,"content":{"application/json":{"schema":{
                 "type":"object","additionalProperties":false,"properties":{
                     "id":{"type":"string"},"choice":{"type":"string"},
-                    "choice_body":{"type":"string"},"a/b~c":{"type":"string"},"flag":false
+                    "choice_body":{"type":"string"},"a/b~c":{"type":"string"},"flag":false,
+                    "blocked":{"type":"string"},"blocked_body":false
                 }
             }}}}
         }}}});
@@ -632,12 +720,13 @@ mod tests {
         let name = tool.name.clone();
         cfg.overrides = json!({name:{"params":{
             "id":"outer id","id_body":"nested id","choice_body":"exact spelling",
-            "a/b~c":"escaped name","flag":"not an object","missing":"not present"
+            "a/b~c":"escaped name","flag":"not an object","missing":"not present",
+            "blocked_body":"cannot fall back through the boolean slot"
         }}});
         let view = projection(&cfg, &document).unwrap();
         assert_eq!(
             view["overrides"][0]["missing_parameter_notes"],
-            json!(["flag", "missing"])
+            json!(["blocked_body", "flag", "missing"])
         );
         let properties = &view["effective"]["POST /one"]["input_schema"]["properties"];
         assert_eq!(properties["id"]["description"], "outer id");
@@ -647,7 +736,31 @@ mod tests {
         assert!(body["choice"].get("description").is_none());
         assert_eq!(body["a/b~c"]["description"], "escaped name");
         assert_eq!(body["flag"], false);
+        assert_eq!(body["blocked_body"], false);
+        assert!(body["blocked"].get("description").is_none());
         assert!(body.get("missing").is_none());
+        let issues = view["overrides"][0]["issues"].as_array().unwrap();
+        assert!(issues.iter().any(|issue| issue["target"] == "choice_body"
+            && issue["problem"] == "ambiguous"
+            && issue["selected"] == "/properties/body_body/properties/choice_body"));
+        let patched = catalog::build_catalog(&cfg, &document, "demo")
+            .unwrap()
+            .tools
+            .remove(0);
+        let request = json!({"id":"query id","body_body":{"id":"body id","choice_body":"value","a/b~c":"literal"}});
+        let route = |tool: &catalog::ToolSpec| {
+            serde_json::to_value(
+                tool.route("https://example.com", request.as_object().unwrap())
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(route(&tool), route(&patched));
+
+        cfg.include_tools = vec!["nonexistent".into()];
+        let filtered = projection(&cfg, &document).unwrap();
+        assert!(filtered["effective"]["compiler_error"].is_string());
+        assert_eq!(filtered["overrides"][0]["issues"], json!(issues));
     }
 
     #[test]
@@ -839,6 +952,95 @@ mod tests {
             value["overrides"][0]["missing_parameter_notes"],
             json!(["q"])
         );
+        let unsupported = json!({"paths":{"/one":{"get":{"parameters":[
+            {"name":"session","in":"cookie","schema":{"type":"string"}}
+        ]}}}});
+        let partial = projection(&cfg, &unsupported).unwrap();
+        assert_eq!(partial["omitted_operations"][0]["path"], "/one");
+        assert_eq!(partial["override_diagnostic_inventory"], json!({}));
+        assert!(partial["effective"]["compiler_error"].is_string());
+        assert!(partial["unoverridden"]["compiler_error"].is_string());
+        assert!(partial["overrides"][0]["missing_tool"].is_null());
+    }
+
+    #[test]
+    fn incomplete_catalog_keeps_partial_tools_for_override_diagnostics() {
+        let mut cfg = cfg();
+        cfg.overrides = json!({"demo_one":{"params":{"q":"Query hint."}}});
+        let mut document = spec();
+        document["paths"]["/unsupported"] = json!({"get":{"parameters":[
+            {"name":"session","in":"cookie","schema":{"type":"string"}}
+        ]}});
+        let view = projection(&cfg, &document).unwrap();
+        assert!(view["effective"]["compiler_error"].is_string());
+        assert_eq!(view["unoverridden"], view["effective"]);
+        assert_eq!(view["omitted_operations"][0]["path"], "/unsupported");
+        assert_eq!(
+            view["override_diagnostic_inventory"]["GET /one"]["name"],
+            "demo_one"
+        );
+        assert_eq!(view["overrides"][0]["missing_tool"], false);
+    }
+
+    #[test]
+    fn malformed_override_containers_are_reported_even_without_compiled_operations() {
+        let mut cfg = cfg();
+        let root = json!({"paths":{}});
+        for (overrides, issue_path) in [
+            (json!(false), "/override_map_issues/0"),
+            (json!({"demo_one":false}), "/overrides/0/issues/0"),
+            (
+                json!({"demo_one":{"params":false}}),
+                "/overrides/0/issues/0",
+            ),
+            (
+                json!({"demo_one":{"description":false}}),
+                "/overrides/0/issues/0",
+            ),
+            (
+                json!({"demo_one":{"params":{"q":false}}}),
+                "/overrides/0/issues/0",
+            ),
+        ] {
+            cfg.overrides = overrides;
+            let view = projection(&cfg, &root).unwrap();
+            assert!(view["effective"]["compiler_error"].is_string());
+            assert_eq!(view.pointer(issue_path).unwrap()["problem"], "malformed");
+        }
+        cfg.overrides = json!({"demo_one":{"params":{"q":false}}});
+        let report = projected(&cfg, br#"{"paths":[]}"#);
+        assert!(report["compiler_error"].is_string());
+        assert_eq!(
+            report["override_container_issues"][0]["problem"],
+            "malformed"
+        );
+        assert_eq!(report["override_container_issues"][0]["target"], "q");
+        cfg.include_tools = vec![String::new()];
+        let view = projection(&cfg, &root).unwrap();
+        assert_eq!(
+            view["effective"]["compiler_error"],
+            "invalid provider tool configuration: empty tool selector"
+        );
+        assert_eq!(view["effective"], view["unoverridden"]);
+        assert_eq!(
+            view["override_diagnostic_inventory"]["compiler_error"],
+            "no operations matched"
+        );
+    }
+
+    #[test]
+    fn invalid_recommendations_leave_the_override_diagnostic_inventory_available() {
+        let mut cfg = cfg();
+        cfg.recommended_tools = vec![String::new()];
+        cfg.overrides = json!({"demo_one":{"params":{"typo":"Missing parameter."}}});
+        let report = projected(&cfg, spec().to_string().as_bytes());
+        assert!(report["effective"]["compiler_error"].is_string());
+        assert_eq!(report["effective"], report["unoverridden"]);
+        assert_eq!(
+            report["override_diagnostic_inventory"]["GET /one"]["recommended"],
+            false
+        );
+        assert_eq!(report["overrides"][0]["issues"][0]["problem"], "missing");
     }
     #[test]
     fn frozen_comparison_baselines_pinned_changes_and_guide_only_drift() {

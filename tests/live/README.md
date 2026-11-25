@@ -32,8 +32,9 @@ RUST_BACKTRACE=0 target/release/examples/quote_near \
   `provider_preflight` refuses direct mode, writes a new owner-only JSONL file
   (refusing existing paths), flushes after every case, and runs sequentially
   with bounded downloads and 60-second request timeouts.
-- **What preflight does:** Fetches the spec, builds the catalog, fetches
-  configured help, and sends one unsigned challenge using a dummy public EVM
+- **What preflight does:** Fetches the spec, checks catalog completeness and
+  overrides, fetches configured help, and sends one unsigned challenge using a
+  dummy public EVM
   transport identity (never signing, loading wallet state, calling MCP, or
   testing help caching). Arguments are pinned in `preflight.json` without
   schema validation. Offers above 10,000 Base USDC atomic units are flagged

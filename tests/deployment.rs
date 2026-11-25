@@ -593,7 +593,7 @@ description = "Authored instructions"
         .iter()
         .find(|t| t.tool.name == "alpha_pay")
         .unwrap();
-    assert_eq!(pay.tool.description, "Authored instructions");
+    assert_eq!(pay.tool.description, "Authored instructions Cost: unknown.");
     assert!(
         inventory[1]
             .tools

@@ -68,9 +68,13 @@ new candidate so stale proposals never linger.
   never form a baseline.
 - **Raw and compiled diffs:** Packets contain recursive JSON diffs (ignoring
   only object key order), atomic array diffs, exact text and hash diffs for
-  non-JSON files, and production `operations` and `build_tools` projections
-  (including hidden operations, unoverridden vs. effective tools, and missing
-  tool or parameter-note override targets).
+  non-JSON files, and production catalog projections. The comparison uses the
+  same compiled inventory for unoverridden and effective tools. Incomplete
+  catalogs report a compiler error in both views, with operation omissions and
+  available targets shown in the diagnostic inventory. The comparison reports
+  malformed override tables even if the catalog cannot compile. Parameter
+  diagnostics include the target and the selected path when legacy spellings
+  overlap.
 - **Runtime vs. upstream drift:** `previous_runtime` and `runtime_changes`
   track local TOML, guidance, and asset changes separately from
   `previous_upstream` and `tool_changes`. Local edits alone report
@@ -165,9 +169,11 @@ projections):
 Replay stages `candidate-N.json` only for `vendor-copy` assets with one
 successful `schema` authority, complete supporting reads, valid iterative local
 JSON-pointer reference closure (including OpenAPI Example objects and local
-extension targets), and successful production compilation. Candidates keep full
-vendor documents (`snapshot_spec` reduces request-only fixtures separately) and
-record `expected_preimage` hashes; the tool never writes tracked files.
+extension targets), and a complete catalog. Staging checks override value
+types and edits to compiled tools. The comparison packet identifies absent
+override targets for review. Candidates keep full vendor documents
+(`snapshot_spec` reduces request-only fixtures separately) and record
+`expected_preimage` hashes; the tool never writes tracked files.
 
 Acceptance workflow:
 

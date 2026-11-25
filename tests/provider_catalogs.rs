@@ -2634,7 +2634,32 @@ async fn hirescrape_names_future_public_routes_without_exposing_known_siwx() {
         "/api/skills/runs":{"post":{"summary":"SIWX run"}},
         "/api/snapshots/{id}":{"get":{"summary":"SIWX snapshot"}}
     }});
-    let tools = catalog::build_tools(&cfg, &doc, "hirescrape").unwrap();
+    let built = catalog::build_catalog(&cfg, &doc, "hirescrape").unwrap();
+    assert_eq!(
+        built
+            .override_issues
+            .iter()
+            .map(|issue| (
+                issue.tool.as_deref(),
+                issue.target.as_deref(),
+                issue.problem
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                Some("hirescrape_jobs"),
+                Some("maxResults"),
+                catalog::OverrideProblem::Missing
+            ),
+            (
+                Some("hirescrape_jobs"),
+                Some("sites"),
+                catalog::OverrideProblem::Missing
+            ),
+        ]
+    );
+    assert!(built.check_overrides().is_err());
+    let tools = built.tools;
     assert!(tools.iter().any(|t| t.name == "hirescrape_jobs"));
     assert!(tools.iter().any(|t| t.path == "/future-public-diagnostic"));
     assert!(!tools.iter().any(|t| t.path == "/api/skills/runs"

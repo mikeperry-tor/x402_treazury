@@ -382,9 +382,11 @@ and actionable:
   partial-result semantics, or non-retry warnings).
 - **Omit:** Internal Rust module names, TOML configuration keys, maintainer
   rationale, provider probe history, and repetitive boilerplate.
-- **Pricing separation:** When overriding a tool description in TOML, keep
-  behavioral rules in `description` and place the current-call price estimate
-  in `pricing_description` so live observed offers replace only the price line.
+- **Field-specific edits:** Keep behavioral rules in `description` and
+  supplemental billing terms in `pricing_description`. A parameter note edits
+  its named schema description. The published tariff and each input's
+  request contract have their own sources.
+  [Description overrides](configuration.md#observed-prices-and-description-overrides)
 - **Keep maintainer notes in docs:** Put compatibility rationale, probe limits,
   and upgrade caveats in `providers/CAVEATS.md` and the owning reference guide,
   not in MCP tool text.

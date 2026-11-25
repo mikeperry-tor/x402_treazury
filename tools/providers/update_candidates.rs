@@ -169,7 +169,7 @@ fn candidate(run: &Path, provider: &Provider) -> Result<Option<Vec<u8>>> {
     let prefix = cfg.prefix.clone().map(Ok).unwrap_or_else(|| {
         x402_treazury::catalog::default_prefix(cfg.base_url.as_deref().context("missing base URL")?)
     })?;
-    x402_treazury::catalog::build_tools(cfg, &root, &prefix)?;
+    x402_treazury::catalog::build_catalog(cfg, &root, &prefix)?.complete_strict()?;
     Ok(Some(raw))
 }
 fn semantically_equal(left: &[u8], right: &[u8]) -> bool {
@@ -366,6 +366,12 @@ mod tests {
             description_raw,
             "description-only upstream edits stage a candidate"
         );
+        let config = provider.config.as_mut().unwrap();
+        config.overrides = json!({"demo_one":{"pricing_description":false}});
+        let rejected = stage(run, &provider, 2).unwrap();
+        assert!(rejected.get("file").is_none());
+        assert!(!run.join("candidate-2.json").exists());
+        provider.config.as_mut().unwrap().overrides = json!({});
         let target = run.join("tracked-schema.json");
         std::fs::write(&target, b"intervening user edit").unwrap();
         provider.asset.as_mut().unwrap().source = target.to_str().unwrap().into();

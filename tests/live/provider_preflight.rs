@@ -74,7 +74,8 @@ async fn inspect(case: Case) -> Value {
         let origin=if cfg.spec.starts_with("https://") {cfg.spec.as_str()} else {case.url.as_str()};
         let http=network::discovery(origin,Duration::from_secs(60))?;
         let root=catalog::load_json_with_limit(&cfg.spec,&http,cfg.max_spec_bytes).await?;
-        let tools=catalog::build_tools(&cfg,&root,cfg.prefix.as_deref().unwrap_or("api"))?;
+        let tools=catalog::build_catalog(&cfg,&root,cfg.prefix.as_deref().unwrap_or("api"))?
+            .complete_strict()?;
         Ok::<_,anyhow::Error>(json!({"status":"pass","local":!cfg.spec.starts_with("https://"),"tools":tools.len(),
             "pricing_key":cfg.pricing_key,"pricing_probe":"not_attempted; production startup eligibility/cache tested separately"}))
     }.await;

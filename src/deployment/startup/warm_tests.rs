@@ -821,12 +821,19 @@ async fn warming_accepts_empty_filters_but_rejects_invalid_syntax_before_io() {
             dir.path().display()
         )
     };
-    std::fs::write(&path, config("include_tools=['']")).unwrap();
-    assert!(
-        super::super::cache_warm::warm_cache(&path, &[], false)
-            .await
-            .is_err()
-    );
+    for settings in [
+        "include_tools=['']",
+        "[sources.api.overrides.api_read]\npricing_description=17",
+        "[sources.api.overrides.api_read]\npricing_desciption='quoted price'",
+    ] {
+        std::fs::write(&path, config(settings)).unwrap();
+        assert!(
+            super::super::cache_warm::warm_cache(&path, &[], false)
+                .await
+                .is_err(),
+            "{settings}"
+        );
+    }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     for settings in [
         "use_recommended_tools=true",

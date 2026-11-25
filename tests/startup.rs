@@ -579,7 +579,7 @@ async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
             .iter()
             .find(|t| t["name"] == "s01_read")
             .unwrap()["description"],
-        "Authored alias description"
+        "Authored alias description Cost: unknown."
     );
     assert_eq!(inventory[0]["wallet_bindings"]["s01"]["wallet"], "other");
     assert_eq!(inventory[0]["wallet_bindings"]["s00"]["wallet"], "w");

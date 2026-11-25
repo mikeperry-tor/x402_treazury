@@ -651,6 +651,46 @@ and provider files cannot themselves use `extends`.
   across listeners load once, and their instructions combine without silent
   truncation.
 
+#### Edit inherited tool metadata
+
+Use `overrides_patch` to change individual fields while inheriting the other
+tool edits. Use `response_mappings_patch` to replace the complete mapping for a
+method and path.
+
+```toml
+[sources.example]
+extends = "provider.toml"
+
+[sources.example.overrides_patch.example_search]
+pricing_description = false
+
+[sources.example.overrides_patch.example_search.params]
+query = "Terms to search for."
+
+[sources.example.response_mappings_patch."GET /search"]
+omit = ["/debug"]
+```
+
+Set a tool, field, parameter note, or operation mapping to `false` in the
+corresponding patch table to remove that inherited value. A removed description
+or parameter note uses the catalog text. Response mapping arrays preserve their
+declared order. An empty patch leaves the inherited map in place. To clear the
+whole map, use `overrides = {}` or `response_mappings = {}`. Declare either the
+whole map or its patch in each source.
+
+`config show` reports mixed map origins with JSON Pointer keys relative to
+the effective settings. A tool edit origin such as
+`/overrides/example_search/params/query` identifies its declaring file. A
+response mapping origin names the complete operation mapping.
+
+Use patch tables in a deployment source or a standalone configuration file.
+Provider files loaded through `extends` declare `overrides` and
+`response_mappings` directly.
+
+For standalone serving, `X402_MCP_GENERIC_PRICING_KEY` replaces the file's
+pricing declaration with the legacy catalog key. Standalone `config show`
+reports file settings.
+
 ### Source tool distribution
 
 Deployment sources support optional ordered `send_tools` rules to route tools
@@ -902,12 +942,12 @@ absolute public HTTPS request URLs from that operation-level OpenAPI extension:
   top-level tool arguments (including pure required-only `oneOf`, `anyOf`, and
   `allOf` constraints); set `additional_properties = false` (or `true`) on a
   provider or source to control `additionalProperties` on the flat outer tool
-  schema. Optional bodies, property-bearing `allOf`, exclusive or closed
+  schema. A closed flattened body stays closed with `additional_properties =
+  true`. Optional bodies, property-bearing `allOf`, exclusive or closed
   alternatives, and unfamiliar root constraints wrap under a single `body`
   argument (or `body_body` on collision) with a closed outer schema so callers
-  can omit the body, pass `{}`, or pass JSON `null` distinctly. Parameter
-  description overrides target outer arguments first, then unambiguous
-  whole-body properties.
+  can omit the body, pass `{}`, or pass JSON `null` distinctly.
+  [Parameter description overrides](#observed-prices-and-description-overrides)
 - **Media types:** The encoder prefers representable `application/json`, then a
   concrete `+json` type ([RFC 6839](https://www.rfc-editor.org/rfc/rfc6839.html#section-3.1)),
   requiring UTF-8. Form, multipart, XML, and binary-only bodies are omitted
@@ -1247,19 +1287,33 @@ and search results replace the generated pricing suffix with
 `Observed cost: ~$0.005/call.` (restoring the fallback on expiry; CLI
 inspection and canonical search text keep the fallback).
 
-When overriding a tool description in TOML, separate the current-call price
-line into `pricing_description` so observed offers replace only the price while
-preserving behavioral text:
+An override edits one field. `description` replaces operation prose, and
+`pricing_description` adds a configured pricing note independently. The
+canonical description shows the published tariff and the authored note.
+An identical note appears once with both sources acknowledged. Credit terms
+have their own section. Help descriptions have no operation tariff.
 
 ```toml
 [overrides.example_search]
-description = "Search records. Billed per returned record; empty results are free."
-pricing_description = "Cost: ~$0.01/record [spec]."
+description = "Search records. Returns matching records and their sources."
+pricing_description = "Billed per returned record. Empty results are free."
+
+[overrides.example_search.params]
+query = "Terms to find in the record title."
 ```
 
-`pricing_description` requires a paired `description`. `max_description_chars`
-applies to generated fallbacks and observed renderings (marking truncation
-visibly), while plain override fallbacks bypass it.
+Parameter notes target the exposed argument first, then an exact member of
+the whole-body argument, then the legacy `NAME_body` spelling. If two notes
+target the same field, serving uses the exact spelling and reports the
+discarded legacy note. Set the inherited legacy key to `false` in
+`overrides_patch` to remove it. The provider comparison reports competing matches,
+selected schema paths, malformed override tables and notes, and missing
+targets. Serving reports unknown override fields and applies valid fields.
+Strict inspection rejects discarded edits even if a tool-name
+filter hides the compiled tool.
+
+`max_description_chars` limits the completed description, including authored
+text, with the visible truncation marker.
 
 ## Automatic discovery disk cache
 

@@ -221,7 +221,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         "max_help_bytes",
         "max_spec_bytes",
         "no partial content returned",
-        "tool description truncated",
+        "tool_description_truncated",
         "MCP request rejected",
     ] {
         assert!(log.contains(evidence), "missing {evidence}: {log}");

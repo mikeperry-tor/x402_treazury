@@ -110,3 +110,32 @@ fn terminal_diagnostics_use_command_scope_and_never_log_private_error_chains() {
         }
     }
 }
+
+#[tokio::test]
+async fn standalone_environment_pricing_replaces_the_file_declaration() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("provider.toml");
+    std::fs::write(
+        &file,
+        "spec='catalog.json'\n[pricing]\nsource='catalog'\nformat='x402'\nkey='x-file'\nunit='call'\n",
+    ).unwrap();
+    let args = super::Args {
+        config: Some(file.to_str().unwrap().to_owned()),
+        ..Default::default()
+    };
+    let environment = std::collections::BTreeMap::from([(
+        "X402_MCP_GENERIC_PRICING_KEY".into(),
+        "x-environment".into(),
+    )]);
+    let cfg = super::standalone_config(&args, &environment).await.unwrap();
+    assert!(cfg.pricing.is_none());
+    let document = serde_json::json!({"paths":{"/items":{"get":{
+        "x-file":{"price":"$0.02"},
+        "x-environment":{"amount":"0.03","currency":"USD","unit":"request"}
+    }}}});
+    let tool = super::catalog::build_tools(&cfg, &document, "sample")
+        .unwrap()
+        .remove(0);
+    assert!(tool.description.contains("$0.03/request"));
+    assert!(!tool.description.contains("$0.02"));
+}
