@@ -58,7 +58,6 @@ impl Service {
             crate::treasury::native_recipient(&chain, &destination.recipient)?;
             Ok(Some(amount))
         } else {
-            self.near()?;
             Ok(None)
         }
     }
@@ -82,6 +81,7 @@ impl Service {
                 json!({"executable":false,"route":"native","asset_id":route::ZEC,"chain":"zec","amount_zatoshis":principal.to_string(),"recipient":destination.recipient,"fee_estimate":estimate,"max_total_debit_zatoshis":cap.map(|value|value.to_string())}),
             );
         }
+        self.near()?;
         let refund = self.backend()?.treasury.preview_address().await?;
         let identity = self.identity(&format!("preview:{owner}")).await?;
         let quote = self
@@ -122,6 +122,7 @@ impl Service {
         };
         let native_principal = self.validate_destination(&destination).await?;
         let maximum = config.max_debit_zatoshis();
+        let near_available = self.near().map(|_| ());
         let route = if native_principal.is_some() {
             DirectRoute::Native
         } else {
@@ -144,6 +145,9 @@ impl Service {
                             .is_some_and(|op| op.authority.is_some() || route == DirectRoute::Near)
                         {
                             return Ok(None);
+                        }
+                        if route == DirectRoute::Near {
+                            near_available?;
                         }
                         let max_debit_zatoshis = maximum?;
                         validate_known_send_cap(

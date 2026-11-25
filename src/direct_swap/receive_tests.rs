@@ -357,3 +357,97 @@ async fn identical_create_retry_returns_original_without_renewal_or_sdk_provider
         worker.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn exact_foreign_receive_retry_succeeds_without_near_while_new_work_and_mismatches_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = crate::rotation::store::Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"wallet",
+    )
+    .unwrap();
+    let fixture = foreign();
+    let terms = fixture.terms.clone();
+    let (operation, _) = state
+        .reserve_direct("owner", "receive", "original", terms.clone())
+        .unwrap();
+    state
+        .save_direct_address(&operation.id, "treasury-shielded-receiver", 1, b"address")
+        .unwrap();
+    state
+        .save_direct_quote(&operation.id, fixture.quote.clone().unwrap())
+        .unwrap();
+    let before = state.direct_operation("owner", &operation.id).unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let (treasury, commands) = crate::treasury::actor::channel();
+    let service = Service::native(store.clone(), treasury, 5);
+    let config = Config {
+        receive: true,
+        ..Default::default()
+    };
+
+    let retry = service
+        .invoke(
+            "owner",
+            &config,
+            "x402_treazury_payment_request_create",
+            terms.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry["operation"]["id"], operation.id);
+    assert_eq!(retry["operation"]["quote"], fixture.quote.unwrap());
+
+    let mut mismatched = terms.clone();
+    mismatched["amount"] = json!("999");
+    let mismatch_error = service
+        .invoke(
+            "owner",
+            &config,
+            "x402_treazury_payment_request_create",
+            mismatched,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        mismatch_error
+            .to_string()
+            .contains("request ID already used with different terms"),
+        "{mismatch_error:#}"
+    );
+
+    let mut fresh = terms;
+    fresh["request_id"] = json!("new-foreign-receive");
+    let fresh_error = service
+        .invoke(
+            "owner",
+            &config,
+            "x402_treazury_payment_request_create",
+            fresh,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        fresh_error
+            .to_string()
+            .contains("Foreign swaps unavailable"),
+        "{fresh_error:#}"
+    );
+
+    assert!(commands.test_is_empty());
+    store
+        .call(move |s| {
+            assert_eq!(s.direct_operation("owner", &operation.id)?, before);
+            assert!(
+                s.direct_request("owner", "receive", "new-foreign-receive")
+                    .is_err()
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop((service, store, commands));
+    worker.await.unwrap();
+}

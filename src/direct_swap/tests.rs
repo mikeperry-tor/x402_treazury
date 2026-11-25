@@ -555,3 +555,137 @@ async fn committed_quote_is_observed_without_foreground_acknowledgment() {
     drop((service, store, commands));
     worker.await.unwrap();
 }
+
+#[tokio::test]
+async fn exact_foreign_send_retry_succeeds_without_near_while_new_work_and_mismatches_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = crate::rotation::store::Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"wallet",
+    )
+    .unwrap();
+    let (store, worker) = StoreHandle::spawn(state);
+    let foreign = json!({
+        "asset_id": "token:base-usdc",
+        "chain": "base",
+        "amount": "100",
+        "recipient": "fixture-recipient",
+        "request_id": "saved-foreign-send"
+    });
+    let mut accepted_terms = foreign.clone();
+    accepted_terms["request_id"] = json!("accepted-foreign-send");
+    let (saved, accepted) = store
+        .call({
+            let terms = foreign.clone();
+            let accepted_terms = accepted_terms.clone();
+            move |s| {
+                let saved = s
+                    .reserve_direct("owner", "send", "saved-foreign-send", terms)?
+                    .0;
+                let (accepted, _, _) = s.reserve_direct_route(
+                    "owner",
+                    "send",
+                    "accepted-foreign-send",
+                    accepted_terms,
+                    crate::rotation::store::DirectRoute::Near,
+                    |_| {
+                        Ok(Some(crate::rotation::store::DirectSendAuthority {
+                            max_debit_zatoshis: Some(1_000_000),
+                        }))
+                    },
+                )?;
+                Ok((saved, accepted))
+            }
+        })
+        .await
+        .unwrap();
+    let (treasury, commands) = crate::treasury::actor::channel();
+    let service = Service::native(store.clone(), treasury, 5);
+    let config = Config {
+        send: true,
+        max_send_zec: Some("0.00000001".into()),
+        ..Default::default()
+    };
+
+    let retry = service
+        .invoke("owner", &config, SEND, foreign.clone())
+        .await
+        .unwrap();
+    assert_eq!(retry["operation"], serde_json::to_value(&saved).unwrap());
+
+    let accepted_retry = service
+        .invoke("owner", &config, SEND, accepted_terms)
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted_retry["operation"],
+        serde_json::to_value(&accepted).unwrap()
+    );
+
+    let mut mismatched = foreign.clone();
+    mismatched["amount"] = json!("200");
+    let mismatch_error = service
+        .invoke("owner", &config, SEND, mismatched)
+        .await
+        .unwrap_err();
+    assert!(
+        mismatch_error
+            .to_string()
+            .contains("request ID already used with different terms"),
+        "{mismatch_error:#}"
+    );
+
+    let mut fresh = foreign;
+    fresh["request_id"] = json!("new-foreign-send");
+    let fresh_error = service
+        .invoke("owner", &config, SEND, fresh)
+        .await
+        .unwrap_err();
+    assert!(
+        fresh_error
+            .to_string()
+            .contains("Foreign swaps unavailable"),
+        "{fresh_error:#}"
+    );
+
+    let preview_error = service
+        .invoke(
+            "owner",
+            &config,
+            PREVIEW,
+            json!({
+                "asset_id": "token:base-usdc",
+                "chain": "base",
+                "amount": "100",
+                "recipient": "fixture-recipient"
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        preview_error
+            .to_string()
+            .contains("Foreign swaps unavailable"),
+        "{preview_error:#}"
+    );
+
+    assert!(commands.test_is_empty());
+    store
+        .call(move |s| {
+            assert!(
+                s.direct_request("owner", "send", "new-foreign-send")
+                    .is_err()
+            );
+            assert_eq!(
+                s.direct_request("owner", "send", "saved-foreign-send")?,
+                saved
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop((service, store, commands));
+    worker.await.unwrap();
+}

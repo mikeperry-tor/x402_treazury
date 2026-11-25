@@ -29,7 +29,6 @@ impl Service {
                 "native ZEC does not use a refund_address"
             );
         } else {
-            self.near()?;
             ensure!(
                 args.refund_address
                     .as_deref()
@@ -43,6 +42,7 @@ impl Service {
                 "native ZEC does not use refund_after_seconds"
             );
         }
+        let near_available = self.near().map(|_| ());
         let after = args.refund_after_seconds;
         let terms = serde_json::to_value(&args)?;
         let owner_owned = owner.to_owned();
@@ -54,6 +54,7 @@ impl Service {
                     s.reserve_native(&owner_owned, "receive", &request, terms)
                 } else {
                     s.reserve_direct_checked(&owner_owned, "receive", &request, terms, || {
+                        near_available?;
                         refund_deadline(crate::rotation::base::now()?, after).map(|_| ())
                     })
                 }
