@@ -30,6 +30,7 @@ pub(super) struct Runtime {
     relays: Vec<Arc<crate::discovery_relay::Relay>>,
     can_allocate: bool,
     readiness: BTreeMap<String, tokio::sync::oneshot::Sender<Result<()>>>,
+    closed_endpoints: BTreeSet<String>,
     startup_ready: Option<tokio::sync::oneshot::Sender<readiness::FundingPools>>,
 }
 type RefreshedSource = (
@@ -47,20 +48,23 @@ enum Event {
         String,
         Option<crate::discovery_relay::CatalogDependency>,
         tokio::sync::watch::Receiver<crate::discovery_relay::CatalogDependency>,
+        CancellationToken,
     ),
     Catalog(String, Result<Box<Source>>),
+    Cancelled,
 }
 fn status_change(
     id: String,
     mut receiver: tokio::sync::watch::Receiver<crate::discovery_relay::CatalogDependency>,
+    cancel: CancellationToken,
 ) -> futures_util::future::BoxFuture<'static, Event> {
     async move {
-        let value = receiver
-            .changed()
-            .await
-            .ok()
-            .map(|()| *receiver.borrow_and_update());
-        Event::Dependency(id, value, receiver)
+        let value = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => None,
+            changed = receiver.changed() => changed.ok().map(|()| receiver.borrow_and_update().clone()),
+        };
+        Event::Dependency(id, value, receiver, cancel)
     }
     .boxed()
 }
@@ -146,6 +150,7 @@ impl Runtime {
             refreshes,
             can_allocate,
             readiness: BTreeMap::new(),
+            closed_endpoints: BTreeSet::new(),
             startup_ready: None,
             #[cfg(test)]
             failure: None,
@@ -182,6 +187,9 @@ impl Runtime {
         for name in self.readiness.keys().cloned().collect::<Vec<_>>() {
             let result = self.deployment.endpoint_readiness(&name);
             if let Some(result) = result {
+                if result.is_err() {
+                    self.closed_endpoints.insert(name.clone());
+                }
                 let _ = self.readiness.remove(&name).unwrap().send(result);
             }
         }
@@ -201,6 +209,38 @@ impl Runtime {
                 let pools = readiness::funding_pools(&self.deployment, &self.wallets);
                 let _ = self.startup_ready.take().unwrap().send(pools);
             }
+        }
+    }
+    fn cancel_orphaned_pending_sources(
+        &mut self,
+        pending_cancels: &mut BTreeMap<String, CancellationToken>,
+    ) {
+        if self.closed_endpoints.is_empty() {
+            return;
+        }
+        let orphaned: Vec<String> = self
+            .deployment
+            .pending_sources
+            .keys()
+            .filter(|id| {
+                let mut referenced = false;
+                for (endpoint, config) in &self.deployment.listeners {
+                    if config.sources.iter().any(|source| source == *id) {
+                        referenced = true;
+                        if !self.closed_endpoints.contains(endpoint) {
+                            return false;
+                        }
+                    }
+                }
+                referenced
+            })
+            .cloned()
+            .collect();
+        for id in orphaned {
+            if let Some(cancel) = pending_cancels.remove(&id) {
+                cancel.cancel();
+            }
+            self.deployment.pending_sources.remove(&id);
         }
     }
     pub(super) fn startup_readiness(
@@ -415,8 +455,13 @@ impl Runtime {
         let mut waiting_sources = BTreeSet::new();
         for endpoint in self.readiness.keys() {
             for source in &self.deployment.listeners[endpoint].sources {
-                if self.deployment.pending_sources.contains_key(source) {
-                    waiting_sources.insert(source.as_str());
+                if let Some(entry) = self.deployment.pending_sources.get(source) {
+                    let omitted_optional = self.deployment.config.sources[source]
+                        .allow_catalog_failure
+                        && entry.is_relay_blocked();
+                    if !omitted_optional {
+                        waiting_sources.insert(source.as_str());
+                    }
                 }
             }
         }
@@ -425,10 +470,17 @@ impl Runtime {
         }
         let mut downloading = Vec::new();
         let mut pending = Vec::new();
+        let mut awaiting_relay_funds = Vec::new();
+        let mut relay_wallets = BTreeSet::new();
         let uses_tor = crate::network::global().policy.mode == crate::network::Mode::Tor;
         for source in waiting_sources {
             let entry = &self.deployment.pending_sources[source];
-            if startup::source_downloading(&entry.config, Some(gate), uses_tor) {
+            if entry.dependency.waiting_for_relay_funds {
+                awaiting_relay_funds.push(source);
+                if let Some(wallet) = entry.dependency.relay_wallet.as_deref() {
+                    relay_wallets.insert(wallet);
+                }
+            } else if startup::source_downloading(&entry.config, Some(gate), uses_tor) {
                 downloading.push(source);
             } else {
                 pending.push(source);
@@ -437,13 +489,27 @@ impl Runtime {
         let endpoints = startup::format_bounded_list(self.readiness.keys().map(String::as_str));
         let downloading = startup::format_bounded_list(downloading);
         let pending = startup::format_bounded_list(pending);
-        tracing::info!(
-            category = "catalog_startup_waiting",
-            endpoints = endpoints.as_deref(),
-            downloading = downloading.as_deref(),
-            pending = pending.as_deref(),
-            "Still waiting for catalogs before starting endpoints"
-        );
+        let awaiting_relay_funds = startup::format_bounded_list(awaiting_relay_funds);
+        let relay_wallets = startup::format_bounded_list(relay_wallets);
+        if awaiting_relay_funds.is_some() {
+            tracing::info!(
+                category = "catalog_startup_waiting",
+                endpoints = endpoints.as_deref(),
+                downloading = downloading.as_deref(),
+                pending = pending.as_deref(),
+                awaiting_relay_funds = awaiting_relay_funds.as_deref(),
+                relay_wallets = relay_wallets.as_deref(),
+                "Still waiting for catalogs before starting endpoints; some catalogs need paid relay wallet funding"
+            );
+        } else {
+            tracing::info!(
+                category = "catalog_startup_waiting",
+                endpoints = endpoints.as_deref(),
+                downloading = downloading.as_deref(),
+                pending = pending.as_deref(),
+                "Still waiting for catalogs before starting endpoints"
+            );
+        }
     }
     pub async fn run(mut self, stop: CancellationToken) -> Self {
         struct FailureGuard(Arc<crate::catalog_state::CatalogState>, bool);
@@ -471,23 +537,34 @@ impl Runtime {
         #[cfg(not(test))]
         let failure = std::future::pending::<()>();
         tokio::pin!(failure);
+        let mut pending_cancels: BTreeMap<String, CancellationToken> = BTreeMap::new();
+        self.cancel_orphaned_pending_sources(&mut pending_cancels);
+        let mut reported_relay_blocks: BTreeSet<(Option<String>, &'static str)> = BTreeSet::new();
         let mut work = FuturesUnordered::new();
         let gate = self.deployment.catalog_capacity.clone();
         for (id, pending) in &self.deployment.pending_sources {
             let id = id.clone();
             let pending = pending.clone();
             let gate = gate.clone();
+            let source_cancel = stop.child_token();
+            pending_cancels.insert(id.clone(), source_cancel.clone());
             let (status, changed) = tokio::sync::watch::channel(Default::default());
             let readiness = crate::discovery_relay::CatalogReadiness {
                 status: Some(status),
                 can_allocate: self.can_allocate,
+                log_blocks: false,
             };
             let status_id = id.clone();
-            work.push(status_change(status_id, changed));
+            work.push(status_change(status_id, changed, source_cancel.clone()));
             work.push(
                 async move {
-                    let result = pending.resume(&id, gate, readiness).await.map(Box::new);
-                    Event::Catalog(id, result)
+                    tokio::select! {
+                        biased;
+                        _ = source_cancel.cancelled() => Event::Cancelled,
+                        result = pending.resume(&id, gate, readiness) => {
+                            Event::Catalog(id, result.map(Box::new))
+                        }
+                    }
                 }
                 .boxed(),
             );
@@ -523,33 +600,96 @@ impl Runtime {
                 _ = &mut failure => panic!("injected deferred worker failure"),
             };
             let Some(event) = event else { continue };
-            let completed_source = match &event {
-                Event::Catalog(id, _) => Some(id.clone()),
-                _ => None,
-            };
+            let mut completed_source = None;
+            let mut settled_source = None;
             let previous_selection_errors = self.deployment.selection_errors.clone();
             let previous_conflicts = self.deployment.published_conflicts();
             let mut selection = Ok(BTreeMap::new());
             match event {
+                Event::Cancelled => continue,
                 Event::Refresh(id, binding, result) => {
                     self.complete_refresh(id, binding, result).await;
                     continue;
                 }
-                Event::Dependency(id, dependency, receiver) => {
+                Event::Dependency(id, dependency, receiver, cancel) => {
                     let Some(dependency) = dependency else {
                         continue;
                     };
                     let Some(pending) = self.deployment.pending_sources.get_mut(&id) else {
                         continue;
                     };
-                    pending.operator_required = dependency.operator_required;
-                    work.push(status_change(id, receiver));
+                    let previous = std::mem::replace(&mut pending.dependency, dependency.clone());
+                    let was_blocked = previous.is_relay_blocked();
+                    let now_blocked = dependency.is_relay_blocked();
+                    let instructions_changed = previous.operator_required
+                        != dependency.operator_required
+                        || previous.relay_funding_blocked_reason
+                            != dependency.relay_funding_blocked_reason;
+                    if let Some((category, reason)) = dependency.block_category_and_reason() {
+                        if reported_relay_blocks.insert((dependency.relay_wallet.clone(), category))
+                        {
+                            dependency.warn_wallet_block();
+                        }
+                        if !was_blocked && now_blocked {
+                            let allow_failure =
+                                self.deployment.config.sources[&id].allow_catalog_failure;
+                            let closes_waiting = !allow_failure
+                                && self.deployment.listeners.iter().any(|(endpoint, config)| {
+                                    !self.closed_endpoints.contains(endpoint)
+                                        && config.wait_for_catalogs
+                                        && config.sources.iter().any(|source| source == &id)
+                                });
+                            let keeps_running = allow_failure
+                                || self.deployment.listeners.iter().any(|(endpoint, config)| {
+                                    !self.closed_endpoints.contains(endpoint)
+                                        && !config.wait_for_catalogs
+                                        && config.sources.iter().any(|source| source == &id)
+                                });
+                            let impact = match (keeps_running, closes_waiting) {
+                                (true, true) => {
+                                    "waiting listeners that require this source cannot start; non-waiting listeners omit it until relay funding succeeds"
+                                }
+                                (true, false) => {
+                                    "this source is omitted until relay funding succeeds"
+                                }
+                                (false, _) => {
+                                    "waiting listeners that require this source cannot start"
+                                }
+                            };
+                            tracing::warn!(
+                                source = id,
+                                category = "catalog_unavailable",
+                                relay_wallet = dependency.relay_wallet.as_deref(),
+                                reason,
+                                "The provider catalog fell back to the paid discovery relay, but relay wallet funding is currently unavailable; {impact}"
+                            );
+                            selection = self.deployment.refresh_selection(true);
+                            settled_source = Some(id.clone());
+                        }
+                    } else if !dependency.waiting_for_relay_funds {
+                        reported_relay_blocks
+                            .retain(|(wallet, _)| wallet != &dependency.relay_wallet);
+                    }
+                    work.push(status_change(id, receiver, cancel));
+                    if !instructions_changed && settled_source.is_none() {
+                        continue;
+                    }
                 }
                 Event::Catalog(id, result) => {
+                    let Some(removed_pending) = self.deployment.pending_sources.remove(&id) else {
+                        pending_cancels.remove(&id);
+                        continue;
+                    };
+                    if result.is_ok() && removed_pending.dependency.waiting_for_relay_funds {
+                        reported_relay_blocks.retain(|(wallet, _)| {
+                            wallet != &removed_pending.dependency.relay_wallet
+                        });
+                    }
                     heartbeat
                         .as_mut()
                         .reset(tokio::time::Instant::now() + startup::CATALOG_PROGRESS_INTERVAL);
-                    self.deployment.pending_sources.remove(&id);
+                    pending_cancels.remove(&id);
+                    completed_source = Some(id.clone());
                     let result = result.and_then(|source| {
                         self.accept_source(&id, *source)
                             .context(crate::catalog::LoadStage::Selection)
@@ -608,8 +748,15 @@ impl Runtime {
                     tracing::info!(source = id, category = "catalog_ready", "Catalog ready");
                     source.report_degradation(&id);
                 }
+            } else if let Some(id) = settled_source {
+                self.deployment.report_completed_diagnostics(
+                    diagnostics,
+                    &previous_conflicts,
+                    Some(&id),
+                );
             }
             self.signal_readiness();
+            self.cancel_orphaned_pending_sources(&mut pending_cancels);
         }
         drop(work);
         self.startup_ready.take();
@@ -1720,8 +1867,18 @@ wait_for_catalogs=false
                 )
                 .unwrap(),
             );
-            let (_dir, running, catalog, fixture, relay, api) =
+            let (_dir, mut running, catalog, fixture, relay, api) =
                 prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
+            for source in ["a", "b"] {
+                running
+                    .deferred
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut(source)
+                    .unwrap()
+                    .allow_catalog_failure = true;
+            }
             let relay_owner = running.deferred.relays()[0].clone();
             let waiting = crate::discovery_relay::tests::dependency_wait_signal(&relay_owner).await;
             drop(relay_owner);
@@ -1848,6 +2005,1221 @@ wait_for_catalogs=false
     }
 
     #[tokio::test]
+    async fn relay_funding_obstructions_unblock_waiting_listeners_and_cancel_orphaned_required_sources()
+     {
+        if public_target_fixture(
+            "relay_funding_obstructions_unblock_waiting_listeners_and_cancel_orphaned_required_sources",
+        )
+        .await
+        {
+            return;
+        }
+        use crate::rotation::{
+            base::BaseRpc,
+            error::FundingCondition,
+            manager::ManagedPool,
+            store::{AllocationKind, Store, StoreHandle},
+        };
+        for mode in [
+            "required_shortfall",
+            "optional_shortfall",
+            "optional_paused",
+            "eager_shortfall",
+            "mixed_shortfall",
+        ] {
+            let state_dir = tempfile::tempdir().unwrap();
+            let mut state = Store::create(
+                &state_dir.path().join("state"),
+                &state_dir.path().join("key"),
+                1,
+                b"fixture",
+            )
+            .unwrap();
+            let reserves = crate::rotation::test_capacity::small_reserve("5");
+            let pool = state
+                .ensure_capacity_group(
+                    "relay",
+                    &reserves,
+                    Some(alloy_primitives::U256::from(1_000_000u64)),
+                    0,
+                )
+                .unwrap();
+            state
+                .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+                .unwrap()
+                .unwrap();
+            let job = state.funding_jobs().unwrap().remove(0);
+            if mode == "optional_paused" {
+                state.pause_new_funding();
+            } else {
+                state
+                    .observe_funding_condition(
+                        &job.id,
+                        &job.operation_id,
+                        Some(FundingCondition::InsufficientFunds),
+                    )
+                    .unwrap();
+            }
+            let (store, worker) = StoreHandle::spawn(state);
+            let rpc_listener = crate::test_tls::listener().await;
+            let rpc_base = format!("https://{}", rpc_listener.local_addr().unwrap());
+            let timestamp = crate::rotation::base::now().unwrap();
+            let rpc = tokio::spawn(async move {
+                axum::serve(
+                    rpc_listener,
+                    Router::new().route(
+                        "/",
+                        axum::routing::post(move |request| {
+                            crate::discovery_relay::readiness_tests::rpc(timestamp, request)
+                        }),
+                    ),
+                )
+                .await
+                .unwrap();
+            });
+            let manager = Arc::new(
+                ManagedPool::new(
+                    store.clone(),
+                    pool.clone(),
+                    BaseRpc::new(&rpc_base).unwrap(),
+                    crate::payment::SpendPolicy::dollars("1").unwrap(),
+                )
+                .unwrap(),
+            );
+            let (_dir, mut running, catalog, fixture, relay, api) =
+                prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
+            let readiness_one = running.catalog_readiness.remove("one").unwrap();
+            let mut runtime = running.deferred;
+            runtime.can_allocate = mode != "optional_paused";
+            let optional = !matches!(mode, "required_shortfall" | "eager_shortfall");
+            for source in ["a", "b"] {
+                runtime
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut(source)
+                    .unwrap()
+                    .allow_catalog_failure = optional;
+            }
+            if matches!(mode, "optional_shortfall" | "eager_shortfall") {
+                // Verify selection diagnostics fire when the listener settles on shortfall.
+                runtime
+                    .deployment
+                    .listeners
+                    .get_mut("one")
+                    .unwrap()
+                    .include_tools = vec!["missing_exact_tool".into()];
+            }
+            if mode == "eager_shortfall" {
+                runtime
+                    .deployment
+                    .listeners
+                    .get_mut("one")
+                    .unwrap()
+                    .wait_for_catalogs = false;
+                runtime.readiness.remove("one");
+            }
+            let mut readiness_two = None;
+            if mode == "mixed_shortfall" {
+                runtime
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut("a")
+                    .unwrap()
+                    .allow_catalog_failure = true;
+                runtime
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut("b")
+                    .unwrap()
+                    .allow_catalog_failure = false;
+                let mut listener = runtime.deployment.listeners["one"].clone();
+                listener.sources = vec!["b".into()];
+                runtime.deployment.listeners.insert("two".into(), listener);
+                runtime.deployment.listeners.get_mut("one").unwrap().sources =
+                    vec!["healthy".into(), "a".into()];
+                runtime.deployment.wallet_resolution.bindings.insert(
+                    "two".into(),
+                    runtime.deployment.wallet_resolution.bindings["one"].clone(),
+                );
+                runtime.deployment.refresh_selection(true).unwrap();
+                let (send, receive) = tokio::sync::oneshot::channel();
+                runtime.readiness.insert("two".into(), send);
+                readiness_two = Some(receive);
+                let mut snapshot = (*catalog.read()).clone();
+                snapshot.views.insert("two".into(), Vec::new());
+                snapshot.instructions.insert("two".into(), None);
+                catalog.publish(snapshot);
+            }
+            use tracing::instrument::WithSubscriber;
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            let stop = CancellationToken::new();
+            let task = tokio::spawn(runtime.run(stop.clone()).with_subscriber(subscriber));
+            let one_result = if mode == "eager_shortfall" {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while !catalog.read().instructions["one"]
+                        .as_deref()
+                        .is_some_and(|text| {
+                            text.contains("Source a: BLOCKED") && text.contains("Source b: BLOCKED")
+                        })
+                    {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                // Wait for report_completed_diagnostics right after publish().
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while !std::fs::read_to_string(log.path())
+                        .unwrap()
+                        .contains("missing_exact_tool")
+                    {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                Ok(())
+            } else {
+                tokio::time::timeout(Duration::from_secs(5), readiness_one)
+                    .await
+                    .unwrap()
+                    .unwrap()
+            };
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            match mode {
+                "required_shortfall" => {
+                    assert!(one_result.is_err(), "{mode}: {one_result:?}");
+                    assert_eq!(
+                        logs.matches("relay_wallet_insufficient_zec").count(),
+                        1,
+                        "wallet-level shortfall WARN must be deduplicated across sources: {logs}"
+                    );
+                    assert!(logs.contains("catalog_unavailable"), "{logs}");
+                    // Supply funds after the sole required listener already closed:
+                    // the orphaned relay task must have been cancelled and must never pay.
+                    store
+                        .call(|s| {
+                            for job in s.funding_jobs()? {
+                                s.record_funding_balance(
+                                    &job.id,
+                                    &job.operation_id,
+                                    &job.wallet_id,
+                                    &job.recipient,
+                                    alloy_primitives::U256::from(5_000_000),
+                                )?;
+                            }
+                            Ok(())
+                        })
+                        .await
+                        .unwrap();
+                    manager.reconcile().await.unwrap();
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+                    assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
+                }
+                "optional_shortfall" => {
+                    assert!(one_result.is_ok(), "{mode}: {one_result:?}");
+                    assert_eq!(
+                        logs.matches("relay_wallet_insufficient_zec").count(),
+                        1,
+                        "{logs}"
+                    );
+                    assert!(
+                        logs.contains("missing_exact_tool"),
+                        "unmatched include_tools diagnostic must fire when listener settles on shortfall: {logs}"
+                    );
+                    let instructions = catalog.read().instructions["one"].clone().unwrap();
+                    assert!(instructions.contains("BLOCKED"), "{instructions}");
+                    assert!(
+                        instructions.contains("treasury ZEC is insufficient"),
+                        "{instructions}"
+                    );
+                    // Unrelated capacity wakeups while still unfunded must NOT
+                    // flap MCP instructions or re-emit catalog_unavailable / selection WARNs.
+                    let before_spurious_wakeup = std::fs::read_to_string(log.path()).unwrap();
+                    let pool_for_wake = pool.clone();
+                    store
+                        .call(move |s| {
+                            s.capacity_changes(&pool_for_wake).notify_waiters();
+                            Ok(())
+                        })
+                        .await
+                        .unwrap();
+                    tokio::time::sleep(Duration::from_millis(120)).await;
+                    let after_spurious_wakeup = std::fs::read_to_string(log.path()).unwrap();
+                    assert_eq!(
+                        after_spurious_wakeup.matches("catalog_unavailable").count(),
+                        before_spurious_wakeup
+                            .matches("catalog_unavailable")
+                            .count(),
+                        "spurious capacity wakeup must not re-emit catalog_unavailable: {after_spurious_wakeup}"
+                    );
+                    assert_eq!(
+                        after_spurious_wakeup.matches("missing_exact_tool").count(),
+                        before_spurious_wakeup.matches("missing_exact_tool").count(),
+                        "spurious capacity wakeup must not re-emit selection WARN: {after_spurious_wakeup}"
+                    );
+                    assert!(
+                        catalog.read().instructions["one"]
+                            .as_deref()
+                            .is_some_and(|text| text.contains("BLOCKED")),
+                        "spurious capacity wakeup must not flap BLOCKED back to PENDING"
+                    );
+                    // Background recovery still loads the omitted optional source once funded.
+                    store
+                        .call(|s| {
+                            for job in s.funding_jobs()? {
+                                s.record_funding_balance(
+                                    &job.id,
+                                    &job.operation_id,
+                                    &job.wallet_id,
+                                    &job.recipient,
+                                    alloy_primitives::U256::from(5_000_000),
+                                )?;
+                            }
+                            Ok(())
+                        })
+                        .await
+                        .unwrap();
+                    manager.reconcile().await.unwrap();
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while catalog.read().instructions["one"]
+                            .as_deref()
+                            .is_some_and(|text| {
+                                text.contains("BLOCKED") || text.contains("PENDING")
+                            })
+                        {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+                }
+                "optional_paused" => {
+                    assert!(one_result.is_ok(), "{mode}: {one_result:?}");
+                    assert_eq!(
+                        logs.matches("relay_wallet_unavailable").count(),
+                        1,
+                        "{logs}"
+                    );
+                    assert!(logs.contains("funding_disabled"), "{logs}");
+                    let instructions = catalog.read().instructions["one"].clone().unwrap();
+                    assert!(
+                        instructions.contains("automatic relay wallet funding is disabled"),
+                        "{instructions}"
+                    );
+                }
+                "eager_shortfall" => {
+                    assert!(
+                        logs.contains("missing_exact_tool"),
+                        "wait_for_catalogs = false listener must still emit selection diagnostics on shortfall: {logs}"
+                    );
+                    assert_eq!(
+                        logs.matches("relay_wallet_insufficient_zec").count(),
+                        1,
+                        "{logs}"
+                    );
+                }
+                "mixed_shortfall" => {
+                    assert!(one_result.is_ok(), "{mode}: {one_result:?}");
+                    let two_result =
+                        tokio::time::timeout(Duration::from_secs(5), readiness_two.unwrap())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    assert!(two_result.is_err(), "{mode}: {two_result:?}");
+                    // Listener "one" still references source "a", so background recovery
+                    // publishes "a" onto "one" once funds arrive.
+                    store
+                        .call(|s| {
+                            for job in s.funding_jobs()? {
+                                s.record_funding_balance(
+                                    &job.id,
+                                    &job.operation_id,
+                                    &job.wallet_id,
+                                    &job.recipient,
+                                    alloy_primitives::U256::from(5_000_000),
+                                )?;
+                            }
+                            Ok(())
+                        })
+                        .await
+                        .unwrap();
+                    manager.reconcile().await.unwrap();
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while catalog.read().views["one"].len() < 2 {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+                }
+                _ => unreachable!(),
+            }
+            stop.cancel();
+            tokio::time::timeout(Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap();
+            drop(manager);
+            drop(store);
+            worker.await.unwrap();
+            rpc.abort();
+            relay.abort();
+            api.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn waiting_for_relay_funds_heartbeat_reports_and_clears_on_download_resume() {
+        if public_target_fixture(
+            "waiting_for_relay_funds_heartbeat_reports_and_clears_on_download_resume",
+        )
+        .await
+        {
+            return;
+        }
+        use crate::rotation::{
+            base::BaseRpc,
+            manager::ManagedPool,
+            store::{AllocationKind, Store, StoreHandle},
+        };
+        let state_dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &state_dir.path().join("state"),
+            &state_dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = crate::rotation::test_capacity::small_reserve("5");
+        let pool = state
+            .ensure_capacity_group(
+                "relay",
+                &reserves,
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .unwrap();
+        state
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let rpc_listener = crate::test_tls::listener().await;
+        let rpc_base = format!("https://{}", rpc_listener.local_addr().unwrap());
+        let timestamp = crate::rotation::base::now().unwrap();
+        let rpc = tokio::spawn(async move {
+            axum::serve(
+                rpc_listener,
+                Router::new().route(
+                    "/",
+                    axum::routing::post(move |request| {
+                        crate::discovery_relay::readiness_tests::rpc(timestamp, request)
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let manager = Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool.clone(),
+                BaseRpc::new(&rpc_base).unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        );
+        // Stall relay HTTP responses so we can observe waiting_for_relay_funds
+        // clear to false once the wallet is funded and active download begins.
+        let (_dir, running, _catalog, _fixture, relay_task, api) =
+            prepared(true, false, Some(PaidClient::managed(manager.clone()))).await;
+        let relay = running.deferred.relays()[0].clone();
+        let waiting = crate::discovery_relay::tests::dependency_wait_signal(&relay).await;
+        let (status_tx, mut status_rx) = tokio::sync::watch::channel(Default::default());
+        let target = format!(
+            "https://spec.example.com:{}/spec",
+            crate::test_tls::listener()
+                .await
+                .local_addr()
+                .unwrap()
+                .port()
+        );
+        let fetch = tokio::spawn({
+            let relay = relay.clone();
+            async move {
+                relay
+                    .fetch_when_ready_bounded(
+                        &target,
+                        4096,
+                        "max_spec_bytes",
+                        None,
+                        crate::discovery_relay::CatalogReadiness {
+                            status: Some(status_tx),
+                            can_allocate: true,
+                            log_blocks: false,
+                        },
+                        None,
+                    )
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+            .await
+            .unwrap();
+        let dep = status_rx.borrow_and_update().clone();
+        assert!(dep.waiting_for_relay_funds, "{dep:?}");
+        assert_eq!(dep.relay_wallet.as_deref(), Some("selected"));
+        assert!(!dep.is_relay_blocked(), "{dep:?}");
+
+        // Fund the wallet: fetch resumes into the stalled HTTP download and
+        // immediately clears waiting_for_relay_funds.
+        store
+            .call(|s| {
+                for job in s.funding_jobs()? {
+                    s.record_funding_balance(
+                        &job.id,
+                        &job.operation_id,
+                        &job.wallet_id,
+                        &job.recipient,
+                        alloy_primitives::U256::from(5_000_000),
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        manager.reconcile().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), status_rx.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        let resumed = status_rx.borrow_and_update().clone();
+        assert!(!resumed.waiting_for_relay_funds, "{resumed:?}");
+
+        // Exercise report_waiting_catalogs directly to verify awaiting_relay_funds,
+        // relay_wallets, and omission of blocked optional sources.
+        let mut runtime = running.deferred;
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        runtime
+            .deployment
+            .pending_sources
+            .get_mut("a")
+            .unwrap()
+            .dependency = crate::discovery_relay::CatalogDependency {
+            waiting_for_relay_funds: true,
+            relay_wallet: Some("selected".into()),
+            ..Default::default()
+        };
+        runtime
+            .deployment
+            .config
+            .sources
+            .get_mut("b")
+            .unwrap()
+            .allow_catalog_failure = true;
+        runtime
+            .deployment
+            .pending_sources
+            .get_mut("b")
+            .unwrap()
+            .dependency = crate::discovery_relay::CatalogDependency {
+            waiting_for_relay_funds: true,
+            relay_funding_blocked_reason: Some("treasury_insufficient_spendable_funds"),
+            relay_wallet: Some("blocked_wallet".into()),
+            ..Default::default()
+        };
+        let gate = runtime.deployment.catalog_capacity.clone();
+        tracing::dispatcher::with_default(&subscriber.into(), || {
+            runtime.report_waiting_catalogs(&gate);
+        });
+        let heartbeat_logs = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            heartbeat_logs.contains("catalog_startup_waiting"),
+            "{heartbeat_logs}"
+        );
+        assert!(
+            heartbeat_logs.contains("awaiting_relay_funds=\"a\""),
+            "{heartbeat_logs}"
+        );
+        assert!(
+            heartbeat_logs.contains("relay_wallets=\"selected\""),
+            "{heartbeat_logs}"
+        );
+        assert!(
+            !heartbeat_logs.contains("blocked_wallet"),
+            "blocked optional sources must not appear in awaiting_relay_funds: {heartbeat_logs}"
+        );
+
+        fetch.abort();
+        drop(relay);
+        drop(runtime);
+        drop(manager);
+        drop(store);
+        worker.await.unwrap();
+        rpc.abort();
+        relay_task.abort();
+        api.abort();
+    }
+
+    #[tokio::test]
+    async fn closed_required_listener_cancels_non_blocked_sibling_pending_source() {
+        if public_target_fixture(
+            "closed_required_listener_cancels_non_blocked_sibling_pending_source",
+        )
+        .await
+        {
+            return;
+        }
+        use crate::rotation::{
+            base::BaseRpc,
+            error::FundingCondition,
+            manager::ManagedPool,
+            store::{AllocationKind, Store, StoreHandle},
+        };
+        let state_dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &state_dir.path().join("state"),
+            &state_dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = crate::rotation::test_capacity::small_reserve("5");
+        let blocked_pool = state
+            .ensure_capacity_group(
+                "blocked",
+                &reserves,
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .unwrap();
+        let waiting_pool = state
+            .ensure_capacity_group(
+                "waiting",
+                &reserves,
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .unwrap();
+        let blocked_job_id = state
+            .allocate_capacity_kind(&blocked_pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        state
+            .allocate_capacity_kind(&waiting_pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let blocked_job = state.funding_job(&blocked_job_id).unwrap().unwrap();
+        state
+            .observe_funding_condition(
+                &blocked_job.id,
+                &blocked_job.operation_id,
+                Some(FundingCondition::InsufficientFunds),
+            )
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let rpc_listener = crate::test_tls::listener().await;
+        let rpc_base = format!("https://{}", rpc_listener.local_addr().unwrap());
+        let timestamp = crate::rotation::base::now().unwrap();
+        let rpc = tokio::spawn(async move {
+            axum::serve(
+                rpc_listener,
+                Router::new().route(
+                    "/",
+                    axum::routing::post(move |request| {
+                        crate::discovery_relay::readiness_tests::rpc(timestamp, request)
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let blocked_manager = Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                blocked_pool.clone(),
+                BaseRpc::new(&rpc_base).unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        );
+        let waiting_manager = Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                waiting_pool.clone(),
+                BaseRpc::new(&rpc_base).unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        );
+        let (_dir, mut running, _catalog, fixture_a, relay_a_task, api) = prepared(
+            false,
+            false,
+            Some(PaidClient::managed(blocked_manager.clone())),
+        )
+        .await;
+        // Rebind source "b" onto a distinct non-blocked relay ("waiting" pool)
+        // so "b" is NOT relay-blocked when "a" closes listener "one".
+        let target_b = format!(
+            "https://b.example.com:{}/spec",
+            crate::test_tls::listener()
+                .await
+                .local_addr()
+                .unwrap()
+                .port()
+        );
+        let envelope_b = json!({"url":target_b,"method":"GET","statusCode":200,"headers":{},"body":r#"{"operations":[{"method":"GET","path":"/read"}]}"#,"redirectChain":[],"error":null});
+        let (mut relay_b, fixture_b, relay_b_task) =
+            crate::discovery_relay::tests::fixture(envelope_b, false, false).await;
+        crate::discovery_relay::tests::set_wallet(&mut relay_b, "waiting");
+        crate::discovery_relay::tests::set_client(
+            &mut relay_b,
+            PaidClient::managed(waiting_manager.clone()),
+        );
+        let mut cfg_b = running.deferred.deployment.pending_sources["b"]
+            .config
+            .clone();
+        cfg_b.spec = target_b;
+        cfg_b.relay_fallback = Some(relay_b);
+        running
+            .deferred
+            .deployment
+            .pending_sources
+            .get_mut("b")
+            .unwrap()
+            .replace_config_for_test(cfg_b);
+
+        let readiness_one = running.catalog_readiness.remove("one").unwrap();
+        let mut runtime = running.deferred;
+        runtime.can_allocate = true;
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(runtime.run(stop.clone()));
+        let one_result = tokio::time::timeout(Duration::from_secs(5), readiness_one)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(one_result.is_err(), "{one_result:?}");
+
+        // Now fund the non-blocked sibling's "waiting" pool: because listener
+        // "one" already closed, sibling source "b" must have been cancelled and
+        // must never invoke or pay its relay.
+        let waiting_pool_id = waiting_pool.clone();
+        store
+            .call(move |s| {
+                for job in s.funding_jobs()? {
+                    if job.pool_id == waiting_pool_id {
+                        s.record_funding_balance(
+                            &job.id,
+                            &job.operation_id,
+                            &job.wallet_id,
+                            &job.recipient,
+                            alloy_primitives::U256::from(5_000_000),
+                        )?;
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        waiting_manager.reconcile().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(fixture_a.signed.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture_b.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture_b.signed.load(Ordering::SeqCst), 0);
+
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(blocked_manager);
+        drop(waiting_manager);
+        drop(store);
+        worker.await.unwrap();
+        rpc.abort();
+        relay_a_task.abort();
+        relay_b_task.abort();
+        api.abort();
+    }
+
+    #[tokio::test]
+    async fn initially_closed_listener_prunes_orphaned_pending_sources_before_spawning() {
+        if public_target_fixture(
+            "initially_closed_listener_prunes_orphaned_pending_sources_before_spawning",
+        )
+        .await
+        {
+            return;
+        }
+        let (_dir, mut running, _catalog, fixture, relay, api) = prepared(false, false, None).await;
+        // Simulate a listener whose required non-deferred source already failed
+        // before Runtime::run starts (initial signal_readiness closes it).
+        running.deferred.deployment.sources.remove("healthy");
+        running
+            .deferred
+            .deployment
+            .unavailable_sources
+            .insert("healthy".into(), "initial failure".into());
+        let readiness_one = running.catalog_readiness.remove("one").unwrap();
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(running.deferred.run(stop.clone()));
+        let one_result = tokio::time::timeout(Duration::from_secs(5), readiness_one)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(one_result.is_err(), "{one_result:?}");
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        // Pending sources "a" and "b" were pruned before spawning, so zero
+        // relay requests or payments occurred.
+        assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
+        stop.cancel();
+        let returned = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(returned.deployment.pending_sources.is_empty());
+        relay.abort();
+        api.abort();
+    }
+
+    #[tokio::test]
+    async fn standalone_relay_logs_deduplicated_wallet_block_warn_without_status_receiver() {
+        if public_target_fixture(
+            "standalone_relay_logs_deduplicated_wallet_block_warn_without_status_receiver",
+        )
+        .await
+        {
+            return;
+        }
+        use crate::rotation::{
+            base::BaseRpc,
+            error::FundingCondition,
+            manager::ManagedPool,
+            store::{AllocationKind, Store, StoreHandle},
+        };
+        use tracing::instrument::WithSubscriber;
+        let state_dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &state_dir.path().join("state"),
+            &state_dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = crate::rotation::test_capacity::small_reserve("5");
+        let pool = state
+            .ensure_capacity_group(
+                "relay",
+                &reserves,
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .unwrap();
+        let job_id = state
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let job = state.funding_job(&job_id).unwrap().unwrap();
+        state
+            .observe_funding_condition(
+                &job.id,
+                &job.operation_id,
+                Some(FundingCondition::InsufficientFunds),
+            )
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let rpc_listener = crate::test_tls::listener().await;
+        let rpc_base = format!("https://{}", rpc_listener.local_addr().unwrap());
+        let timestamp = crate::rotation::base::now().unwrap();
+        let rpc = tokio::spawn(async move {
+            axum::serve(
+                rpc_listener,
+                Router::new().route(
+                    "/",
+                    axum::routing::post(move |request| {
+                        crate::discovery_relay::readiness_tests::rpc(timestamp, request)
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let manager = Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool.clone(),
+                BaseRpc::new(&rpc_base).unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        );
+        let (_dir, running, _catalog, _fixture, relay_task, api) =
+            prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
+        let relay = running.deferred.relays()[0].clone();
+        let waiting = crate::discovery_relay::tests::dependency_wait_signal(&relay).await;
+        let target = format!(
+            "https://standalone.example.com:{}/spec",
+            crate::test_tls::listener()
+                .await
+                .local_addr()
+                .unwrap()
+                .port()
+        );
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let fetch = tokio::spawn(
+            {
+                let relay = relay.clone();
+                async move {
+                    relay
+                        .fetch_when_ready_bounded(
+                            &target,
+                            4096,
+                            "max_spec_bytes",
+                            None,
+                            crate::discovery_relay::CatalogReadiness {
+                                status: None,
+                                can_allocate: true,
+                                log_blocks: true,
+                            },
+                            None,
+                        )
+                        .await
+                }
+            }
+            .with_subscriber(subscriber),
+        );
+        tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+            .await
+            .unwrap();
+        // Wake capacity once more while still unfunded: standalone WARN must not duplicate.
+        let pool_for_wake = pool.clone();
+        store
+            .call(move |s| {
+                s.capacity_changes(&pool_for_wake).notify_waiters();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), waiting.notified())
+            .await
+            .unwrap();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            logs.matches("relay_wallet_insufficient_zec").count(),
+            1,
+            "{logs}"
+        );
+        fetch.abort();
+        drop(relay);
+        drop(running);
+        drop(manager);
+        drop(store);
+        worker.await.unwrap();
+        rpc.abort();
+        relay_task.abort();
+        api.abort();
+    }
+
+    #[tokio::test]
+    async fn relay_wallet_block_re_warns_after_recovery_episode() {
+        if public_target_fixture("relay_wallet_block_re_warns_after_recovery_episode").await {
+            return;
+        }
+        use crate::rotation::{
+            base::BaseRpc,
+            error::FundingCondition,
+            manager::ManagedPool,
+            store::{AllocationKind, Store, StoreHandle},
+        };
+        use tracing::instrument::WithSubscriber;
+        let state_dir = tempfile::tempdir().unwrap();
+        let mut state = Store::create(
+            &state_dir.path().join("state"),
+            &state_dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let reserves = crate::rotation::test_capacity::small_reserve("5");
+        let pool = state
+            .ensure_capacity_group(
+                "relay",
+                &reserves,
+                Some(alloy_primitives::U256::from(1_000_000u64)),
+                0,
+            )
+            .unwrap();
+        let job_id = state
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let job = state
+            .funding_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id == job_id)
+            .unwrap();
+        state
+            .observe_funding_condition(
+                &job.id,
+                &job.operation_id,
+                Some(FundingCondition::InsufficientFunds),
+            )
+            .unwrap();
+        let (store, worker) = StoreHandle::spawn(state);
+        let rpc_listener = crate::test_tls::listener().await;
+        let rpc_base = format!("https://{}", rpc_listener.local_addr().unwrap());
+        let timestamp = crate::rotation::base::now().unwrap();
+        let rpc = tokio::spawn(async move {
+            axum::serve(
+                rpc_listener,
+                Router::new().route(
+                    "/",
+                    axum::routing::post(move |request| {
+                        crate::discovery_relay::readiness_tests::rpc(timestamp, request)
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let manager = Arc::new(
+            ManagedPool::new(
+                store.clone(),
+                pool.clone(),
+                BaseRpc::new(&rpc_base).unwrap(),
+                crate::payment::SpendPolicy::dollars("1").unwrap(),
+            )
+            .unwrap(),
+        );
+        let (_dir, mut running, catalog, _fixture, relay_task, api) =
+            prepared(false, false, Some(PaidClient::managed(manager.clone()))).await;
+        // Gate source "b"'s origin fetch behind a Notify so "b" stays out of
+        // the relay until after "a" recovers, then falls back to the same relay
+        // wallet in a second shortfall episode.
+        let release_b = Arc::new(tokio::sync::Notify::new());
+        let origin_b_gate = release_b.clone();
+        let (origin_b_addr, origin_b) = crate::test_tls::serve(Router::new().route(
+            "/spec-b",
+            get(move || {
+                let gate = origin_b_gate.clone();
+                async move {
+                    gate.notified().await;
+                    axum::http::StatusCode::FORBIDDEN
+                }
+            }),
+        ))
+        .await;
+        let origin_b_url = format!("https://spec.example.com:{}/spec-b", origin_b_addr.port());
+        let mut cfg_b = running.deferred.deployment.pending_sources["b"]
+            .config
+            .clone();
+        cfg_b.spec = origin_b_url;
+        running
+            .deferred
+            .deployment
+            .pending_sources
+            .get_mut("b")
+            .unwrap()
+            .replace_config_for_test(cfg_b);
+
+        running.deferred.can_allocate = true;
+        for source in ["a", "b"] {
+            running
+                .deferred
+                .deployment
+                .config
+                .sources
+                .get_mut(source)
+                .unwrap()
+                .allow_catalog_failure = true;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(
+            running
+                .deferred
+                .run(stop.clone())
+                .with_subscriber(subscriber),
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let text = catalog.read().instructions["one"]
+                    .clone()
+                    .unwrap_or_default();
+                if text.contains("Source a: BLOCKED") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            logs.matches("relay_wallet_insufficient_zec").count(),
+            1,
+            "{logs}"
+        );
+
+        // 1. A transient shortfall clear while still unfunded (for example, an
+        //    outgoing spendability change before FundingWorker re-assesses)
+        //    must NOT duplicate the wallet-level WARN when shortfall recurs.
+        let clear_job = job.id.clone();
+        let clear_op = job.operation_id.clone();
+        store
+            .call(move |s| s.observe_funding_condition(&clear_job, &clear_op, None))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let text = catalog.read().instructions["one"]
+                    .clone()
+                    .unwrap_or_default();
+                if text.contains("Source a: PENDING") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let retry_job = job.id.clone();
+        let retry_op = job.operation_id.clone();
+        store
+            .call(move |s| {
+                s.observe_funding_condition(
+                    &retry_job,
+                    &retry_op,
+                    Some(FundingCondition::InsufficientFunds),
+                )
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let text = catalog.read().instructions["one"]
+                    .clone()
+                    .unwrap_or_default();
+                if text.contains("Source a: BLOCKED") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            logs.matches("relay_wallet_insufficient_zec").count(),
+            1,
+            "transient clear while still unfunded should not duplicate wallet WARN: {logs}"
+        );
+
+        // 2. Actual wallet recovery (a funded wallet clears waiting_for_relay_funds
+        //    and loads source "a") resets deduplication so a later shortfall
+        //    episode on source "b" emits a fresh wallet-level WARN.
+        let wallet_id = job.wallet_id.clone();
+        let pool_for_credit = pool.clone();
+        store
+            .call(move |s| {
+                s.record_credit(&wallet_id, "5000000", "fixture", 101)?;
+                s.capacity_changes(&pool_for_credit).notify_waiters();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while catalog.read().views["one"].len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        // Retire the funded wallet and allocate a fresh unfunded job with
+        // InsufficientFunds, then release source "b" to enter relay fallback.
+        let pool_for_second = pool.clone();
+        let first_wallet = job.wallet_id.clone();
+        store
+            .call(move |s| {
+                s.retire_wallet_for_test(&first_wallet)?;
+                let second_id = s
+                    .allocate_capacity_kind(&pool_for_second, AllocationKind::Small, true)?
+                    .expect("second allocation");
+                let second = s.funding_job(&second_id)?.expect("second job");
+                s.observe_funding_condition(
+                    &second.id,
+                    &second.operation_id,
+                    Some(FundingCondition::InsufficientFunds),
+                )
+            })
+            .await
+            .unwrap();
+        release_b.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let text = catalog.read().instructions["one"]
+                    .clone()
+                    .unwrap_or_default();
+                if text.contains("Source b: BLOCKED") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            logs.matches("relay_wallet_insufficient_zec").count(),
+            2,
+            "second shortfall episode after recovery must re-emit wallet WARN: {logs}"
+        );
+
+        stop.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        origin_b.abort();
+        drop(manager);
+        drop(store);
+        worker.await.unwrap();
+        rpc.abort();
+        relay_task.abort();
+        api.abort();
+    }
+
+    #[tokio::test]
     async fn invalid_late_source_does_not_stop_alias_publication_or_existing_calls() {
         if public_target_fixture(
             "invalid_late_source_does_not_stop_alias_publication_or_existing_calls",
@@ -1863,8 +3235,18 @@ wait_for_catalogs=false
                 .with_writer(log.reopen().unwrap())
                 .finish();
             let _logging = tracing::subscriber::set_default(subscriber);
-            let (_dir, running, catalog, fixture, relay, api) =
+            let (_dir, mut running, catalog, fixture, relay, api) =
                 prepared(false, invalid_first, None).await;
+            for source in ["a", "b"] {
+                running
+                    .deferred
+                    .deployment
+                    .config
+                    .sources
+                    .get_mut(source)
+                    .unwrap()
+                    .allow_catalog_failure = true;
+            }
             let captured = catalog.read();
             let healthy = captured.views["one"][0].clone();
             let stop = CancellationToken::new();

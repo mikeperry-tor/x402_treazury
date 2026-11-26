@@ -80,13 +80,24 @@ impl std::fmt::Debug for DeferredDocument {
 pub(super) struct PendingSource {
     send_tools: Option<Vec<SendToolsRule>>,
     pub config: catalog::Config,
-    pub operator_required: bool,
+    pub dependency: crate::discovery_relay::CatalogDependency,
     document: DeferredDocument,
 }
 impl PendingSource {
+    pub(super) fn is_relay_blocked(&self) -> bool {
+        self.dependency.is_relay_blocked()
+    }
     #[cfg(test)]
     pub(super) fn shares_download(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.document.0, &other.document.0)
+    }
+    #[cfg(test)]
+    pub(super) fn replace_config_for_test(&mut self, config: catalog::Config) {
+        self.document = DeferredDocument(Arc::new(DeferredLoad {
+            config: config.clone(),
+            prepared: OnceCell::new(),
+        }));
+        self.config = config;
     }
 
     pub async fn resume(
@@ -543,7 +554,7 @@ impl Source {
                 return Ok(SourceLoad::Pending(PendingSource {
                     send_tools: source.send_tools.clone(),
                     config: cfg,
-                    operator_required: false,
+                    dependency: Default::default(),
                     document,
                 }));
             }
@@ -1111,7 +1122,7 @@ mod deferred_tests {
         let pending = PendingSource {
             send_tools: None,
             config: cfg,
-            operator_required: false,
+            dependency: Default::default(),
             document,
         };
         let (source, logs) = crate::limits::tests::capture(async {

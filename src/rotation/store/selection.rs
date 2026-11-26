@@ -137,6 +137,19 @@ impl Store {
             owner.capacity_changed.notify_waiters();
         }
     }
+
+    /// Wake local capacity waiters across all pools without waking the treasury
+    /// sync loop (for treasury-wide state transitions such as outgoing closure).
+    pub(super) fn notify_all_capacity_changed(&self) {
+        for owner in self
+            .group_gates
+            .lock()
+            .expect("group ownership lock")
+            .values()
+        {
+            owner.capacity_changed.notify_waiters();
+        }
+    }
 }
 
 #[cfg(test)]

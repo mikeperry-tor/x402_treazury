@@ -387,9 +387,17 @@ impl PaidClient {
         Ok(changes)
     }
     pub(crate) async fn discovery_requires_creation(&self) -> Result<bool> {
-        match &self.managed {
+        let client = self.capture_effective(false).await?;
+        match &client.managed {
             Some(pool) => pool.discovery_requires_creation().await,
             None => Ok(false),
+        }
+    }
+    pub(crate) async fn discovery_funding_obstruction(&self) -> Result<Option<&'static str>> {
+        let client = self.capture_effective(false).await?;
+        match &client.managed {
+            Some(pool) => pool.discovery_funding_obstruction().await,
+            None => Ok(None),
         }
     }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {

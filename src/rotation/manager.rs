@@ -262,6 +262,12 @@ impl ManagedPool {
             .call(move |s| s.payment_identity_requires_creation(&pool))
             .await
     }
+    pub(crate) async fn discovery_funding_obstruction(&self) -> Result<Option<&'static str>> {
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| s.pool_funding_obstruction(&pool))
+            .await
+    }
     pub(crate) async fn discovery_ready(&self) -> Result<bool> {
         let pool = self.pool.clone();
         self.store

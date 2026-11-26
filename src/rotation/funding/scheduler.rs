@@ -158,13 +158,20 @@ struct Record {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TreasuryNotice {
+    DegradedShortfall,
     Shortfall,
     Unavailable,
     SyncDeferred,
 }
 impl TreasuryNotice {
     fn replaces(self, previous: Option<Self>) -> bool {
-        previous != Some(self) && previous != Some(Self::Shortfall)
+        match previous {
+            None => true,
+            Some(prev) if prev == self => false,
+            Some(Self::DegradedShortfall) => false,
+            Some(Self::Shortfall) => self == Self::DegradedShortfall,
+            Some(Self::Unavailable | Self::SyncDeferred) => true,
+        }
     }
 }
 #[derive(Debug, PartialEq, Eq)]
@@ -248,10 +255,11 @@ fn report_decode_failure(fault: &MalformedFunding) {
         "Saved wallet funding data could not be read; the affected operation is retained for inspection");
 }
 
-fn treasury_notice(error: &anyhow::Error) -> Option<TreasuryNotice> {
+fn treasury_notice(error: &anyhow::Error, degraded: bool) -> Option<TreasuryNotice> {
     if funding_condition(error) == Some(super::super::error::FundingCondition::InsufficientFunds) {
         use super::super::error::TreasuryFunds;
         match TreasuryFunds::from_error(error) {
+            TreasuryFunds::Shortfall if degraded => Some(TreasuryNotice::DegradedShortfall),
             TreasuryFunds::Shortfall => Some(TreasuryNotice::Shortfall),
             TreasuryFunds::Unavailable => Some(TreasuryNotice::Unavailable),
             TreasuryFunds::Waiting => None,
@@ -266,18 +274,20 @@ fn treasury_notice(error: &anyhow::Error) -> Option<TreasuryNotice> {
 }
 
 /// Report a new operator requirement once; polling details never change backoff.
+#[allow(clippy::too_many_arguments)]
 fn report_observation_failure(
     job: &FundingJob,
     wallet_type: &str,
     kind: Kind,
     phase: &FundingPhase,
     error: &anyhow::Error,
+    degraded: bool,
     previous_error: Option<&str>,
     previous_treasury_notice: Option<TreasuryNotice>,
 ) -> String {
     let category = safe_error(error, phase);
     let category_code = category.split(';').next().unwrap_or(category.as_str());
-    let notice = treasury_notice(error);
+    let notice = treasury_notice(error, degraded);
     let new_treasury_notice = notice.is_some_and(|n| n.replaces(previous_treasury_notice));
     // Presentation only: changing height details do not create a new disposition.
     let new_requirement = previous_error.and_then(|s| s.split("; treasury:").next())
@@ -306,6 +316,15 @@ fn report_observation_failure(
             TreasuryFunds::Waiting if new_requirement => {
                 tracing::debug!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
                 "Wallet funding is waiting for existing ZEC to become spendable; pending funds may still be insufficient; synchronization and funding retry automatically")
+            }
+            TreasuryFunds::Shortfall if new_treasury_notice && degraded => {
+                if let Some(address) = address {
+                    tracing::warn!(wallet=%job.pool_name,size=wallet_type,category=category_code,
+                "Observed ZEC is insufficient to fund a wallet group with no funded USDC wallets; add ZEC to {address} and allow confirmations; synchronization and funding retry automatically");
+                } else {
+                    tracing::warn!(wallet=%job.pool_name,size=wallet_type,category=category_code,
+                "Observed ZEC is insufficient to fund a wallet group with no funded USDC wallets; run wallet status --config FILE with the serving configuration to find the deposit address; add ZEC and allow confirmations; synchronization and funding retry automatically");
+                }
             }
             TreasuryFunds::Shortfall if new_treasury_notice => {
                 if let Some(address) = address {
@@ -1340,8 +1359,27 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let error = match failure.filter(|_| wait.is_none()) {
             Some(error) => {
                 let id = job.id.clone();
-                let wallet_type = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
-                notice = treasury_notice(&error);
+                let pool_name = job.pool_name.clone();
+                let bootstrap = self.bootstrap_policy.clone();
+                let check_degraded = funding_condition(&error)
+                    == Some(super::super::error::FundingCondition::InsufficientFunds)
+                    && matches!(
+                        super::super::error::TreasuryFunds::from_error(&error),
+                        super::super::error::TreasuryFunds::Shortfall
+                    );
+                let (wallet_type, degraded) = self
+                    .store
+                    .call(move |s| {
+                        let wallet_type = s.funding_wallet_type(&id)?;
+                        let degraded = if check_degraded {
+                            s.pool_shortfall_is_degraded(&pool_name, bootstrap.as_ref())?
+                        } else {
+                            false
+                        };
+                        Ok((wallet_type, degraded))
+                    })
+                    .await?;
+                notice = treasury_notice(&error, degraded);
                 let (previous_error, previous_treasury_notice) = {
                     let state = lease.state.lock().expect("funding schedule lock");
                     (
@@ -1360,6 +1398,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     kind,
                     &phase,
                     &error,
+                    degraded,
                     previous_error.as_deref(),
                     previous_treasury_notice,
                 ))
@@ -1408,12 +1447,8 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let (next, streak, health, condition) = {
             let state = lease.state.lock().expect("funding schedule lock");
             let (next, streak, health) = state.health(&job.operation_id, instant, applicable);
-            (
-                next,
-                streak,
-                health,
-                state.condition(&job.operation_id, applicable),
-            )
+            let condition = state.condition(&job.operation_id, applicable, kind == Kind::Source);
+            (next, streak, health, condition)
         };
         let (id, operation) = (job.id.clone(), job.operation_id.clone());
         let phase = self
@@ -1429,7 +1464,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     streak,
                     health.as_deref(),
                 )?;
-                s.observe_funding_condition(&id, &operation, condition)?;
+                match condition {
+                    Some(condition) => s.observe_funding_condition(&id, &operation, condition)?,
+                    None => s.clear_non_shortfall_funding_condition(&id, &operation)?,
+                }
                 let current = s.funding_job(&id)?.context("funding job missing")?;
                 Ok(Some((current.phase, s.funding_wallet_type(&id)?)))
             })
@@ -1647,22 +1685,49 @@ impl State {
         record.error = error;
         record.condition = condition;
     }
+    /// Returns `Some(condition)` to publish to `Store::observe_funding_condition`,
+    /// or `None` to leave `Store`'s current condition unchanged (preventing a
+    /// non-Source completion from resurrecting or erasing a Source shortfall).
     fn condition(
         &self,
         operation: &str,
         applicable: [bool; 4],
-    ) -> Option<super::super::error::FundingCondition> {
-        [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit]
-            .into_iter()
-            .filter(|kind| applicable[*kind as usize])
-            .find_map(|kind| {
-                self.records
-                    .get(&Key {
-                        operation: operation.to_owned(),
-                        kind,
-                    })
-                    .and_then(|record| record.condition)
-            })
+        source_publication: bool,
+    ) -> Option<Option<super::super::error::FundingCondition>> {
+        use super::super::error::FundingCondition;
+        let mut first = None;
+        let mut has_source_shortfall = false;
+        for kind in [Kind::Source, Kind::Quote, Kind::Status, Kind::Credit] {
+            if !applicable[kind as usize] {
+                continue;
+            }
+            let Some(condition) = self
+                .records
+                .get(&Key {
+                    operation: operation.to_owned(),
+                    kind,
+                })
+                .and_then(|record| record.condition)
+            else {
+                continue;
+            };
+            if condition == FundingCondition::EvidenceInvalid {
+                return Some(Some(condition));
+            }
+            if !source_publication
+                && kind == Kind::Source
+                && condition == FundingCondition::InsufficientFunds
+            {
+                has_source_shortfall = true;
+                continue;
+            }
+            first.get_or_insert(condition);
+        }
+        if first.is_none() && has_source_shortfall {
+            None
+        } else {
+            Some(first)
+        }
     }
     fn health(
         &self,

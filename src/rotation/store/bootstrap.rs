@@ -126,21 +126,62 @@ impl Store {
         operation: &str,
         condition: Option<super::super::error::FundingCondition>,
     ) -> Result<()> {
-        let current: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM funding_progress WHERE job_id=?1 AND operation_id=?2)",
-            params![job, operation],
-            |r| r.get(0),
-        )?;
-        if !current {
+        let pool: Option<String> = self
+            .db
+            .query_row(
+                "SELECT f.pool_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2",
+                params![job, operation],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(pool) = pool else {
             return Ok(());
-        }
+        };
+        let previous = self
+            .funding_conditions
+            .get(job)
+            .filter(|(recorded, _)| recorded == operation)
+            .map(|(_, recorded)| *recorded);
         if let Some(condition) = condition {
             self.funding_conditions
                 .insert(job.to_owned(), (operation.to_owned(), condition));
         } else {
             self.funding_conditions.remove(job);
         }
+        if previous != condition {
+            self.capacity_changes(&pool).notify_waiters();
+        }
         Ok(())
+    }
+
+    /// Clear any non-shortfall funding condition for `(job, operation)` while
+    /// leaving an active or already-cleared `InsufficientFunds` untouched.
+    pub(crate) fn clear_non_shortfall_funding_condition(
+        &mut self,
+        job: &str,
+        operation: &str,
+    ) -> Result<()> {
+        let is_shortfall = self
+            .funding_conditions
+            .get(job)
+            .is_some_and(|(recorded, condition)| {
+                recorded == operation
+                    && *condition == super::super::error::FundingCondition::InsufficientFunds
+            });
+        if !is_shortfall {
+            self.observe_funding_condition(job, operation, None)?;
+        }
+        Ok(())
+    }
+
+    /// Clear cached ZEC-shortfall observations when treasury spendability may
+    /// have changed (for example, an outgoing transaction expired, confirmed, or
+    /// resolved) and wake parked capacity waiters to re-evaluate.
+    pub(super) fn note_spendability_changed(&mut self) {
+        self.funding_conditions.retain(|_, (_, condition)| {
+            *condition != super::super::error::FundingCondition::InsufficientFunds
+        });
+        self.notify_all_capacity_changed();
     }
 
     /// Caller pages its immutable configured name set, at most GROUP_PAGE per turn.
@@ -290,7 +331,7 @@ impl Store {
         }
     }
 
-    fn startup_path(&self, id: &str) -> Result<StartupPath> {
+    pub(super) fn startup_path(&self, id: &str) -> Result<StartupPath> {
         let job = self.funding_job(id)?.context("funding job missing")?;
         let facts = self.funding_facts(id, &job.operation_id)?;
         let operation = if facts.provider_success {

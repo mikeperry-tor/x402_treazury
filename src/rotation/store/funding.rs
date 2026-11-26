@@ -413,14 +413,23 @@ impl Store {
     pub(crate) fn funding_operation_fulfilled(&mut self, operation: &str) -> Result<bool> {
         let direct_success = self.direct_source_succeeded(operation)?;
         let tx = self.db.transaction()?;
-        if direct_success {
+        let mut resolved_outgoing = if direct_success {
             tx.execute(
-                "UPDATE outgoing SET state='RESOLVED' WHERE id=?1",
+                "UPDATE outgoing SET state='RESOLVED' WHERE id=?1 AND state='PREPARED'",
                 [operation],
-            )?;
-        }
-        let fulfilled = close_fulfilled_source(&tx, operation)? || direct_success;
+            )? > 0
+        } else {
+            false
+        };
+        let closed = close_fulfilled_source(&tx, operation)?;
+        resolved_outgoing |= closed.resolved_outgoing;
+        let fulfilled = closed.fulfilled || direct_success;
         tx.commit()?;
+        if resolved_outgoing {
+            self.note_spendability_changed();
+        } else if fulfilled {
+            self.notify_all_capacity_changed();
+        }
         Ok(fulfilled)
     }
 
@@ -780,10 +789,13 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let completed = finish_if_proven(&tx, job, operation)?;
+        let (completed, resolved_outgoing) = finish_if_proven(&tx, job, operation)?;
         tx.commit()?;
         if completed {
             self.funding_conditions.remove(job);
+        }
+        if resolved_outgoing {
+            self.note_spendability_changed();
         }
         Ok(completed)
     }
@@ -832,8 +844,11 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        derive_operation_phase(&tx, job, operation)?;
+        let resolved_outgoing = derive_operation_phase(&tx, job, operation)?;
         tx.commit()?;
+        if resolved_outgoing {
+            self.note_spendability_changed();
+        }
         Ok(())
     }
 
@@ -892,26 +907,33 @@ impl Store {
             [job],
             |r| r.get(0),
         )?;
-        close_fulfilled_source(&tx, operation)?;
+        let mut resolved_outgoing = close_fulfilled_source(&tx, operation)?.resolved_outgoing;
         if current_operation != operation {
-            close_fulfilled_source(&tx, &current_operation)?;
+            resolved_outgoing |= close_fulfilled_source(&tx, &current_operation)?.resolved_outgoing;
         }
         if current {
-            derive_operation_phase(&tx, job, operation)?;
+            resolved_outgoing |= derive_operation_phase(&tx, job, operation)?;
         } else if matches!(status, SwapStatus::Success) {
-            derive_operation_phase(&tx, job, &current_operation)?;
+            resolved_outgoing |= derive_operation_phase(&tx, job, &current_operation)?;
         }
         tx.commit()?;
         if matches!(status, SwapStatus::Success) {
             self.refund_observations.remove(operation);
         }
-        if (matches!(status, SwapStatus::Failed) && !failed)
+        let treasury_outcome_changed = (matches!(status, SwapStatus::Failed) && !failed)
             || (matches!(status, SwapStatus::Refunded) && !refunded)
-            || (matches!(status, SwapStatus::Success) && !success)
-        {
+            || (matches!(status, SwapStatus::Success) && !success);
+        let outcome_changed = treasury_outcome_changed
+            || (matches!(status, SwapStatus::IncompleteDeposit) && !incomplete);
+        if treasury_outcome_changed {
             // Wake an idle treasury to discover new refund work (or stop it).
             // Repeated polls cannot shorten the existing scan cadence.
             self.treasury_changes.notify_one();
+        }
+        if resolved_outgoing {
+            self.note_spendability_changed();
+        } else if outcome_changed {
+            self.notify_all_capacity_changed();
         }
         Ok(())
     }
@@ -960,30 +982,44 @@ pub(super) fn claim_succeeded(db: &Connection, operation: &str) -> Result<bool> 
     Ok(false)
 }
 
+pub(super) struct ClosedSource {
+    pub(super) fulfilled: bool,
+    pub(super) resolved_outgoing: bool,
+}
+
 /// Idempotently close local source work while retaining factual SDK submission status.
-pub(super) fn close_fulfilled_source(db: &Connection, operation: &str) -> Result<bool> {
+pub(super) fn close_fulfilled_source(db: &Connection, operation: &str) -> Result<ClosedSource> {
     let claim = claim_succeeded(db, operation)?;
     let exact = provider_succeeded(db, operation)?;
-    if exact {
+    let resolved_outgoing = if exact {
         db.execute(
-            "UPDATE outgoing SET state='RESOLVED' WHERE id=?1",
+            "UPDATE outgoing SET state='RESOLVED' WHERE id=?1 AND state='PREPARED'",
             [operation],
-        )?;
+        )? > 0
     } else if claim {
         // Only an intact native first-send sequence proves non-disclosure.
         // Malformed or already-disclosed originals retain their observation owner.
-        db.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1 AND EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=?1 AND t.submission='PREPARED' AND typeof(t.attempts)='integer' AND t.attempts=0)",[operation])?;
-    }
+        db.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1 AND state='PREPARED' AND EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=?1 AND t.submission='PREPARED' AND typeof(t.attempts)='integer' AND t.attempts=0)",[operation])? > 0
+    } else {
+        false
+    };
     let pending: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='PREPARED') OR (EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1))",
         [operation],
         |r| r.get(0),
     )?;
     let fulfilled = exact || (claim && !pending);
-    Ok(fulfilled)
+    Ok(ClosedSource {
+        fulfilled,
+        resolved_outgoing,
+    })
 }
 
-pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> Result<bool> {
+pub(super) fn finish_if_proven(
+    tx: &Connection,
+    job: &str,
+    operation: &str,
+) -> Result<(bool, bool)> {
     let (ready, correlation, flags, attempts, confirmed):
             (bool, Option<String>, rusqlite::Result<ProviderFlags>, rusqlite::Result<i64>, bool) = tx.query_row(
             "SELECT f.readiness_requirement IS NOT NULL,f.readiness_operation,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),o.submission,o.id IS NOT NULL,EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,provider_flags(r,2),observation_disclosure(r,8,6,r.get(9)?,r.get(10)?).map(|(_,attempts)|attempts),r.get(7)?)))?;
@@ -995,7 +1031,7 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
         |r| r.get(0),
     )?;
     let ready = ready && initial_credit_recorded(tx, &wallet)?;
-    close_fulfilled_source(tx, operation)?;
+    let resolved_outgoing = close_fulfilled_source(tx, operation)?.resolved_outgoing;
     let fulfilled = claim_succeeded(tx, operation)?;
     if fulfilled {
         tx.execute("UPDATE funding_progress SET phase='\"VERIFYING_CREDIT\"',last_error=NULL WHERE job_id=?1 AND operation_id=?2", params![job,operation])?;
@@ -1026,7 +1062,7 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
             [job],
         )?;
     }
-    Ok(outcome.is_some())
+    Ok((outcome.is_some(), resolved_outgoing))
 }
 
 /// Publication is driven by destination readiness, never financial completion.
@@ -1043,7 +1079,7 @@ fn publish_initial_credit(db: &Connection, wallet: &str) -> Result<()> {
     Ok(())
 }
 
-fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result<()> {
+fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result<bool> {
     let matched: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM funding_progress WHERE job_id=?1 AND operation_id=?2)",
         params![job, operation],
@@ -1051,11 +1087,12 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
     )?;
     ensure!(matched, "funding operation correlation mismatch");
     // NEAR fulfillment and destination readiness are independently established.
-    if finish_if_proven(db, job, operation)? || claim_succeeded(db, operation)? {
-        return Ok(());
+    let (completed, resolved_outgoing) = finish_if_proven(db, job, operation)?;
+    if completed || claim_succeeded(db, operation)? {
+        return Ok(resolved_outgoing);
     }
     db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_incomplete=1 THEN '\"RECOVERY_REQUIRED\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o JOIN outgoing x ON x.id=o.id WHERE o.id=operation_id AND o.attempts>0 AND x.state='PREPARED') THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase!='\"COMPLETE\"'", params![job,operation])?;
-    Ok(())
+    Ok(resolved_outgoing)
 }
 
 /// Source work and bridge delivery are independent original obligations.
@@ -1144,10 +1181,12 @@ impl Store {
                 .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
+        let mut changed = false;
         for (job, operation) in candidates {
             if provider_succeeded(&tx, &operation)? {
                 continue;
             }
+            changed = true;
             tx.execute("INSERT OR IGNORE INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2",params![job,operation])?;
             tx.execute(
                 "INSERT OR IGNORE INTO funding_quote_refreshes VALUES (?1)",
@@ -1156,6 +1195,9 @@ impl Store {
             tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='preparation_interrupted_before_publication; original intent retained' WHERE job_id=?1 AND operation_id=?2",params![job,operation])?;
         }
         tx.commit()?;
+        if changed {
+            self.note_spendability_changed();
+        }
         Ok(())
     }
 

@@ -374,15 +374,101 @@ impl std::fmt::Display for RetryDisposition {
 }
 impl std::error::Error for RetryDisposition {}
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CatalogDependency {
     pub(crate) operator_required: bool,
+    pub(crate) waiting_for_relay_funds: bool,
+    pub(crate) relay_funding_blocked_reason: Option<&'static str>,
+    pub(crate) relay_wallet: Option<String>,
+}
+impl CatalogDependency {
+    pub(crate) fn is_relay_blocked(&self) -> bool {
+        self.operator_required || self.relay_funding_blocked_reason.is_some()
+    }
+
+    pub(crate) fn block_category_and_reason(&self) -> Option<(&'static str, &'static str)> {
+        if self.relay_funding_blocked_reason == Some("treasury_insufficient_spendable_funds") {
+            Some((
+                "relay_wallet_insufficient_zec",
+                "treasury_insufficient_spendable_funds",
+            ))
+        } else if self.is_relay_blocked() {
+            Some((
+                "relay_wallet_unavailable",
+                self.relay_funding_blocked_reason
+                    .unwrap_or("relay_wallet_unavailable"),
+            ))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn warn_wallet_block(&self) {
+        let Some((category, reason)) = self.block_category_and_reason() else {
+            return;
+        };
+        if category == "relay_wallet_insufficient_zec" {
+            tracing::warn!(
+                category,
+                relay_wallet = self.relay_wallet.as_deref(),
+                reason,
+                "Paid discovery relay wallet has no funded USDC wallets and treasury ZEC is insufficient to fund it; add ZEC to the address shown by 'wallet status --config FILE'"
+            );
+        } else if self.operator_required {
+            tracing::warn!(
+                category,
+                relay_wallet = self.relay_wallet.as_deref(),
+                reason,
+                "The catalog needs a relay wallet that cannot be created while managed funding is unavailable; enable managed funding or configure an available relay wallet"
+            );
+        } else {
+            let message = match reason {
+                "funding_disabled" => {
+                    "Paid discovery relay wallet has no funded USDC wallets and automatic funding is disabled or unavailable; run 'wallet bootstrap --config FILE' or fund the relay wallet and restart"
+                }
+                "funding_group_disabled" => {
+                    "Paid discovery relay wallet group is disabled in configuration; enable the wallet group or configure an available relay wallet and restart"
+                }
+                "qualification_funding_denied" => {
+                    "Paid discovery relay wallet has no funded USDC wallets and automatic funding is denied under current qualification settings; fund the relay wallet or inspect 'wallet status --config FILE'"
+                }
+                "funding_policy_requires_review" => {
+                    "Paid discovery relay wallet has no funded USDC wallets and automatic funding is blocked by configured funding limits or provider authentication; inspect 'wallet status --config FILE'"
+                }
+                "funding_outcome_requires_review"
+                | "funding_evidence_requires_review"
+                | "funding_data_requires_review"
+                | "preparation_or_swap_requires_review" => {
+                    "Paid discovery relay wallet has no funded USDC wallets and an earlier funding attempt requires operator review; inspect 'wallet status --config FILE'"
+                }
+                _ => {
+                    "Paid discovery relay wallet has no funded USDC wallets and automatic funding is currently blocked; inspect 'wallet status --config FILE' to resolve it"
+                }
+            };
+            tracing::warn!(
+                category,
+                relay_wallet = self.relay_wallet.as_deref(),
+                reason,
+                "{message}"
+            );
+        }
+    }
 }
 
-#[derive(Default)]
 pub(crate) struct CatalogReadiness {
     pub(crate) status: Option<tokio::sync::watch::Sender<CatalogDependency>>,
     pub(crate) can_allocate: bool,
+    /// When false, the caller consumes `status` and owns deduplicated WARN logging.
+    pub(crate) log_blocks: bool,
+}
+impl Default for CatalogReadiness {
+    fn default() -> Self {
+        Self {
+            status: None,
+            can_allocate: false,
+            log_blocks: true,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -390,6 +476,7 @@ pub struct Relay {
     client: PaidClient,
     sequence: SearchRelay,
     pub key: String,
+    wallet_name: Option<String>,
     sources: Vec<String>,
     state: Arc<tokio::sync::Mutex<State>>,
 }
@@ -434,6 +521,7 @@ impl Relay {
             client: client.without_bootstrap(),
             sequence,
             key: serde_json::to_string(&policy.wallet)?,
+            wallet_name: policy.wallet.clone(),
             sources: policy.sources.clone(),
             state,
         }))
@@ -465,8 +553,27 @@ impl Relay {
     ) -> Result<Arc<Response>> {
         let capacity = self.client.discovery_changes().await?;
         let relay_changes = self.state.lock().await.changes.clone();
-        let mut reported_operator_action = false;
+        let mut waiting_for_funds = false;
+        let mut reported_standalone_block: Option<&'static str> = None;
         loop {
+            // Only clear waiting/blocked state once a funded relay wallet is
+            // available (or the client fails), so unrelated capacity wakeups
+            // while still unfunded never flap dependency state.
+            if waiting_for_funds && self.client.discovery_ready().await.unwrap_or(true) {
+                reported_standalone_block = None;
+                if let Some(status) = &readiness.status {
+                    let cleared = CatalogDependency {
+                        waiting_for_relay_funds: false,
+                        relay_wallet: self.wallet_name.clone(),
+                        ..Default::default()
+                    };
+                    status.send_if_modified(|old| {
+                        let changed = *old != cleared;
+                        *old = cleared;
+                        changed
+                    });
+                }
+            }
             let relay_changed = relay_changes.notified();
             tokio::pin!(relay_changed);
             relay_changed.as_mut().enable();
@@ -490,7 +597,8 @@ impl Relay {
                 Err(error)
                     if RetryDisposition::from_error(&error) == RetryDisposition::DependencyWait =>
                 {
-                    self.report_dependency(&readiness, &mut reported_operator_action)
+                    waiting_for_funds = true;
+                    self.report_dependency(&readiness, &mut reported_standalone_block)
                         .await;
                     #[cfg(test)]
                     if let Some(signal) = &self.state.lock().await.dependency_wait {
@@ -516,24 +624,44 @@ impl Relay {
     async fn report_dependency(
         &self,
         readiness: &CatalogReadiness,
-        reported_operator_action: &mut bool,
+        reported_standalone_block: &mut Option<&'static str>,
     ) {
         // Advisory reporting must not terminate a recoverable capacity wait.
-        let Ok(needs_wallet) = self.client.discovery_requires_creation().await else {
-            return;
-        };
+        let needs_wallet = self
+            .client
+            .discovery_requires_creation()
+            .await
+            .unwrap_or(false);
         let operator_required = !readiness.can_allocate && needs_wallet;
+        let relay_funding_blocked_reason = self
+            .client
+            .discovery_funding_obstruction()
+            .await
+            .ok()
+            .flatten();
+        let updated = CatalogDependency {
+            operator_required,
+            waiting_for_relay_funds: true,
+            relay_funding_blocked_reason,
+            relay_wallet: self.wallet_name.clone(),
+        };
         if let Some(status) = &readiness.status {
             status.send_if_modified(|old| {
-                let changed = old.operator_required != operator_required;
-                old.operator_required = operator_required;
+                let changed = *old != updated;
+                *old = updated.clone();
                 changed
             });
         }
-        if operator_required && !*reported_operator_action {
-            tracing::info!(relay_wallet = %self.key,
-                "The catalog needs a relay wallet that cannot be created while managed funding is unavailable. Enable managed funding or configure an available relay wallet");
-            *reported_operator_action = true;
+        if !readiness.log_blocks {
+            return;
+        }
+        // Standalone callers without a deferred runtime receiver still get one
+        // WARN per obstruction transition.
+        if let Some((category, _)) = updated.block_category_and_reason()
+            && *reported_standalone_block != Some(category)
+        {
+            updated.warn_wallet_block();
+            *reported_standalone_block = Some(category);
         }
     }
     pub async fn fetch(
@@ -854,6 +982,7 @@ pub(crate) mod tests {
                 client: PaidClient::new(payer),
                 sequence: SearchRelay::fixture(endpoint, Config::default()),
                 key: "fixture".into(),
+                wallet_name: Some("fixture".into()),
                 sources: vec![],
                 state: Default::default(),
             }),
@@ -887,11 +1016,9 @@ pub(crate) mod tests {
             .client = client;
     }
     pub(crate) fn set_wallet(relay: &mut Arc<Relay>, wallet: &str) {
-        Arc::get_mut(relay)
-            .expect("unshared fixture")
-            .sequence
-            .policy
-            .wallet = Some(wallet.into());
+        let inner = Arc::get_mut(relay).expect("unshared fixture");
+        inner.sequence.policy.wallet = Some(wallet.into());
+        inner.wallet_name = Some(wallet.into());
     }
     pub(crate) fn is_idle(relay: &Relay) -> bool {
         relay
@@ -916,6 +1043,7 @@ pub(crate) mod tests {
             client: PaidClient::new(payer),
             sequence: first.sequence.clone(),
             key: "second-wallet".into(),
+            wallet_name: Some("second-wallet".into()),
             sources: vec![],
             state: first.state.clone(),
         }

@@ -186,6 +186,27 @@ covers its finite `max_api_payment_usdc`, serving logs one `INFO` line:
   (or `wait_for_catalogs = false` on the listener) omits a failed remote source
   as a unit and lets the endpoint serve healthy siblings while reporting
   pending or unavailable sources in stderr and MCP instructions.
+- **Unfunded relay fallbacks:** Direct origin catalog fetches always run first
+  without requiring a relay wallet. When `[wallet_bootstrap]` is configured,
+  paid metadata relays bind permanently to `bootstrap_group`. If a failed origin
+  fetch enters paid discovery-relay fallback while its relay wallet cannot be
+  funded in-process, serving logs a deduplicated wallet-level `WARN`
+  (`relay_wallet_unavailable` or `relay_wallet_insufficient_zec`) and a
+  per-source `catalog_unavailable` `WARN`.
+
+  This applies when automatic funding is unavailable or paused with no in-flight
+  swap, when the relay pool is disabled, or when every incomplete enabled
+  funding claim for the pool is blocked by insufficient treasury ZEC, policy
+  limits, or a disclosed swap outcome requiring review with no prepared
+  transaction, settling swap, or vacant enabled claim that can progress. Serving
+  then unblocks `wait_for_catalogs = true` listeners according to
+  `allow_catalog_failure`: required listeners close with `ERROR` and cancel any
+  pending source tasks referenced only by closed listeners, while tolerant
+  listeners omit the source, settle selection diagnostics, and keep background
+  recovery active if funds arrive later. While a completable swap or initial
+  allocation is in flight, waiting listeners keep waiting and the 30-second
+  `catalog_startup_waiting` heartbeat reports `awaiting_relay_funds` and
+  `relay_wallets` until active relay downloading resumes.
 - **Local fatal errors:** Malformed configuration, unreadable local files,
   malformed local documents, and structural-safety violations fail startup.
 - **Permissive selection in serving:** Serving accepts empty source or listener

@@ -84,6 +84,7 @@ pub struct Treasury {
     last_completed_sync: Option<tokio::time::Instant>,
     observation: observation::Schedule,
     funding_groups: Vec<String>,
+    bootstrap_policy: Option<crate::rotation::assignment::BootstrapPolicy>,
     startup_discovery: bool,
 }
 /// Shared state remains exclusively owned when only SDK reconstruction fails.
@@ -233,6 +234,7 @@ impl Treasury {
             last_completed_sync: None,
             observation: Default::default(),
             funding_groups: Vec::new(),
+            bootstrap_policy: None,
             startup_discovery: true,
         })
     }
@@ -323,6 +325,7 @@ impl Treasury {
             last_completed_sync: None,
             observation: Default::default(),
             funding_groups: Vec::new(),
+            bootstrap_policy: None,
             startup_discovery: true,
         })))
     }
@@ -739,6 +742,13 @@ fn log_sync_progress(height: Option<u64>, context: &TreasuryObservationDemand, c
     };
     if summary.is_empty() {
         tracing::info!(height, wallets = wallets.as_deref(), "{stage}");
+    } else if context.is_degraded() {
+        tracing::warn!(
+            height,
+            reason = reason.as_str(),
+            wallets = wallets.as_deref(),
+            "{stage}; {summary}"
+        );
     } else {
         tracing::info!(
             height,

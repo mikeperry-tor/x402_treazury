@@ -237,7 +237,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                     "public-receive-address".into(),
                 ))
                 .context("private upstream shortage"),
-            "INFO",
+            "WARN",
             "add ZEC to public-receive-address and allow confirmations",
         ),
         (
@@ -322,6 +322,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
         let condition = funding_condition(&error);
         let startup_condition = startup_funding_condition(&error);
         let assessment = TreasuryFunds::from_error(&error);
+        let is_recovery_blocked = error.is::<RecoveryBlocked>();
         let category = safe_error(&error, &job.phase);
 
         let (store, owner) = StoreHandle::spawn(raw);
@@ -400,7 +401,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 "{logged}"
             );
         }
-        if level == "WARN" {
+        if is_recovery_blocked {
             assert!(logged.contains("lookup_height=100"), "{logged}");
             assert!(logged.contains("wallet_height="), "{logged}");
             assert!(logged.contains("scanned_height="), "{logged}");
@@ -420,6 +421,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                     Kind::Source,
                     &job.phase,
                     &repeated,
+                    false,
                     Some(&category),
                     None,
                 )
@@ -441,6 +443,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                     Kind::Source,
                     &job.phase,
                     &repeated,
+                    false,
                     None,
                     None,
                 )
@@ -457,7 +460,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 "{recurrence_logs}"
             );
         }
-        if level != "INFO" {
+        if level != "INFO" && condition != Some(FundingCondition::InsufficientFunds) {
             assert!(
                 logged.contains("observation=Source") && logged.contains("phase=Quoted"),
                 "{logged}"
@@ -490,6 +493,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                     Kind::Source,
                     &job.phase,
                     &repeated,
+                    assessment == TreasuryFunds::Shortfall,
                     Some(&category),
                     previous_notice,
                 )
@@ -497,6 +501,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             let repeated_logs = std::fs::read_to_string(log.path()).unwrap();
             let repeated_logs = &repeated_logs[logged.len()..];
             assert!(!repeated_logs.contains("INFO"), "{repeated_logs}");
+            assert!(!repeated_logs.contains("WARN"), "{repeated_logs}");
             assert!(
                 !repeated_logs.contains("public-receive-address"),
                 "{repeated_logs}"
@@ -622,14 +627,23 @@ fn canonical_disagreement_reports_automatic_resolution_once_per_error_episode() 
             let error = error
                 .context("source_reconciliation_failed")
                 .context("private upstream details");
-            let category =
-                report_observation_failure(&job, "small", Kind::Source, &phase, &error, None, None);
+            let category = report_observation_failure(
+                &job,
+                "small",
+                Kind::Source,
+                &phase,
+                &error,
+                false,
+                None,
+                None,
+            );
             report_observation_failure(
                 &job,
                 "small",
                 Kind::Source,
                 &phase,
                 &error,
+                false,
                 Some(&category),
                 None,
             );
@@ -961,7 +975,7 @@ async fn shared_treasury_notices_deduplicate_across_wallets_and_use_short_catego
         "{after_unavailable}"
     );
 
-    // Transitioning to Shortfall emits one INFO with a short machine category.
+    // Transitioning to Shortfall on degraded pools emits one WARN with a short machine category.
     for job in &jobs {
         worker
             .publish_observation(
@@ -980,14 +994,14 @@ async fn shared_treasury_notices_deduplicate_across_wallets_and_use_short_catego
     }
     let after_shortfall = std::fs::read_to_string(log.path()).unwrap();
     let delta = &after_shortfall[after_unavailable.len()..];
-    let info_lines: Vec<_> = delta.lines().filter(|line| line.contains("INFO")).collect();
-    assert_eq!(info_lines.len(), 1, "{delta}");
+    let warn_lines: Vec<_> = delta.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warn_lines.len(), 1, "{delta}");
     assert!(
-        info_lines[0].contains("Observed ZEC is insufficient")
-            && info_lines[0].contains("category=\"treasury_insufficient_spendable_funds\"")
-            && !info_lines[0].contains("category=\"treasury_insufficient_spendable_funds;"),
+        warn_lines[0].contains("Observed ZEC is insufficient")
+            && warn_lines[0].contains("category=\"treasury_insufficient_spendable_funds\"")
+            && !warn_lines[0].contains("category=\"treasury_insufficient_spendable_funds;"),
         "{}",
-        info_lines[0]
+        warn_lines[0]
     );
 
     // Quote prerequisites, confirmation waits, and transient sync outages do
@@ -1055,6 +1069,7 @@ async fn shared_treasury_notices_deduplicate_across_wallets_and_use_short_catego
     let after_non_clearing = std::fs::read_to_string(log.path()).unwrap();
     let non_clearing_delta = &after_non_clearing[after_shortfall.len()..];
     assert!(!non_clearing_delta.contains("INFO"), "{non_clearing_delta}");
+    assert!(!non_clearing_delta.contains("WARN"), "{non_clearing_delta}");
 
     // A successful source observation clears the shared notice so a sibling
     // wallet's recurrence announces again even if its own last error matched.
@@ -1090,11 +1105,421 @@ async fn shared_treasury_notices_deduplicate_across_wallets_and_use_short_catego
     assert_eq!(
         recurrence
             .lines()
-            .filter(|line| line.contains("INFO") && line.contains("Observed ZEC is insufficient"))
+            .filter(|line| line.contains("WARN") && line.contains("Observed ZEC is insufficient"))
             .count(),
         1,
         "{recurrence}"
     );
+
+    drop(lease);
+    drop(worker);
+    drop(store);
+    owner.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn shortfall_promotes_from_info_to_warn_after_bootstrap_handoff() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::diagnostics::shortfall_promotes_from_info_to_warn_after_bootstrap_handoff",
+    ) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let reserves = crate::rotation::test_capacity::small_reserve("5");
+    let general = crate::rotation::test_capacity::declare_and_allocate!(
+        raw,
+        "general",
+        reserves,
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0
+    )
+    .unwrap();
+    let gen_job = raw
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .find(|j| j.pool_id == general)
+        .unwrap();
+    raw.record_credit(&gen_job.wallet_id, "5000000", "fixture", 100)
+        .unwrap();
+
+    let financial = crate::rotation::test_capacity::declare_and_allocate!(
+        raw,
+        "financial",
+        crate::rotation::test_capacity::two_reserves("5"),
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0
+    )
+    .unwrap();
+    let fin_jobs: Vec<_> = raw
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .filter(|j| j.pool_id == financial)
+        .collect();
+    assert_eq!(fin_jobs.len(), 2);
+    for job in &fin_jobs {
+        raw.save_funding_quote(&job.id, &serde_json::to_vec(&quote(job)).unwrap())
+            .unwrap();
+    }
+    let fin_job_1 = raw.funding_job(&fin_jobs[0].id).unwrap().unwrap();
+    let fin_job_2 = raw.funding_job(&fin_jobs[1].id).unwrap().unwrap();
+
+    let (store, owner) = StoreHandle::spawn(raw);
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let policy = crate::rotation::assignment::BootstrapPolicy {
+        bootstrap_group: "general".to_owned(),
+        deferred_groups: vec!["financial".to_owned()],
+    };
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: true,
+                quotes: None,
+            },
+            gate: Arc::new(Semaphore::new(0)),
+            started,
+        },
+        5,
+    )
+    .with_bootstrap_policy(Some(policy));
+    let lease = Arc::new(store.funding_owner().lock_owned().await);
+    let key1 = Key {
+        operation: fin_job_1.operation_id.clone(),
+        kind: Kind::Source,
+    };
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&key1, Some(&fin_job_1.phase), 1000, &BTreeSet::new()),
+        Admission::Ready
+    );
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let subscriber = tracing::Dispatch::new(subscriber);
+    let clock = TickClock {
+        epoch: 1000,
+        started: tokio::time::Instant::now(),
+    };
+
+    // 1. Before financial receives initial credit, general backs it: shortfall logs INFO.
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: fin_job_1.clone(),
+                kind: Kind::Source,
+                result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                    .context(TreasuryFunds::Shortfall)
+                    .context(crate::rotation::error::TreasuryDepositAddress(
+                        "u1bootstrapdeposit".into(),
+                    ))),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber.clone())
+        .await
+        .unwrap();
+    let before_handoff = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        before_handoff.lines().any(|line| line.contains("INFO")
+            && line.contains("u1bootstrapdeposit")
+            && line.contains("wallet=financial")),
+        "{before_handoff}"
+    );
+    assert!(
+        !before_handoff.lines().any(|line| line.contains("WARN")),
+        "{before_handoff}"
+    );
+
+    // 2. Financial completes its first initial credit (ending bootstrap fallback),
+    //    its own wallet is later depleted (low_balance), and a new refill job hits
+    //    shortfall while general still has a funded wallet: promotes directly to WARN.
+    let financial_id = financial.clone();
+    let first_wallet = fin_job_1.wallet_id.clone();
+    store
+        .call(move |s| {
+            s.record_credit(&first_wallet, "5000000", "fixture", 101)?;
+            s.low_balance(&financial_id, &first_wallet)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let key2 = Key {
+        operation: fin_job_2.operation_id.clone(),
+        kind: Kind::Source,
+    };
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&key2, Some(&fin_job_2.phase), 1005, &BTreeSet::new()),
+        Admission::Ready
+    );
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: fin_job_2,
+                kind: Kind::Source,
+                result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                    .context(TreasuryFunds::Shortfall)
+                    .context(crate::rotation::error::TreasuryDepositAddress(
+                        "u1bootstrapdeposit".into(),
+                    ))),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber)
+        .await
+        .unwrap();
+    let after_handoff = std::fs::read_to_string(log.path()).unwrap();
+    let delta = &after_handoff[before_handoff.len()..];
+    assert_eq!(
+        delta
+            .lines()
+            .filter(|line| line.contains("WARN")
+                && line.contains("u1bootstrapdeposit")
+                && line.contains("wallet=financial"))
+            .count(),
+        1,
+        "{delta}"
+    );
+
+    drop(lease);
+    drop(worker);
+    drop(store);
+    owner.await.unwrap();
+}
+
+#[tokio::test]
+async fn non_source_health_publication_does_not_resurrect_cleared_shortfall() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        raw,
+        "relay",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    let job = raw.funding_jobs().unwrap().remove(0);
+    let sibling_pool = crate::rotation::test_capacity::declare_and_allocate!(
+        raw,
+        "sibling",
+        crate::rotation::test_capacity::small_reserve("5"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    let sibling = raw
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.pool_id == sibling_pool)
+        .unwrap();
+    raw.accept_preparation(&sibling.operation_id, Some(&sibling.pool_id), 100, None)
+        .unwrap();
+    raw.prepare_with_facts(
+        &sibling.operation_id,
+        1,
+        b"sibling-snap",
+        b"sibling-raw",
+        None,
+    )
+    .unwrap();
+    let (store, owner) = StoreHandle::spawn(raw);
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: true,
+                quotes: None,
+            },
+            gate: Arc::new(Semaphore::new(0)),
+            started,
+        },
+        5,
+    );
+    let lease = Arc::new(store.funding_owner().lock_owned().await);
+    let clock = TickClock {
+        epoch: 1000,
+        started: tokio::time::Instant::now(),
+    };
+
+    // 1. Source observation records InsufficientFunds in both scheduler records and Store.
+    let source_key = Key {
+        operation: job.operation_id.clone(),
+        kind: Kind::Source,
+    };
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&source_key, Some(&job.phase), 1000, &BTreeSet::new()),
+        Admission::Ready
+    );
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: job.clone(),
+                kind: Kind::Source,
+                result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                    .context(TreasuryFunds::Shortfall)),
+            },
+            &clock,
+        )
+        .await
+        .unwrap();
+
+    // 2. Sibling spend confirms, clearing InsufficientFunds from Store while
+    //    scheduler.records still retains the prior Source record.
+    let sibling_op = sibling.operation_id.clone();
+    let pool_check = pool.clone();
+    store
+        .call(move |s| {
+            s.confirm_spend(&sibling_op)?;
+            assert_eq!(s.pool_funding_obstruction(&pool_check)?, None);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // 3. A non-Source (Status) completion runs publish_health while Source is
+    //    still applicable: it must NOT resurrect the cleared InsufficientFunds.
+    let status_key = Key {
+        operation: job.operation_id.clone(),
+        kind: Kind::Status,
+    };
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&status_key, Some(&job.phase), 1001, &BTreeSet::new()),
+        Admission::Ready
+    );
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: job.clone(),
+                kind: Kind::Status,
+                result: Ok(Observation::None),
+            },
+            &clock,
+        )
+        .await
+        .unwrap();
+    let pool_after = pool.clone();
+    let obstruction = store
+        .call(move |s| s.pool_funding_obstruction(&pool_after))
+        .await
+        .unwrap();
+    assert_eq!(obstruction, None);
+
+    // 4. A non-Source failure with a non-shortfall condition (AuthenticationRequired)
+    //    must still be published rather than shadowed by the stale Source shortfall.
+    let quote_key = Key {
+        operation: job.operation_id.clone(),
+        kind: Kind::Quote,
+    };
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&quote_key, Some(&job.phase), 2000, &BTreeSet::new()),
+        Admission::Ready
+    );
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: job.clone(),
+                kind: Kind::Quote,
+                result: Err(anyhow::Error::new(FundingCondition::AuthenticationRequired)),
+            },
+            &clock,
+        )
+        .await
+        .unwrap();
+    let pool_auth = pool.clone();
+    let auth_obstruction = store
+        .call(move |s| s.pool_funding_obstruction(&pool_auth))
+        .await
+        .unwrap();
+    assert_eq!(auth_obstruction, Some("funding_policy_requires_review"));
+
+    // 5. When that non-Source lane subsequently succeeds, the non-shortfall
+    //    condition must clear back to None rather than staying stuck while
+    //    Source still holds its stale shortfall record.
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&quote_key, Some(&job.phase), 3000, &BTreeSet::new()),
+        Admission::Ready
+    );
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: job.clone(),
+                kind: Kind::Quote,
+                result: Ok(Observation::None),
+            },
+            &clock,
+        )
+        .await
+        .unwrap();
+    let pool_cleared = pool.clone();
+    let cleared_obstruction = store
+        .call(move |s| s.pool_funding_obstruction(&pool_cleared))
+        .await
+        .unwrap();
+    assert_eq!(cleared_obstruction, None);
 
     drop(lease);
     drop(worker);

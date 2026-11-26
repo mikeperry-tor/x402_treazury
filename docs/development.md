@@ -286,9 +286,13 @@ Core severity rules:
   waits on `wait_for_catalogs` or `catalog warm` goes 30 seconds without a
   catalog completing, an `INFO` heartbeat (`catalog_startup_waiting` or
   `catalog_warm_progress`) reports bounded `downloading` and `pending` source
-  lists (plus waiting `endpoints` for `serve`). Catalog
-  failures report source ID, `failure_stage`, fixed plain-language `reason`,
-  and numeric `http_status` without URLs or schemas. See
+  lists (plus waiting `endpoints`, `awaiting_relay_funds`, and `relay_wallets`
+  for `serve`). Relay wallet funding blocks that cannot resolve in-process
+  (`relay_wallet_unavailable` and `relay_wallet_insufficient_zec`) log `WARN`
+  and unblock `wait_for_catalogs` listeners according to
+  `allow_catalog_failure`. Catalog failures report source ID, `failure_stage`,
+  fixed plain-language `reason`, and numeric `http_status` without URLs or
+  schemas. See
   [catalog startup](configuration.md#catalog-failures-and-strict-inspection)
   for listener selection warnings. Disk cache I/O failures log `WARN` with
   safe OS or SQLite codes while preserving origin responses.
@@ -318,19 +322,25 @@ Core severity rules:
     progress. Validated NEAR enums, confirmation polls, Base RPC attempts,
     failover ordinals, and repeat scan failures log at `DEBUG`; first scan
     failure transitions, observation recovery, terminal NEAR outcomes (after
-    persistence), and actionable Ironwood shortages (printing the shielded
+    persistence), and reserve-refill Ironwood shortages (printing the shielded
     receive address, or directing the operator to
     `wallet status --config FILE` when unavailable) log at `INFO`.
   - After an SDK insufficient-funds rejection, `funding_assessment` evaluates
     owned Ironwood notes only: an incomplete scan logs an `INFO` unavailable
     assessment, confirmed plus unconfirmed owned Ironwood notes covering the
     required amount log a `DEBUG` spendability wait, and an Ironwood shortfall
-    logs `INFO` with the receive address.
-  - Treasury scan progress and completion `INFO` events append the primary
-    plain-language reason (with a `(+N other pending tasks)` suffix when
-    multiple demand sources are active), a comma-separated `reason` field of
-    all active sync codes, and a bounded `wallets` field listing associated
-    pool names for pool-scoped work.
+    prints the receive address at `INFO` for reserve refills or `WARN` when the
+    wallet group has no funded, non-`low_balance` USDC wallets and no settling
+    sibling swap (accounting for `[wallet_bootstrap]` fallback to
+    `bootstrap_group` until a deferred group's first initial credit).
+  - Treasury scan progress and completion events follow the same severity rule
+    -- `INFO` normally, or `WARN` when any wallet group has insufficient ZEC,
+    no funded, non-`low_balance` USDC wallets (including a deferred group whose
+    own wallet depletes after its first initial credit), and no settling sibling
+    swap -- appending the primary plain-language reason (with a
+    `(+N other pending tasks)` suffix when multiple demand sources are active),
+    a comma-separated `reason` field of all active sync codes, and a bounded
+    `wallets` field listing associated pool names for pool-scoped work.
   - Background scan failures report `automatic_retry=true` and
     `retry_after_seconds` (90, 180, and 300 seconds); one-pass `wallet sync`
     warns with `automatic_retry=false`. Zingolib errors are sanitized to fixed

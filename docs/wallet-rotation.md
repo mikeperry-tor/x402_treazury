@@ -157,14 +157,18 @@ local USD conversion-overhead gate:
 ## Treasury sync coverage
 
 - **Sync logging:** Scan starts log at `DEBUG`; persisted completions and
-  30-second progress updates log saved height at `INFO`. After an SDK
+  30-second progress updates log saved height at `INFO`, or at `WARN` when a
+  wallet group has insufficient ZEC, no funded non-`low_balance` USDC wallets,
+  and no settling sibling swap (accounting for `[wallet_bootstrap]` fallback to
+  `bootstrap_group` until a deferred group's first initial credit). After an SDK
   insufficient-funds proposal rejection, `funding_assessment` sums confirmed
   and unconfirmed owned Ironwood notes (excluding spent outputs and ignoring
   transparent coins): incomplete scans report unavailable assessment at `INFO`,
   sufficient owned Ironwood awaiting confirmation logs a spendability wait at
-  `DEBUG`, and an assessed Ironwood shortage logs the shielded receive address
-  at `INFO` (asking the operator to add ZEC). Repeated identical reports stay
-  at `DEBUG`.
+  `DEBUG`, and an assessed Ironwood shortage prints the shielded receive address
+  at `INFO` for reserve refills or `WARN` for degraded groups. Repeated
+  identical reports stay at `DEBUG`; see
+  [diagnostic context](development.md#diagnostic-context) for full log fields.
 - **Structured sync errors:** Interruption reports include `category`, fixed
   `reason`, numeric `grpc_code` and `grpc_status` (for example, code `4`
   `DeadlineExceeded` vs. code `14` `Unavailable`), and on shard-tree errors the

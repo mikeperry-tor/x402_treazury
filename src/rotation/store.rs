@@ -921,6 +921,18 @@ impl Store {
     pub(crate) fn jobless_pending_operation(&self) -> Result<Option<String>> {
         Ok(self.db.query_row("SELECT x.id FROM outgoing x WHERE x.state='PREPARED' AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=x.id)",[],|r|r.get(0)).optional()?)
     }
+    #[cfg(test)]
+    pub(crate) fn retire_wallet_for_test(&mut self, wallet: &str) -> Result<()> {
+        self.db.execute(
+            "UPDATE wallets SET role='RETIRED', balance='0', low_balance=1 WHERE id=?1",
+            [wallet],
+        )?;
+        self.db.execute(
+            "UPDATE reserve_claims SET wallet_id=NULL WHERE wallet_id=?1",
+            [wallet],
+        )?;
+        Ok(())
+    }
     pub fn prepared_bytes(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
         let bytes: Vec<u8> =
             self.db
@@ -946,6 +958,7 @@ impl Store {
             [id],
         )?;
         tx.commit()?;
+        self.note_spendability_changed();
         Ok(())
     }
     pub fn wallet_secret(&self, pool: &str, wallet: &str) -> Result<Zeroizing<Vec<u8>>> {

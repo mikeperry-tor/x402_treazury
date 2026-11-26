@@ -175,13 +175,24 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
         None,
     );
     assert_eq!(
-        state.condition(&job.operation_id, [true; 4]),
-        Some(FundingCondition::InsufficientFunds)
+        state.condition(&job.operation_id, [true; 4], true),
+        Some(Some(FundingCondition::InsufficientFunds))
     );
+    assert_eq!(state.condition(&job.operation_id, [true; 4], false), None);
     let mut applicable = [true; 4];
     applicable[Kind::Source as usize] = false;
-    assert_eq!(state.condition(&job.operation_id, applicable), None);
-    assert_eq!(state.condition("another-operation", [true; 4]), None);
+    assert_eq!(
+        state.condition(&job.operation_id, applicable, true),
+        Some(None)
+    );
+    assert_eq!(
+        state.condition(&job.operation_id, applicable, false),
+        Some(None)
+    );
+    assert_eq!(
+        state.condition("another-operation", [true; 4], true),
+        Some(None)
+    );
     state.complete(
         (&job.id, &job.operation_id),
         Kind::Source,
@@ -190,7 +201,10 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
         None,
         None,
     );
-    assert_eq!(state.condition(&job.operation_id, [true; 4]), None);
+    assert_eq!(
+        state.condition(&job.operation_id, [true; 4], true),
+        Some(None)
+    );
 }
 
 #[test]

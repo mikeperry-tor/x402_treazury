@@ -156,6 +156,7 @@ pub struct FundingWorker<B> {
     pub backend: std::sync::Arc<tokio::sync::Mutex<B>>,
     pub poll_seconds: u64,
     bootstrap_participants: std::collections::BTreeSet<String>,
+    bootstrap_policy: Option<super::assignment::BootstrapPolicy>,
     allocation_selection: Option<std::collections::BTreeSet<String>>,
     #[cfg(test)]
     inventory_test_hook: Option<std::sync::Arc<scheduler::InventoryTestHook>>,
@@ -167,6 +168,7 @@ impl<B> Clone for FundingWorker<B> {
             backend: self.backend.clone(),
             poll_seconds: self.poll_seconds,
             bootstrap_participants: self.bootstrap_participants.clone(),
+            bootstrap_policy: self.bootstrap_policy.clone(),
             allocation_selection: self.allocation_selection.clone(),
             #[cfg(test)]
             inventory_test_hook: self.inventory_test_hook.clone(),
@@ -180,16 +182,29 @@ impl<B: FundingBackend> FundingWorker<B> {
             backend: std::sync::Arc::new(tokio::sync::Mutex::new(backend)),
             poll_seconds,
             bootstrap_participants: Default::default(),
+            bootstrap_policy: None,
             allocation_selection: None,
             #[cfg(test)]
             inventory_test_hook: None,
         }
     }
+    #[cfg(test)]
     pub(crate) fn with_bootstrap_participants(
         mut self,
         groups: std::collections::BTreeSet<String>,
     ) -> Self {
         self.bootstrap_participants = groups;
+        self
+    }
+    pub(crate) fn with_bootstrap_policy(
+        mut self,
+        policy: Option<super::assignment::BootstrapPolicy>,
+    ) -> Self {
+        self.bootstrap_participants = policy
+            .as_ref()
+            .map(|policy| policy.deferred_groups.iter().cloned().collect())
+            .unwrap_or_default();
+        self.bootstrap_policy = policy;
         self
     }
     /// Restrict new allocations while observing all already owned funding jobs.

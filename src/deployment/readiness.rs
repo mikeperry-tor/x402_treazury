@@ -36,15 +36,19 @@ impl Deployment {
             .context(catalog::LoadStage::Selection)));
         }
         if let Some(id) = sources.iter().find(|id| {
-            !self.pending_sources.contains_key(*id)
-                && !self.sources.contains_key(*id)
-                && !self.config.sources[*id].allow_catalog_failure
+            let blocked_relay = self
+                .pending_sources
+                .get(*id)
+                .is_some_and(startup::PendingSource::is_relay_blocked);
+            let unavailable =
+                !self.pending_sources.contains_key(*id) && !self.sources.contains_key(*id);
+            (unavailable || blocked_relay) && !self.config.sources[*id].allow_catalog_failure
         }) {
             return Some(Err(anyhow::anyhow!("required catalog unavailable: {id}")));
         }
         sources
             .iter()
-            .all(|id| !self.pending_sources.contains_key(id))
+            .all(|id| !self.source_blocks_settlement(id))
             .then_some(Ok(()))
     }
 

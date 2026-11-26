@@ -28,7 +28,11 @@ pub(super) fn report_completed(
         if completed.is_some_and(|id| !server.sources.iter().any(|source| source == id)) {
             continue;
         }
-        let settled = !server.sources.iter().any(|id| pending.contains_key(id));
+        let settled = !server.sources.iter().any(|id| {
+            pending
+                .get(id)
+                .is_some_and(|entry| !entry.is_relay_blocked())
+        });
         if (settled || !server.wait_for_catalogs)
             && let Some(names) = conflicts.get(name).filter(|names| !names.is_empty())
             && previous_conflicts.get(name) != Some(names)

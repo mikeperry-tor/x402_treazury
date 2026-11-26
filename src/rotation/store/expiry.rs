@@ -69,6 +69,7 @@ impl Store {
             tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1",[&job])?;
         }
         tx.commit()?;
+        self.note_spendability_changed();
         Ok(())
     }
 }

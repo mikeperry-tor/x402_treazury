@@ -1264,6 +1264,10 @@ impl Deployment {
                     owner.configure_funding_discovery(
                         crate::rotation::funding::FundingBackend::allocation_groups(&backend),
                     );
+                    let bootstrap_policy = (!crate::qualification::active())
+                        .then(|| self.wallet_resolution.bootstrap.clone())
+                        .flatten();
+                    owner.configure_bootstrap_policy(bootstrap_policy.clone());
                     ManagedRuntime::Treasury(Box::new(TreasuryRuntime {
                         direct,
                         owner,
@@ -1275,13 +1279,7 @@ impl Deployment {
                                 backend,
                                 f.poll_seconds,
                             )
-                            .with_bootstrap_participants(
-                                self.wallet_resolution
-                                    .bootstrap
-                                    .as_ref()
-                                    .map(|policy| policy.deferred_groups.iter().cloned().collect())
-                                    .unwrap_or_default(),
-                            ),
+                            .with_bootstrap_policy(bootstrap_policy),
                         ),
                     }))
                 }
@@ -1567,6 +1565,12 @@ impl Deployment {
         }
     }
 
+    pub(super) fn source_blocks_settlement(&self, id: &str) -> bool {
+        self.pending_sources
+            .get(id)
+            .is_some_and(|pending| !pending.is_relay_blocked())
+    }
+
     fn published_conflicts(&self) -> BTreeMap<String, Vec<String>> {
         self.conflicting_tools
             .iter()
@@ -1576,7 +1580,7 @@ impl Deployment {
                         || !self.listeners[*name]
                             .sources
                             .iter()
-                            .any(|id| self.pending_sources.contains_key(id)))
+                            .any(|id| self.source_blocks_settlement(id)))
             })
             .map(|(name, names)| (name.clone(), names.clone()))
             .collect()
@@ -1661,14 +1665,22 @@ impl Deployment {
                     instructions.push_str(&format!("\n\nSource {id}: some configured selections match no current tools. Remaining selected tools are available; missing selections do not expose additional tools."));
                 }
                 if self.unavailable_sources.contains_key(id) {
-                    if self
-                        .pending_sources
-                        .get(id)
-                        .is_some_and(|pending| pending.operator_required)
-                    {
-                        instructions.push_str(&format!("\n\nSource {id}: OPERATOR_REQUIRED (new relay payer creation is unavailable). Observation continues; its tools will appear if discovery becomes possible."));
-                    } else if self.pending_sources.contains_key(id) {
-                        instructions.push_str(&format!("\n\nSource {id}: PENDING (catalog discovery is waiting). Its tools will appear when discovery succeeds."));
+                    if let Some(pending) = self.pending_sources.get(id) {
+                        if pending.dependency.operator_required {
+                            instructions.push_str(&format!("\n\nSource {id}: OPERATOR_REQUIRED (new relay payer creation is unavailable). Observation continues; its tools will appear if discovery becomes possible."));
+                        } else if pending.dependency.relay_funding_blocked_reason
+                            == Some("treasury_insufficient_spendable_funds")
+                        {
+                            instructions.push_str(&format!("\n\nSource {id}: BLOCKED (treasury ZEC is insufficient to fund the paid discovery relay wallet). Observation continues; its tools will appear if relay funding succeeds."));
+                        } else if pending.dependency.relay_funding_blocked_reason
+                            == Some("funding_disabled")
+                        {
+                            instructions.push_str(&format!("\n\nSource {id}: PENDING (automatic relay wallet funding is disabled; waiting for external credit or funding). Its tools will appear when discovery succeeds."));
+                        } else if pending.dependency.relay_funding_blocked_reason.is_some() {
+                            instructions.push_str(&format!("\n\nSource {id}: BLOCKED (paid discovery relay wallet funding requires operator review). Observation continues; its tools will appear if relay funding succeeds."));
+                        } else {
+                            instructions.push_str(&format!("\n\nSource {id}: PENDING (catalog discovery is waiting). Its tools will appear when discovery succeeds."));
+                        }
                     } else {
                         instructions.push_str(&format!("\n\nSource {id}: UNAVAILABLE (catalog discovery failed). Its tools are unavailable, not intentionally empty. Restart to retry."));
                     }

@@ -254,9 +254,10 @@ impl Treasury {
                 )
             } else {
                 let groups = self.funding_groups.clone();
+                let bootstrap = self.bootstrap_policy.clone();
                 match crate::rotation::store::inventory::read_result(
                     self.store
-                        .call(move |s| s.treasury_observation_demand(&groups))
+                        .call(move |s| s.treasury_observation_demand(&groups, bootstrap.as_ref()))
                         .await,
                     &mut None,
                 )? {

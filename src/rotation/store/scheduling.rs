@@ -212,6 +212,7 @@ impl Store {
             "quote deadline has not expired"
         );
         self.db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error=?3 WHERE job_id=?1 AND operation_id=?2",params![job,operation,diagnostic])?;
+        self.notify_all_capacity_changed();
         Ok(())
     }
 

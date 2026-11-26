@@ -41,6 +41,12 @@ impl Treasury {
     pub(crate) fn configure_funding_discovery(&mut self, groups: Vec<String>) {
         self.funding_groups = groups;
     }
+    pub(crate) fn configure_bootstrap_policy(
+        &mut self,
+        policy: Option<crate::rotation::assignment::BootstrapPolicy>,
+    ) {
+        self.bootstrap_policy = policy;
+    }
     /// Waiting source operations share the last actual scan. Cooldown failure
     /// returns unavailable; events cannot turn failed scans into a fast poller.
     pub(crate) async fn sync_for_observation(
@@ -230,16 +236,21 @@ mod tests {
         );
         with_wallets.insert_reason(TreasurySyncReason::DirectReceive);
         with_wallets.insert_wallet("financial");
+        let mut degraded = TreasuryObservationDemand::from_reason(
+            TreasurySyncReason::WalletFundingDegradedInsufficientZec,
+        );
+        degraded.insert_wallet("financial");
         let without_wallets =
             TreasuryObservationDemand::from_reason(TreasurySyncReason::StartupDiscovery);
         tracing::subscriber::with_default(subscriber, || {
             super::log_sync_progress(Some(3_614_778), &with_wallets, false);
             super::log_sync_progress(Some(3_614_781), &with_wallets, true);
             super::log_sync_progress(Some(3_614_782), &without_wallets, true);
+            super::log_sync_progress(Some(3_614_783), &degraded, true);
         });
         let text = std::fs::read_to_string(logs.path()).unwrap();
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines.len(), 3, "{text}");
+        assert_eq!(lines.len(), 4, "{text}");
         for (line, height) in [(lines[0], "height=3614778"), (lines[1], "height=3614781")] {
             assert!(line.contains("INFO"), "{line}");
             assert!(line.contains(height), "{line}");
@@ -249,6 +260,7 @@ mod tests {
             );
             assert!(line.contains("wallets=\"financial\""), "{line}");
         }
+        assert!(lines[2].contains("INFO"), "{}", lines[2]);
         assert!(lines[2].contains("height=3614782"), "{}", lines[2]);
         assert!(
             lines[2].contains("reason=\"startup_discovery\""),
@@ -256,5 +268,13 @@ mod tests {
             lines[2]
         );
         assert!(!lines[2].contains("wallets="), "{}", lines[2]);
+        assert!(lines[3].contains("WARN"), "{}", lines[3]);
+        assert!(lines[3].contains("height=3614783"), "{}", lines[3]);
+        assert!(
+            lines[3].contains("reason=\"wallet_funding_degraded_insufficient_zec\""),
+            "{}",
+            lines[3]
+        );
+        assert!(lines[3].contains("wallets=\"financial\""), "{}", lines[3]);
     }
 }

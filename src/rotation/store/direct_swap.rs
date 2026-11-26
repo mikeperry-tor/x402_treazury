@@ -81,7 +81,7 @@ impl StoreHandle {
     }
 }
 impl Store {
-    fn direct_aad(&self, id: &str) -> String {
+    pub(super) fn direct_aad(&self, id: &str) -> String {
         format!("v1:{}:{}:direct:{id}", self.id, self.network.name())
     }
     fn direct_by_id(&self, id: &str) -> Result<DirectOperation> {
