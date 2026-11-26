@@ -16,69 +16,81 @@ async fn empty_owner(net: &MockNet, birthday: u32) -> (tempfile::TempDir, Treasu
     (dir, owner)
 }
 
-#[tokio::test]
-async fn shorter_prefix_preserves_established_history_and_later_healthy_sync_resumes() {
-    for (old_tip, shorter_tip) in [(100, 50), (1250, 150), (1250, 1200)] {
-        let original = MockNet::launch().await;
-        original.chain.write().await.mine_empty_blocks(old_tip);
-        let (_dir, mut owner) = empty_owner(&original, 100).await;
-        let stop = CancellationToken::new();
-        owner.sync_once(&stop).await.unwrap();
-        let expected = {
-            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-            assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
-            assert!(wallet.wallet_blocks.contains_key(&100.into()));
-            assert!(wallet.wallet_blocks.contains_key(&old_tip.into()));
-            let mut scan = Vec::new();
-            wallet.sync_state.clone().write(&mut scan).unwrap();
-            (
-                scan,
-                wallet
-                    .wallet_blocks
-                    .iter()
-                    .map(|(height, block)| (*height, block.block_hash()))
-                    .collect::<Vec<_>>(),
-            )
-        };
-        let shorter = MockNet::launch().await;
-        shorter.chain.write().await.mine_empty_blocks(shorter_tip);
-        shorter.chain.write().await.faults.inject(
-            Rpc::BlockRange,
-            Fault::Fail(
-                tonic::Code::InvalidArgument,
-                "stop after destructive startup reset".into(),
-            ),
-        );
-        owner.configure_sync(SyncSettings::new(shorter.indexer_uri().to_string(), 1).unwrap());
-        assert!(owner.sync_once(&stop).await.is_err());
+async fn assert_shorter_prefix_preserves_established_history(old_tip: u32, shorter_tip: u32) {
+    let original = MockNet::launch().await;
+    original.chain.write().await.mine_empty_blocks(old_tip);
+    let (_dir, mut owner) = empty_owner(&original, 100).await;
+    let stop = CancellationToken::new();
+    owner.sync_once(&stop).await.unwrap();
+    let expected = {
         let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-        assert_eq!(u32::from(wallet.birthday()), 100);
         assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
+        assert!(wallet.wallet_blocks.contains_key(&100.into()));
+        assert!(wallet.wallet_blocks.contains_key(&old_tip.into()));
         let mut scan = Vec::new();
         wallet.sync_state.clone().write(&mut scan).unwrap();
-        assert_eq!(scan, expected.0);
-        assert_eq!(
+        (
+            scan,
             wallet
                 .wallet_blocks
                 .iter()
                 .map(|(height, block)| (*height, block.block_hash()))
                 .collect::<Vec<_>>(),
-            expected.1
-        );
-        assert_eq!(
-            shorter.chain.read().await.faults.pending(Rpc::BlockRange),
-            1,
-            "ambiguous regression must not begin a rescan"
-        );
-        drop(wallet);
-        owner.configure_sync(SyncSettings::new(original.indexer_uri().to_string(), 1).unwrap());
-        owner.sync_once(&stop).await.unwrap();
-        assert_eq!(
-            owner.status().await.unwrap().sync.unwrap().phase,
-            SyncPhase::Ready
-        );
-        owner.close().await.unwrap();
-    }
+        )
+    };
+    let shorter = MockNet::launch().await;
+    shorter.chain.write().await.mine_empty_blocks(shorter_tip);
+    shorter.chain.write().await.faults.inject(
+        Rpc::BlockRange,
+        Fault::Fail(
+            tonic::Code::InvalidArgument,
+            "stop after destructive startup reset".into(),
+        ),
+    );
+    owner.configure_sync(SyncSettings::new(shorter.indexer_uri().to_string(), 1).unwrap());
+    assert!(owner.sync_once(&stop).await.is_err());
+    let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+    assert_eq!(u32::from(wallet.birthday()), 100);
+    assert_eq!(wallet.sync_state.wallet_birthday(), Some(100.into()));
+    let mut scan = Vec::new();
+    wallet.sync_state.clone().write(&mut scan).unwrap();
+    assert_eq!(scan, expected.0);
+    assert_eq!(
+        wallet
+            .wallet_blocks
+            .iter()
+            .map(|(height, block)| (*height, block.block_hash()))
+            .collect::<Vec<_>>(),
+        expected.1
+    );
+    assert_eq!(
+        shorter.chain.read().await.faults.pending(Rpc::BlockRange),
+        1,
+        "ambiguous regression must not begin a rescan"
+    );
+    drop(wallet);
+    owner.configure_sync(SyncSettings::new(original.indexer_uri().to_string(), 1).unwrap());
+    owner.sync_once(&stop).await.unwrap();
+    assert_eq!(
+        owner.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Ready
+    );
+    owner.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn shorter_prefix_preserves_established_history_below_birthday() {
+    assert_shorter_prefix_preserves_established_history(100, 50).await;
+}
+
+#[tokio::test]
+async fn shorter_prefix_preserves_established_history_deep_regression() {
+    assert_shorter_prefix_preserves_established_history(1250, 150).await;
+}
+
+#[tokio::test]
+async fn shorter_prefix_preserves_established_history_shallow_regression() {
+    assert_shorter_prefix_preserves_established_history(1250, 1200).await;
 }
 
 #[tokio::test]
@@ -548,9 +560,7 @@ async fn future_cached_roots_preserve_current_spendability_across_tail_shrink_an
         .as_str()
         .unwrap()
         .to_owned();
-    let credit = net
-        .funding_transaction(vec![(&address, 2_000_000, None)])
-        .await;
+    let credit = canonical_funding_transaction(&net, &address, 2_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![credit]);

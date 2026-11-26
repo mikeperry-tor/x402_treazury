@@ -48,14 +48,16 @@ proving, lifecycle, and codec coverage.
   is unsupported). This nightly emits a future-compatibility trait-depth
   warning on the deferred catalog and paid relay `Send` proof; preserve the
   diagnostic without suppressing it or raising recursion limits.
-- **Outputs and concurrency:** Publishes separately to
-  `target/coverage-condition` and `target/coverage-condition-financial`. The
-  financial supplement runs proving (1 thread), lifecycle (8 threads), and
-  codec isolation (1 thread) sequentially under `zcash-testutils` (asserting
-  nonzero tests per filter; default condition runs at 8 threads). Keep
-  selections identical across baseline and final runs. Because `tools/protoc`
-  uses a sibling target directory, application Cargo initializes the coverage
-  target root first.
+- **Outputs and concurrency:** Default, condition, branch, and lifecycle
+  coverage selections use `TEST_THREADS` (default 8; CI sets `$(nproc)`), while
+  proving, codec, and consensus selections stay at 1 thread. Condition runs
+  publish separately to `target/coverage-condition` and
+  `target/coverage-condition-financial`. The financial supplement runs proving
+  (1 thread), lifecycle (`TEST_THREADS`), and codec isolation (1 thread)
+  sequentially under `zcash-testutils` (asserting nonzero tests per filter).
+  Keep selections identical across baseline and final runs. Because
+  `tools/protoc` uses a sibling target directory, application Cargo initializes
+  the coverage target root first.
 - **Exported JSON views:** `full.json` keeps default exclusions (hiding test
   folders and `*_tests.rs`). Condition modes also export `all-sources.json`
   from the same profiles with defaults disabled so operational runner and tool

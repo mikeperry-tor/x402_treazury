@@ -35,184 +35,192 @@ async fn prepare(owner: &mut Treasury) -> (FundingJob, PreparedTransaction) {
     (job, prepared)
 }
 
-#[tokio::test]
-async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_restart() {
-    for terminal in [
-        crate::rotation::near::SwapStatus::Failed,
-        crate::rotation::near::SwapStatus::Refunded,
-    ] {
-        let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
-        let stop = CancellationToken::new();
-        let (job, prepared) = prepare(&mut owner).await;
-        let expiry = prepared.facts().unwrap().expiry_height;
-        {
-            let mut chain = net.chain.write().await;
-            let n = expiry + 2 - chain.tip();
-            chain.mine_empty_blocks(n);
-        }
-        owner
-            .recover_expired(job.operation_id.clone(), &stop)
-            .await
-            .unwrap();
-        let operation = job.operation_id.clone();
-        let inputs = owner
-            .store
-            .call(move |s| s.prepared_inputs(&operation))
-            .await
-            .unwrap();
-        let identity = owner.status().await.unwrap().treasury_id;
-        owner.close().await.unwrap();
-        {
-            let mut chain = net.chain.write().await;
-            chain.reorg_to(23);
-            chain.mine_block(vec![prepared.bytes().to_vec()]);
-            chain.mine_empty_blocks(expiry + 2 - 24);
-        }
-        owner = Treasury::open_with_network(
-            dir.path().join("state"),
-            dir.path().join("key"),
-            identity,
-            TreasuryNetwork::Synthetic,
-        )
+async fn assert_completed_expiry_evidence_stays_historical(
+    terminal: crate::rotation::near::SwapStatus,
+) {
+    let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let stop = CancellationToken::new();
+    let (job, prepared) = prepare(&mut owner).await;
+    let expiry = prepared.facts().unwrap().expiry_height;
+    {
+        let mut chain = net.chain.write().await;
+        let n = expiry + 2 - chain.tip();
+        chain.mine_empty_blocks(n);
+    }
+    owner
+        .recover_expired(job.operation_id.clone(), &stop)
         .await
         .unwrap();
-        owner.configure_sync(SyncSettings::new(endpoint, 2).unwrap());
-        if owner.sync_once(&stop).await.is_err() {
-            owner.sync_once(&stop).await.unwrap();
+    let operation = job.operation_id.clone();
+    let inputs = owner
+        .store
+        .call(move |s| s.prepared_inputs(&operation))
+        .await
+        .unwrap();
+    let identity = owner.status().await.unwrap().treasury_id;
+    owner.close().await.unwrap();
+    {
+        let mut chain = net.chain.write().await;
+        chain.reorg_to(23);
+        chain.mine_block(vec![prepared.bytes().to_vec()]);
+        chain.mine_empty_blocks(expiry + 2 - 24);
+    }
+    owner = Treasury::open_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        identity,
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    owner.configure_sync(SyncSettings::new(endpoint, 2).unwrap());
+    if owner.sync_once(&stop).await.is_err() {
+        owner.sync_once(&stop).await.unwrap();
+    }
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        let txid = submission::decode(prepared.bytes()).unwrap().txid();
+        assert!(
+            wallet
+                .wallet_transactions
+                .get(&txid)
+                .unwrap()
+                .status()
+                .is_confirmed(),
+            "SDK independently owns current transaction observation"
+        );
+    }
+    let operation = job.operation_id.clone();
+    let raw = prepared.bytes().to_vec();
+    let checked_job = job.id.clone();
+    owner
+        .store
+        .call(move |s| {
+            assert_eq!(
+                s.operation(&operation)?.submission,
+                "EXPIRED",
+                "a completed source journal is historical evidence, not a live reorg projection"
+            );
+            assert!(!s.operation_pending(&operation)?);
+            assert!(!s.source_previously_closed(&operation)?);
+            assert_eq!(s.operation(&operation)?.attempts, 0);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), raw);
+            assert_eq!(s.prepared_inputs(&operation)?, inputs);
+            assert!(s.funding_facts(&checked_job, &operation)?.archived);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let error = owner
+        .reconcile_prepared(job.operation_id.clone(), &mut NoDisclosure, &stop)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("transaction is not pending"));
+    // Exercise the existing canonical-proof/Store boundary with the retained
+    // authenticated original. Ordinary reconciliation remains pending-only;
+    // scans must not reopen completed historical source journals.
+    let original_operation = job.operation_id.clone();
+    let (original_inputs, original_snapshot) = owner
+        .store
+        .call(move |s| {
+            Ok((
+                s.prepared_inputs(&original_operation)?,
+                s.prepared_snapshot(&original_operation)?.to_vec(),
+            ))
+        })
+        .await
+        .unwrap();
+    assert!(
+        owner
+            .confirm_sdk_transaction(&prepared)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let (job_id, operation) = (job.id.clone(), job.operation_id.clone());
+    owner
+        .store
+        .call(move |s| s.record_provider_outcome(&job_id, &operation, &terminal, now()?))
+        .await
+        .unwrap();
+    let identity = owner.status().await.unwrap().treasury_id;
+    use crate::treasury::recovery::RecoveryOutcome;
+    for restart in [false, true] {
+        if restart {
+            owner.close().await.unwrap();
+            owner = Treasury::open_with_network(
+                dir.path().join("state"),
+                dir.path().join("key"),
+                identity.clone(),
+                TreasuryNetwork::Synthetic,
+            )
+            .await
+            .unwrap();
         }
-        {
-            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-            let txid = submission::decode(prepared.bytes()).unwrap().txid();
-            assert!(
-                wallet
-                    .wallet_transactions
-                    .get(&txid)
-                    .unwrap()
-                    .status()
-                    .is_confirmed(),
-                "SDK independently owns current transaction observation"
+        // Canonical confirmation supersedes active expiry as replacement
+        // authority. Its archived proof remains immutable history.
+        for allowed in [false, true] {
+            assert_eq!(
+                owner
+                    .recover_funding_job(job.id.clone(), allowed, &mut NoDisclosure, &stop)
+                    .await
+                    .unwrap(),
+                RecoveryOutcome::Waiting(
+                    if terminal == crate::rotation::near::SwapStatus::Refunded {
+                        "waiting_for_confirmed_refund"
+                    } else {
+                        "swap_outcome_pending"
+                    }
+                )
             );
         }
-        let operation = job.operation_id.clone();
+        let original = job.clone();
         let raw = prepared.bytes().to_vec();
-        let checked_job = job.id.clone();
+        let inputs = original_inputs.clone();
+        let snapshot = original_snapshot.clone();
         owner
             .store
             .call(move |s| {
                 assert_eq!(
-                    s.operation(&operation)?.submission,
-                    "EXPIRED",
-                    "a completed source journal is historical evidence, not a live reorg projection"
+                    s.funding_job(&original.id)?.unwrap().operation_id,
+                    original.operation_id
                 );
-                assert!(!s.operation_pending(&operation)?);
-                assert!(!s.source_previously_closed(&operation)?);
-                assert_eq!(s.operation(&operation)?.attempts, 0);
-                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), raw);
-                assert_eq!(s.prepared_inputs(&operation)?, inputs);
-                assert!(s.funding_facts(&checked_job, &operation)?.archived);
+                assert!(
+                    s.funding_facts(&original.id, &original.operation_id)?
+                        .archived
+                );
+                assert!(s.source_previously_closed(&original.operation_id)?);
+                assert_eq!(s.operation(&original.operation_id)?.submission, "CONFIRMED");
+                assert_eq!(
+                    s.operation(&original.operation_id)?.attempts,
+                    0,
+                    "recovery must not broadcast"
+                );
+                assert_eq!(s.prepared_bytes(&original.operation_id)?.as_slice(), raw);
+                assert_eq!(s.prepared_inputs(&original.operation_id)?, inputs);
+                assert_eq!(
+                    s.prepared_snapshot(&original.operation_id)?.as_slice(),
+                    snapshot
+                );
+                assert!(!s.operation_pending(&original.operation_id)?);
                 Ok(())
             })
             .await
             .unwrap();
-        let error = owner
-            .reconcile_prepared(job.operation_id.clone(), &mut NoDisclosure, &stop)
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("transaction is not pending"));
-        // Exercise the existing canonical-proof/Store boundary with the retained
-        // authenticated original. Ordinary reconciliation remains pending-only;
-        // scans must not reopen completed historical source journals.
-        let original_operation = job.operation_id.clone();
-        let (original_inputs, original_snapshot) = owner
-            .store
-            .call(move |s| {
-                Ok((
-                    s.prepared_inputs(&original_operation)?,
-                    s.prepared_snapshot(&original_operation)?.to_vec(),
-                ))
-            })
-            .await
-            .unwrap();
-        assert!(
-            owner
-                .confirm_sdk_transaction(&prepared)
-                .await
-                .unwrap()
-                .is_some()
-        );
-        let (job_id, operation) = (job.id.clone(), job.operation_id.clone());
-        owner
-            .store
-            .call(move |s| s.record_provider_outcome(&job_id, &operation, &terminal, now()?))
-            .await
-            .unwrap();
-        let identity = owner.status().await.unwrap().treasury_id;
-        use crate::treasury::recovery::RecoveryOutcome;
-        for restart in [false, true] {
-            if restart {
-                owner.close().await.unwrap();
-                owner = Treasury::open_with_network(
-                    dir.path().join("state"),
-                    dir.path().join("key"),
-                    identity.clone(),
-                    TreasuryNetwork::Synthetic,
-                )
-                .await
-                .unwrap();
-            }
-            // Canonical confirmation supersedes active expiry as replacement
-            // authority. Its archived proof remains immutable history.
-            for allowed in [false, true] {
-                assert_eq!(
-                    owner
-                        .recover_funding_job(job.id.clone(), allowed, &mut NoDisclosure, &stop)
-                        .await
-                        .unwrap(),
-                    RecoveryOutcome::Waiting(
-                        if terminal == crate::rotation::near::SwapStatus::Refunded {
-                            "waiting_for_confirmed_refund"
-                        } else {
-                            "swap_outcome_pending"
-                        }
-                    )
-                );
-            }
-            let original = job.clone();
-            let raw = prepared.bytes().to_vec();
-            let inputs = original_inputs.clone();
-            let snapshot = original_snapshot.clone();
-            owner
-                .store
-                .call(move |s| {
-                    assert_eq!(
-                        s.funding_job(&original.id)?.unwrap().operation_id,
-                        original.operation_id
-                    );
-                    assert!(
-                        s.funding_facts(&original.id, &original.operation_id)?
-                            .archived
-                    );
-                    assert!(s.source_previously_closed(&original.operation_id)?);
-                    assert_eq!(s.operation(&original.operation_id)?.submission, "CONFIRMED");
-                    assert_eq!(
-                        s.operation(&original.operation_id)?.attempts,
-                        0,
-                        "recovery must not broadcast"
-                    );
-                    assert_eq!(s.prepared_bytes(&original.operation_id)?.as_slice(), raw);
-                    assert_eq!(s.prepared_inputs(&original.operation_id)?, inputs);
-                    assert_eq!(
-                        s.prepared_snapshot(&original.operation_id)?.as_slice(),
-                        snapshot
-                    );
-                    assert!(!s.operation_pending(&original.operation_id)?);
-                    Ok(())
-                })
-                .await
-                .unwrap();
-        }
-        owner.close().await.unwrap();
     }
+    owner.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_restart_failed() {
+    assert_completed_expiry_evidence_stays_historical(crate::rotation::near::SwapStatus::Failed)
+        .await;
+}
+
+#[tokio::test]
+async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_restart_refunded() {
+    assert_completed_expiry_evidence_stays_historical(crate::rotation::near::SwapStatus::Refunded)
+        .await;
 }
 
 #[tokio::test]
@@ -246,9 +254,7 @@ async fn fulfilled_source_work_survives_sdk_reorg_without_confirmation_or_credit
         .as_str()
         .unwrap()
         .to_owned();
-    let replacement = net
-        .funding_transaction(vec![(&address, 2_000_000, None)])
-        .await;
+    let replacement = canonical_funding_transaction(&net, &address, 2_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.reorg_to(20);

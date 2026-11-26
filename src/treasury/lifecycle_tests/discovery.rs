@@ -561,14 +561,7 @@ async fn new_claim_resumes_shared_capital_discovery_and_detects_a_later_deposit(
         TreasuryNetwork::Synthetic,
     )
     .unwrap();
-    // Keep the test runtime active while SDK scans run on their private runtime;
-    // paused-time auto-advance must not race blocking Store/scan publication.
-    let active = tokio::spawn(async {
-        loop {
-            tokio::task::yield_now().await;
-        }
-    });
-    tokio::time::pause();
+    let active = pause_without_auto_advance();
     let observation_due = owner.observation.due();
     let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
     // Complete the finite startup request by observing its already-current scan.
@@ -592,9 +585,7 @@ async fn new_claim_resumes_shared_capital_discovery_and_detects_a_later_deposit(
         Some(&crate::rotation::error::FundingCondition::InsufficientFunds)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    let deposit = net
-        .funding_transaction(vec![(&address, 1_000_000, None)])
-        .await;
+    let deposit = canonical_funding_transaction(&net, &address, 1_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![deposit]);

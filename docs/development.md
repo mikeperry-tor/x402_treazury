@@ -119,15 +119,18 @@ target/release/x402_treazury --help
   See [entrypoint reference](../scripts/README.md) and
   [reproducible builds](reproducible-builds.md).
 - Development and test builds use `debug = "line-tables-only"` for file and
-  line backtraces without full variable debug info. Use `make build-dev` for an
-  incremental dev build (`CARGO_INCREMENTAL=1`), `make build PROFILE=dev` for a
-  non-incremental dev build, or `CARGO_INCREMENTAL=0 make test` to disable
-  incremental test caches.
+  line backtraces without full variable debug info, and compile dependencies at
+  optimization level 2 (`[profile.dev.package."*"]`) while keeping workspace
+  crates at level 0 so proving, note decryption, and key derivation run fast
+  without slowing local edits or distorting line coverage. `check-proving`,
+  `check-lifecycle`, and `check-codec` also set `CARGO_PROFILE_TEST_OPT_LEVEL=2`
+  so monomorphized Halo2 proving and sync generics inside `x402_treazury` are
+  optimized while reusing the shared `target/debug` dependencies. Use
+  `make build-dev` for an incremental dev build (`CARGO_INCREMENTAL=1`),
+  `make build PROFILE=dev` for a non-incremental dev build, or
+  `CARGO_INCREMENTAL=0 make test` to disable incremental test caches.
 - Set `CARGO_PROFILE_DEV_DEBUG=2` or `CARGO_PROFILE_TEST_DEBUG=2` for full
   debugger symbols.
-- `make check-lifecycle LIFECYCLE_PROFILE=test-optimized` selects an opt-in
-  profile inheriting `test` with optimization level 2, debug assertions, and
-  overflow checks (used in Linux CI lifecycle diagnostics).
 - With builds stopped, delete only `target/debug/incremental` to reclaim
   incremental cache space. Preserve the rest of `target/`, which can hold
   qualification evidence, pinned executables, and reports; never run blanket

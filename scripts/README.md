@@ -74,9 +74,9 @@ and Cargo against the CI and release pin. See
   the full suite). Never pass Cargo profile flags in `CARGO_ARGS` for `build`
   or `build-dev`; use `PROFILE=NAME` on `build`.
 - `TEST_THREADS` sets libtest concurrency for `make test`, `check-compat`,
-  `check-default`, and `check-default-remaining` (default `8`). `TEST_ARGS`
-  replaces the entire harness argument list (do not include the separating
-  `--`; Make adds it).
+  `check-default`, `check-default-remaining`, `check-lifecycle`, and parallel
+  `coverage*` targets (default `8`). `TEST_ARGS` replaces the entire harness
+  argument list (do not include the separating `--`; Make adds it).
 - For `make run`, pass Cargo and application flags in `CARGO_ARGS` separated by
   `--`. Double `$` as `$$` when an environment variable should expand in the
   recipe shell, and never pass secrets in CLI arguments:
@@ -93,26 +93,27 @@ make build PROFILE=dev CARGO_ARGS='--offline'
 
 Select checks using [validation by change](../docs/testing.md#selecting-validation-by-change).
 `make check` and named `check-*` stages ignore `CARGO_ARGS` and `TEST_ARGS`
-(`TEST_THREADS` still adjusts `check-compat`, `check-default`, and
-`check-default-remaining`), stop on the first failing stage even under
-`make -k`, and always execute when invoked (no cached pass state).
+(`TEST_THREADS` still adjusts `check-compat`, `check-default`,
+`check-default-remaining`, and `check-lifecycle`), stop on the first failing
+stage even under `make -k`, and always execute when invoked (no cached pass
+state).
 
 - **Combined `make check` flow:** Runs static, tooling, complexity, and
   provenance checks; `check-clippy`; `check-compat`; `check-default-remaining`
   (deriving remaining targets from locked Cargo metadata so the four compat
   targets run once); and then `zcash-testutils` proving (1 thread), lifecycle
-  (8 threads), and codec (1 thread).
+  (`TEST_THREADS`, default 8), and codec (1 thread) with
+  `CARGO_PROFILE_TEST_OPT_LEVEL=2` reusing the shared `target/debug`
+  dependencies.
 - **CI stage wrapper (`scripts/ci-stage.sh CHECK_STAGE`):** Runs one of the
   seven stages, streams combined output, writes logs, elapsed seconds, and exit
   status to `target/ci-checks/`, and appends to `GITHUB_STEP_SUMMARY` when set.
   See [GitHub Actions and coverage](../docs/testing.md#github-actions-and-coverage).
-- **Lifecycle diagnostics (`LIFECYCLE_DIAGNOSTICS=target/ci-checks/lifecycle`):**
-  On Linux CI, compiles `make check-lifecycle` with JSON metadata
-  (`build.jsonl`, `build-status.json`), records `status.json`, and captures
-  periodic `snapshot-N/` CPU, memory, and native stacks via GDB (requiring
-  same-user ptrace permission on the ephemeral runner) with no lifecycle
-  deadline. `LIFECYCLE_PROFILE=test-optimized` enables the opt-in `-O2` test
-  profile with debug assertions and overflow checks.
+- **Opt-in lifecycle diagnostics (`LIFECYCLE_DIAGNOSTICS=DIR`):** Compiles
+  `make check-lifecycle` with JSON metadata (`build.jsonl`,
+  `build-status.json`), records `status.json`, and captures periodic
+  `snapshot-N/` CPU, memory, and native stacks via GDB (requiring same-user
+  ptrace permission on Linux) with no lifecycle deadline.
 - **Treasury hang workflow (`scripts/diagnose-treasury-sync.py`):** Compiles
   `--test treasury_sync --no-run --message-format=json`, runs 8 threads with
   `--nocapture` inside a 5-minute diagnostic window (outside compilation), and

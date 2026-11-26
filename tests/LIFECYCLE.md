@@ -16,10 +16,10 @@ make test CARGO_ARGS='--offline --features zcash-testutils --lib' TEST_ARGS='rot
 # Synthetic proving tests (1 thread):
 make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::send::proving_tests' TEST_ARGS='--test-threads=1'
 
-# Synthetic-chain source lifecycle suite (8 threads; included in make check):
+# Synthetic-chain source lifecycle suite (TEST_THREADS, default 8; included in make check):
 make check-lifecycle
 # Serial diagnostic run:
-make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::lifecycle_tests' TEST_THREADS=1
+make check-lifecycle TEST_THREADS=1
 
 # Docker consensus scenario (run one named scenario per process):
 RUST_BACKTRACE=0 make test CARGO_ARGS='--offline --features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery' TEST_ARGS='--ignored --exact --nocapture --test-threads=1'
@@ -36,9 +36,9 @@ for live mainnet scope.
   projections follow the
   [Ironwood-only policy](../docs/zingo-integration.md#ironwood-only-policy)
   with Orchard-only UAs. Common funded fixtures share immutable raw faucet
-  transactions (1,000,000 and 10,000 zatoshis, proved once per process at
-  height 21) while creating fresh SDK wallets, encrypted Stores, and mock
-  chains per test with no shared mutable state.
+  transactions cached per process by `(receiver, amount, height_bucket)` under
+  the default synthetic activation schedule while creating fresh SDK wallets,
+  encrypted Stores, and mock chains per test with no shared mutable state.
 - **HTTPS policy and ownership:** The full concurrent worker shares a verified
   TLS router across its local bridge, Base RPC, and paid API. Release temporary
   `StoreHandle` observers before awaiting `Treasury::close` so the Store worker
@@ -72,7 +72,7 @@ for live mainnet scope.
 | Direct native sends and receives | `treasury::lifecycle_tests::shielding`, direct-send and native-receive suites | Principal-plus-fee authority, cancellation, exact-byte restart, partial and excess native receipts, zero transparent RPCs, and unconditional refusal of transparent-input shielding. |
 | Blocking calculation and publication ownership | `treasury::lifecycle_tests::calculation_owner`, `treasury::send::proving_tests`, `treasury::publication::tests` | Single accepted input owner surviving cancellation, runtime drop, and concurrent MCP calls; NU7 expiry boundaries; failed publication retries of identical bytes; panic isolation and offline reconstruction. |
 | Targeted destination discovery | `treasury::lifecycle_tests::discovery` | Insufficient SDK funds skip destination checks; positive destination blocks acceptance; credit handoff reuses recipient cooldown without clobbering payment decrements. |
-| SDK confirmation, ZIP 244, and expiry | `treasury::lifecycle_tests::{ironwood,terminal}`, `unsubmitted_funding_expiry_uses_only_its_one_proof_scan` | Confirmation without indexer lookup (including v5 alternate auth), relocated Ironwood notes, buried and unsubmitted expiry in one scan, damaged plaintext projections, and preserved terminal history. |
+| SDK confirmation, ZIP 244, and expiry | `treasury::lifecycle_tests::{ironwood,terminal}`, `unsubmitted_funding_expiry_uses_only_its_one_proof_scan_*` | Confirmation without indexer lookup (including v5 alternate auth), relocated Ironwood notes, buried and unsubmitted expiry in one scan, damaged plaintext projections, and preserved terminal history. |
 | Managed refund replacement | `treasury::lifecycle_tests::managed_refunds` | Four-part replacement rule: bound `REFUNDED`, source closure, receiver-specific confirmed Ironwood receipt (including partial), and unused claim under enabled funding. |
 | Indexer recovery and deep reorgs | `treasury::lifecycle_tests::{scan_bounds,indexer_recovery}`, `unknown_deep_fork_rescans_before_birthday_even_when_tip_remains_above_it` | Shorter same-prefix tips stay safe; full-header identity beats compact hash; missing checkpoints and deep forks rescan from Sapling activation below birthday while keeping original liabilities pending. |
 | Archived swap races and scheduler saturation | `rotation::funding::scheduler::tests::{archive_status,diagnostics}`, `fulfilled_archived_request_does_not_starve_disclosed_replacement_after_credit` | Multi-page archived status polling, late archived `SUCCESS` suppressing undisclosed replacements while letting disclosed replacements confirm, and saturated scheduling-record bounds. |

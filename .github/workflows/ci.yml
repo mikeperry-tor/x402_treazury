@@ -29,12 +29,22 @@ jobs:
           python-version: '3.13'
       - name: Install the repository's pinned Rust toolchain
         run: sh scripts/ci-toolchain.sh
+      - name: Match test concurrency to runner vCPUs
+        run: echo "TEST_THREADS=$(nproc)" >> "$GITHUB_ENV"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-inputs-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'tools/protoc/Cargo.lock') }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            target/CACHEDIR.TAG
+            target/debug/build
+            target/debug/deps
+            target/debug/.fingerprint
+          key: check-deps-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'tools/complexity/Cargo.toml', 'vendor/**') }}
       - name: Static checks
         run: scripts/ci-stage.sh check-static
       - name: Compiler and Clippy checks
@@ -45,37 +55,7 @@ jobs:
         run: scripts/ci-stage.sh check-default-remaining
       - name: Proving tests
         run: scripts/ci-stage.sh check-proving
-      # Temporary automatic capture; retire after main badge acceptance.
-      # Policy and retained tools: docs/testing.md#temporary-ci-diagnostics
-      - name: Prepare lifecycle diagnostics
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y gdb
-          sudo sysctl -w kernel.yama.ptrace_scope=0
-          mkdir -p target/ci-checks/lifecycle
-          git rev-parse HEAD > target/ci-checks/lifecycle/revision.txt
-          {
-            nproc
-            free -m
-            for resource in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do
-              if [[ -r "$resource" ]]; then
-                printf '%s: ' "$resource"
-                cat "$resource"
-              fi
-            done
-          } > target/ci-checks/lifecycle/runner.txt
-          sleep 30 &
-          fixture_pid=$!
-          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
-          timeout --signal=KILL 10s gdb -q -nx -batch \
-            -iex 'set auto-load off' -iex 'set debuginfod enabled off' \
-            -ex 'set print frame-arguments none' -ex 'thread apply all bt' \
-            -ex detach -p "$fixture_pid" \
-            > target/ci-checks/lifecycle/debugger-smoke.txt 2>&1
       - name: Treasury lifecycle tests
-        env:
-          LIFECYCLE_DIAGNOSTICS: target/ci-checks/lifecycle
-          LIFECYCLE_PROFILE: test-optimized
         run: scripts/ci-stage.sh check-lifecycle
       - name: Address codec test
         run: scripts/ci-stage.sh check-codec
@@ -86,6 +66,8 @@ jobs:
           name: check-diagnostics
           path: target/ci-checks/
           if-no-files-found: ignore
+      - name: Prune workspace artifacts before caching dependencies
+        run: cargo clean --locked -p x402_treazury -p treazury-complexity
 
   coverage:
     name: Default line coverage
@@ -100,12 +82,22 @@ jobs:
           persist-credentials: false
       - name: Install the repository's pinned Rust and matching LLVM tools
         run: sh scripts/ci-toolchain.sh --component llvm-tools-preview
+      - name: Match test concurrency to runner vCPUs
+        run: echo "TEST_THREADS=$(nproc)" >> "$GITHUB_ENV"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: cargo-inputs-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'tools/protoc/Cargo.lock') }}
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            target/llvm-cov-default/CACHEDIR.TAG
+            target/llvm-cov-default/debug/build
+            target/llvm-cov-default/debug/deps
+            target/llvm-cov-default/debug/.fingerprint
+          key: coverage-deps-0.9.1-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'vendor/**') }}
       - name: Install the pinned coverage collector
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
@@ -149,6 +141,8 @@ jobs:
             target/coverage-runs/*/provenance.txt
             target/coverage-runs/*/commands.txt
           if-no-files-found: ignore
+      - name: Prune workspace artifacts before caching dependencies
+        run: cargo clean --locked --target-dir target/llvm-cov-default -p x402_treazury
 
   publish-badge:
     name: Publish main coverage badge

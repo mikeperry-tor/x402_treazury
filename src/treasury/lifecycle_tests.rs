@@ -165,35 +165,72 @@ async fn funded_fixture(confirmations: u64) -> (tempfile::TempDir, MockNet, Trea
     funded_fixture_amount(confirmations, 1_000_000).await
 }
 
-// Fixed SEED/account-zero receiver, Synthetic activation schedule and height 21.
-// Share only public transaction bytes; each fixture retains its own owner and scan.
+// Cached public faucet transaction bytes for the default Synthetic activation
+// schedule, keyed by (receiver, amount, height_bucket). Proving at each
+// 2,000-block bucket ceiling keeps expiry_height >= next_height across heights
+// in that bucket while each fixture retains its own owner and scan. Callers
+// must not mine the same cached (receiver, amount, bucket) twice on one chain.
 async fn canonical_funding_transaction(net: &MockNet, address: &str, amount: u64) -> Vec<u8> {
-    assert_eq!(
-        net.chain.read().await.tip(),
-        20,
-        "canonical funding height changed"
-    );
-    static STANDARD: tokio::sync::OnceCell<(String, Vec<u8>)> = tokio::sync::OnceCell::const_new();
-    static LOW: tokio::sync::OnceCell<(String, Vec<u8>)> = tokio::sync::OnceCell::const_new();
-    let funding = match amount {
-        1_000_000 => &STANDARD,
-        10_000 => &LOW,
-        _ => return net.funding_transaction(vec![(address, amount, None)]).await,
+    let (activation, next_height) = {
+        let chain = net.chain.read().await;
+        (chain.activation_heights(), u32::from(chain.next_height()))
     };
-    let (recipient, bytes) = funding
-        .get_or_init(|| async {
-            (
-                address.to_owned(),
-                net.funding_transaction(vec![(address, amount, None)]).await,
-            )
-        })
-        .await;
+    canonical_funding_transaction_on(activation, next_height, address, amount).await
+}
+
+async fn canonical_funding_transaction_on(
+    activation: zingolib::ActivationHeights,
+    min_height: u32,
+    address: &str,
+    amount: u64,
+) -> Vec<u8> {
     assert_eq!(
-        recipient.as_str(),
-        address,
-        "canonical funding receiver changed"
+        activation,
+        zingolib::testutils::mock_activation_heights(),
+        "canonical funding cache requires default synthetic activation heights"
     );
-    bytes.clone()
+    const BUCKET: u32 = 2_000;
+    let bucket_ceiling = ((min_height.max(1) - 1) / BUCKET + 1) * BUCKET;
+    type CacheMap = std::collections::HashMap<
+        (String, u64, u32),
+        std::sync::Arc<tokio::sync::OnceCell<Vec<u8>>>,
+    >;
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<CacheMap>> = std::sync::OnceLock::new();
+    let cell = {
+        let mut cache = CACHE
+            .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+            .lock()
+            .unwrap();
+        std::sync::Arc::clone(
+            cache
+                .entry((address.to_owned(), amount, bucket_ceiling))
+                .or_insert_with(|| std::sync::Arc::new(tokio::sync::OnceCell::new())),
+        )
+    };
+    cell.get_or_init(|| async {
+        zingolib::testutils::mock_indexer::faucet_funding_transaction_on(
+            activation,
+            bucket_ceiling.into(),
+            vec![(address, amount, None)],
+        )
+        .await
+    })
+    .await
+    .clone()
+}
+
+// Keep paused Tokio time from auto-advancing while SDK scans run on their
+// private runtime and Store publications finish on blocking workers, without
+// spinning a CPU core at 100% during Halo2 proving.
+fn pause_without_auto_advance() -> tokio::task::JoinHandle<()> {
+    let active = tokio::spawn(async {
+        loop {
+            std::thread::sleep(Duration::from_micros(250));
+            tokio::task::yield_now().await;
+        }
+    });
+    tokio::time::pause();
+    active
 }
 
 async fn funded_fixture_amount(
@@ -329,8 +366,11 @@ async fn inclusion_after_wallet_scan_waits_without_resubmitting_or_releasing_inp
     owner.close().await.unwrap();
 }
 
-#[tokio::test]
-async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
+async fn assert_unsubmitted_funding_expiry_uses_only_its_one_proof_scan(
+    malformed_sequencing: bool,
+    warm_cached: bool,
+    projected_expiry: serde_json::Value,
+) {
     struct ReadOnly;
     impl TransactionSubmission for ReadOnly {
         async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
@@ -340,159 +380,174 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
             panic!("canonical expiry proof needs no external inclusion corroboration");
         }
     }
-    for (malformed_sequencing, warm_cached, projected_expiry) in [
-        // Projection permutations are covered without proving in Store tests.
-        // These journeys retain the distinct cold and already-observed paths.
-        (false, false, serde_json::json!(0)),
-        (true, true, serde_json::json!("invalid")),
-    ] {
-        let (dir, net, mut owner, _endpoint) = funded_fixture(2).await;
-        let pool = owner
-            .ensure_capacity_group(
-                "expiry".into(),
-                crate::rotation::test_capacity::small_reserve("5"),
-                None,
-                0,
-            )
-            .await
+    let (dir, net, mut owner, _endpoint) = funded_fixture(2).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "expiry".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let jobs = owner.store.call(|s| s.funding_jobs()).await.unwrap();
+    let job = jobs[0].clone();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&owner.store, jobs, deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let expiry = prepared.facts().unwrap().expiry_height;
+    {
+        let mut chain = net.chain.write().await;
+        let blocks = expiry + 2 - chain.tip();
+        chain.mine_empty_blocks(blocks);
+    }
+    if warm_cached {
+        // A successful cached observation is not a new proof scan in this
+        // invocation. Recovery must still acquire one actual canonical scan.
+        owner.sync_once(&CancellationToken::new()).await.unwrap();
+    }
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let damaged_facts = damage_projections(&db, &job.operation_id, Some(projected_expiry));
+    db.execute_batch(
+        "CREATE TABLE fixture_completed_scans(observation TEXT NOT NULL);
+        CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
+        WHEN json_extract(NEW.observation,'$.phase')='ready'
+        BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
+    )
+    .unwrap();
+    if malformed_sequencing {
+        db.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
-        owner
-            .allocate_capacity_kind(pool, AllocationKind::Small, true)
-            .await
-            .unwrap();
-        let jobs = owner.store.call(|s| s.funding_jobs()).await.unwrap();
-        let job = jobs[0].clone();
-        let deadline = now().unwrap() + 7200;
-        save_quotes(&owner.store, jobs, deadline).await;
-        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
-        let expiry = prepared.facts().unwrap().expiry_height;
-        {
-            let mut chain = net.chain.write().await;
-            let blocks = expiry + 2 - chain.tip();
-            chain.mine_empty_blocks(blocks);
-        }
-        if warm_cached {
-            // A successful cached observation is not a new proof scan in this
-            // invocation. Recovery must still acquire one actual canonical scan.
-            owner.sync_once(&CancellationToken::new()).await.unwrap();
-        }
-        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-        let damaged_facts = damage_projections(&db, &job.operation_id, Some(projected_expiry));
-        db.execute_batch(
-            "CREATE TABLE fixture_completed_scans(observation TEXT NOT NULL);
-            CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
-            WHEN json_extract(NEW.observation,'$.phase')='ready'
-            BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
+        db.execute(
+            "UPDATE treasury_operations SET attempts='invalid',submission=x'00' WHERE id=?1",
+            [&job.operation_id],
         )
         .unwrap();
-        if malformed_sequencing {
-            db.execute_batch("PRAGMA ignore_check_constraints=ON")
-                .unwrap();
-            db.execute(
-                "UPDATE treasury_operations SET attempts='invalid',submission=x'00' WHERE id=?1",
-                [&job.operation_id],
-            )
+        db.execute("UPDATE funding_progress SET attempts='bad',next_poll='bad',last_error=x'00',phase='invalid' WHERE job_id=?1",[&job.id]).unwrap();
+        db.execute("INSERT INTO funding_health(job_id,started_at,error_streak,timed_out) VALUES(?1,'bad','bad','bad') ON CONFLICT(job_id) DO UPDATE SET started_at='bad',error_streak='bad',timed_out='bad'",[&job.id]).unwrap();
+        db.execute_batch("PRAGMA ignore_check_constraints=OFF")
             .unwrap();
-            db.execute("UPDATE funding_progress SET attempts='bad',next_poll='bad',last_error=x'00',phase='invalid' WHERE job_id=?1",[&job.id]).unwrap();
-            db.execute("INSERT INTO funding_health(job_id,started_at,error_streak,timed_out) VALUES(?1,'bad','bad','bad') ON CONFLICT(job_id) DO UPDATE SET started_at='bad',error_streak='bad',timed_out='bad'",[&job.id]).unwrap();
-            db.execute_batch("PRAGMA ignore_check_constraints=OFF")
-                .unwrap();
-        }
-        let original_operation = job.operation_id.clone();
-        let mut sender = ReadOnly;
-        assert_eq!(
-            owner
-                .recover_funding_job(
-                    job.id.clone(),
-                    false,
-                    &mut sender,
-                    &CancellationToken::new()
-                )
-                .await
-                .unwrap(),
-            recovery::RecoveryOutcome::Waiting("funding_disabled")
-        );
-        assert_eq!(
-            db.query_row("SELECT count(*) FROM fixture_completed_scans", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap(),
-            1,
-            "one completed canonical proof scan suffices; do not scan just to decide whether to scan"
-        );
-        owner
-            .store
-            .call(move |s| {
-                assert_eq!(
-                    s.funding_job(&job.id)?.unwrap().operation_id,
-                    job.operation_id
-                );
-                assert_eq!(
-                    s.observation_operation(&job.operation_id)?.submission,
-                    "EXPIRED"
-                );
-                if malformed_sequencing {
-                    assert!(s.operation(&job.operation_id).is_err());
-                } else {
-                    assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
-                }
-                assert_eq!(
-                    s.prepared_bytes(&job.operation_id)?.as_slice(),
-                    prepared.bytes()
-                );
-                assert!(!s.operation_pending(&job.operation_id)?);
-                Ok(())
-            })
-            .await
-            .unwrap();
-        if malformed_sequencing {
-            let diagnostic: rusqlite::types::Value = db
-                .query_row(
-                    "SELECT attempts FROM funding_progress WHERE operation_id=?1",
-                    [&original_operation],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(
-                diagnostic,
-                rusqlite::types::Value::Text("bad".into()),
-                "canonical recovery does not rewrite diagnostic counters"
-            );
-        }
-        let sequencing: (rusqlite::types::Value, rusqlite::types::Value) = db
-            .query_row(
-                "SELECT attempts,submission FROM treasury_operations WHERE id=?1",
-                [&original_operation],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            sequencing,
-            if malformed_sequencing {
-                (
-                    rusqlite::types::Value::Text("invalid".into()),
-                    rusqlite::types::Value::Blob(vec![0]),
-                )
-            } else {
-                (
-                    rusqlite::types::Value::Integer(0),
-                    rusqlite::types::Value::Text("PREPARED".into()),
-                )
-            },
-            "canonical expiry closes ownership without rewriting sequencing reports"
-        );
-        assert_eq!(
-            db.query_row(
-                "SELECT facts FROM treasury_operations WHERE id=?1",
-                [&original_operation],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            damaged_facts,
-            "recovery reads signed projections without rewriting the original journal"
-        );
-        owner.close().await.unwrap();
     }
+    let original_operation = job.operation_id.clone();
+    let mut sender = ReadOnly;
+    assert_eq!(
+        owner
+            .recover_funding_job(
+                job.id.clone(),
+                false,
+                &mut sender,
+                &CancellationToken::new()
+            )
+            .await
+            .unwrap(),
+        recovery::RecoveryOutcome::Waiting("funding_disabled")
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM fixture_completed_scans", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        1,
+        "one completed canonical proof scan suffices; do not scan just to decide whether to scan"
+    );
+    owner
+        .store
+        .call(move |s| {
+            assert_eq!(
+                s.funding_job(&job.id)?.unwrap().operation_id,
+                job.operation_id
+            );
+            assert_eq!(
+                s.observation_operation(&job.operation_id)?.submission,
+                "EXPIRED"
+            );
+            if malformed_sequencing {
+                assert!(s.operation(&job.operation_id).is_err());
+            } else {
+                assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+            }
+            assert_eq!(
+                s.prepared_bytes(&job.operation_id)?.as_slice(),
+                prepared.bytes()
+            );
+            assert!(!s.operation_pending(&job.operation_id)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    if malformed_sequencing {
+        let diagnostic: rusqlite::types::Value = db
+            .query_row(
+                "SELECT attempts FROM funding_progress WHERE operation_id=?1",
+                [&original_operation],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            diagnostic,
+            rusqlite::types::Value::Text("bad".into()),
+            "canonical recovery does not rewrite diagnostic counters"
+        );
+    }
+    let sequencing: (rusqlite::types::Value, rusqlite::types::Value) = db
+        .query_row(
+            "SELECT attempts,submission FROM treasury_operations WHERE id=?1",
+            [&original_operation],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        sequencing,
+        if malformed_sequencing {
+            (
+                rusqlite::types::Value::Text("invalid".into()),
+                rusqlite::types::Value::Blob(vec![0]),
+            )
+        } else {
+            (
+                rusqlite::types::Value::Integer(0),
+                rusqlite::types::Value::Text("PREPARED".into()),
+            )
+        },
+        "canonical expiry closes ownership without rewriting sequencing reports"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT facts FROM treasury_operations WHERE id=?1",
+            [&original_operation],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        damaged_facts,
+        "recovery reads signed projections without rewriting the original journal"
+    );
+    owner.close().await.unwrap();
+}
+
+// Projection permutations are covered without proving in Store tests.
+// These journeys retain the distinct cold and already-observed paths.
+#[tokio::test]
+async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan_cold() {
+    assert_unsubmitted_funding_expiry_uses_only_its_one_proof_scan(
+        false,
+        false,
+        serde_json::json!(0),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan_warm_malformed() {
+    assert_unsubmitted_funding_expiry_uses_only_its_one_proof_scan(
+        true,
+        true,
+        serde_json::json!("invalid"),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -540,14 +595,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         TreasuryNetwork::Synthetic,
     )
     .unwrap();
-    // Keep paused time stable while SDK scans use their private runtime and
-    // Store publications finish on blocking workers.
-    let active = tokio::spawn(async {
-        loop {
-            tokio::task::yield_now().await;
-        }
-    });
-    tokio::time::pause();
+    let active = pause_without_auto_advance();
     let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
     for wrong_binding in [false, true] {
         let mut rejected = request(&jobs[0], deadline);
@@ -981,8 +1029,11 @@ async fn same_height_tip_reorg_rebuilds_sdk_without_reopening_historical_source_
     owner.close().await.unwrap();
 }
 
-#[tokio::test]
-async fn sdk_reorg_rescan_preserves_original_signed_work() {
+async fn assert_sdk_reorg_rescan_preserves_original_signed_work(
+    rollback: u32,
+    old_checkpoint_window: bool,
+    same_height_fork: bool,
+) {
     use crate::rotation::store::preparation::{InputPool, OwnedInput};
     use pepper_sync::wallet::{IronwoodNote, OutputInterface};
     use shardtree::store::ShardStore as _;
@@ -1012,267 +1063,228 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
         );
         (output.value(), output.spending_transaction())
     }
-    for (rollback, old_checkpoint_window, same_height_fork) in [
-        (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, false, false),
-        // Tip 43 is replaced by tip 33 while checkpoint 23 is removed explicitly.
-        // Missing-checkpoint recovery needs no rolling-window-sized chain.
-        (20, true, false),
-        (pepper_sync::sync::MAX_REORG_ALLOWANCE + 11, false, false),
-        (pepper_sync::sync::MAX_REORG_ALLOWANCE + 1, false, true),
-    ] {
-        let (dir, net, mut owner, _endpoint) = funded_fixture(1).await;
-        net.chain.write().await.mine_empty_blocks(rollback);
-        owner.sync_once(&CancellationToken::new()).await.unwrap();
-        let pool = owner
-            .ensure_capacity_group(
-                "rollback".into(),
-                crate::rotation::test_capacity::small_reserve("5"),
-                None,
-                0,
-            )
-            .await
-            .unwrap();
-        owner
-            .allocate_capacity_kind(pool, AllocationKind::Small, true)
-            .await
-            .unwrap();
-        let mut store = owner.store_handle();
-        let job = store
-            .call(|s| Ok(s.funding_jobs()?.remove(0)))
-            .await
-            .unwrap();
-        let deadline = now().unwrap() + 7200;
-        save_quotes(&store, vec![job.clone()], deadline).await;
-        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
-        let durable = rusqlite::Connection::open_with_flags(
-            dir.path().join("state/state.sqlite"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    let (dir, net, mut owner, _endpoint) = funded_fixture(1).await;
+    net.chain.write().await.mine_empty_blocks(rollback);
+    owner.sync_once(&CancellationToken::new()).await.unwrap();
+    let pool = owner
+        .ensure_capacity_group(
+            "rollback".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let mut store = owner.store_handle();
+    let job = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let durable = rusqlite::Connection::open_with_flags(
+        dir.path().join("state/state.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let original_preparation: Vec<u8> = durable
+        .query_row(
+            "SELECT preparation FROM outgoing WHERE id=?1",
+            [&job.operation_id],
+            |row| row.get(0),
         )
         .unwrap();
-        let original_preparation: Vec<u8> = durable
-            .query_row(
-                "SELECT preparation FROM outgoing WHERE id=?1",
-                [&job.operation_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(!original_preparation.is_empty());
-        let addresses = owner.addresses().await.unwrap();
-        let original_inputs = {
-            let operation = job.operation_id.clone();
-            store
-                .call(move |s| s.prepared_inputs(&operation))
-                .await
-                .unwrap()
-        };
-        let source_bytes = if rollback > pepper_sync::sync::MAX_REORG_ALLOWANCE && !same_height_fork
-        {
-            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-            assert_eq!(original_inputs.len(), 1);
-            let source_id =
-                zcash_primitives::transaction::TxId::from_hex(&original_inputs[0].txid).unwrap();
-            let source = &wallet.wallet_transactions[&source_id];
-            assert_eq!(source.transaction().txid(), source_id);
-            assert_eq!(source.status().get_confirmed_height(), Some(21.into()));
-            let mut bytes = Vec::new();
-            source.transaction().write(&mut bytes).unwrap();
-            Some(bytes)
-        } else {
-            None
-        };
-        let settings = owner.sync_settings.clone().unwrap();
-        let treasury_id = owner.status().await.unwrap().treasury_id;
-        if old_checkpoint_window {
-            // A retained rollback boundary may be absent from an older saved
-            // tree even while newer checkpoints and the actual note data exist.
-            // Stay inside the current cache horizon so this exercises the exact
-            // missing-checkpoint fallback rather than the known-deep-tip reset.
-            {
-                let mut wallet = owner.client.as_ref().unwrap().wallet().write().await;
-                let tree = &mut wallet.shard_trees.ironwood;
-                let tip = tree.store().max_checkpoint_id().unwrap().unwrap();
-                let rollback_height = 23.into();
-                assert!(
-                    tree.store()
-                        .get_checkpoint(&rollback_height)
-                        .unwrap()
-                        .is_some()
-                );
-                tree.store_mut()
-                    .remove_checkpoint(&rollback_height)
-                    .unwrap();
-                assert!(
-                    tree.store()
-                        .get_checkpoint(&rollback_height)
-                        .unwrap()
-                        .is_none()
-                );
-                assert_eq!(tree.store().max_checkpoint_id().unwrap(), Some(tip));
-            }
-            let observation = store
-                .call(|s| Ok(s.treasury_sync_state()?.sync.unwrap()))
-                .await
-                .unwrap();
-            owner.checkpoint(observation).await.unwrap();
-            drop(store);
-            owner.close().await.unwrap();
-            owner = Treasury::open_with_network(
-                dir.path().join("state"),
-                dir.path().join("key"),
-                treasury_id.clone(),
-                TreasuryNetwork::Synthetic,
-            )
-            .await
-            .unwrap();
-            owner.configure_sync(settings.clone());
-            store = owner.store_handle();
-        }
-        let (served_tip, fork_height) = {
-            let mut chain = net.chain.write().await;
-            let tip = chain.tip();
-            // Shallow33 verifies from24 and rolls back at checkpoint23.
-            // A deep regression may retain only the original funding21 below
-            // tip33, so keep its exact transaction at21 on a changed block21.
-            let fork_height = if let Some(source) = &source_bytes {
-                let evicted = chain.reorg_to(20);
-                assert!(
-                    evicted.as_slice() == std::slice::from_ref(source),
-                    "the replacement must contain only the exact original funding21 transaction"
-                );
-                chain.mine_block(evicted);
-                chain.mine_empty_blocks(12);
-                21
-            } else {
-                let fork_height = if same_height_fork { 23 } else { 33 };
-                chain.reorg_to(fork_height - 1);
-                chain.mine_empty_blocks(1);
-                if same_height_fork {
-                    chain.mine_empty_blocks(tip - fork_height);
-                }
-                fork_height
-            };
-            if !same_height_fork {
-                assert_eq!(chain.tip(), 33);
-                assert_eq!(
-                    tip - chain.tip() > pepper_sync::sync::MAX_REORG_ALLOWANCE,
-                    rollback > pepper_sync::sync::MAX_REORG_ALLOWANCE,
-                    "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}"
-                );
-            }
-            (chain.tip(), fork_height)
-        };
-        let (comparison_height, old_hash) = {
-            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-            if rollback < pepper_sync::sync::MAX_REORG_ALLOWANCE {
-                assert!(wallet.wallet_blocks.contains_key(&23.into()));
-                assert_eq!(
-                    wallet
-                        .shard_trees
-                        .ironwood
-                        .store()
-                        .get_checkpoint(&23.into())
-                        .unwrap()
-                        .is_none(),
-                    old_checkpoint_window
-                );
-            } else if same_height_fork {
-                assert!(!wallet.wallet_blocks.contains_key(&14.into()));
-            }
-            let (height, block) = wallet
-                .wallet_blocks
-                .range(..=zcash_protocol::consensus::BlockHeight::from_u32(served_tip))
-                .next_back()
-                .unwrap();
-            assert!(
-                u32::from(*height) >= fork_height,
-                "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: the actual retained comparison must be on the changed branch"
-            );
-            (*height, block.block_hash().0)
-        };
-        // This is the actual service behind this MockNet, not a fabricated
-        // branch hash. Its headerless fixture uses the SDK's raw-hash identity.
-        let served = MockIndexerService::new(net.chain.clone())
-            .get_block(tonic::Request::new(BlockId {
-                height: u64::from(comparison_height),
-                ..Default::default()
-            }))
+    assert!(!original_preparation.is_empty());
+    let addresses = owner.addresses().await.unwrap();
+    let original_inputs = {
+        let operation = job.operation_id.clone();
+        store
+            .call(move |s| s.prepared_inputs(&operation))
             .await
             .unwrap()
-            .into_inner();
-        assert_eq!(served.height, u64::from(comparison_height));
-        assert!(served.header.is_empty());
-        assert_eq!(served.hash.len(), 32);
-        assert!(
-            served.hash.as_slice() != old_hash.as_slice(),
-            "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: the actual selected comparison must prove divergence"
-        );
-        if old_checkpoint_window || same_height_fork {
-            // Only these proven recovery dispositions permit the following
-            // fresh cycle; the durable original remains owned throughout.
-            let error = owner
-                .sync_once(&CancellationToken::new())
-                .await
-                .unwrap_err();
-            let reason = if old_checkpoint_window {
-                "sync_scan_failed: reason=truncation_checkpoint_missing"
-            } else {
-                "sync_scan_failed: reason=chain_verification_failed"
-            };
-            assert_eq!(diagnostics::sync_detail(&error).as_deref(), Some(reason));
-            {
-                let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-                assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
-                assert!(wallet.wallet_blocks.is_empty());
-                assert!(wallet.wallet_transactions.is_empty());
-                assert!(
-                    wallet
-                        .sync_state
-                        .scan_ranges()
-                        .iter()
-                        .all(|range| !range.priority().is_scanned())
-                );
-            }
-            pending(&store, &job, prepared.bytes()).await;
-            let operation = job.operation_id.clone();
-            let expected_inputs = original_inputs.clone();
-            store
-                .call(move |s| {
-                    assert_eq!(s.prepared_inputs(&operation)?, expected_inputs);
-                    assert_eq!(s.operation(&operation)?.attempts, 0);
-                    Ok(())
-                })
-                .await
+    };
+    let source_bytes = if rollback > pepper_sync::sync::MAX_REORG_ALLOWANCE && !same_height_fork {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(original_inputs.len(), 1);
+        let source_id =
+            zcash_primitives::transaction::TxId::from_hex(&original_inputs[0].txid).unwrap();
+        let source = &wallet.wallet_transactions[&source_id];
+        assert_eq!(source.transaction().txid(), source_id);
+        assert_eq!(source.status().get_confirmed_height(), Some(21.into()));
+        let mut bytes = Vec::new();
+        source.transaction().write(&mut bytes).unwrap();
+        Some(bytes)
+    } else {
+        None
+    };
+    let settings = owner.sync_settings.clone().unwrap();
+    let treasury_id = owner.status().await.unwrap().treasury_id;
+    if old_checkpoint_window {
+        // A retained rollback boundary may be absent from an older saved
+        // tree even while newer checkpoints and the actual note data exist.
+        // Stay inside the current cache horizon so this exercises the exact
+        // missing-checkpoint fallback rather than the known-deep-tip reset.
+        {
+            let mut wallet = owner.client.as_ref().unwrap().wallet().write().await;
+            let tree = &mut wallet.shard_trees.ironwood;
+            let tip = tree.store().max_checkpoint_id().unwrap().unwrap();
+            let rollback_height = 23.into();
+            assert!(
+                tree.store()
+                    .get_checkpoint(&rollback_height)
+                    .unwrap()
+                    .is_some()
+            );
+            tree.store_mut()
+                .remove_checkpoint(&rollback_height)
                 .unwrap();
-            let retained: Vec<u8> = durable
-                .query_row(
-                    "SELECT preparation FROM outgoing WHERE id=?1",
-                    [&job.operation_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(retained, original_preparation);
-            drop(store);
-            owner.close().await.unwrap();
-            owner = Treasury::open_with_network(
-                dir.path().join("state"),
-                dir.path().join("key"),
-                treasury_id,
-                TreasuryNetwork::Synthetic,
-            )
+            assert!(
+                tree.store()
+                    .get_checkpoint(&rollback_height)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(tree.store().max_checkpoint_id().unwrap(), Some(tip));
+        }
+        let observation = store
+            .call(|s| Ok(s.treasury_sync_state()?.sync.unwrap()))
             .await
             .unwrap();
-            owner.configure_sync(settings);
-            store = owner.store_handle();
+        owner.checkpoint(observation).await.unwrap();
+        drop(store);
+        owner.close().await.unwrap();
+        owner = Treasury::open_with_network(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            treasury_id.clone(),
+            TreasuryNetwork::Synthetic,
+        )
+        .await
+        .unwrap();
+        owner.configure_sync(settings.clone());
+        store = owner.store_handle();
+    }
+    let (served_tip, fork_height) = {
+        let mut chain = net.chain.write().await;
+        let tip = chain.tip();
+        // Shallow33 verifies from24 and rolls back at checkpoint23.
+        // A deep regression may retain only the original funding21 below
+        // tip33, so keep its exact transaction at21 on a changed block21.
+        let fork_height = if let Some(source) = &source_bytes {
+            let evicted = chain.reorg_to(20);
+            assert!(
+                evicted.as_slice() == std::slice::from_ref(source),
+                "the replacement must contain only the exact original funding21 transaction"
+            );
+            chain.mine_block(evicted);
+            chain.mine_empty_blocks(12);
+            21
+        } else {
+            let fork_height = if same_height_fork { 23 } else { 33 };
+            chain.reorg_to(fork_height - 1);
+            chain.mine_empty_blocks(1);
+            if same_height_fork {
+                chain.mine_empty_blocks(tip - fork_height);
+            }
+            fork_height
+        };
+        if !same_height_fork {
+            assert_eq!(chain.tip(), 33);
+            assert_eq!(
+                tip - chain.tip() > pepper_sync::sync::MAX_REORG_ALLOWANCE,
+                rollback > pepper_sync::sync::MAX_REORG_ALLOWANCE,
+                "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}"
+            );
         }
-        owner
+        (chain.tip(), fork_height)
+    };
+    let (comparison_height, old_hash) = {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        if rollback < pepper_sync::sync::MAX_REORG_ALLOWANCE {
+            assert!(wallet.wallet_blocks.contains_key(&23.into()));
+            assert_eq!(
+                wallet
+                    .shard_trees
+                    .ironwood
+                    .store()
+                    .get_checkpoint(&23.into())
+                    .unwrap()
+                    .is_none(),
+                old_checkpoint_window
+            );
+        } else if same_height_fork {
+            assert!(!wallet.wallet_blocks.contains_key(&14.into()));
+        }
+        let (height, block) = wallet
+            .wallet_blocks
+            .range(..=zcash_protocol::consensus::BlockHeight::from_u32(served_tip))
+            .next_back()
+            .unwrap();
+        assert!(
+            u32::from(*height) >= fork_height,
+            "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: the actual retained comparison must be on the changed branch"
+        );
+        (*height, block.block_hash().0)
+    };
+    // This is the actual service behind this MockNet, not a fabricated
+    // branch hash. Its headerless fixture uses the SDK's raw-hash identity.
+    let served = MockIndexerService::new(net.chain.clone())
+        .get_block(tonic::Request::new(BlockId {
+            height: u64::from(comparison_height),
+            ..Default::default()
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(served.height, u64::from(comparison_height));
+    assert!(served.header.is_empty());
+    assert_eq!(served.hash.len(), 32);
+    assert!(
+        served.hash.as_slice() != old_hash.as_slice(),
+        "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: the actual selected comparison must prove divergence"
+    );
+    if old_checkpoint_window || same_height_fork {
+        // Only these proven recovery dispositions permit the following
+        // fresh cycle; the durable original remains owned throughout.
+        let error = owner
             .sync_once(&CancellationToken::new())
             .await
-            .unwrap_or_else(|error| {
-                panic!(
-                    "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: {error:#}"
-                )
-            });
-        assert_eq!(owner.addresses().await.unwrap(), addresses);
+            .unwrap_err();
+        let reason = if old_checkpoint_window {
+            "sync_scan_failed: reason=truncation_checkpoint_missing"
+        } else {
+            "sync_scan_failed: reason=chain_verification_failed"
+        };
+        assert_eq!(diagnostics::sync_detail(&error).as_deref(), Some(reason));
+        {
+            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+            assert_eq!(wallet.sync_state.wallet_birthday(), Some(1.into()));
+            assert!(wallet.wallet_blocks.is_empty());
+            assert!(wallet.wallet_transactions.is_empty());
+            assert!(
+                wallet
+                    .sync_state
+                    .scan_ranges()
+                    .iter()
+                    .all(|range| !range.priority().is_scanned())
+            );
+        }
+        pending(&store, &job, prepared.bytes()).await;
+        let operation = job.operation_id.clone();
+        let expected_inputs = original_inputs.clone();
+        store
+            .call(move |s| {
+                assert_eq!(s.prepared_inputs(&operation)?, expected_inputs);
+                assert_eq!(s.operation(&operation)?.attempts, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
         let retained: Vec<u8> = durable
             .query_row(
                 "SELECT preparation FROM outgoing WHERE id=?1",
@@ -1281,60 +1293,130 @@ async fn sdk_reorg_rescan_preserves_original_signed_work() {
             )
             .unwrap();
         assert_eq!(retained, original_preparation);
-        drop(durable);
-        let synced = owner.status().await.unwrap().sync.unwrap();
-        assert_eq!(synced.phase, SyncPhase::Ready);
-        let (funding_value, reservation) = {
-            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-            assert_eq!(
-                original_inputs.len(),
-                1,
-                "this fixture selects its one original funding note"
-            );
-            let input = &original_inputs[0];
-            assert!(matches!(input.pool, InputPool::Ironwood));
-            canonical_input::<IronwoodNote>(&wallet, input)
-        };
-        assert_eq!(
-            funding_value, 1_000_000,
-            "a Ready rescan must reconstruct the exact canonical owned value"
-        );
-        // The SDK advisory confirmed balance excludes notes reserved by a
-        // Calculated transaction. A shallow rollback can retain that original
-        // SDK reservation; a full clear reconstructs the note without it.
-        let expected_balance = if let Some(spender) = reservation {
-            assert_eq!(
-                spender.to_string(),
-                prepared.facts().unwrap().txid,
-                "only the exact accepted original may reserve this funding note"
-            );
-            0
-        } else {
-            funding_value
-        };
-        assert_eq!(synced.confirmed_shielded_zatoshis, expected_balance);
-        pending(&store, &job, prepared.bytes()).await;
-        let operation = job.operation_id.clone();
-        store
-            .call(move |s| {
-                assert_eq!(s.prepared_inputs(&operation)?, original_inputs);
-                assert_eq!(s.operation(&operation)?.attempts, 0);
-                assert_eq!(s.funding_jobs()?.len(), 1);
-                Ok(())
-            })
-            .await
-            .unwrap();
-        // A second scan must finish from the repaired snapshot rather than
-        // restoring the stale tip or abandoning the original input owner.
-        owner.sync_once(&CancellationToken::new()).await.unwrap();
-        pending(&store, &job, prepared.bytes()).await;
         drop(store);
         owner.close().await.unwrap();
+        owner = Treasury::open_with_network(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            treasury_id,
+            TreasuryNetwork::Synthetic,
+        )
+        .await
+        .unwrap();
+        owner.configure_sync(settings);
+        store = owner.store_handle();
     }
+    owner
+            .sync_once(&CancellationToken::new())
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "rollback={rollback} old_checkpoint_window={old_checkpoint_window} same_height_fork={same_height_fork}: {error:#}"
+                )
+            });
+    assert_eq!(owner.addresses().await.unwrap(), addresses);
+    let retained: Vec<u8> = durable
+        .query_row(
+            "SELECT preparation FROM outgoing WHERE id=?1",
+            [&job.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, original_preparation);
+    drop(durable);
+    let synced = owner.status().await.unwrap().sync.unwrap();
+    assert_eq!(synced.phase, SyncPhase::Ready);
+    let (funding_value, reservation) = {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        assert_eq!(
+            original_inputs.len(),
+            1,
+            "this fixture selects its one original funding note"
+        );
+        let input = &original_inputs[0];
+        assert!(matches!(input.pool, InputPool::Ironwood));
+        canonical_input::<IronwoodNote>(&wallet, input)
+    };
+    assert_eq!(
+        funding_value, 1_000_000,
+        "a Ready rescan must reconstruct the exact canonical owned value"
+    );
+    // The SDK advisory confirmed balance excludes notes reserved by a
+    // Calculated transaction. A shallow rollback can retain that original
+    // SDK reservation; a full clear reconstructs the note without it.
+    let expected_balance = if let Some(spender) = reservation {
+        assert_eq!(
+            spender.to_string(),
+            prepared.facts().unwrap().txid,
+            "only the exact accepted original may reserve this funding note"
+        );
+        0
+    } else {
+        funding_value
+    };
+    assert_eq!(synced.confirmed_shielded_zatoshis, expected_balance);
+    pending(&store, &job, prepared.bytes()).await;
+    let operation = job.operation_id.clone();
+    store
+        .call(move |s| {
+            assert_eq!(s.prepared_inputs(&operation)?, original_inputs);
+            assert_eq!(s.operation(&operation)?.attempts, 0);
+            assert_eq!(s.funding_jobs()?.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // A second scan must finish from the repaired snapshot rather than
+    // restoring the stale tip or abandoning the original input owner.
+    owner.sync_once(&CancellationToken::new()).await.unwrap();
+    pending(&store, &job, prepared.bytes()).await;
+    drop(store);
+    owner.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_replay() {
+async fn sdk_reorg_rescan_preserves_original_signed_work_shallow_rollback() {
+    assert_sdk_reorg_rescan_preserves_original_signed_work(
+        pepper_sync::sync::MAX_REORG_ALLOWANCE - 1,
+        false,
+        false,
+    )
+    .await;
+}
+
+// Tip 43 is replaced by tip 33 while checkpoint 23 is removed explicitly.
+// Missing-checkpoint recovery needs no rolling-window-sized chain.
+#[tokio::test]
+async fn sdk_reorg_rescan_preserves_original_signed_work_pruned_checkpoint_window() {
+    assert_sdk_reorg_rescan_preserves_original_signed_work(20, true, false).await;
+}
+
+#[tokio::test]
+async fn sdk_reorg_rescan_preserves_original_signed_work_deep_rollback() {
+    assert_sdk_reorg_rescan_preserves_original_signed_work(
+        pepper_sync::sync::MAX_REORG_ALLOWANCE + 11,
+        false,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sdk_reorg_rescan_preserves_original_signed_work_same_height_deep_fork() {
+    assert_sdk_reorg_rescan_preserves_original_signed_work(
+        pepper_sync::sync::MAX_REORG_ALLOWANCE + 1,
+        false,
+        true,
+    )
+    .await;
+}
+
+async fn assert_sdk_confirmation_finishes_original_source(
+    presence: TransactionPresence,
+    journaled_submission: bool,
+    alternate_authorization: bool,
+    malformed_sequencing: bool,
+) {
     struct StaleLookup {
         presence: TransactionPresence,
         lookups: usize,
@@ -1353,173 +1435,195 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
             })
         }
     }
-    for (presence, journaled_submission, alternate_authorization, malformed_sequencing) in [
-        (TransactionPresence::Unknown, false, false, false),
-        (
-            TransactionPresence::Confirmed { height: 23 },
-            true,
-            false,
-            false,
-        ),
-        // Alternate authorizing bytes and damaged bookkeeping share the same
-        // canonical-confirmation path; neither needs another funded SDK world.
-        (TransactionPresence::Unknown, false, true, true),
-    ] {
-        let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
-        let pool = owner
-            .ensure_capacity_group(
-                "confirmation".into(),
-                crate::rotation::test_capacity::small_reserve("5"),
-                None,
-                0,
-            )
-            .await
-            .unwrap();
+    let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "confirmation".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let stop = CancellationToken::new();
+    let mut actual = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    if journaled_submission {
         owner
-            .allocate_capacity_kind(pool, AllocationKind::Small, true)
+            .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
             .await
             .unwrap();
-        let store = owner.store_handle();
-        let job = store
-            .call(|s| Ok(s.funding_jobs()?.remove(0)))
-            .await
+        net.chain.write().await.mine_mempool();
+    } else {
+        // This matching fixture does not validate consensus signatures.
+        // ZIP 244 permits authorizing-data variants with the same effects.
+        let mut canonical = prepared.bytes().to_vec();
+        if alternate_authorization {
+            let scalar_start = canonical.len() - 32;
+            canonical[scalar_start] ^= 1;
+            assert_ne!(canonical.as_slice(), prepared.bytes());
+            assert_eq!(
+                submission::decode(&canonical).unwrap().txid(),
+                submission::decode(prepared.bytes()).unwrap().txid()
+            );
+        }
+        // The local submission-attempt label can still be zero.
+        net.chain.write().await.mine_block(vec![canonical]);
+    }
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let damaged_facts = damage_projections(&db, &job.operation_id, None);
+    if malformed_sequencing {
+        db.execute_batch("PRAGMA ignore_check_constraints=ON")
             .unwrap();
-        let deadline = now().unwrap() + 7200;
-        save_quotes(&store, vec![job.clone()], deadline).await;
-        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
-        let stop = CancellationToken::new();
-        let mut actual = submission::GrpcSubmission::with_network(
-            endpoint.clone(),
-            endpoint,
-            TreasuryNetwork::Synthetic,
+        db.execute(
+            "UPDATE treasury_operations SET attempts='invalid',submission=x'00' WHERE id=?1",
+            [&job.operation_id],
         )
         .unwrap();
-        if journaled_submission {
-            owner
-                .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
-                .await
-                .unwrap();
-            net.chain.write().await.mine_mempool();
-        } else {
-            // This matching fixture does not validate consensus signatures.
-            // ZIP 244 permits authorizing-data variants with the same effects.
-            let mut canonical = prepared.bytes().to_vec();
-            if alternate_authorization {
-                let scalar_start = canonical.len() - 32;
-                canonical[scalar_start] ^= 1;
-                assert_ne!(canonical.as_slice(), prepared.bytes());
+        db.execute("UPDATE funding_progress SET attempts='bad',next_poll='bad',last_error=x'00',phase='invalid' WHERE job_id=?1",[&job.id]).unwrap();
+        db.execute("INSERT INTO funding_health(job_id,started_at,error_streak,timed_out) VALUES(?1,'bad','bad','bad') ON CONFLICT(job_id) DO UPDATE SET started_at='bad',error_streak='bad',timed_out='bad'",[&job.id]).unwrap();
+        db.execute_batch("PRAGMA ignore_check_constraints=OFF")
+            .unwrap();
+    }
+    let mut sender = StaleLookup {
+        presence,
+        lookups: 0,
+    };
+    assert_eq!(
+        owner
+            .recover_funding_job(job.id.clone(), false, &mut sender, &stop)
+            .await
+            .unwrap(),
+        recovery::RecoveryOutcome::Waiting("swap_outcome_pending")
+    );
+    assert_eq!(
+        sender.lookups, 0,
+        "established SDK confirmation needs no indexer corroboration"
+    );
+    if alternate_authorization {
+        let txid = submission::decode(prepared.bytes()).unwrap().txid();
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        let record = wallet.wallet_transactions.get(&txid).unwrap();
+        let mut current = Vec::new();
+        record.transaction().write(&mut current).unwrap();
+        assert_ne!(
+            current.as_slice(),
+            prepared.bytes(),
+            "the SDK record must exercise distinct authorizing bytes"
+        );
+        assert_eq!(record.transaction().txid(), txid);
+    }
+    let original_operation = job.operation_id.clone();
+    let operation = job.operation_id;
+    store
+        .call(move |s| {
+            assert_eq!(s.observation_operation(&operation)?.submission, "CONFIRMED");
+            if malformed_sequencing {
+                assert!(s.operation(&operation).is_err());
+            } else {
                 assert_eq!(
-                    submission::decode(&canonical).unwrap().txid(),
-                    submission::decode(prepared.bytes()).unwrap().txid()
+                    s.operation(&operation)?.attempts,
+                    i64::from(journaled_submission)
                 );
             }
-            // The local submission-attempt label can still be zero.
-            net.chain.write().await.mine_block(vec![canonical]);
-        }
-        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-        let damaged_facts = damage_projections(&db, &job.operation_id, None);
-        if malformed_sequencing {
-            db.execute_batch("PRAGMA ignore_check_constraints=ON")
-                .unwrap();
-            db.execute(
-                "UPDATE treasury_operations SET attempts='invalid',submission=x'00' WHERE id=?1",
-                [&job.operation_id],
-            )
-            .unwrap();
-            db.execute("UPDATE funding_progress SET attempts='bad',next_poll='bad',last_error=x'00',phase='invalid' WHERE job_id=?1",[&job.id]).unwrap();
-            db.execute("INSERT INTO funding_health(job_id,started_at,error_streak,timed_out) VALUES(?1,'bad','bad','bad') ON CONFLICT(job_id) DO UPDATE SET started_at='bad',error_streak='bad',timed_out='bad'",[&job.id]).unwrap();
-            db.execute_batch("PRAGMA ignore_check_constraints=OFF")
-                .unwrap();
-        }
-        let mut sender = StaleLookup {
-            presence,
-            lookups: 0,
-        };
-        assert_eq!(
-            owner
-                .recover_funding_job(job.id.clone(), false, &mut sender, &stop)
-                .await
-                .unwrap(),
-            recovery::RecoveryOutcome::Waiting("swap_outcome_pending")
-        );
-        assert_eq!(
-            sender.lookups, 0,
-            "established SDK confirmation needs no indexer corroboration"
-        );
-        if alternate_authorization {
-            let txid = submission::decode(prepared.bytes()).unwrap().txid();
-            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
-            let record = wallet.wallet_transactions.get(&txid).unwrap();
-            let mut current = Vec::new();
-            record.transaction().write(&mut current).unwrap();
-            assert_ne!(
-                current.as_slice(),
-                prepared.bytes(),
-                "the SDK record must exercise distinct authorizing bytes"
-            );
-            assert_eq!(record.transaction().txid(), txid);
-        }
-        let original_operation = job.operation_id.clone();
-        let operation = job.operation_id;
-        store
-            .call(move |s| {
-                assert_eq!(s.observation_operation(&operation)?.submission, "CONFIRMED");
-                if malformed_sequencing {
-                    assert!(s.operation(&operation).is_err());
-                } else {
-                    assert_eq!(
-                        s.operation(&operation)?.attempts,
-                        i64::from(journaled_submission)
-                    );
-                }
-                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
-                assert!(!s.funding_facts(&job.id, &operation)?.archived);
-                Ok(())
-            })
-            .await
-            .unwrap();
-        if malformed_sequencing {
-            let diagnostic: rusqlite::types::Value = db
-                .query_row(
-                    "SELECT attempts FROM funding_progress WHERE operation_id=?1",
-                    [&original_operation],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert_eq!(
-                diagnostic,
-                rusqlite::types::Value::Text("bad".into()),
-                "canonical recovery does not rewrite diagnostic counters"
-            );
-        }
-        let count: rusqlite::types::Value = db
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
+            assert!(!s.funding_facts(&job.id, &operation)?.archived);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    if malformed_sequencing {
+        let diagnostic: rusqlite::types::Value = db
             .query_row(
-                "SELECT attempts FROM treasury_operations WHERE id=?1",
+                "SELECT attempts FROM funding_progress WHERE operation_id=?1",
                 [&original_operation],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(
-            count,
-            if malformed_sequencing {
-                rusqlite::types::Value::Text("invalid".into())
-            } else {
-                rusqlite::types::Value::Integer(i64::from(journaled_submission))
-            },
-            "canonical confirmation never repairs or resets disclosure counts"
+            diagnostic,
+            rusqlite::types::Value::Text("bad".into()),
+            "canonical recovery does not rewrite diagnostic counters"
         );
-        assert_eq!(
-            db.query_row(
-                "SELECT facts FROM treasury_operations WHERE id=?1",
-                [&original_operation],
-                |r| r.get::<_, String>(0)
-            )
-            .unwrap(),
-            damaged_facts
-        );
-        drop(store);
-        owner.close().await.unwrap();
     }
+    let count: rusqlite::types::Value = db
+        .query_row(
+            "SELECT attempts FROM treasury_operations WHERE id=?1",
+            [&original_operation],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        count,
+        if malformed_sequencing {
+            rusqlite::types::Value::Text("invalid".into())
+        } else {
+            rusqlite::types::Value::Integer(i64::from(journaled_submission))
+        },
+        "canonical confirmation never repairs or resets disclosure counts"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT facts FROM treasury_operations WHERE id=?1",
+            [&original_operation],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        damaged_facts
+    );
+    drop(store);
+    owner.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn sdk_confirmation_finishes_original_source_unsubmitted_unknown_lookup() {
+    assert_sdk_confirmation_finishes_original_source(
+        TransactionPresence::Unknown,
+        false,
+        false,
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sdk_confirmation_finishes_original_source_journaled_submission_confirmed_lookup() {
+    assert_sdk_confirmation_finishes_original_source(
+        TransactionPresence::Confirmed { height: 23 },
+        true,
+        false,
+        false,
+    )
+    .await;
+}
+
+// Alternate authorizing bytes and damaged bookkeeping share the same
+// canonical-confirmation path; neither needs another funded SDK world.
+#[tokio::test]
+async fn sdk_confirmation_finishes_original_source_alternate_authorization_malformed_sequencing() {
+    assert_sdk_confirmation_finishes_original_source(
+        TransactionPresence::Unknown,
+        false,
+        true,
+        true,
+    )
+    .await;
 }
 
 #[tokio::test]

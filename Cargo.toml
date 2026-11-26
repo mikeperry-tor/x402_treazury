@@ -23,12 +23,11 @@ exclude = [
 [profile.dev]
 debug = "line-tables-only"
 
-# Opt-in lifecycle experiment; ordinary tests keep their existing profile.
-[profile.test-optimized]
-inherits = "test"
+# Optimize third-party and vendored dependencies in dev and test builds so
+# Halo2 proving, note decryption, and key derivation run at full speed while
+# workspace crates stay fast to compile with accurate line coverage.
+[profile.dev.package."*"]
 opt-level = 2
-debug-assertions = true
-overflow-checks = true
 
 [profile.release]
 overflow-checks = true
