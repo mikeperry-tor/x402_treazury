@@ -8,9 +8,6 @@ use crate::{
 use anyhow::Result;
 use std::sync::Arc;
 
-pub(crate) const POSSIBLE_PAYMENT_ADVISORY: &str =
-    "This call may have charged; do not automatically repeat this logical call.";
-
 // Relay payment uses PaidClient again with recursive fallback disabled. Erase
 // only this indirect future's type, retaining the existing call owner and Send.
 pub(crate) fn fallback<'a>(
@@ -97,11 +94,7 @@ pub(crate) fn fallback<'a>(
                 mime_type,
                 paid_submission: false,
                 relay_payment_may_have_occurred: response.payment_may_have_occurred,
-                advisories: if response.payment_may_have_occurred {
-                    vec![POSSIBLE_PAYMENT_ADVISORY.into()]
-                } else {
-                    Vec::new()
-                },
+                advisories: Vec::new(),
             },
             Some(facts),
         ))

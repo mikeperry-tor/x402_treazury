@@ -69,12 +69,7 @@ pub(super) fn aggregate(results: Vec<(RemoteDirectory, Result<ToolOutput>)>) -> 
     for (directory, result) in results {
         let result = result.and_then(|child| {
             output.payment_may_have_occurred |= child.payment_may_have_occurred;
-            output
-                .advisories
-                .extend(child.advisories.into_iter().filter(|advisory| {
-                    !child.payment_may_have_occurred
-                        || advisory != crate::discovery_relay::api::POSSIBLE_PAYMENT_ADVISORY
-                }));
+            output.advisories.extend(child.advisories);
             crate::payment::with_payment_context(
                 child.payment_may_have_occurred,
                 (|| {
@@ -118,11 +113,5 @@ pub(super) fn aggregate(results: Vec<(RemoteDirectory, Result<ToolOutput>)>) -> 
     }
     // Serializing a Value to String is infallible; no later conversion can drop child evidence.
     output.text = Value::Object(values).to_string();
-    if output.payment_may_have_occurred {
-        output.advisories.push(
-            "This search may have authorized multiple charges; do not automatically repeat it."
-                .into(),
-        );
-    }
     output
 }

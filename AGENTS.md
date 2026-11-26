@@ -363,8 +363,9 @@ dependency.
   edit. Explicitly requested full checks and named stages keep their fixed
   selections.
 - **Test assertions and fixtures:** Keep tests independent of wording in logs,
-  maintained documentation, and comments in code or configuration. Use stable
-  diagnostic fields and dedicated test inputs. See
+  maintained documentation, comments in code or configuration, and
+  agent-facing advisory or error prose. Use stable diagnostic fields, status
+  codes, redaction checks, and dedicated test inputs. See
   [test boundaries](docs/testing.md#test-boundaries).
 - **Efficiency, ordering, and continuation:** Follow
   [testing efficiency](docs/testing.md#testing-efficiency) (reuse valid

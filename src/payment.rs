@@ -24,6 +24,8 @@ mod lifetime;
 pub(crate) mod signer;
 pub(crate) use lifetime::{BoundedClient, MAX_AUTHORITY_SECONDS};
 mod presentation;
+#[cfg(test)]
+pub(crate) use presentation::RETRY_GUIDANCE;
 pub(crate) use presentation::{
     ApiExecution, ResponseFacts, present as present_api_error, summary as api_error_summary,
 };

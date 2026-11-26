@@ -656,14 +656,6 @@ async fn paid_document_fixture() {
                 .unwrap_or(false),
             paid
         );
-        if paid {
-            assert!(
-                value["documentation"]["warning"]
-                    .as_str()
-                    .unwrap()
-                    .contains("may have charged")
-            );
-        }
         assert_eq!(
             origin_calls
                 .lock()

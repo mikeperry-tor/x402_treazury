@@ -99,9 +99,10 @@ async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains(
                 "opaque static SDK offers have no observation"
             );
             let status = StatusCode::from_u16(code).unwrap();
-            assert_eq!(
-                result["result"]["content"][0]["text"],
-                format!("Provider API HTTP {status}: {kind}. Do not retry automatically.")
+            let text = result["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.starts_with(&format!("Provider API HTTP {status}: {kind}.")),
+                "{text}"
             );
         }
         task.abort();

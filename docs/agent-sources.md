@@ -193,10 +193,10 @@ Responses return a map keyed by directory name (`coinbase`, `coinbase_curated`,
 JSON object. A direct or relayed HTTP `206` or successful response with
 `Content-Range` returns `local_error` with any possible charge preserved.
 Other directories can still return results.
-Relay advisories and possible-payment notices sit outside individual
-directory objects. Paid directories and configured `source_discovery` relay
-fallbacks can authorize multiple payments per search. The tool returns each
-directory's response directly and leaves any follow-up search to the caller.
+Relay and attribution advisories sit outside individual directory objects.
+Failed directory entries report `local_error` with `payment_may_have_occurred`.
+The tool returns each directory's response directly and leaves any follow-up
+search to the caller.
 
 ### Registration matching and naming
 
@@ -391,11 +391,12 @@ descriptions concise, direct, and actionable:
   depend on the registration name.
 - **Do not discourage tool use:** Paid tools exist to be used from a pre-funded
   treasury. Do not add defensive disclaimers, generic domain truisms,
-  operator-cap warnings, or pricing-uncertainty handwringing (such as
-  "unknown does not mean free" or "not guaranteed quotes") that make agents
-  hesitate to call paid tools or loop on failing free workarounds. State
-  concrete behavioral constraints (such as non-retry warnings on failed paid
-  calls) plainly without deterring normal use.
+  operator-cap warnings, ominous status jargon, or pricing-uncertainty
+  handwringing (such as "unknown does not mean free", "not guaranteed quotes",
+  or blunt "do not retry" warnings on successful calls) in endpoint
+  instructions, tool descriptions, advisories, or error messages. State
+  concrete behavioral constraints (such as avoiding identical repeats of a
+  failed call) plainly and constructively without deterring normal use.
 - **Field-specific edits:** Keep behavioral rules in `description` and
   supplemental billing terms in `pricing_description`. A parameter note edits
   its named schema description. The published tariff and each input's

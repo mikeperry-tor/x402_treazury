@@ -33,7 +33,9 @@ pub fn listener_definitions(
         }), &["provider_id"])));
     }
     if policy.remote_search() {
-        let mut description = "Find APIs across configured directories. Returns each directory's results or error. Searches may charge.".to_owned();
+        let mut description =
+            "Find APIs across configured directories. Returns each directory's results or error."
+                .to_owned();
         if policy
             .directories
             .contains(&super::policy::RemoteDirectory::AgentsTrust)
@@ -56,14 +58,14 @@ pub fn listener_definitions(
             "spec_url":{"type":"string","format":"uri","description":"Published public HTTPS OpenAPI 3 JSON URL; an API base or usage document is insufficient."},
             "name":registration_name()
         }), &["spec_url"])));
-        definitions.push((super::source_details::NAME, "Locate provider specifications and help from a public HTTPS base_url, or read complete plain/Markdown text from documentation_url. HTML/non-text is rejected. Add a known specification with providers_add_remote. Lookups may charge; do not automatically repeat failed paid lookups.".into(), super::source_details::schema(policy.has_x402_list())));
+        definitions.push((super::source_details::NAME, "Locate provider specifications and help from a public HTTPS base_url, or read complete plain/Markdown text from documentation_url. HTML/non-text is rejected. Add a known specification with providers_add_remote. Avoid repeating a failed lookup identically.".into(), super::source_details::schema(policy.has_x402_list())));
     }
     if policy.raw {
-        definitions.push((super::raw::NAME, "Call an exact documented public HTTPS endpoint without registration. Supply its documented method, URL and arguments. May spend Base USDC; a failed call may have paid or completed a side effect. Do not automatically repeat it. Returns text or supported images.".into(), super::raw::schema()));
+        definitions.push((super::raw::NAME, "Call an exact documented public HTTPS endpoint without registration. Supply its documented method, URL, and arguments. Avoid repeating a failed call identically. Returns text or supported images.".into(), super::raw::schema()));
     }
     if policy.management() || discover_on_demand {
         definitions.push(("x402_treazury_tools_search", "Find callable API tools and complete input schemas on this MCP endpoint. This catalog search makes no provider requests. Omit query to enumerate and follow next_cursor for more. Invoke a returned tool_id with tool_call on this same endpoint.".into(), search_schema()));
-        definitions.push(("x402_treazury_tool_call", "Invoke a tool_id using its discovered input schema on this same MCP endpoint. Calls may charge; do not automatically repeat a failed paid call.".into(), object(json!({
+        definitions.push(("x402_treazury_tool_call", "Invoke a tool_id using its discovered input schema on this same MCP endpoint. Avoid repeating a failed call identically.".into(), object(json!({
             "tool_id":{"type":"string","description":"Exact tool_id returned by tools_search on this endpoint; reusable while available."},
             "arguments":{"type":"object","additionalProperties":true,"description":"Arguments matching the tool input_schema; use {} when no arguments are needed."}
         }), &["tool_id","arguments"])));

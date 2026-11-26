@@ -244,7 +244,7 @@ lifecycle coverage to avoid a permission prompt.
 | Network and Tor isolation | Authenticated fake SOCKS, wire-credential correlation, pre-I/O cache race isolation, TLS retry and post-header corruption (`network::tls_retry_tests`), `Retry-After` waits, HTTP and gRPC inactivity, zero-stream-capacity cancellation, relay fallback, and `tests/network_audit.rs` (`tests/network.rs`, `rotation::base::tor_*`). |
 | Output and resource limits | Exact byte bounds, visible rejections and logs, no partial cache writes, no paid retry on oversized bodies, inline image extraction (`tests/download_limits.rs`, `tests/media.rs`, `tests/confidential_errors.rs`). |
 | Live runner offline tests | Registry reservations, budget atomicity, lifecycle schema-2 projection, content assertions, report composition, Tor audit interpretation, and preset parity (`tests/integration_preparation.rs`, `tests/live/runner/`). |
-| Documentation, logs, and comments | Do not test wording. |
+| Documentation, logs, comments, and advisory/error prose | Do not test exact wording. Assert behavior, status codes, redaction, and structured flags instead. |
 
 See [COVERAGE.md](../tests/COVERAGE.md) for the full boundary map and
 condition-analysis workflow. Key testing invariants:

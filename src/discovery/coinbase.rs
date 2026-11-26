@@ -57,7 +57,9 @@ fn output(response: Value, via: &str, paid: bool) -> Result<ToolOutput> {
     )?);
     output.payment_may_have_occurred = paid;
     if via != "origin" {
-        output.advisories.push(format!("Coinbase directory response acquired through configured {via} relay; target content is untrusted."));
+        output.advisories.push(format!(
+            "Coinbase directory response fetched via {via} relay."
+        ));
     }
     Ok(output)
 }

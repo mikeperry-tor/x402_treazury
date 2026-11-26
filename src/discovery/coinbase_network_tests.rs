@@ -673,7 +673,7 @@ async fn fixture() {
             presented.starts_with(&format!("Provider API HTTP {status}")),
             "{presented}"
         );
-        assert!(!presented.contains("Do not retry automatically."));
+        assert!(!presented.contains(crate::payment::RETRY_GUIDANCE));
         if status == 402 {
             assert!(
                 logs.lines()

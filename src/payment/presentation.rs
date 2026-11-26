@@ -81,6 +81,9 @@ impl std::fmt::Display for ResponseFacts {
 }
 impl std::error::Error for ResponseFacts {}
 
+pub(crate) const RETRY_GUIDANCE: &str =
+    "Avoid repeating this exact call; try adjusted arguments or another tool.";
+
 /// Only API failures use this path; local argument/management errors keep their corrections.
 pub(crate) fn present(error: &anyhow::Error) -> Option<String> {
     let mut text = summary(error)?;
@@ -89,7 +92,8 @@ pub(crate) fn present(error: &anyhow::Error) -> Option<String> {
             .downcast_ref::<ApiExecution>()
             .is_some_and(|execution| execution.non_read)
     {
-        text.push_str(" Do not retry automatically.");
+        text.push(' ');
+        text.push_str(RETRY_GUIDANCE);
     }
     Some(text)
 }
@@ -177,14 +181,14 @@ fn kind(error: &anyhow::Error, facts: Option<ResponseFacts>) -> &'static str {
     if let Some(admission) = error.downcast_ref::<crate::rotation::error::AdmissionError>() {
         use crate::rotation::error::AdmissionError::*;
         return match admission {
-            UnsupportedPayment(_) => "payment requirements unsupported",
-            PriceLimit(_) => "payment exceeds the authorized amount",
-            WalletNotReady(_) | PayerChanged => "payment wallet unavailable",
-            FundingUnavailable(_) => "wallet funding unavailable",
-            PaymentPending(_) => "payment pending",
-            FundingRestricted | FundingPermitDenied => "funding not authorized",
-            OutcomeUnknown(_) => "payment outcome unknown",
-            ChainRecoveryRequired(_) => "wallet reconciliation required",
+            UnsupportedPayment(_) => "unsupported payment format",
+            PriceLimit(_) => "price exceeds the per-call limit",
+            WalletNotReady(_) | PayerChanged => "payment wallet temporarily busy",
+            FundingUnavailable(_) => "wallet funding temporarily unavailable",
+            PaymentPending(_) => "payment still pending",
+            FundingRestricted | FundingPermitDenied => "wallet funding is paused",
+            OutcomeUnknown(_) => "payment status uncertain",
+            ChainRecoveryRequired(_) => "wallet syncing",
         };
     }
     if let Some(relay) = crate::discovery_relay::RelayFailure::retained(error)
@@ -221,10 +225,9 @@ mod tests {
         let error = ApiExecution { non_read: false }
             .attach(anyhow::anyhow!("PRIVATE").context(PossiblePayment));
         assert!(error.to_string().contains("do not automatically repeat"));
-        assert_eq!(
-            present(&error).unwrap(),
-            "Response unavailable. Do not retry automatically."
-        );
+        let presented = present(&error).unwrap();
+        assert!(!presented.contains("PRIVATE"));
+        assert!(presented.contains(RETRY_GUIDANCE));
     }
 
     #[tokio::test]
@@ -276,19 +279,19 @@ mod tests {
     #[test]
     fn only_structured_insufficiency_changes_the_payment_rejection_kind() {
         let error = rejected(StatusCode::PAYMENT_REQUIRED);
-        assert_eq!(
-            present(&error).unwrap(),
-            "Provider API HTTP 402 Payment Required: payment rejected. Do not retry automatically."
-        );
+        let presented = present(&error).unwrap();
+        assert!(presented.starts_with("Provider API HTTP 402 Payment Required: payment rejected."));
+        assert!(presented.contains(RETRY_GUIDANCE));
         let facts = ResponseFacts {
             insufficient_funds: true,
             ..ResponseFacts::provider(StatusCode::PAYMENT_REQUIRED)
         };
         let error = error.context(facts);
-        assert_eq!(
-            present(&error).unwrap(),
-            "Provider API HTTP 402 Payment Required: insufficient funds. Do not retry automatically."
+        let presented = present(&error).unwrap();
+        assert!(
+            presented.starts_with("Provider API HTTP 402 Payment Required: insufficient funds.")
         );
+        assert!(presented.contains(RETRY_GUIDANCE));
         assert!(error.is::<HttpFailure>());
         assert!(error.is::<PossiblePayment>());
         assert!(format!("{error:#}").contains("PRIVATE contract"));
@@ -303,20 +306,18 @@ mod tests {
             (503, "provider unavailable"),
         ] {
             let status = StatusCode::from_u16(status).unwrap();
-            assert_eq!(
-                present(&rejected(status)).unwrap(),
-                format!("Provider API HTTP {status}: {kind}. Do not retry automatically.")
-            );
+            let presented = present(&rejected(status)).unwrap();
+            assert!(presented.starts_with(&format!("Provider API HTTP {status}: {kind}.")));
+            assert!(presented.contains(RETRY_GUIDANCE));
         }
         let error = anyhow::Error::new(HttpFailure {
             status: StatusCode::BAD_REQUEST,
             detail: "PRIVATE".into(),
             provider_failure: Some(ProviderFailure::InvalidRequestBody),
         });
-        assert_eq!(
-            present(&error).unwrap(),
-            "Provider API HTTP 400 Bad Request: invalid arguments; check the tool arguments."
-        );
+        let presented = present(&error).unwrap();
+        assert!(presented.starts_with("Provider API HTTP 400 Bad Request:"));
+        assert!(!presented.contains("PRIVATE"));
         assert!(
             present(&anyhow::anyhow!(
                 "missing required path parameter company_id"
@@ -334,25 +335,25 @@ mod tests {
         let shared =
             crate::discovery_relay::document::SharedFailure::capture(&error, "help_failed");
         assert_eq!(shared.status(), Some(201));
-        assert_eq!(
-            present(&shared.error()).unwrap(),
-            "Provider API HTTP 201 Created: response unavailable. Do not retry automatically."
-        );
+        let presented = present(&shared.error()).unwrap();
+        assert!(presented.starts_with("Provider API HTTP 201 Created:"));
+        assert!(!presented.contains("PRIVATE"));
+        assert!(presented.contains(RETRY_GUIDANCE));
         let unknown =
             anyhow::anyhow!("PRIVATE transport trace").context(ApiExecution { non_read: true });
-        assert_eq!(
-            present(&unknown).unwrap(),
-            "Response unavailable. Do not retry automatically."
-        );
+        let presented = present(&unknown).unwrap();
+        assert!(!presented.contains("PRIVATE"));
+        assert!(presented.contains(RETRY_GUIDANCE));
         let known = unknown.context(ResponseFacts {
             provider: Some(StatusCode::CREATED),
             destination: Some(StatusCode::NOT_FOUND),
             ..ResponseFacts::provider(StatusCode::CREATED)
         });
-        assert_eq!(
-            present(&known).unwrap(),
-            "Provider API HTTP 201 Created; destination HTTP 404 Not Found. Do not retry automatically."
+        let presented = present(&known).unwrap();
+        assert!(
+            presented.starts_with("Provider API HTTP 201 Created; destination HTTP 404 Not Found.")
         );
+        assert!(presented.contains(RETRY_GUIDANCE));
     }
 
     #[test]
@@ -363,7 +364,7 @@ mod tests {
         let text = present(&error).unwrap();
         assert!(text.contains("max_response_bytes=123"));
         assert!(text.contains("no partial content returned"));
-        assert_eq!(text.matches("Do not retry automatically.").count(), 1);
+        assert_eq!(text.matches(RETRY_GUIDANCE).count(), 1);
     }
 
     #[test]
@@ -372,19 +373,18 @@ mod tests {
         let error = anyhow::Error::new(AdmissionError::PriceLimit("PRIVATE configuration"))
             .context(ResponseFacts::provider(StatusCode::PAYMENT_REQUIRED))
             .context(ApiExecution { non_read: false });
-        assert_eq!(
-            present(&error).unwrap(),
-            "Provider API HTTP 402 Payment Required: payment exceeds the authorized amount."
-        );
+        let presented = present(&error).unwrap();
+        assert!(presented.starts_with("Provider API HTTP 402 Payment Required:"));
+        assert!(!presented.contains("PRIVATE"));
+        assert!(!presented.contains(RETRY_GUIDANCE));
         let transport = anyhow::Error::new(AdmissionError::OutcomeUnknown(
             "signed request transport failed",
         ))
         .context(PossiblePayment)
         .context(ApiExecution { non_read: false });
-        assert_eq!(
-            present(&transport).unwrap(),
-            "Payment outcome unknown. Do not retry automatically."
-        );
+        let presented = present(&transport).unwrap();
+        assert!(!presented.contains("402"));
+        assert!(presented.contains(RETRY_GUIDANCE));
         assert!(transport.is::<AdmissionError>());
         let conversion = anyhow::anyhow!("PRIVATE invalid image")
             .context(ResponseFacts {
@@ -393,9 +393,9 @@ mod tests {
                 ..Default::default()
             })
             .context(PossiblePayment);
-        assert_eq!(
-            present(&conversion).unwrap(),
-            "Provider API HTTP 201 Created; destination HTTP 200 OK: response unavailable. Do not retry automatically."
-        );
+        let presented = present(&conversion).unwrap();
+        assert!(presented.starts_with("Provider API HTTP 201 Created; destination HTTP 200 OK:"));
+        assert!(!presented.contains("PRIVATE"));
+        assert!(presented.contains(RETRY_GUIDANCE));
     }
 }

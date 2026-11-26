@@ -479,10 +479,7 @@ async fn paid_fixture() {
     let output = ordinary.invoke_output(&Default::default()).await.unwrap();
     assert_eq!(output.text, "complete relay help\n");
     assert!(output.payment_may_have_occurred);
-    assert_eq!(
-        output.advisories,
-        ["This call may have charged; do not automatically repeat this logical call."]
-    );
+    assert!(output.advisories.is_empty());
     assert_eq!(
         sequence(&fixture, "metadata-off"),
         ["origin", "origin", "challenge", "signed"]

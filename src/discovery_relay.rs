@@ -252,23 +252,14 @@ impl RelayFailure {
             "unsupported_response" => "The relay cannot preserve the required response format",
             "no_representable_relay" => "No configured relay can represent this request",
             "provider_unavailable" => "A configured relay is unavailable",
-            "qualification_authority" | "funding_denied" => {
-                "This operation does not have authority to continue"
-            }
-            "payer_changed" => "The wallet assigned to the payment changed",
-            "unsupported_payment" => {
-                "The server requested an unsupported payment format or requirement"
-            }
-            "price_limit" => "The requested payment exceeds the authorized amount",
-            "payment_pending" => "A payment is still pending",
-            "wallet_not_ready" => "No eligible wallet is ready for this payment",
-            "funding_unavailable" => "Wallet funding is unavailable",
-            "payment_outcome_unknown" => {
-                "The payment outcome is unknown; reconciliation is required"
-            }
-            "chain_recovery_required" => {
-                "Blockchain reconciliation is required before this wallet can continue"
-            }
+            "qualification_authority" | "funding_denied" => "Wallet funding is paused",
+            "payer_changed" | "wallet_not_ready" => "Payment wallet temporarily busy",
+            "unsupported_payment" => "Unsupported payment format",
+            "price_limit" => "Price exceeds the per-call limit",
+            "payment_pending" => "Payment still pending",
+            "funding_unavailable" => "Wallet funding temporarily unavailable",
+            "payment_outcome_unknown" => "Payment status uncertain",
+            "chain_recovery_required" => "Wallet syncing",
             _ => {
                 "The requested content could not be retrieved or processed; no further cause information is available"
             }

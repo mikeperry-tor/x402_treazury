@@ -193,7 +193,6 @@ fn direct_routed_requests_cannot_override_reserved_headers_or_inject_values() {
         let error = presentation::ApiExecution { non_read: true }.attach(error);
         let shown = presentation::present(&error).unwrap();
         assert!(shown.contains("API header is reserved"), "{shown}");
-        assert!(shown.contains("Do not retry automatically"));
         assert!(!shown.contains("fixture"));
     }
     let mut request = route("https://api.example.com");

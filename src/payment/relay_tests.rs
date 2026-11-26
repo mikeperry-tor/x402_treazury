@@ -478,14 +478,7 @@ async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
         assert_eq!(output.relay_payment_may_have_occurred, relay_requests > 0);
         assert_eq!(progress.possible(), relay_requests > 0);
         assert_eq!(output.bytes, body.as_bytes());
-        assert_eq!(
-            output.advisories.as_slice(),
-            if relay_requests > 0 {
-                vec![crate::discovery_relay::api::POSSIBLE_PAYMENT_ADVISORY.to_owned()]
-            } else {
-                Vec::new()
-            }
-        );
+        assert!(output.advisories.is_empty());
         let content = output
             .render(None, &Default::default())
             .unwrap()
@@ -791,10 +784,6 @@ async fn fixture(mode: &str) {
             let output = client.execute_response(route(method, &kind)).await.unwrap();
             assert!(!output.paid_submission, "relay fee is not a target payment");
             assert!(output.relay_payment_may_have_occurred);
-            assert!(
-                !output.advisories.is_empty(),
-                "possible relay fee remains visible"
-            );
             assert_eq!(
                 output.bytes,
                 if method == "HEAD" {
@@ -974,7 +963,7 @@ async fn fixture(mode: &str) {
             .await
             .unwrap();
         assert!(!output.paid_submission && output.relay_payment_may_have_occurred);
-        assert!(progress.possible() && !output.advisories.is_empty());
+        assert!(progress.possible());
         assert_eq!(output.bytes, b"relay result");
         let events = fixture.events(&format!("{method}-other-origin"));
         assert_eq!(events.len(), attempts + 2);
@@ -991,11 +980,7 @@ async fn fixture(mode: &str) {
         let timed = client.clone().with_timeout(Duration::from_millis(150));
         for kind in ["body-stall", "body-reset", "header-stall"] {
             let output = timed.execute_response(route(method, kind)).await.unwrap();
-            assert!(
-                !output.paid_submission
-                    && output.relay_payment_may_have_occurred
-                    && !output.advisories.is_empty()
-            );
+            assert!(!output.paid_submission && output.relay_payment_may_have_occurred);
             let events = fixture.events(&format!("{method}-{kind}"));
             assert_eq!(
                 events.len(),
@@ -1169,11 +1154,7 @@ async fn fixture(mode: &str) {
             binary.mime_type.as_deref(),
             Some("application/octet-stream")
         );
-        assert!(
-            !binary.paid_submission
-                && binary.relay_payment_may_have_occurred
-                && !binary.advisories.is_empty()
-        );
+        assert!(!binary.paid_submission && binary.relay_payment_may_have_occurred);
     }
     for kind in [
         "binary-truncated",
@@ -1183,7 +1164,6 @@ async fn fixture(mode: &str) {
     ] {
         let output = client.execute_response(route("GET", kind)).await.unwrap();
         assert!(!output.paid_submission && output.relay_payment_may_have_occurred);
-        assert!(!output.advisories.is_empty());
         if kind.starts_with("image-") {
             assert_eq!(output.bytes, STANDARD.decode(PNG).unwrap());
             assert_eq!(output.mime_type.as_deref(), Some("image/png"));

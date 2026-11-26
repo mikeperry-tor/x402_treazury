@@ -25,24 +25,21 @@ fn relay_http_status_keeps_specific_categories_through_shared_failure_caching() 
 #[test]
 fn relay_admission_reasons_survive_presentation_and_shared_failure_caching() {
     use crate::{discovery_relay::RelayFailure, rotation::error::AdmissionError};
-    for (admission, status, possible, expected) in [
+    for (admission, status, possible) in [
         (
             AdmissionError::PriceLimit("PRIVATE payment cap"),
             Some(StatusCode::PAYMENT_REQUIRED),
             false,
-            "Provider API HTTP 402 Payment Required: The requested payment exceeds the authorized amount.",
         ),
         (
             AdmissionError::WalletNotReady("PRIVATE wallet identity"),
             None,
             false,
-            "No eligible wallet is ready for this payment.",
         ),
         (
             AdmissionError::OutcomeUnknown("PRIVATE transport context"),
             None,
             true,
-            "The payment outcome is unknown; reconciliation is required. Do not retry automatically.",
         ),
     ] {
         let original = anyhow::Error::new(admission).context("PRIVATE upstream prose");
@@ -50,7 +47,13 @@ fn relay_admission_reasons_survive_presentation_and_shared_failure_caching() {
         let mut failure = TargetFailure::new(safe.kind(), safe.status(), false);
         failure.response = status.map(crate::payment::ResponseFacts::provider);
         let error = failure.error(possible);
-        assert_eq!(crate::payment::present_api_error(&error).unwrap(), expected);
+        let expected = crate::payment::present_api_error(&error).unwrap();
+        assert!(!expected.contains("PRIVATE"));
+        assert_ne!(expected, "Response unavailable.");
+        assert_eq!(expected.contains(crate::payment::RETRY_GUIDANCE), possible);
+        if let Some(status) = status {
+            assert!(expected.starts_with(&format!("Provider API HTTP {status}:")));
+        }
         let shared = SharedFailure::capture(&error, "cached help unavailable");
         assert_eq!(shared.status(), status.map(|status| status.as_u16()));
         assert_eq!(shared.possible_payment(), possible);

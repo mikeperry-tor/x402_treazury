@@ -115,10 +115,9 @@ async fn reported_destination_errors_keep_actual_provider_status_and_no_replay()
         .await
         .err()
         .expect("destination rejection");
-    assert_eq!(
-        crate::payment::present_api_error(&error).unwrap(),
-        "Provider API HTTP 200 OK; destination HTTP 404 Not Found. Do not retry automatically."
-    );
+    let presented = crate::payment::present_api_error(&error).unwrap();
+    assert!(presented.starts_with("Provider API HTTP 200 OK; destination HTTP 404 Not Found."));
+    assert!(!presented.contains("PRIVATE"));
     assert!(error.is::<crate::payment::PossiblePayment>());
     let binding = crate::catalog_refresh::Binding::new(|_| {});
     binding.observe(None, Some(&error));
