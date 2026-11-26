@@ -3,7 +3,9 @@
 **Completeness check:** This file ends with the exact line `END OF AGENTS.md`.
 If that line is missing from your instructions (or your harness reports
 truncation), read the remainder of `AGENTS.md` before starting work. Keep
-`END OF AGENTS.md` as the final line when editing this file.
+`END OF AGENTS.md` as the final line when editing this file. You must follow
+the FULL set of AGENTS.md rules, from this instruction through the final
+`END OF AGENTS.md` marker.
 
 `x402_treazury` is a Rust executable and library that exposes x402-paid HTTP
 APIs as MCP tools, owns payment credentials, and handles payment challenges,
