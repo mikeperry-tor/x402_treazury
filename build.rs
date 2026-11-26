@@ -86,6 +86,7 @@ fn output(command: &str, args: &[&str], root: &Path) -> String {
 
 fn git(args: &[&str], root: &Path) -> Option<String> {
     let out = Command::new("git")
+        .arg("--no-optional-locks")
         .args(args)
         .current_dir(root)
         .output()

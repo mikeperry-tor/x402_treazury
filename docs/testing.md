@@ -278,10 +278,12 @@ on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
   via `scripts/ci-stage.sh`; `treasury` runs `check-proving`, `check-lifecycle`,
   and `check-codec` via `scripts/ci-stage.sh`; and `coverage` collects default
   Linux line coverage via `make coverage` and reports with `octocov`. All three
-  jobs set `TEST_THREADS=$(nproc)` to match runner vCPUs and cache compiled
-  dependencies under `target/` (pruning workspace artifacts before saving).
-  `publish-badge` runs after `check`, `treasury`, and `coverage` succeed on
-  `push` to `main`.
+  jobs set `TEST_THREADS=$(nproc)` to match runner vCPUs, normalize `vendor/`
+  file timestamps after checkout so Cargo reuses cached vendored crates, and
+  cache compiled dependencies under `target/` alongside `~/.zcash-params`
+  (avoiding repeated `zingolib` build-script reruns while pruning workspace
+  artifacts before saving). `publish-badge` runs after `check`, `treasury`, and
+  `coverage` succeed on `push` to `main`.
 - **Coverage badge:** `publish-badge` writes `coverage.svg` and
   `source-revision.txt` to the root of the orphan `badges` branch (serializing
   writes via concurrency group `main-coverage-badge` and skipping superseded

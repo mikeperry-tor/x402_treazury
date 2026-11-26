@@ -31,6 +31,8 @@ jobs:
         run: sh scripts/ci-toolchain.sh
       - name: Match test concurrency to runner vCPUs
         run: echo "TEST_THREADS=$(nproc)" >> "$GITHUB_ENV"
+      - name: Normalize vendored source timestamps for Cargo cache reuse
+        run: find vendor -type f -exec touch -t 202001010000 {} +
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -40,11 +42,12 @@ jobs:
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
+            ~/.zcash-params
             target/CACHEDIR.TAG
             target/debug/build
             target/debug/deps
             target/debug/.fingerprint
-          key: check-deps-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'tools/complexity/Cargo.toml', 'vendor/**') }}
+          key: check-deps-v2-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'tools/complexity/Cargo.toml', 'vendor/**') }}
       - name: Static checks
         run: scripts/ci-stage.sh check-static
       - name: Compiler and Clippy checks
@@ -74,6 +77,8 @@ jobs:
         run: sh scripts/ci-toolchain.sh
       - name: Match test concurrency to runner vCPUs
         run: echo "TEST_THREADS=$(nproc)" >> "$GITHUB_ENV"
+      - name: Normalize vendored source timestamps for Cargo cache reuse
+        run: find vendor -type f -exec touch -t 202001010000 {} +
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -83,13 +88,14 @@ jobs:
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
+            ~/.zcash-params
             target/CACHEDIR.TAG
             target/debug/build
             target/debug/deps
             target/debug/.fingerprint
-          key: treasury-deps-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'vendor/**') }}
+          key: treasury-deps-v2-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'vendor/**') }}
           restore-keys: |
-            check-deps-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'tools/complexity/Cargo.toml', 'vendor/**') }}
+            check-deps-v2-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'tools/complexity/Cargo.toml', 'vendor/**') }}
       - name: Proving tests
         run: scripts/ci-stage.sh check-proving
       - name: Treasury lifecycle tests
@@ -121,6 +127,8 @@ jobs:
         run: sh scripts/ci-toolchain.sh --component llvm-tools-preview
       - name: Match test concurrency to runner vCPUs
         run: echo "TEST_THREADS=$(nproc)" >> "$GITHUB_ENV"
+      - name: Normalize vendored source timestamps for Cargo cache reuse
+        run: find vendor -type f -exec touch -t 202001010000 {} +
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
@@ -130,11 +138,12 @@ jobs:
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
+            ~/.zcash-params
             target/llvm-cov-default/CACHEDIR.TAG
             target/llvm-cov-default/debug/build
             target/llvm-cov-default/debug/deps
             target/llvm-cov-default/debug/.fingerprint
-          key: coverage-deps-0.9.1-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'vendor/**') }}
+          key: coverage-deps-v2-0.9.1-${{ runner.os }}-${{ hashFiles('scripts/rust-toolchain-pin.toml', 'Cargo.toml', 'Cargo.lock', 'vendor/**') }}
       - name: Install the pinned coverage collector
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
