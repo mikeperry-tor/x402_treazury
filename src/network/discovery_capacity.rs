@@ -14,6 +14,7 @@ pub struct DiscoveryCapacity {
 struct Scope {
     owner: Weak<DiscoveryCapacity>,
     key: IsolationId,
+    identity: IsolationId,
     permit: OnceCell<OwnedSemaphorePermit>,
 }
 
@@ -44,6 +45,7 @@ impl DiscoveryCapacity {
                 let scope = Arc::new(Scope {
                     owner: Arc::downgrade(self),
                     key: transport.scope.clone(),
+                    identity: transport.identity.clone(),
                     permit: OnceCell::new(),
                 });
                 scopes.insert(transport.scope.clone(), Arc::downgrade(&scope));
@@ -64,6 +66,22 @@ impl DiscoveryCapacity {
             })
             .await?;
         Ok(Some(DiscoveryPermit { _scope: scope }))
+    }
+
+    pub(crate) fn is_identity_active(&self, identity: &IsolationId) -> bool {
+        // Release the map lock before dropping upgraded Arc<Scope> handles;
+        // dropping the last Arc triggers Scope::drop, which locks self.scopes.
+        let scopes: Vec<Arc<Scope>> = {
+            self.scopes
+                .lock()
+                .expect("discovery capacity poisoned")
+                .values()
+                .filter_map(Weak::upgrade)
+                .collect()
+        };
+        scopes
+            .iter()
+            .any(|scope| &scope.identity == identity && scope.permit.initialized())
     }
 
     #[cfg(test)]
@@ -149,6 +167,9 @@ mod tests {
         let mut third_wait = Box::pin(gate.acquire(&third));
         assert!(poll(second_wait.as_mut()).is_pending());
         assert!(poll(third_wait.as_mut()).is_pending());
+        assert!(gate.is_identity_active(&first.identity));
+        assert!(!gate.is_identity_active(&second.identity));
+        assert!(!gate.is_identity_active(&third.identity));
         let alias_guard = match poll(Box::pin(gate.acquire(&alias)).as_mut()) {
             Poll::Ready(Ok(Some(guard))) => guard,
             _ => panic!("active scope must join immediately despite queued scopes"),
@@ -181,7 +202,10 @@ mod tests {
         let mut retry_wait = Box::pin(gate.acquire(&retry));
         assert!(poll(retry_wait.as_mut()).is_pending());
         drop(initial_guard);
-        drop(retry_wait.await.unwrap());
+        let retry_guard = retry_wait.await.unwrap();
+        assert!(gate.is_identity_active(&initial.identity));
+        drop(retry_guard);
+        assert!(!gate.is_identity_active(&initial.identity));
         assert_eq!(gate.available_permits(), 1);
         assert!(gate.scopes.lock().unwrap().is_empty());
     }
@@ -266,6 +290,7 @@ mod tests {
         let replacement = Arc::new(Scope {
             owner: Arc::downgrade(&gate),
             key: transport.scope.clone(),
+            identity: transport.identity.clone(),
             permit: OnceCell::new(),
         });
         gate.scopes

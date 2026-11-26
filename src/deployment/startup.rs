@@ -766,6 +766,11 @@ pub(super) async fn warm(
         configured.push((id, cfg));
     }
     let mut loads = Vec::with_capacity(configured.len());
+    let mut remaining: BTreeMap<String, catalog::Config> = configured
+        .iter()
+        .map(|(id, cfg)| (id.clone(), cfg.clone()))
+        .collect();
+    let uses_tor = !direct && config.network.mode == crate::network::Mode::Tor;
     tracing::info!(target: "x402_treazury::startup", category = "catalog_warm_start", total,
         "Warming selected catalogs");
     for (id, cfg) in configured {
@@ -779,7 +784,33 @@ pub(super) async fn warm(
     let mut pending = stream::iter(loads).buffer_unordered(total.max(1));
     let mut results = Vec::new();
     let mut local_error = None;
-    while let Some((id, remote, result)) = pending.next().await {
+    let heartbeat = tokio::time::sleep(CATALOG_PROGRESS_INTERVAL);
+    tokio::pin!(heartbeat);
+    loop {
+        let item = tokio::select! {
+            biased;
+            item = pending.next() => item,
+            _ = &mut heartbeat, if !remaining.is_empty() => {
+                report_warming_progress(
+                    results.len(),
+                    total,
+                    &remaining,
+                    downloads.gate.as_deref(),
+                    uses_tor,
+                );
+                heartbeat
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + CATALOG_PROGRESS_INTERVAL);
+                continue;
+            }
+        };
+        let Some((id, remote, result)) = item else {
+            break;
+        };
+        remaining.remove(&id);
+        heartbeat
+            .as_mut()
+            .reset(tokio::time::Instant::now() + CATALOG_PROGRESS_INTERVAL);
         let result = match result {
             Ok(result) => result,
             Err(error) if remote && warm_remote_failure(&error) => {
@@ -810,6 +841,85 @@ pub(super) async fn warm(
     }
     results.sort_by(|a, b| a.source.cmp(&b.source));
     Ok(results)
+}
+
+pub(super) const CATALOG_PROGRESS_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(30);
+const MAX_LOGGED_CATALOG_ITEMS: usize = 8;
+
+pub(super) fn source_downloading(
+    config: &catalog::Config,
+    gate: Option<&crate::network::DiscoveryCapacity>,
+    uses_tor: bool,
+) -> bool {
+    if !uses_tor {
+        return true;
+    }
+    let Some(gate) = gate else {
+        return true;
+    };
+    if crate::network::IsolationId::discovery(&config.spec)
+        .ok()
+        .is_some_and(|identity| gate.is_identity_active(&identity))
+    {
+        return true;
+    }
+    config
+        .pricing
+        .as_ref()
+        .filter(|pricing| pricing.source != "catalog")
+        .and_then(|pricing| crate::network::IsolationId::discovery(&pricing.source).ok())
+        .is_some_and(|identity| gate.is_identity_active(&identity))
+}
+
+pub(super) fn format_bounded_list<'a>(items: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let mut iter = items.into_iter();
+    let mut shown = Vec::with_capacity(MAX_LOGGED_CATALOG_ITEMS);
+    let mut overflow = 0usize;
+    for item in &mut iter {
+        if shown.len() < MAX_LOGGED_CATALOG_ITEMS {
+            shown.push(item);
+        } else {
+            overflow += 1;
+        }
+    }
+    if shown.is_empty() {
+        return None;
+    }
+    if overflow > 0 {
+        Some(format!("{},+{overflow}", shown.join(",")))
+    } else {
+        Some(shown.join(","))
+    }
+}
+
+fn report_warming_progress(
+    completed: usize,
+    total: usize,
+    remaining: &BTreeMap<String, catalog::Config>,
+    gate: Option<&crate::network::DiscoveryCapacity>,
+    uses_tor: bool,
+) {
+    let mut downloading = Vec::new();
+    let mut pending = Vec::new();
+    for (id, cfg) in remaining {
+        if source_downloading(cfg, gate, uses_tor) {
+            downloading.push(id.as_str());
+        } else {
+            pending.push(id.as_str());
+        }
+    }
+    let downloading = format_bounded_list(downloading);
+    let pending = format_bounded_list(pending);
+    tracing::info!(
+        target: "x402_treazury::startup",
+        category = "catalog_warm_progress",
+        completed,
+        total,
+        downloading = downloading.as_deref(),
+        pending = pending.as_deref(),
+        "Still warming catalogs ({completed}/{total} complete)"
+    );
 }
 
 fn warm_remote_failure(mut error: &anyhow::Error) -> bool {
@@ -1662,5 +1772,68 @@ mod external_pricing_refresh_tests {
         drop(store);
         worker.await.unwrap();
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn catalog_progress_helpers_split_active_and_pending_and_bound_lists() {
+        assert_eq!(format_bounded_list(std::iter::empty()), None);
+        assert_eq!(
+            format_bounded_list(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]),
+            Some("a,b,c,d,e,f,g,h,+2".to_owned())
+        );
+        let tor = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some("127.0.0.1:9150".parse().unwrap()),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        let gate = std::sync::Arc::new(crate::network::DiscoveryCapacity::new(1));
+        let active_url = "https://active.example.com/spec.json";
+        let queued_url = "https://queued.example.com/spec.json";
+        let active_transport = tor
+            .http_participating(
+                &crate::network::IsolationId::discovery(active_url).unwrap(),
+                active_url,
+                None,
+                true,
+                crate::network::HttpPolicy::default(),
+            )
+            .unwrap();
+        let _guard = gate.acquire(&active_transport).await.unwrap();
+        let active_cfg = catalog::Config {
+            spec: active_url.to_owned(),
+            ..Default::default()
+        };
+        let queued_cfg = catalog::Config {
+            spec: queued_url.to_owned(),
+            ..Default::default()
+        };
+        assert!(source_downloading(&active_cfg, Some(&gate), true));
+        assert!(!source_downloading(&queued_cfg, Some(&gate), true));
+        assert!(source_downloading(&queued_cfg, Some(&gate), false));
+
+        let mut remaining = BTreeMap::new();
+        remaining.insert("active".to_owned(), active_cfg);
+        remaining.insert("queued".to_owned(), queued_cfg);
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            report_warming_progress(2, 4, &remaining, Some(&gate), true);
+        });
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert!(
+            text.contains("category=\"catalog_warm_progress\""),
+            "{text}"
+        );
+        assert!(text.contains("completed=2"), "{text}");
+        assert!(text.contains("total=4"), "{text}");
+        assert!(text.contains("downloading=\"active\""), "{text}");
+        assert!(text.contains("pending=\"queued\""), "{text}");
     }
 }

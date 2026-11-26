@@ -408,6 +408,43 @@ impl Runtime {
             );
         }
     }
+    fn report_waiting_catalogs(&self, gate: &crate::network::DiscoveryCapacity) {
+        if self.readiness.is_empty() {
+            return;
+        }
+        let mut waiting_sources = BTreeSet::new();
+        for endpoint in self.readiness.keys() {
+            for source in &self.deployment.listeners[endpoint].sources {
+                if self.deployment.pending_sources.contains_key(source) {
+                    waiting_sources.insert(source.as_str());
+                }
+            }
+        }
+        if waiting_sources.is_empty() {
+            return;
+        }
+        let mut downloading = Vec::new();
+        let mut pending = Vec::new();
+        let uses_tor = crate::network::global().policy.mode == crate::network::Mode::Tor;
+        for source in waiting_sources {
+            let entry = &self.deployment.pending_sources[source];
+            if startup::source_downloading(&entry.config, Some(gate), uses_tor) {
+                downloading.push(source);
+            } else {
+                pending.push(source);
+            }
+        }
+        let endpoints = startup::format_bounded_list(self.readiness.keys().map(String::as_str));
+        let downloading = startup::format_bounded_list(downloading);
+        let pending = startup::format_bounded_list(pending);
+        tracing::info!(
+            category = "catalog_startup_waiting",
+            endpoints = endpoints.as_deref(),
+            downloading = downloading.as_deref(),
+            pending = pending.as_deref(),
+            "Still waiting for catalogs before starting endpoints"
+        );
+    }
     pub async fn run(mut self, stop: CancellationToken) -> Self {
         struct FailureGuard(Arc<crate::catalog_state::CatalogState>, bool);
         impl Drop for FailureGuard {
@@ -455,11 +492,20 @@ impl Runtime {
                 .boxed(),
             );
         }
+        let heartbeat = tokio::time::sleep(startup::CATALOG_PROGRESS_INTERVAL);
+        tokio::pin!(heartbeat);
         loop {
             let event = tokio::select! {
                 biased;
                 _ = stop.cancelled() => break,
                 event = work.next(), if !work.is_empty() => event,
+                _ = &mut heartbeat, if !self.readiness.is_empty() => {
+                    self.report_waiting_catalogs(&gate);
+                    heartbeat
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + startup::CATALOG_PROGRESS_INTERVAL);
+                    continue;
+                }
                 Some((id, binding)) = self.refresh_receive.recv() => {
                     if !self.refreshes.get(&id).is_some_and(|current| Arc::ptr_eq(current, &binding)) { continue; }
                     let Some(source) = self.deployment.sources.get(&id) else { binding.retire(); continue; };
@@ -500,6 +546,9 @@ impl Runtime {
                     work.push(status_change(id, receiver));
                 }
                 Event::Catalog(id, result) => {
+                    heartbeat
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + startup::CATALOG_PROGRESS_INTERVAL);
                     self.deployment.pending_sources.remove(&id);
                     let result = result.and_then(|source| {
                         self.accept_source(&id, *source)

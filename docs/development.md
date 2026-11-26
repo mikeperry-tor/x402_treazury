@@ -282,7 +282,11 @@ Core severity rules:
 - **Catalogs, caches, and filters:** File reads, origin fetches, cache hits and
   writes, shared loads, and shadowed `send_tools` rules log at `DEBUG`.
   Per-source readiness, startup loading summaries, warming progress, unmatched
-  exclusion selectors, and unused recommendations log at `INFO`. Catalog
+  exclusion selectors, and unused recommendations log at `INFO`. When `serve`
+  waits on `wait_for_catalogs` or `catalog warm` goes 30 seconds without a
+  catalog completing, an `INFO` heartbeat (`catalog_startup_waiting` or
+  `catalog_warm_progress`) reports bounded `downloading` and `pending` source
+  lists (plus waiting `endpoints` for `serve`). Catalog
   failures report source ID, `failure_stage`, fixed plain-language `reason`,
   and numeric `http_status` without URLs or schemas. See
   [catalog startup](configuration.md#catalog-failures-and-strict-inspection)

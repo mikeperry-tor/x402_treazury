@@ -356,6 +356,7 @@ see [local resource limits](local-resource-limits.md).
 | MCP SSE keepalives | 2s | Keeps stateless HTTP client connections open; never renews remote timeouts or payment authority. |
 | `rmcp` response teardown drain | 2s cancel and 5s close | Bounds response delivery only; accepted work drains in `Work` with no cutoff. |
 | Pepper sync checkpoints and drain logs | 30s checkpoints and 10s drain `INFO` | Persistence and progress reporting only; never an abort deadline. |
+| Catalog startup and warming progress | 30s inactivity `INFO` | Logs waiting endpoints, active downloads, and pending catalogs while `serve` waits on `wait_for_catalogs` or `catalog warm` is running; never an abort deadline. |
 | Sync mempool drain window | Bounded initial settle | Bounds initial mempool stream settling before shutting down that stream; not a sync deadline. |
 | Treasury ZEC scan cadence | 60s after success; 90s, 180s, and 300s error backoff | Runs only when enabled funding, pending source or refund work, or active direct receive needs it; idle treasury does not poll. |
 | Local SDK publication and reconstruction retry | 60s | Retries unacknowledged local publication or SDK reconstruction without triggering network scans. |
