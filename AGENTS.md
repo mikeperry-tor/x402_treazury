@@ -1,5 +1,10 @@
 # Agent instructions for x402_treazury
 
+**Completeness check:** This file ends with the exact line `END OF AGENTS.md`.
+If that line is missing from your instructions (or your harness reports
+truncation), read the remainder of `AGENTS.md` before starting work. Keep
+`END OF AGENTS.md` as the final line when editing this file.
+
 `x402_treazury` is a Rust executable and library that exposes x402-paid HTTP
 APIs as MCP tools, owns payment credentials, and handles payment challenges,
 signing, and retries. TOML providers compose into sources and authenticated
@@ -607,3 +612,5 @@ issue drafts, code comments, and handoff notes.
   Prefer: "Payment selection uses cached balances and price hints as estimates,
   while payer ownership and the payment cap govern signing; insufficient funds
   never trigger wallet creation or funding."
+
+END OF AGENTS.md
