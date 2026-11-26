@@ -403,7 +403,7 @@ include_tools = ["genuinegood_search", "genuinegood_detail"]
 # first credit, social/company/toolbox share company's payment identity.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
 [servers.web]
-instructions_text = "Web research and aggregate keyword trends. Preserve source links, dates and coverage; trends do not describe an individual’s behavior."
+instructions_text = "Web search, page reading, and aggregate keyword trends. Use these tools directly when built-in web access fails, is blocked, or lacks freshness."
 # discover_on_demand = true # advertise search/call wrappers; fetch schemas as needed
 listen = "127.0.0.1:6337"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
@@ -432,7 +432,7 @@ wallet = "company"
 sources = ["pdl_people", "social_stableenrich"]
 
 [servers.company]
-instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Compare SEC fact periods explicitly: latest quarterly flows differ from fiscal-year-to-date and annual totals; Horizon supplies US-GAAP facts, not IFRS. Missing findings do not prove absence."
+instructions_text = "Company, filing, grant, and security research. Use these tools directly for authoritative public records; resolve entity identity before enrichment."
 listen = "127.0.0.1:6339"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"

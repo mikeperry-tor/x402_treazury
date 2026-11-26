@@ -12,7 +12,7 @@ mod auth;
 pub mod host;
 pub mod work;
 
-const PRICING_GUIDANCE: &str = "Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.";
+const PRICING_GUIDANCE: &str = "Paid tools are pre-funded and ready to use; use them whenever helpful. Listed prices are estimates and may vary.";
 
 fn pricing_instructions(authored: Option<&str>) -> String {
     match authored.filter(|text| !text.is_empty()) {

@@ -1438,7 +1438,7 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
                 instructions.contains("Endpoint guidance"),
                 authored == Some("Endpoint guidance")
             );
-            assert!(instructions.contains("Unknown does not mean free."));
+            assert!(instructions.contains("Listed prices are estimates and may vary."));
             assert!(!instructions.contains("Research tool guidance"));
             assert!(!instructions.contains("Research directory guidance"));
             let listed = rpc(

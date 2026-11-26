@@ -345,8 +345,8 @@ notices are never hidden by custom text:
 
 1. **Operator or source guidance:** `[servers.NAME].instructions_text` replaces
    composed source guidance (an empty string suppresses it).
-2. **Generated pricing caveat:** Appended once ("Prices are estimates or
-   sampled payment offers, not guaranteed quotes...").
+2. **Generated pricing caveat:** Appended once ("Paid tools are pre-funded and
+   ready to use; use them whenever helpful...").
 3. **Operational coverage notices:** Appended last and never suppressed by
    `instructions_text`, covering pending or unavailable sources, omitted
    unsupported operations, and ambiguous duplicate tool names.
@@ -379,8 +379,8 @@ first results for competing matches.
 
 ## Tool documentation
 
-Keep agent-facing tool descriptions and parameter descriptions concise, direct,
-and actionable:
+Keep agent-facing endpoint instructions, tool descriptions, and parameter
+descriptions concise, direct, and actionable:
 
 - **Include:** What the tool does, required and meaningful optional inputs,
   what the response contains, and constraints that affect the caller's next
@@ -389,6 +389,13 @@ and actionable:
 - **Omit:** Internal Rust module names, TOML configuration keys, maintainer
   rationale, provider probe history, repetitive boilerplate, and tool IDs that
   depend on the registration name.
+- **Do not discourage tool use:** Paid tools exist to be used from a pre-funded
+  treasury. Do not add defensive disclaimers, generic domain truisms,
+  operator-cap warnings, or pricing-uncertainty handwringing (such as
+  "unknown does not mean free" or "not guaranteed quotes") that make agents
+  hesitate to call paid tools or loop on failing free workarounds. State
+  concrete behavioral constraints (such as non-retry warnings on failed paid
+  calls) plainly without deterring normal use.
 - **Field-specific edits:** Keep behavioral rules in `description` and
   supplemental billing terms in `pricing_description`. A parameter note edits
   its named schema description. The published tariff and each input's

@@ -163,11 +163,13 @@ Follow the [provider policy](providers/README.md#provider-policy),
 - Store provider-specific regression fixtures only for a named quirk, failure,
   or custom transformation; use small faithful inputs and shared synthetic
   tests instead of universal inventory or settings snapshots.
-- Keep agent-facing tool descriptions and parameter descriptions concise,
-  consistent, and focused on choosing and calling the API successfully. State
-  purpose, inputs, useful results, and constraints that affect the caller's next
-  action; omit implementation details and boilerplate, and keep maintainer
-  rationale in owning guides. Follow the
+- Keep agent-facing endpoint instructions, tool descriptions, and parameter
+  descriptions concise, consistent, and focused on choosing and calling the API
+  successfully. State purpose, inputs, useful results, and constraints that
+  affect the caller's next action; omit implementation details, boilerplate,
+  and defensive disclaimers or pricing-uncertainty warnings that discourage
+  agents from using paid tools. Keep maintainer rationale in owning guides.
+  Follow the
   [tool documentation policy](docs/agent-sources.md#tool-documentation).
 - Review endpoint summaries and discovery search keywords whenever capabilities
   or routing change, including new tools; follow

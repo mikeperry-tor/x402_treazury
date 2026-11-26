@@ -23,7 +23,7 @@ max_api_payment_usdc = "0.50" # Per authorization, independently of reserve size
 # or 0 to disable disk caching. Explicit catalog warm always re-downloads.
 catalog_cache_ttl_seconds = "indefinite"
 extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.
-instructions_text = "Use exa_search for URL discovery and exa_contents for known URLs. Choose lite for indexed search when its restricted inputs fit the task. Auto is the general-search default. Use deeper modes when the task needs them. Content options can add charges. Choose freshness, coverage, and quality before price."
+instructions_text = "Use exa_search for web/news discovery and exa_contents for known URLs, especially when built-in web tools fail, are blocked, or lack freshness. Prioritize coverage and answer quality over price."
 
 [servers.research]
 listen = "127.0.0.1:8000"

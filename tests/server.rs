@@ -413,11 +413,11 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
     assert!(instructions.starts_with("Read help first\n\n"));
     assert_eq!(
         instructions
-            .matches("Prices are estimates or sampled payment offers")
+            .matches("Paid tools are pre-funded and ready to use")
             .count(),
         1
     );
-    assert!(instructions.ends_with("Unknown does not mean free."));
+    assert!(instructions.ends_with("Listed prices are estimates and may vary."));
     assert_ne!(
         initialized["result"]["capabilities"]["tools"]["listChanged"],
         true
