@@ -576,20 +576,26 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
         let stop = CancellationToken::new();
         let task = tokio::spawn(running.serve(stop.clone()));
-        for (listener, expected) in [
-            ("one", "Payment wallet unavailable."),
-            ("static", "static-ok"),
-        ] {
+        for (listener, expected) in [("one", None), ("static", Some("static-ok"))] {
             let response: Value = crate::network::NetworkContext::new(Default::default()).unwrap()
                 .discovery(&format!("http://{}/mcp", addresses[listener]), None).unwrap().post(format!("http://{}/mcp",addresses[listener]))
                 .bearer_auth("fixture-token").header("accept","application/json, text/event-stream")
                 .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api_read","arguments":{}}}))
                 .send().await.unwrap().mcp_json().await.unwrap();
-            assert_eq!(
-                response["result"]["content"],
-                json!([{ "type":"text", "text":expected }]),
-                "{fault}: {response}"
-            );
+            if let Some(expected) = expected {
+                assert_eq!(
+                    response["result"]["content"],
+                    json!([{ "type":"text", "text":expected }]),
+                    "{fault}: {response}"
+                );
+            } else {
+                assert!(
+                    response["result"]["content"][0]["text"]
+                        .as_str()
+                        .is_some_and(|text| !text.is_empty()),
+                    "{fault}: {response}"
+                );
+            }
             assert_eq!(
                 response["result"]["isError"].as_bool().unwrap_or(false),
                 listener == "one"

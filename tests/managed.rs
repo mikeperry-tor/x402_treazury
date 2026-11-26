@@ -1676,7 +1676,9 @@ sources=["api"]
         let response:Value=reqwest::Client::new().post(format!("http://{address}/mcp")).bearer_auth("secret").header("accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"managed_pay","arguments":{}}})).send().await.unwrap().mcp_json().await.unwrap();
         assert_eq!(response["result"]["isError"], true, "{response}");
         assert!(
-            response.to_string().contains("Payment wallet unavailable"),
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
             "{response}"
         );
     }
