@@ -1,5 +1,7 @@
 //! Actual CLI signals while an unfunded, locally signed payment is in flight.
 #![cfg(unix)]
+#[path = "support/ports.rs"]
+mod ports;
 #[path = "support/tls.rs"]
 mod tls;
 use axum::{
@@ -92,12 +94,17 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
     let source = format!(
         "spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\nread_timeout_seconds = 60\n"
     );
-    let config = if meta {
-        format!(
-            "version = 1\n[sources.test]\n{source}\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'EVM_PRIVATE_KEY'\n[servers.one]\nlisten = '127.0.0.1:0'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TEST_TOKEN'\n[servers.two]\nlisten = '127.0.0.1:0'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TEST_TOKEN'\n"
+    let (config, single_port) = if meta {
+        let one = ports::non_ephemeral_address().await;
+        let two = ports::non_ephemeral_address().await;
+        (
+            format!(
+                "version = 1\n[sources.test]\n{source}\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'EVM_PRIVATE_KEY'\n[servers.one]\nlisten = '{one}'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TEST_TOKEN'\n[servers.two]\nlisten = '{two}'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TEST_TOKEN'\n"
+            ),
+            None,
         )
     } else {
-        source
+        (source, Some(ports::non_ephemeral_address().await.port()))
     };
     std::fs::write(tmp.path().join("config.toml"), config).unwrap();
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
@@ -115,6 +122,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
     if meta {
         command.args(["serve", "--config", "config.toml"]);
     } else {
+        let port = single_port.unwrap().to_string();
         command.args([
             "serve",
             "--provider",
@@ -124,7 +132,7 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
             "--host",
             "127.0.0.1",
             "--port",
-            "0",
+            &port,
         ]);
     }
     command

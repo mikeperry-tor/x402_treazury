@@ -393,9 +393,7 @@ exec {} --exact tor::owned::tests::fake_tor --ignored --nocapture
         );
         std::fs::write(&script, contents).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socks = listener.local_addr().unwrap();
-        drop(listener);
+        let socks = crate::ports::non_ephemeral_address().await;
         let policy = NetworkPolicy {
             mode: Mode::Tor,
             socks_endpoint: Some(socks.into()),

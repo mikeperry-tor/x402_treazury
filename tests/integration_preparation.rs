@@ -114,9 +114,7 @@ async fn production_startup_preserves_inventory_without_endpoint_pricing_probes(
             serde_json::from_slice(&std::fs::read(&spec_path).unwrap()).unwrap();
         spec["paths"]["/price"] = json!({"get":{}});
         std::fs::write(spec_path, spec.to_string()).unwrap();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        drop(listener);
+        let addr = ports::non_ephemeral_address().await;
         let text = std::fs::read_to_string(&m.deployment)
             .unwrap()
             .replace("https://example.invalid", &base)
@@ -289,9 +287,7 @@ async fn runner_executes_concurrent_keyless_cases_once_and_retains_failures() {
     let (mut m, state) = fixture(tmp.path());
     let state = state.strip_prefix(&cwd).unwrap().to_path_buf();
     assert!(state.is_relative());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
+    let addr = ports::non_ephemeral_address().await;
     let text = std::fs::read_to_string(&m.deployment)
         .unwrap()
         .replace("https://example.invalid", &base)
@@ -404,9 +400,7 @@ async fn runner_response_limit_and_timeout_are_visible_and_never_replayed() {
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
     let tmp = tempfile::tempdir().unwrap();
     let (mut m, state) = fixture(tmp.path());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
+    let addr = ports::non_ephemeral_address().await;
     let text = std::fs::read_to_string(&m.deployment)
         .unwrap()
         .replace("https://example.invalid", &base)
@@ -1098,9 +1092,7 @@ async fn runner_skips_closed_windows_and_failed_dependencies_but_runs_independen
     let vendor = tls::listener().await;
     let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
+    let addr = ports::non_ephemeral_address().await;
     let text = std::fs::read_to_string(&m.deployment)
         .unwrap()
         .replace("https://example.invalid", &base)
@@ -1254,9 +1246,7 @@ async fn runner_cancellation_retains_completed_peer_and_pending_claim_while_drai
     let vendor = tls::listener().await;
     let base = format!("https://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
+    let addr = ports::non_ephemeral_address().await;
     let text = std::fs::read_to_string(&m.deployment)
         .unwrap()
         .replace("https://example.invalid", &base)

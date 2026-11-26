@@ -1,5 +1,7 @@
 //! Real production child, keyless MCP calls, and a parent-owned pipe; localhost only.
 #![cfg(unix)]
+#[path = "support/ports.rs"]
+mod ports;
 #[path = "support/tls.rs"]
 mod tls;
 use axum::serve::Listener as _;
@@ -347,6 +349,14 @@ async fn actual_parent_exit_closes_lifetime_channel_without_destructor_cleanup()
     let (base, _v, server) = vendor().await;
     let dir = tempfile::tempdir().unwrap();
     config(dir.path(), &base, false);
+    let fixed_address = ports::non_ephemeral_address().await;
+    let updated = std::fs::read_to_string(dir.path().join("config.toml"))
+        .unwrap()
+        .replace(
+            "listen=\"127.0.0.1:0\"",
+            &format!("listen=\"{fixed_address}\""),
+        );
+    std::fs::write(dir.path().join("config.toml"), updated).unwrap();
     let mut parent = tokio::process::Command::new(std::env::current_exe().unwrap());
     parent
         .args([
@@ -369,6 +379,7 @@ async fn actual_parent_exit_closes_lifetime_channel_without_destructor_cleanup()
         .unwrap()
         .strip_suffix("/mcp")
         .unwrap();
+    assert_eq!(address, fixed_address.to_string());
     std::fs::write(dir.path().join("exit-parent"), b"exit").unwrap();
     assert_eq!(exit(&mut parent).await.code(), Some(86));
     wait_log(dir.path(), "supervisor connection closed").await;

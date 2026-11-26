@@ -1,5 +1,7 @@
 #[path = "support/evm_address.rs"]
 mod evm_address;
+#[path = "support/ports.rs"]
+mod ports;
 #[path = "support/tls.rs"]
 mod tls;
 use axum::{
@@ -531,9 +533,7 @@ async fn binding_is_atomic_and_missing_auth_opens_no_port() {
     }
     let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let occupied = reserved.local_addr().unwrap();
-    let free = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = free.local_addr().unwrap();
-    drop(free);
+    let address = ports::non_ephemeral_address().await;
     // BTree order binds beta_only first, then fails research. Both must close.
     let text = configuration()
         .replacen("127.0.0.1:0", &occupied.to_string(), 1)

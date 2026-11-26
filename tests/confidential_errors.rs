@@ -1,4 +1,6 @@
 //! Server-held credentials must not become diagnostic content. Vendor bodies are distinct.
+#[path = "support/ports.rs"]
+mod ports;
 #[path = "support/tls.rs"]
 mod tls;
 use x402_treazury::network;
@@ -124,9 +126,8 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     mcp_task.abort();
     task.abort();
     // Connect failure exercises the initial payment request and spec fetch paths.
-    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("https://{}/?token={SECRET}", closed.local_addr().unwrap());
-    drop(closed);
+    let closed = ports::non_ephemeral_address().await;
+    let url = format!("https://{closed}/?token={SECRET}");
     let route = RoutedRequest {
         json_media_type: None,
         headers: Default::default(),

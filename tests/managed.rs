@@ -1,4 +1,6 @@
 //! Offline end-to-end admission against a local Base RPC and x402 seller.
+#[path = "support/ports.rs"]
+mod ports;
 #[path = "support/tls.rs"]
 mod tls;
 use x402_treazury::network;
@@ -1611,9 +1613,7 @@ sources=["api"]
 
     // Fail after wallets and an earlier listener exist; retry must reuse identities.
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let first_address = first.local_addr().unwrap();
-    drop(first);
+    let first_address = ports::non_ephemeral_address().await;
     let mut conflicting: toml::Value = toml::from_str(&config).unwrap();
     conflicting["servers"]["one"]["listen"] = toml::Value::String(first_address.to_string());
     conflicting["servers"]["three"]["listen"] =

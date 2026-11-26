@@ -28,6 +28,9 @@ mod planner;
 #[path = "preparation.rs"]
 mod preparation;
 #[cfg(test)]
+#[path = "../../support/ports.rs"]
+mod ports;
+#[cfg(test)]
 #[path = "presets.rs"]
 mod presets;
 #[path = "process.rs"]

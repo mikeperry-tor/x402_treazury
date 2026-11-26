@@ -1,4 +1,6 @@
 //! Offline executable boundaries, with synthetic stores and no real wallet material.
+#[path = "support/ports.rs"]
+mod ports;
 #[path = "support/tls.rs"]
 mod tls;
 use axum::serve::Listener as _;
@@ -691,11 +693,9 @@ async fn wallet_recovery_argument_errors_are_legible_without_submission_credenti
 
 #[tokio::test]
 async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrides() {
-    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let one = first.local_addr().unwrap();
+    let one = ports::non_ephemeral_address().await;
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let two = occupied.local_addr().unwrap();
-    drop(first);
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
     std::fs::write(
