@@ -273,14 +273,14 @@ on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
 - **Rust:** The checks, line coverage, and treasury diagnostics workflows
   explicitly select and verify the version in
   [the shared pin](../scripts/rust-toolchain-pin.toml).
-- **Jobs:** `check` runs all seven stages sequentially via
-  `scripts/ci-stage.sh` (`check-static`, `check-clippy`, `check-compat`,
-  `check-default-remaining`, `check-proving`, `check-lifecycle`, and
-  `check-codec`). `coverage` runs in parallel with `check` on every trigger,
-  collecting default Linux line coverage via `make coverage` and reporting with
-  `octocov`. Both jobs set `TEST_THREADS=$(nproc)` to match runner vCPUs and
-  cache compiled dependencies under `target/` (pruning workspace artifacts
-  before saving). `publish-badge` runs after `check` and `coverage` succeed on
+- **Jobs:** Three jobs run in parallel on every trigger: `check` runs
+  `check-static`, `check-clippy`, `check-compat`, and `check-default-remaining`
+  via `scripts/ci-stage.sh`; `treasury` runs `check-proving`, `check-lifecycle`,
+  and `check-codec` via `scripts/ci-stage.sh`; and `coverage` collects default
+  Linux line coverage via `make coverage` and reports with `octocov`. All three
+  jobs set `TEST_THREADS=$(nproc)` to match runner vCPUs and cache compiled
+  dependencies under `target/` (pruning workspace artifacts before saving).
+  `publish-badge` runs after `check`, `treasury`, and `coverage` succeed on
   `push` to `main`.
 - **Coverage badge:** `publish-badge` writes `coverage.svg` and
   `source-revision.txt` to the root of the orphan `badges` branch (serializing
@@ -291,8 +291,9 @@ on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
 ### Temporary CI diagnostics
 
 `scripts/ci-stage.sh` records per-stage logs, durations, and exit status under
-`target/ci-checks/`, uploaded on every `check` run (`if: always()`, default
-GitHub retention). Opt-in `LIFECYCLE_DIAGNOSTICS=DIR` remains available on
+`target/ci-checks/`, uploaded on every `check` and `treasury` run
+(`if: always()`, default GitHub retention). Opt-in `LIFECYCLE_DIAGNOSTICS=DIR`
+remains available on
 `make check-lifecycle` via `scripts/diagnose-treasury-sync.py`, and manual
 `workflow_dispatch` remains available in `treasury-sync-diagnostics.yml` (whose
 temporary `push` trigger on `ci_coverage` retires once the `main` coverage badge
