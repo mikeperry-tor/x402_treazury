@@ -203,7 +203,8 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
         let logged = std::fs::read_to_string(log.path()).unwrap();
         assert!(logged.contains("near_status=Unknown"), "{logged}");
         assert!(
-            logged.contains("Current saved funding phase; NEAR status is checked separately"),
+            logged.lines().any(|line| line.contains("DEBUG")
+                && line.contains("Current saved funding phase; NEAR status is checked separately")),
             "{logged}"
         );
         assert!(
@@ -420,6 +421,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                     &job.phase,
                     &repeated,
                     Some(&category),
+                    None,
                 )
             });
             let repeated_logs = std::fs::read_to_string(log.path()).unwrap();
@@ -433,7 +435,15 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             assert!(refreshed.contains("scanned_height=102"));
             // A successful observation clears Record.error; recurrence must warn.
             tracing::dispatcher::with_default(&subscriber, || {
-                report_observation_failure(&job, "small", Kind::Source, &job.phase, &repeated, None)
+                report_observation_failure(
+                    &job,
+                    "small",
+                    Kind::Source,
+                    &job.phase,
+                    &repeated,
+                    None,
+                    None,
+                )
             });
             let recurrence_logs = std::fs::read_to_string(log.path()).unwrap();
             assert_eq!(
@@ -472,6 +482,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 .context(crate::rotation::error::TreasuryDepositAddress(
                     "public-receive-address".into(),
                 ));
+            let previous_notice = lease.state.lock().unwrap().treasury_notice;
             tracing::dispatcher::with_default(&subscriber, || {
                 report_observation_failure(
                     &job,
@@ -480,6 +491,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                     &job.phase,
                     &repeated,
                     Some(&category),
+                    previous_notice,
                 )
             });
             let repeated_logs = std::fs::read_to_string(log.path()).unwrap();
@@ -611,7 +623,7 @@ fn canonical_disagreement_reports_automatic_resolution_once_per_error_episode() 
                 .context("source_reconciliation_failed")
                 .context("private upstream details");
             let category =
-                report_observation_failure(&job, "small", Kind::Source, &phase, &error, None);
+                report_observation_failure(&job, "small", Kind::Source, &phase, &error, None, None);
             report_observation_failure(
                 &job,
                 "small",
@@ -619,6 +631,7 @@ fn canonical_disagreement_reports_automatic_resolution_once_per_error_episode() 
                 &phase,
                 &error,
                 Some(&category),
+                None,
             );
         });
         let logged = std::fs::read_to_string(log.path()).unwrap();
@@ -821,4 +834,270 @@ async fn retained_request_debug_matches_actual_status_acquisitions_without_short
     drop(worker);
     drop(store);
     actor.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn shared_treasury_notices_deduplicate_across_wallets_and_use_short_categories() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::diagnostics::shared_treasury_notices_deduplicate_across_wallets_and_use_short_categories",
+    ) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    for pool in ["financial", "general"] {
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            pool,
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+    }
+    let jobs: Vec<_> = raw
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .map(|job| {
+            raw.save_funding_quote(&job.id, &serde_json::to_vec(&quote(&job)).unwrap())
+                .unwrap();
+            raw.funding_job(&job.id).unwrap().unwrap()
+        })
+        .collect();
+    assert_eq!(jobs.len(), 4);
+
+    let (store, owner) = StoreHandle::spawn(raw);
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: true,
+                quotes: None,
+            },
+            gate: Arc::new(Semaphore::new(0)),
+            started,
+        },
+        5,
+    );
+    let lease = Arc::new(store.funding_owner().lock_owned().await);
+    for job in &jobs {
+        let key = Key {
+            operation: job.operation_id.clone(),
+            kind: Kind::Source,
+        };
+        assert_eq!(
+            lease
+                .state
+                .lock()
+                .unwrap()
+                .admit(&key, Some(&job.phase), 1000, &BTreeSet::new()),
+            Admission::Ready
+        );
+    }
+
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let subscriber = tracing::Dispatch::new(subscriber);
+    let clock = TickClock {
+        epoch: 1000,
+        started: tokio::time::Instant::now(),
+    };
+
+    // Both wallets hit TreasuryFunds::Unavailable; only the first emits INFO.
+    for job in &jobs {
+        worker
+            .publish_observation(
+                &lease,
+                Completion {
+                    job: job.clone(),
+                    kind: Kind::Source,
+                    result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                        .context(TreasuryFunds::Unavailable)),
+                },
+                &clock,
+            )
+            .with_subscriber(subscriber.clone())
+            .await
+            .unwrap();
+    }
+    let after_unavailable = std::fs::read_to_string(log.path()).unwrap();
+    let info_lines: Vec<_> = after_unavailable
+        .lines()
+        .filter(|line| line.contains("INFO"))
+        .collect();
+    assert_eq!(info_lines.len(), 1, "{after_unavailable}");
+    assert!(
+        info_lines[0].contains("Treasury funds could not be assessed")
+            && info_lines[0].contains("category=\"treasury_funds_unavailable\"")
+            && !info_lines[0].contains("treasury_insufficient_spendable_funds"),
+        "{}",
+        info_lines[0]
+    );
+    assert!(
+        after_unavailable
+            .lines()
+            .filter(|line| line.contains("Current saved funding phase"))
+            .all(|line| line.contains("DEBUG")),
+        "{after_unavailable}"
+    );
+
+    // Transitioning to Shortfall emits one INFO with a short machine category.
+    for job in &jobs {
+        worker
+            .publish_observation(
+                &lease,
+                Completion {
+                    job: job.clone(),
+                    kind: Kind::Source,
+                    result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                        .context(TreasuryFunds::Shortfall)),
+                },
+                &clock,
+            )
+            .with_subscriber(subscriber.clone())
+            .await
+            .unwrap();
+    }
+    let after_shortfall = std::fs::read_to_string(log.path()).unwrap();
+    let delta = &after_shortfall[after_unavailable.len()..];
+    let info_lines: Vec<_> = delta.lines().filter(|line| line.contains("INFO")).collect();
+    assert_eq!(info_lines.len(), 1, "{delta}");
+    assert!(
+        info_lines[0].contains("Observed ZEC is insufficient")
+            && info_lines[0].contains("category=\"treasury_insufficient_spendable_funds\"")
+            && !info_lines[0].contains("category=\"treasury_insufficient_spendable_funds;"),
+        "{}",
+        info_lines[0]
+    );
+
+    // Quote prerequisites, confirmation waits, and transient sync outages do
+    // not clear or downgrade an active Shortfall notice.
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: jobs[0].clone(),
+                kind: Kind::Source,
+                result: Ok(Observation::Prerequisite(quote(&jobs[0]))),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber.clone())
+        .await
+        .unwrap();
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: jobs[0].clone(),
+                kind: Kind::Source,
+                result: Err(anyhow::Error::new(
+                    crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending,
+                )),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber.clone())
+        .await
+        .unwrap();
+    for transient in [
+        anyhow::Error::new(FundingCondition::InsufficientFunds).context(TreasuryFunds::Unavailable),
+        anyhow::anyhow!("indexer connection failed").context(PreparationDeferred),
+    ] {
+        worker
+            .publish_observation(
+                &lease,
+                Completion {
+                    job: jobs[0].clone(),
+                    kind: Kind::Source,
+                    result: Err(transient),
+                },
+                &clock,
+            )
+            .with_subscriber(subscriber.clone())
+            .await
+            .unwrap();
+    }
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: jobs[1].clone(),
+                kind: Kind::Source,
+                result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                    .context(TreasuryFunds::Shortfall)),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber.clone())
+        .await
+        .unwrap();
+    let after_non_clearing = std::fs::read_to_string(log.path()).unwrap();
+    let non_clearing_delta = &after_non_clearing[after_shortfall.len()..];
+    assert!(!non_clearing_delta.contains("INFO"), "{non_clearing_delta}");
+
+    // A successful source observation clears the shared notice so a sibling
+    // wallet's recurrence announces again even if its own last error matched.
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: jobs[0].clone(),
+                kind: Kind::Source,
+                result: Ok(Observation::None),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber.clone())
+        .await
+        .unwrap();
+    worker
+        .publish_observation(
+            &lease,
+            Completion {
+                job: jobs[1].clone(),
+                kind: Kind::Source,
+                result: Err(anyhow::Error::new(FundingCondition::InsufficientFunds)
+                    .context(TreasuryFunds::Shortfall)),
+            },
+            &clock,
+        )
+        .with_subscriber(subscriber)
+        .await
+        .unwrap();
+    let final_logs = std::fs::read_to_string(log.path()).unwrap();
+    let recurrence = &final_logs[after_non_clearing.len()..];
+    assert_eq!(
+        recurrence
+            .lines()
+            .filter(|line| line.contains("INFO") && line.contains("Observed ZEC is insufficient"))
+            .count(),
+        1,
+        "{recurrence}"
+    );
+
+    drop(lease);
+    drop(worker);
+    drop(store);
+    owner.await.unwrap();
 }

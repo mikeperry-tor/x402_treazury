@@ -156,6 +156,17 @@ struct Record {
     error: Option<String>,
     condition: Option<super::super::error::FundingCondition>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TreasuryNotice {
+    Shortfall,
+    Unavailable,
+    SyncDeferred,
+}
+impl TreasuryNotice {
+    fn replaces(self, previous: Option<Self>) -> bool {
+        previous != Some(self) && previous != Some(Self::Shortfall)
+    }
+}
 #[derive(Debug, PartialEq, Eq)]
 enum PhaseReport {
     Initial,
@@ -164,6 +175,7 @@ enum PhaseReport {
 #[derive(Default)]
 struct State {
     records: BTreeMap<Key, Record>,
+    treasury_notice: Option<TreasuryNotice>,
 }
 /// StoreHandle owns this gate. Independent worker handles cannot overlap even
 /// after their response waiter disappears or a source command outlives a pass.
@@ -236,6 +248,23 @@ fn report_decode_failure(fault: &MalformedFunding) {
         "Saved wallet funding data could not be read; the affected operation is retained for inspection");
 }
 
+fn treasury_notice(error: &anyhow::Error) -> Option<TreasuryNotice> {
+    if funding_condition(error) == Some(super::super::error::FundingCondition::InsufficientFunds) {
+        use super::super::error::TreasuryFunds;
+        match TreasuryFunds::from_error(error) {
+            TreasuryFunds::Shortfall => Some(TreasuryNotice::Shortfall),
+            TreasuryFunds::Unavailable => Some(TreasuryNotice::Unavailable),
+            TreasuryFunds::Waiting => None,
+        }
+    } else if error.is::<super::super::transaction::PreparationDeferred>()
+        && crate::treasury::diagnostics::sync_detail(error).is_some()
+    {
+        Some(TreasuryNotice::SyncDeferred)
+    } else {
+        None
+    }
+}
+
 /// Report a new operator requirement once; polling details never change backoff.
 fn report_observation_failure(
     job: &FundingJob,
@@ -244,8 +273,12 @@ fn report_observation_failure(
     phase: &FundingPhase,
     error: &anyhow::Error,
     previous_error: Option<&str>,
+    previous_treasury_notice: Option<TreasuryNotice>,
 ) -> String {
     let category = safe_error(error, phase);
+    let category_code = category.split(';').next().unwrap_or(category.as_str());
+    let notice = treasury_notice(error);
+    let new_treasury_notice = notice.is_some_and(|n| n.replaces(previous_treasury_notice));
     // Presentation only: changing height details do not create a new disposition.
     let new_requirement = previous_error.and_then(|s| s.split("; treasury:").next())
         != category.split("; treasury:").next();
@@ -260,40 +293,44 @@ fn report_observation_failure(
         ) || error.is::<super::super::transaction::ConfirmationObservation>())
     {
         tracing::info!(wallet=%job.pool_name,size=wallet_type,job_id=%job.id,
-            operation=%job.operation_id,category,
+            operation=%job.operation_id,category=category_code,
             "Wallet funding observations disagree with current blockchain state; the original work remains owned and canonical resolution will retry automatically");
-    } else if new_requirement
-        && funding_condition(error)
-            == Some(super::super::error::FundingCondition::InsufficientFunds)
+    } else if funding_condition(error)
+        == Some(super::super::error::FundingCondition::InsufficientFunds)
     {
         use super::super::error::TreasuryFunds;
         let address = error
             .downcast_ref::<super::super::error::TreasuryDepositAddress>()
             .map(|address| address.0.as_str());
         match TreasuryFunds::from_error(error) {
-            TreasuryFunds::Waiting => {
+            TreasuryFunds::Waiting if new_requirement => {
                 tracing::debug!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
                 "Wallet funding is waiting for existing ZEC to become spendable; pending funds may still be insufficient; synchronization and funding retry automatically")
             }
-            TreasuryFunds::Shortfall => {
+            TreasuryFunds::Shortfall if new_treasury_notice => {
                 if let Some(address) = address {
-                    tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
+                    tracing::info!(wallet=%job.pool_name,size=wallet_type,category=category_code,
                 "Observed ZEC is insufficient for the next wallet funding deposit and fee; add ZEC to {address} and allow confirmations; synchronization and funding retry automatically");
                 } else {
-                    tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
+                    tracing::info!(wallet=%job.pool_name,size=wallet_type,category=category_code,
                 "Observed ZEC is insufficient for the next wallet funding deposit and fee; run wallet status --config FILE with the serving configuration to find the deposit address; add ZEC and allow confirmations; synchronization and funding retry automatically");
                 }
             }
-            TreasuryFunds::Unavailable => {
-                tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
+            TreasuryFunds::Unavailable if new_treasury_notice => {
+                tracing::info!(wallet=%job.pool_name,size=wallet_type,category="treasury_funds_unavailable",
                 "Treasury funds could not be assessed; inspect wallet status --config FILE for saved balances and synchronization progress; synchronization and funding retry automatically")
             }
+            TreasuryFunds::Waiting | TreasuryFunds::Shortfall | TreasuryFunds::Unavailable => {
+                tracing::debug!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,
+                    operation=%job.operation_id,category,
+                    "Wallet funding observation unavailable; existing work retained and checks will retry");
+            }
         }
-    } else if new_requirement
+    } else if new_treasury_notice
         && error.is::<super::super::transaction::PreparationDeferred>()
-        && crate::treasury::diagnostics::sync_detail(error).is_some()
+        && let Some(reason) = crate::treasury::diagnostics::sync_detail(error)
     {
-        tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
+        tracing::info!(wallet=%job.pool_name,size=wallet_type,category=category_code,reason,
             "Wallet funding deferred until treasury synchronization succeeds");
     } else {
         tracing::debug!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,
@@ -1291,6 +1328,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             return Ok(None);
         };
         let failure = result.err();
+        let succeeded = failure.is_none();
         let wait = failure
             .as_ref()
             .and_then(|error| waiting_reason(error, &phase));
@@ -1298,17 +1336,24 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,phase=?phase,reason,"funding awaiting chain confirmation; polling automatically");
         }
         let condition = failure.as_ref().and_then(startup_funding_condition);
+        let mut notice = None;
         let error = match failure.filter(|_| wait.is_none()) {
             Some(error) => {
                 let id = job.id.clone();
                 let wallet_type = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
-                let previous_error = lease.state.lock().expect("funding schedule lock").records
-                    [&Key {
-                        operation: job.operation_id.clone(),
-                        kind,
-                    }]
-                    .error
-                    .clone();
+                notice = treasury_notice(&error);
+                let (previous_error, previous_treasury_notice) = {
+                    let state = lease.state.lock().expect("funding schedule lock");
+                    (
+                        state.records[&Key {
+                            operation: job.operation_id.clone(),
+                            kind,
+                        }]
+                            .error
+                            .clone(),
+                        state.treasury_notice,
+                    )
+                };
                 Some(report_observation_failure(
                     &job,
                     &wallet_type,
@@ -1316,12 +1361,20 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     &phase,
                     &error,
                     previous_error.as_deref(),
+                    previous_treasury_notice,
                 ))
             }
             None => None,
         };
         {
             let mut state = lease.state.lock().expect("funding schedule lock");
+            if let Some(notice) = notice
+                && notice.replaces(state.treasury_notice)
+            {
+                state.treasury_notice = Some(notice);
+            } else if kind == Kind::Source && succeeded && prerequisite.is_none() {
+                state.treasury_notice = None;
+            }
             state.complete(
                 (&job.id, &job.operation_id),
                 kind,
@@ -1392,7 +1445,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 // Sibling reads may have started with older job snapshots.
                 match report {
                     PhaseReport::Initial => {
-                        tracing::info!(wallet=%job.pool_name,size=%wallet_type,status=?phase,
+                        tracing::debug!(wallet=%job.pool_name,size=%wallet_type,status=?phase,
                         "Current saved funding phase; NEAR status is checked separately")
                     }
                     PhaseReport::Changed => {

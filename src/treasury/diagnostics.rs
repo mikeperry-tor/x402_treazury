@@ -247,10 +247,12 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
 }
 
 pub(super) fn report_sync_unavailable(error: &anyhow::Error) {
+    let reason = sync_failure(error);
+    let detail = sync_detail(error).filter(|detail| detail != reason);
     tracing::info!(
         category = "treasury_sync_unavailable",
-        reason = sync_failure(error),
-        detail = sync_detail(error),
+        reason,
+        detail,
         "Zcash treasury synchronization became unavailable; accepted work remains owned"
     );
 }
@@ -1122,5 +1124,27 @@ mod coverage_diagnostic_tests {
         ] {
             assert_eq!(sync_failure(&anyhow::anyhow!(message)), expected);
         }
+    }
+
+    #[test]
+    fn sync_unavailable_omits_duplicate_detail_when_identical_to_reason() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            report_sync_unavailable(&anyhow::anyhow!(
+                "indexer tip regressed below scanned height"
+            ));
+        });
+        let logged = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            logged.contains("reason=\"indexer_tip_regressed\""),
+            "{logged}"
+        );
+        assert!(!logged.contains("detail="), "{logged}");
     }
 }
