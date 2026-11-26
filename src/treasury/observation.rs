@@ -43,10 +43,14 @@ impl Treasury {
     }
     /// Waiting source operations share the last actual scan. Cooldown failure
     /// returns unavailable; events cannot turn failed scans into a fast poller.
-    pub(crate) async fn sync_for_observation(&mut self, stop: &CancellationToken) -> Result<()> {
+    pub(crate) async fn sync_for_observation(
+        &mut self,
+        stop: &CancellationToken,
+        context: TreasuryObservationDemand,
+    ) -> Result<()> {
         ensure!(!stop.is_cancelled(), "treasury sync cancelled");
         if self.observation.ready() {
-            return self.sync_once(stop).await;
+            return self.sync_once_with_context(stop, context).await;
         }
         ensure!(
             self.reusable_observation().await?.is_some(),
@@ -103,13 +107,17 @@ mod tests {
         let revision = owner.revision;
         let stop = CancellationToken::new();
         // No configured endpoint: either a new scan or a tip probe would fail.
+        let context = TreasuryObservationDemand::from_reason(TreasurySyncReason::RequestedSync);
         for _ in 0..12 {
-            owner.sync_for_observation(&stop).await.unwrap();
+            owner
+                .sync_for_observation(&stop, context.clone())
+                .await
+                .unwrap();
             assert_eq!(owner.observation.due(), due);
             assert_eq!(owner.revision, revision);
             tokio::time::advance(Duration::from_secs(5)).await;
         }
-        assert!(owner.sync_for_observation(&stop).await.is_err());
+        assert!(owner.sync_for_observation(&stop, context).await.is_err());
         assert_eq!(
             owner.observation.due() - Instant::now(),
             Duration::from_secs(90)
@@ -207,5 +215,46 @@ mod tests {
         }
         schedule.complete(true);
         assert_eq!(schedule.due() - Instant::now(), Duration::from_secs(60));
+    }
+    #[test]
+    fn sync_progress_logs_emit_reason_and_optional_wallets() {
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        let mut with_wallets = TreasuryObservationDemand::from_reason(
+            TreasurySyncReason::WalletFundingInsufficientZec,
+        );
+        with_wallets.insert_reason(TreasurySyncReason::DirectReceive);
+        with_wallets.insert_wallet("financial");
+        let without_wallets =
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::StartupDiscovery);
+        tracing::subscriber::with_default(subscriber, || {
+            super::log_sync_progress(Some(3_614_778), &with_wallets, false);
+            super::log_sync_progress(Some(3_614_781), &with_wallets, true);
+            super::log_sync_progress(Some(3_614_782), &without_wallets, true);
+        });
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3, "{text}");
+        for (line, height) in [(lines[0], "height=3614778"), (lines[1], "height=3614781")] {
+            assert!(line.contains("INFO"), "{line}");
+            assert!(line.contains(height), "{line}");
+            assert!(
+                line.contains("reason=\"wallet_funding_insufficient_zec,direct_receive\""),
+                "{line}"
+            );
+            assert!(line.contains("wallets=\"financial\""), "{line}");
+        }
+        assert!(lines[2].contains("height=3614782"), "{}", lines[2]);
+        assert!(
+            lines[2].contains("reason=\"startup_discovery\""),
+            "{}",
+            lines[2]
+        );
+        assert!(!lines[2].contains("wallets="), "{}", lines[2]);
     }
 }

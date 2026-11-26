@@ -26,6 +26,7 @@ pub use direct_swap::{
     DirectOperation, DirectRoute, DirectSendAction, DirectSendAuthority, DirectSendBinding,
     DirectSourceCondition,
 };
+pub(crate) use treasury_observation::{TreasuryObservationDemand, TreasurySyncReason};
 mod treasury_reads;
 #[cfg(test)]
 mod worker_tests;

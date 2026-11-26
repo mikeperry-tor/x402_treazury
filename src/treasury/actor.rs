@@ -241,18 +241,31 @@ impl Treasury {
                 }
             }
             self.observe_funding_refunds().await?;
+            enum ObservationRequest {
+                Unknown,
+                Idle,
+                Needed(crate::rotation::store::TreasuryObservationDemand),
+            }
             let requested = if self.startup_discovery && startup_ready {
-                Some(true)
+                ObservationRequest::Needed(
+                    crate::rotation::store::TreasuryObservationDemand::from_reason(
+                        crate::rotation::store::TreasurySyncReason::StartupDiscovery,
+                    ),
+                )
             } else {
                 let groups = self.funding_groups.clone();
-                crate::rotation::store::inventory::read_result(
+                match crate::rotation::store::inventory::read_result(
                     self.store
-                        .call(move |s| s.treasury_observation_needed(&groups))
+                        .call(move |s| s.treasury_observation_demand(&groups))
                         .await,
                     &mut None,
-                )?
+                )? {
+                    None => ObservationRequest::Unknown,
+                    Some(demand) if demand.is_empty() => ObservationRequest::Idle,
+                    Some(demand) => ObservationRequest::Needed(demand),
+                }
             };
-            let due = if requested.is_none() {
+            let due = if matches!(requested, ObservationRequest::Unknown) {
                 // Unknown demand is not permission to scan. A read-only busy
                 // inventory defers reevaluation while accepted commands stay live.
                 tokio::time::Instant::now()
@@ -279,7 +292,10 @@ impl Treasury {
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, base, reply) => {
                             let operation = request.operation_id.clone();
-                            let result = match self.sync_for_observation(stop).await {
+                            let context = crate::rotation::store::TreasuryObservationDemand::from_reason(
+                                crate::rotation::store::TreasurySyncReason::PrepareTransaction,
+                            );
+                            let result = match self.sync_for_observation(stop, context).await {
                                 Err(error) if !self.healthy => Err(error),
                                 _ if stop.is_cancelled() => Err(anyhow::anyhow!("treasury stopping")),
                                 // A missing reusable scan is not a new readiness
@@ -303,12 +319,12 @@ impl Treasury {
                         Command::Reconcile(id, reply) => { let _ = reply.send(self.reconcile_for_observation(id, submission, stop).await); }
                     }
                 }
-                _ = tokio::time::sleep_until(due), if requested != Some(false) => {
-                    if requested == Some(true) {
+                _ = tokio::time::sleep_until(due), if !matches!(requested, ObservationRequest::Idle) => {
+                    if let ObservationRequest::Needed(context) = requested {
                         // Ordinary demanded work can satisfy startup discovery while
                         // its local connectivity observation is still pending.
                         self.startup_discovery &= !startup_ready;
-                        if let Err(error) = self.sync_for_observation(stop).await
+                        if let Err(error) = self.sync_for_observation(stop, context).await
                             && !stop.is_cancelled() {
                                 super::diagnostics::report_sync_failure(
                                     &error,

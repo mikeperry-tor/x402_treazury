@@ -19,16 +19,17 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?)
     }
 
-    pub(crate) fn funding_refund_scan_needed(&self) -> Result<bool> {
+    pub(crate) fn funding_refund_scan_pools(&self) -> Result<std::collections::BTreeSet<String>> {
         let mut after = String::new();
+        let mut pools = std::collections::BTreeSet::new();
         loop {
             let page = self.funding_refund_page(&after)?;
             if page.is_empty() {
-                return Ok(false);
+                return Ok(pools);
             }
-            for (_, operation, _) in page {
+            for (_, operation, pool) in page {
                 if !self.funding_refund_observed(&operation)? {
-                    return Ok(true);
+                    pools.insert(pool);
                 }
                 after = operation;
             }

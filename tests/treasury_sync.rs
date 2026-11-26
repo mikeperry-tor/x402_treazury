@@ -671,25 +671,14 @@ spec="nonexistent.json"
         String::from_utf8_lossy(&output.stderr)
     );
     let logs = String::from_utf8_lossy(&output.stderr);
-    for stage in [
-        "loading configuration and opening encrypted wallet",
-        "wallet opened; starting synchronization",
-        "Zcash treasury wallet synchronized; progress saved",
-    ] {
-        assert!(logs.contains(stage), "missing {stage}: {logs}");
-    }
-    assert!(
-        !logs.contains("Synchronizing Zcash treasury wallet"),
-        "{logs}"
-    );
+    assert!(!logs.contains("DEBUG"), "{logs}");
     let synchronized = logs
         .lines()
-        .find(|line| line.contains("Zcash treasury wallet synchronized; progress saved"))
-        .unwrap();
-    assert!(synchronized.contains("height=2000000"), "{synchronized}");
+        .find(|line| line.contains("height=2000000") && line.contains("reason=\"requested_sync\""))
+        .unwrap_or_else(|| panic!("missing completed sync diagnostic: {logs}"));
     assert!(
-        !synchronized.contains("tip") && !synchronized.contains("blocks"),
-        "{synchronized}"
+        !synchronized.contains("wallets="),
+        "explicit sync should not list wallet pools: {synchronized}"
     );
     assert!(!logs.contains(SEED));
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1586,17 +1575,9 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
     );
     assert_eq!(reported["observations"]["usdc"]["status"], "inapplicable");
     let logs = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !logs.contains("Synchronizing Zcash treasury wallet"),
-        "{logs}"
-    );
+    assert!(!logs.contains("DEBUG"), "{logs}");
     assert!(logs.contains("indexer_network_mismatch"), "{logs}");
-    assert!(!logs.contains("saving final wallet checkpoint"), "{logs}");
-    assert!(
-        !logs.contains("Zcash treasury wallet synchronized; progress saved"),
-        "{logs}"
-    );
-    assert!(!logs.contains("scanning wallet history"), "{logs}");
+    assert!(!logs.contains("height="), "{logs}");
     assert!(!logs.contains(SEED));
     assert!(!logs.contains(&endpoint));
     let saved = x402_treazury::rotation::store::status(&dir.path().join("state"))
@@ -1604,6 +1585,7 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
         .sync
         .unwrap();
     assert_eq!(saved.phase, SyncPhase::Offline);
+    assert!(saved.height.is_none());
     assert_eq!(
         saved.last_error.as_deref(),
         Some("indexer is not on mainnet")

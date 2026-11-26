@@ -29,6 +29,7 @@ fn command(config: &Path, endpoint: &str) -> tokio::process::Command {
     command
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .env("NO_COLOR", "1")
         .env("INDEXER", endpoint)
         .args(["wallet", "recover-expired", "--operation-id"])
         .arg("11111111-1111-4111-8111-111111111111")
@@ -85,7 +86,10 @@ async fn missing_operation_after_canonical_sync_releases_owner_without_submissio
     assert_eq!(saved.height, Some(TIP));
     assert_eq!(saved.observed_tip_height, Some(TIP));
     assert!(saved.checked_at.is_some() && saved.last_error.is_none());
-    assert!(stderr.contains("Zcash treasury wallet synchronized; progress saved"));
+    assert!(
+        stderr.contains(&format!("height={TIP}")) && stderr.contains("reason=\"recover_expired\""),
+        "{stderr}"
+    );
     assert!(!after.sync_complete);
     assert!(after.snapshot_revision > before.snapshot_revision);
     assert_eq!(reopened.addresses().await.unwrap(), addresses);

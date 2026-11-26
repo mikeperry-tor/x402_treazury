@@ -974,7 +974,13 @@ async fn same_height_tip_reorg_rebuilds_sdk_without_reopening_historical_source_
         assert_eq!(chain.reorg_to(23), vec![prepared.bytes().to_vec()]);
         chain.mine_empty_blocks(1);
     }
-    owner.sync_for_command(&stop).await.unwrap();
+    owner
+        .sync_for_command(
+            &stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::RequestedSync),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         owner.status().await.unwrap().sync.unwrap().phase,
         SyncPhase::Ready
@@ -1003,7 +1009,13 @@ async fn same_height_tip_reorg_rebuilds_sdk_without_reopening_historical_source_
         chain.reorg_to(23);
         chain.mine_block(vec![prepared.bytes().to_vec()]);
     }
-    owner.sync_for_command(&stop).await.unwrap();
+    owner
+        .sync_for_command(
+            &stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::RequestedSync),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         owner.status().await.unwrap().sync.unwrap().phase,
         SyncPhase::Ready

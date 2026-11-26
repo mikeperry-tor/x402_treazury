@@ -7,7 +7,11 @@ impl Treasury {
         if self.source_work_fulfilled(&id).await? {
             return Ok(());
         }
-        self.sync_once(stop).await?;
+        self.sync_once_with_context(
+            stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::RecoverExpired),
+        )
+        .await?;
         self.recover_expired_scanned(id, stop).await
     }
 

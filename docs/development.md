@@ -322,6 +322,11 @@ Core severity rules:
     assessment, confirmed plus unconfirmed owned Ironwood notes covering the
     required amount log a `DEBUG` spendability wait, and an Ironwood shortfall
     logs `INFO` with the receive address.
+  - Treasury scan progress and completion `INFO` events append the primary
+    plain-language reason (with a `(+N other pending tasks)` suffix when
+    multiple demand sources are active), a comma-separated `reason` field of
+    all active sync codes, and a bounded `wallets` field listing associated
+    pool names for pool-scoped work.
   - Background scan failures report `automatic_retry=true` and
     `retry_after_seconds` (90, 180, and 300 seconds); one-pass `wallet sync`
     warns with `automatic_retry=false`. Zingolib errors are sanitized to fixed

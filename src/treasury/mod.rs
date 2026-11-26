@@ -43,7 +43,10 @@ impl TreasuryNetwork {
 pub mod submission;
 use crate::rotation::{
     base::now,
-    store::{Status, Store, StoreHandle, SyncObservation, SyncPhase},
+    store::{
+        Status, Store, StoreHandle, SyncObservation, SyncPhase, TreasuryObservationDemand,
+        TreasurySyncReason,
+    },
 };
 use anyhow::{Context, Result, ensure};
 use std::time::Duration;
@@ -543,9 +546,20 @@ impl Treasury {
     /// Cancellation must be requested through `stop`, then this future awaited.
     /// Adapter errors are sanitized; endpoints are not persisted in status.
     pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
+        self.sync_once_with_context(
+            stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::RequestedSync),
+        )
+        .await
+    }
+    pub(crate) async fn sync_once_with_context(
+        &mut self,
+        stop: &CancellationToken,
+        context: TreasuryObservationDemand,
+    ) -> Result<()> {
         self.drain_calculation().await;
         let previously_failed = self.observation.failed();
-        let result = self.scan_once(stop).await;
+        let result = self.scan_once(stop, context).await;
         self.observation.complete(result.is_ok());
         if !previously_failed
             && !stop.is_cancelled()
@@ -555,7 +569,11 @@ impl Treasury {
         }
         result
     }
-    async fn scan_once(&mut self, stop: &CancellationToken) -> Result<()> {
+    async fn scan_once(
+        &mut self,
+        stop: &CancellationToken,
+        context: TreasuryObservationDemand,
+    ) -> Result<()> {
         self.reusable_sync_revision = None;
         ensure!(
             self.healthy,
@@ -619,6 +637,7 @@ impl Treasury {
                 .context("treasury SDK view unavailable")?,
             store: self.store.clone(),
             revision: self.revision,
+            context: context.clone(),
         };
         let cancelled = stop.child_token();
         let _cancel_on_drop = cancelled.clone().drop_guard();
@@ -658,7 +677,7 @@ impl Treasury {
         if outcome.is_ok() && !stop.is_cancelled() {
             self.reusable_sync_revision = Some(self.revision);
             self.last_completed_sync = Some(tokio::time::Instant::now());
-            tracing::info!(height, "Zcash treasury wallet synchronized; progress saved");
+            log_sync_progress(height, &context, true);
         } else {
             tracing::debug!("treasury sync: wallet checkpoint saved after interruption or failure");
         }
@@ -706,6 +725,28 @@ struct SyncSession {
     client: LightClient,
     store: StoreHandle,
     revision: i64,
+    context: TreasuryObservationDemand,
+}
+
+fn log_sync_progress(height: Option<u64>, context: &TreasuryObservationDemand, completed: bool) {
+    let reason = context.reason_codes();
+    let wallets = context.formatted_wallets();
+    let summary = context.summary();
+    let stage = if completed {
+        "Zcash wallet synchronized"
+    } else {
+        "Zcash wallet syncing; progress saved"
+    };
+    if summary.is_empty() {
+        tracing::info!(height, wallets = wallets.as_deref(), "{stage}");
+    } else {
+        tracing::info!(
+            height,
+            reason = reason.as_str(),
+            wallets = wallets.as_deref(),
+            "{stage}; {summary}"
+        );
+    }
 }
 impl SyncSession {
     fn run(
@@ -818,10 +859,7 @@ impl SyncSession {
                         observation.scanned_blocks = progress.total_blocks_scanned;
                     }
                     self.checkpoint(observation).await?;
-                    tracing::info!(
-                        height = observation.height,
-                        "Zcash treasury wallet synchronization in progress; progress saved"
-                    );
+                    log_sync_progress(observation.height, &self.context, false);
                 }
             }
         };

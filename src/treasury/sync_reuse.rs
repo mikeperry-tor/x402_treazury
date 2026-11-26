@@ -2,7 +2,11 @@
 use super::*;
 
 impl Treasury {
-    pub(crate) async fn sync_for_command(&mut self, stop: &CancellationToken) -> Result<()> {
+    pub(crate) async fn sync_for_command(
+        &mut self,
+        stop: &CancellationToken,
+        context: TreasuryObservationDemand,
+    ) -> Result<()> {
         ensure!(!stop.is_cancelled(), "treasury sync cancelled");
         if self.can_reuse_sync(stop).await? {
             tracing::debug!(
@@ -10,7 +14,7 @@ impl Treasury {
             );
             return Ok(());
         }
-        self.sync_once(stop).await
+        self.sync_once_with_context(stop, context).await
     }
 
     pub(super) async fn reusable_observation(&self) -> Result<Option<SyncObservation>> {

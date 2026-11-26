@@ -1,7 +1,7 @@
 //! Serialized, calculate-only deposit preparation and durable submission control.
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod proving_tests;
-use super::{SyncPhase, Treasury, prover};
+use super::{SyncPhase, Treasury, TreasuryObservationDemand, TreasurySyncReason, prover};
 use crate::rotation::{
     base::now,
     transaction::{
@@ -322,7 +322,12 @@ impl Treasury {
                     error.context(crate::rotation::transaction::PreparationDeferred)
                 })?;
                 drop(selected);
-                self.sync_once(stop).await.map_err(|error| {
+                self.sync_once_with_context(
+                    stop,
+                    TreasuryObservationDemand::from_reason(TreasurySyncReason::PrepareTransaction),
+                )
+                .await
+                .map_err(|error| {
                     error.context(crate::rotation::transaction::PreparationDeferred)
                 })?;
                 // The proposal pause is released before scanning. Select exact
@@ -556,7 +561,11 @@ impl Treasury {
         ensure!(self.healthy, "treasury requires reopen");
         // Reuse only an unchanged in-process scan after rechecking the chain.
         // Restart/mutation still requires scanning; a pending send stays owned.
-        self.sync_for_command(stop).await?;
+        self.sync_for_command(
+            stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::SubmitTransaction),
+        )
+        .await?;
         let (_, revision, observation) =
             self.store.call(|s| s.funding_preparation_context()).await?;
         ensure!(
@@ -617,7 +626,11 @@ impl Treasury {
         if self.source_work_fulfilled(&id).await? {
             return Ok(TransactionPresence::Unknown);
         }
-        self.sync_for_command(stop).await?;
+        self.sync_for_command(
+            stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::ReconcileTransaction),
+        )
+        .await?;
         self.reconcile_scanned(id, sender, stop).await
     }
     pub(crate) async fn reconcile_for_observation(
@@ -629,7 +642,11 @@ impl Treasury {
         if self.source_work_fulfilled(&id).await? {
             return Ok(TransactionPresence::Unknown);
         }
-        self.sync_for_observation(stop).await?;
+        self.sync_for_observation(
+            stop,
+            TreasuryObservationDemand::from_reason(TreasurySyncReason::ReconcileTransaction),
+        )
+        .await?;
         self.reconcile_scanned(id, sender, stop).await
     }
     async fn reconcile_scanned(
