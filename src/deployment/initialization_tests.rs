@@ -1,5 +1,28 @@
 use super::*;
 use crate::rotation::restriction::FundingRestriction;
+use std::sync::atomic::{AtomicU16, Ordering};
+
+/// Pick a free localhost port outside Linux (32768..60999) and macOS
+/// (49152..65535) ephemeral ranges so parallel `127.0.0.1:0` tests cannot
+/// reclaim the address during drop-and-rebind assertions.
+pub(super) async fn non_ephemeral_address() -> SocketAddr {
+    const BASE: u16 = 20_000;
+    const SPAN: u16 = 9_000;
+    static NEXT: AtomicU16 = AtomicU16::new(0);
+    let seed = (std::process::id() as u16).wrapping_mul(137) % SPAN;
+    for _ in 0..SPAN {
+        let offset = NEXT.fetch_add(1, Ordering::Relaxed) % SPAN;
+        let port = BASE + (seed + offset) % SPAN;
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        if TcpListener::bind(address).await.is_ok() {
+            return address;
+        }
+    }
+    panic!(
+        "no free non-ephemeral localhost port found in {BASE}..{}",
+        BASE + SPAN
+    );
+}
 
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -498,9 +521,10 @@ async fn binding_completes_only_effective_static_payers_from_reused_relay_initia
                 "[wallets.{name}]\nmode='static'\nprivate_key_env='{name}'\n"
             ));
         }
-        config.push_str(
-            "[sources.api]\nspec='spec.json'\nbase_url='https://127.0.0.1:1'\nwallet='effective'\n[servers.api]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n",
-        );
+        let listen = non_ephemeral_address().await;
+        config.push_str(&format!(
+            "[sources.api]\nspec='spec.json'\nbase_url='https://127.0.0.1:1'\nwallet='effective'\n[servers.api]\nlisten='{listen}'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n"
+        ));
         std::fs::write(&path, config).unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();
         let selected = BTreeSet::from(["relay".to_owned()]);
@@ -562,7 +586,10 @@ async fn binding_restricts_reused_managed_owner_and_socket_failure_releases_it()
         owner.close().await.unwrap();
         write_spec(dir.path());
         let path = dir.path().join("deployment.toml");
-        let config = managed_config().replace("auto_fund=false", "auto_fund=true");
+        let listen = non_ephemeral_address().await;
+        let config = managed_config()
+            .replace("auto_fund=false", "auto_fund=true")
+            .replace("listen='127.0.0.1:0'", &format!("listen='{listen}'"));
         std::fs::write(&path, config).unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();
         let initialized = deployment
@@ -669,9 +696,7 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
         let id = owner.status().await.unwrap().treasury_id;
         owner.close().await.unwrap();
         write_spec(dir.path());
-        let first = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let first_address = first.local_addr().unwrap();
-        drop(first);
+        let first_address = non_ephemeral_address().await;
         let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut provider = crate::test_tls::listener().await;
         let provider_url = format!("https://{}", provider.local_addr().unwrap());

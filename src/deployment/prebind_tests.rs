@@ -31,9 +31,7 @@ async fn relay_second_bind_failure_precedes_wallet_open_and_releases_first_socke
         ] {
             let dir = tempfile::tempdir().unwrap();
             let path = fixture(dir.path(), managed);
-            let first = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = first.local_addr().unwrap();
-            drop(first);
+            let address = super::initialization_tests::non_ephemeral_address().await;
             let second = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let config = std::fs::read_to_string(&path)
                 .unwrap()
@@ -68,22 +66,40 @@ async fn relay_binding_reuses_ephemeral_socket_and_setup_failure_releases_it() {
     let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
         .await
         .unwrap();
-    let address = deployment.prebound["one"].local_addr().unwrap();
+    let ephemeral = deployment.prebound["one"].local_addr().unwrap();
+    let running = deployment.bind(&env).await.unwrap();
+    assert_eq!(running.addresses(), vec![("one".into(), ephemeral)]);
+    assert_eq!(
+        TcpListener::bind(ephemeral).await.unwrap_err().kind(),
+        std::io::ErrorKind::AddrInUse
+    );
+    drop(running);
+
+    // Use a non-ephemeral port for drop-and-rebind assertions so parallel
+    // `127.0.0.1:0` tests cannot reclaim it between drop and rebind.
+    let address = super::initialization_tests::non_ephemeral_address().await;
+    let fixed_config = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("listen='127.0.0.1:0'", &format!("listen='{address}'"));
+    std::fs::write(&path, &fixed_config).unwrap();
+    let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+        .await
+        .unwrap();
     let running = deployment.bind(&env).await.unwrap();
     assert_eq!(running.addresses(), vec![("one".into(), address)]);
     drop(running);
     TcpListener::bind(address).await.unwrap();
 
     // A later missing source document must also drop the already reserved socket.
-    let config = std::fs::read_to_string(&path)
-        .unwrap()
-        .replace("listen='127.0.0.1:0'", &format!("listen='{address}'"))
-        .replace("spec='spec.json'", "spec='missing.json'");
-    std::fs::write(&path, config).unwrap();
+    let missing_config = fixed_config.replace("spec='spec.json'", "spec='missing.json'");
+    std::fs::write(&path, missing_config).unwrap();
+    let error = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+        .await
+        .err()
+        .unwrap();
     assert!(
-        Deployment::load_for_serving_with_relay(&path, &env, Default::default())
-            .await
-            .is_err()
+        !format!("{error:#}").contains("cannot bind"),
+        "expected missing spec error, got bind error: {error:#}"
     );
     TcpListener::bind(address).await.unwrap();
 }
