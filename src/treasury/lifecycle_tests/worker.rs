@@ -419,12 +419,7 @@ async fn production_worker_bootstraps_groups_and_retries_refunded_ready_wallet_r
     // Prerequisite dispatch keeps its ordinary reactor wake in real time.
     // From quote release onward, keep the clock stable across SDK/Store work
     // so local handoffs and recurring network observations can be distinguished.
-    let active = tokio::spawn(async {
-        loop {
-            tokio::task::yield_now().await;
-        }
-    });
-    tokio::time::pause();
+    let active = pause_without_auto_advance();
     let handoff_started = tokio::time::Instant::now();
     f.release_quotes.cancel();
     first.await.unwrap();
@@ -641,9 +636,7 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         .unwrap();
     let saved = owner.status().await.unwrap().sync.unwrap();
     assert_eq!(saved.spendable_shielded_zatoshis, 10_000);
-    let deposit = net
-        .funding_transaction(vec![(&address, 1_000_000, None)])
-        .await;
+    let deposit = canonical_funding_transaction(&net, &address, 1_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![deposit]);
@@ -847,9 +840,7 @@ async fn unstarted_sdk_failures_keep_the_original_quote_until_funded() {
             "repeated SDK shortages must not probe the destination"
         );
     }
-    let deposit = net
-        .funding_transaction(vec![(&address, 1_000_000, None)])
-        .await;
+    let deposit = canonical_funding_transaction(&net, &address, 1_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![deposit]);

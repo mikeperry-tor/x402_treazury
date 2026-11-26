@@ -97,9 +97,7 @@ async fn ironwood_inputs(
 async fn ironwood_expiry_closes_work_despite_orphaned_selected_input() {
     let (_dir, net, mut owner, endpoint) = funded_fixture_amount(2, 20_000).await;
     let address = owner.preview_address().await.unwrap();
-    let large = net
-        .funding_transaction(vec![(&address, 1_000_000, None)])
-        .await;
+    let large = canonical_funding_transaction(&net, &address, 1_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![large.clone()]);

@@ -76,7 +76,7 @@ if sys.argv[1:] == ['--version']:
     print(name + ' ' + version + ' (fixture)')
 else:
     with open(os.environ['MAKE_TEST_LOG'], 'a') as log:
-        log.write(json.dumps([name, sys.argv[1:], os.environ.get('CARGO_INCREMENTAL'), os.environ.get('PROTOC')]) + '\\n')
+        log.write(json.dumps([name, sys.argv[1:], os.environ.get('CARGO_INCREMENTAL'), os.environ.get('PROTOC'), os.environ.get('CARGO_PROFILE_TEST_OPT_LEVEL')]) + '\\n')
     if os.environ.get('FAIL_ARGUMENT') in sys.argv[1:] and (not os.environ.get('FAIL_COMMAND') or sys.argv[1] == os.environ['FAIL_COMMAND']):
         sys.exit(43)
     if name == 'cargo' and sys.argv[1] == 'metadata':
@@ -100,7 +100,7 @@ else:
                         CARGO_INCREMENTAL='inherited')
         for key in ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'CARGO_ARGS', 'TEST_ARGS',
                     'PROFILE', 'COMPLEXITY_BASE_REF', 'TEST', 'TEST_THREADS', 'PYTHON',
-                    'LIFECYCLE_PROFILE', 'LIFECYCLE_DIAGNOSTICS'):
+                    'LIFECYCLE_DIAGNOSTICS', 'CARGO_PROFILE_TEST_OPT_LEVEL'):
             self.env.pop(key, None)
 
     def make(self, *args, success=True, **env):
@@ -139,7 +139,7 @@ else:
                 self.assertEqual(calls[0][2], incremental)
                 self.assertEqual(calls[1], ['cargo', [command, '--locked', '--manifest-path',
                                                     'Cargo.toml', *forwarded], incremental,
-                                            '/fixture/protoc with spaces'])
+                                            '/fixture/protoc with spaces', None])
 
     def test_build_arguments_are_expanded_only_once(self):
         marker = self.root / 'argument-expansions'
@@ -265,7 +265,7 @@ else:
                             '--bench', 'test_only_bench', '--test', 'bench_only', '--test', 'future',
                             '--', '--test-threads=8'),
             ],
-            **{stage: [application('test', *(['--profile', 'test'] if stage == 'check-lifecycle' else []),
+            **{stage: [application('test',
                                   '--features', 'zcash-testutils', '--lib', case, '--',
                                   f'--test-threads={threads}', *(['--nocapture'] if stage == 'check-lifecycle' else []))]
                for stage, case, threads in (
@@ -302,19 +302,27 @@ else:
             _, calls = self.make('-j8', 'check-lifecycle', 'check-codec')
             self.assertEqual(self.check_commands(calls), stages['check-lifecycle'] + stages['check-codec'])
 
-    def test_lifecycle_profile_preserves_selection_and_macos_runner(self):
-        _, calls = self.make('check-lifecycle', 'LIFECYCLE_PROFILE=test-optimized',
-                             'TEST_THREADS=1', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong',
+    def test_lifecycle_preserves_selection_and_honors_threads_and_macos_runner(self):
+        _, calls = self.make('check-lifecycle',
+                             'TEST_THREADS=4', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong',
                              MAKE_TEST_PLATFORM='Darwin')
         self.assertEqual(calls[-1][1], [
             '--config', str(self.root / 'scripts/test-runner.toml'), 'test', '--locked',
-            '--manifest-path', 'Cargo.toml', '--profile', 'test-optimized',
+            '--manifest-path', 'Cargo.toml',
             '--features', 'zcash-testutils', '--lib', 'treasury::lifecycle_tests',
-            '--', '--test-threads=8', '--nocapture',
+            '--', '--test-threads=4', '--nocapture',
         ])
+        self.assertEqual(calls[-1][4], '2')
+
+    def test_proving_lifecycle_and_codec_enable_test_opt_level_without_affecting_compat(self):
+        for stage in ('check-proving', 'check-lifecycle', 'check-codec'):
+            _, calls = self.make(stage)
+            self.assertEqual(calls[-1][4], '2', stage)
+        _, calls = self.make('check-compat')
+        self.assertIsNone(calls[-1][4])
 
     def test_lifecycle_diagnostics_compiles_through_the_existing_runner(self):
-        _, calls = self.make('check-lifecycle', 'LIFECYCLE_PROFILE=test-optimized',
+        _, calls = self.make('check-lifecycle',
                              'LIFECYCLE_DIAGNOSTICS=target/diagnostics with spaces',
                              'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
         self.assertEqual(calls[-1][0], 'python3')
@@ -322,7 +330,7 @@ else:
             'scripts/diagnose-treasury-sync.py', '--lifecycle',
             'target/diagnostics with spaces/build.jsonl', 'target/diagnostics with spaces',
             '--build-command', 'scripts/test-runner.sh', '--cargo', 'cargo', 'test',
-            '--locked', '--manifest-path', 'Cargo.toml', '--profile', 'test-optimized',
+            '--locked', '--manifest-path', 'Cargo.toml',
             '--features', 'zcash-testutils', '--lib', '--no-run', '--message-format=json',
         ])
         self.assertEqual(calls[-1][3], '/fixture/protoc with spaces')

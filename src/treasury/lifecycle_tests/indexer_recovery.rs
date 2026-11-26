@@ -295,7 +295,6 @@ impl TransactionSubmission for ObserveUnknown {
 #[tokio::test]
 async fn proven_deep_fork_finds_prebirthday_credit_but_keeps_orphaned_original_liability() {
     use pepper_sync::wallet::{NoteInterface as _, OutputInterface as _};
-    use zingolib::testutils::mock_indexer::faucet_funding_transaction_on;
     let dir = tempfile::tempdir().unwrap();
     let net = MockNet::launch().await;
     let endpoint = net.indexer_uri().to_string();
@@ -318,9 +317,7 @@ async fn proven_deep_fork_finds_prebirthday_credit_but_keeps_orphaned_original_l
         .unwrap()
         .to_owned();
     let activation = net.chain.read().await.activation_heights();
-    let funding =
-        faucet_funding_transaction_on(activation, 121.into(), vec![(&address, 1_000_000, None)])
-            .await;
+    let funding = canonical_funding_transaction_on(activation, 121, &address, 1_000_000).await;
     {
         let mut chain = net.chain.write().await;
         chain.mine_empty_blocks(120);
@@ -346,9 +343,7 @@ async fn proven_deep_fork_finds_prebirthday_credit_but_keeps_orphaned_original_l
     }
     net.chain.write().await.mine_mempool();
     assert_eq!(net.chain.read().await.mempool_len(), 0);
-    let new_credit =
-        faucet_funding_transaction_on(activation, 90.into(), vec![(&address, 2_000_000, None)])
-            .await;
+    let new_credit = canonical_funding_transaction_on(activation, 90, &address, 2_000_000).await;
     {
         let mut chain = net.chain.write().await;
         let evicted = chain.reorg_to(80);

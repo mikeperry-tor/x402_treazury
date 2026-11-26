@@ -137,14 +137,16 @@ under `make -k`), using `check-default-remaining` after `check-compat`:
 | `check-default-remaining` | All remaining default root targets derived from Cargo metadata after valid `check-compat` |
 | `check-default` (standalone) | Complete `--all-targets` default suite (not repeated inside `make check`) |
 | `check-proving` | `zcash-testutils` treasury proving tests (1 thread) |
-| `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle (8 threads, `--nocapture`) |
+| `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle (`TEST_THREADS`, default 8, `--nocapture`) |
 | `check-codec` | `zcash-testutils` address-codec isolation regression (1 thread) |
 
 - Default harnesses use 8 threads (`TEST_THREADS=1` runs serially for
-  `make test`, `check-compat`, `check-default`, and `check-default-remaining`).
-  `CARGO_ARGS` customizes `make build`, `make build-dev`, `make test`,
-  `make cargo-check`, `make run`, and `make clippy`, and `TEST_ARGS` customizes
-  `make test` only; neither affects `check-*` stages.
+  `make test`, `check-compat`, `check-default`, `check-default-remaining`,
+  `check-lifecycle`, and parallel coverage suites). `CARGO_ARGS` customizes
+  `make build`,
+  `make build-dev`, `make test`, `make cargo-check`, `make run`, and
+  `make clippy`, and `TEST_ARGS` customizes `make test` only; neither affects
+  `check-*` stages.
 - `tests/integration_preparation.rs` runs shared `live_integration` unit tests
   once alongside compiled-executable integration tests (`live_integration`'s
   own test harness is empty under `--all-targets`).
@@ -271,13 +273,17 @@ on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
 - **Rust:** The checks, line coverage, and treasury diagnostics workflows
   explicitly select and verify the version in
   [the shared pin](../scripts/rust-toolchain-pin.toml).
-- **Jobs:** `check` runs all seven stages sequentially via
-  `scripts/ci-stage.sh` (`check-static`, `check-clippy`, `check-compat`,
-  `check-default-remaining`, `check-proving`, `check-lifecycle`, and
-  `check-codec`). `coverage` runs in parallel with `check` on every trigger,
-  collecting default Linux line coverage via `make coverage` and reporting with
-  `octocov`. `publish-badge` runs after `check` and `coverage` succeed on
-  `push` to `main`.
+- **Jobs:** Three jobs run in parallel on every trigger: `check` runs
+  `check-static`, `check-clippy`, `check-compat`, and `check-default-remaining`
+  via `scripts/ci-stage.sh`; `treasury` runs `check-proving`, `check-lifecycle`,
+  and `check-codec` via `scripts/ci-stage.sh`; and `coverage` collects default
+  Linux line coverage via `make coverage` and reports with `octocov`. All three
+  jobs set `TEST_THREADS=$(nproc)` to match runner vCPUs, normalize `vendor/`
+  file timestamps after checkout so Cargo reuses cached vendored crates, and
+  cache compiled dependencies under `target/` alongside `~/.zcash-params`
+  (avoiding repeated `zingolib` build-script reruns while pruning workspace
+  artifacts before saving). `publish-badge` runs after `check`, `treasury`, and
+  `coverage` succeed on `push` to `main`.
 - **Coverage badge:** `publish-badge` writes `coverage.svg` and
   `source-revision.txt` to the root of the orphan `badges` branch (serializing
   writes via concurrency group `main-coverage-badge` and skipping superseded
@@ -287,15 +293,13 @@ on `push` to `main` and `ci_coverage` and on `pull_request` to `main`:
 ### Temporary CI diagnostics
 
 `scripts/ci-stage.sh` records per-stage logs, durations, and exit status under
-`target/ci-checks/`, uploaded on every `check` run (`if: always()`, default
-GitHub retention). In `check`, `check-lifecycle` currently runs with
-`LIFECYCLE_PROFILE=test-optimized` and automatic `LIFECYCLE_DIAGNOSTICS` GDB
-capture after installing `gdb` and relaxing `kernel.yama.ptrace_scope`.
-
-Retire the automatic GDB capture in `ci.yml` and the temporary `push` trigger
-on `ci_coverage` in `treasury-sync-diagnostics.yml` once the `main` coverage
-badge is accepted, keeping `scripts/diagnose-treasury-sync.py` and manual
-`workflow_dispatch` available for future investigations.
+`target/ci-checks/`, uploaded on every `check` and `treasury` run
+(`if: always()`, default GitHub retention). Opt-in `LIFECYCLE_DIAGNOSTICS=DIR`
+remains available on
+`make check-lifecycle` via `scripts/diagnose-treasury-sync.py`, and manual
+`workflow_dispatch` remains available in `treasury-sync-diagnostics.yml` (whose
+temporary `push` trigger on `ci_coverage` retires once the `main` coverage badge
+is accepted).
 
 ### Potential SDK mempool shutdown hang
 

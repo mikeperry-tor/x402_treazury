@@ -148,7 +148,9 @@ collect() {
     fi
     threads=1
     case $mode:$selection in
-        condition:condition|condition-financial:lifecycle) threads=8 ;;
+        default:default|condition:condition|branch:branch|condition-financial:lifecycle)
+            threads=${TEST_THREADS:-8}
+            ;;
     esac
     case $mode in
         consensus-*) set -- "$@" --no-report -- --ignored --exact --nocapture --test-threads=1 ;;

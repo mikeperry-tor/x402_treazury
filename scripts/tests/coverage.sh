@@ -1,6 +1,7 @@
 #!/bin/sh
 # Exercise report publication/failure behavior without compiling or networking.
 set -eu
+unset TEST_THREADS
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
@@ -159,7 +160,10 @@ for filter in treasury::send::proving_tests synthetic_address_codec_is_scoped_to
     grep "$filter" executions.txt | grep -q -- '--test-threads=1'
 done
 grep treasury::lifecycle_tests executions.txt | grep -q -- '--test-threads=8'
-head -n 2 executions.txt | grep -q -- '--test-threads=1'
+head -n 2 executions.txt | grep -q -- '--test-threads=8'
+TEST_THREADS=4 scripts/coverage.sh > override.log
+override=$(readlink target/coverage)
+grep -- '--all-targets' "$override/commands.txt" | grep -q -- '--test-threads=4'
 if grep -q -- '--branch' "$financial/commands.txt"; then exit 1; fi
 grep -q -- '-Zcoverage-options=condition' "$financial/provenance.txt"
 if CONDITION_FIXTURE=yes FAIL_LIFECYCLE=yes scripts/coverage.sh --condition-financial > late-failure.log 2>&1; then exit 1; fi

@@ -7,7 +7,6 @@ SHELL := /bin/sh
 PYTHON ?= python3
 PROFILE ?= release
 TEST_THREADS ?= 8
-LIFECYCLE_PROFILE ?= test
 LIFECYCLE_DIAGNOSTICS ?=
 TEST_ARGS ?= --test-threads='$(TEST_THREADS)'
 COMPLEXITY_BASE_REF ?= main
@@ -130,31 +129,35 @@ check-default-remaining:
 	@$(call application_cargo,test,-- --test-threads='$(TEST_THREADS)',$(PYTHON) scripts/default_targets.py $(foreach name,$(COMPAT_TESTS),--compat $(name)) --)
 
 check-proving:
-	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
+	@export CARGO_PROFILE_TEST_OPT_LEVEL=2; \
+	$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
 
 check-lifecycle:
 ifeq ($(strip $(LIFECYCLE_DIAGNOSTICS)),)
-	@$(call application_cargo,test,--profile '$(LIFECYCLE_PROFILE)' --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=8 --nocapture)
+	@export CARGO_PROFILE_TEST_OPT_LEVEL=2; \
+	$(call application_cargo,test,--features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads='$(TEST_THREADS)' --nocapture)
 else
-	@$(call application_cargo,test,--profile '$(LIFECYCLE_PROFILE)' --features zcash-testutils --lib --no-run --message-format=json,$(PYTHON) scripts/diagnose-treasury-sync.py --lifecycle '$(LIFECYCLE_DIAGNOSTICS)/build.jsonl' '$(LIFECYCLE_DIAGNOSTICS)' --build-command)
+	@export CARGO_PROFILE_TEST_OPT_LEVEL=2; \
+	$(call application_cargo,test,--features zcash-testutils --lib --no-run --message-format=json,$(PYTHON) scripts/diagnose-treasury-sync.py --lifecycle '$(LIFECYCLE_DIAGNOSTICS)/build.jsonl' '$(LIFECYCLE_DIAGNOSTICS)' --build-command)
 endif
 
 check-codec:
-	@$(call application_cargo,test,--features zcash-testutils --lib synthetic_address_codec_is_scoped_to_its_test_client -- --test-threads=1)
+	@export CARGO_PROFILE_TEST_OPT_LEVEL=2; \
+	$(call application_cargo,test,--features zcash-testutils --lib synthetic_address_codec_is_scoped_to_its_test_client -- --test-threads=1)
 
 # Complex report publication remains in an internal helper. Nightly branch
 # coverage can select a different toolchain from default coverage.
 coverage:
-	scripts/coverage.sh
+	TEST_THREADS='$(TEST_THREADS)' scripts/coverage.sh
 
 coverage-condition:
-	scripts/coverage.sh --condition
+	TEST_THREADS='$(TEST_THREADS)' scripts/coverage.sh --condition
 
 coverage-condition-financial:
-	scripts/coverage.sh --condition-financial
+	TEST_THREADS='$(TEST_THREADS)' scripts/coverage.sh --condition-financial
 
 coverage-branch:
-	scripts/coverage.sh --branch
+	TEST_THREADS='$(TEST_THREADS)' scripts/coverage.sh --branch
 
 coverage-proving:
 	scripts/coverage.sh --proving
